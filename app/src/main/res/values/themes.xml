@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Thème de base : Material3 dynamique géré par Compose ; ce style ne sert
+         qu'au lancement (splash) et à la barre système. -->
+    <style name="Theme.MVRViewer" parent="android:Theme.Material.NoActionBar" />
+</resources>

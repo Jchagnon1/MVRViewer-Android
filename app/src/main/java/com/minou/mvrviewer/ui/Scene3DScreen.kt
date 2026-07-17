@@ -1,6 +1,5 @@
 package com.minou.mvrviewer.ui
 
-import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -14,13 +13,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.google.android.filament.Engine
 import com.google.android.filament.MaterialInstance
 import com.google.android.filament.RenderableManager
 import com.minou.mvrviewer.mvr.MvrGeometryRef
@@ -32,6 +32,7 @@ import dev.romainguy.kotlin.math.Float4
 import dev.romainguy.kotlin.math.Mat4
 import io.github.sceneview.Scene
 import io.github.sceneview.geometries.Geometry
+import io.github.sceneview.loaders.MaterialLoader
 import io.github.sceneview.node.GeometryNode
 import io.github.sceneview.rememberCameraManipulator
 import io.github.sceneview.rememberCameraNode
@@ -44,14 +45,21 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlin.math.sqrt
 
-// Nombre max d'objets à géométrie .3ds rendus (1re tranche : bornage perf/mémoire,
-// chaque mesh = un VertexBuffer Filament construit sur le thread moteur).
-private const val MAX_GEOMETRY_OBJECTS = 160
+// Garde-fous d'instanciation (émulateur/appareil : mémoire + draw calls).
+// L'iOS gère les très gros shows par LOD ; ici on borne le TOTAL de triangles
+// et de nœuds — au-delà, on tronque et on l'affiche honnêtement.
+private const val MAX_TRIANGLES = 2_500_000L
+private const val MAX_NODES = 6_000
+// Même plafond pragmatique qu'iOS (SceneKitContainerView.maxSymdefItems).
+private const val MAX_SYMDEF_ITEMS = 500
+private const val GRAY = 0xFFBEBEC3.toInt()
 
 /**
- * Vue 3D. Projecteurs = cubes colorés par calque ; STRUCTURE/DÉCOR = vraie
- * géométrie `.3ds` extraite du MVR, parsée (ThreeDSParser) et rendue via
- * Filament (Geometry/GeometryNode). Repère MVR (mm, Z-haut) → Filament (m, Y-haut).
+ * Vue 3D : structure/décor en VRAIE géométrie `.3ds` (couleurs matériaux
+ * incluses), projecteurs en cubes colorés par calque. Les références Symbol →
+ * Symdef sont résolues récursivement (transforms composées), et les géométries
+ * PARTAGÉES entre instances (un Symdef référencé 300 fois = 1 seul
+ * VertexBuffer). Repère MVR (mm, Z-haut) → Filament (m, Y-haut).
  */
 @Composable
 fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modifier: Modifier = Modifier) {
@@ -65,56 +73,52 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
     val fixtureMaterials: Map<Int, MaterialInstance> = remember(materialLoader, layout) {
         layout.colors.toSet().associateWith { materialLoader.createColorInstance(it) }
     }
-    // Matériau gris de la structure (comme le gris clair par défaut iOS).
-    val structureMaterial = remember(materialLoader) {
-        materialLoader.createColorInstance(AndroidColor.rgb(190, 190, 195))
-    }
 
-    // Racine persistante qui accueille toute la géométrie .3ds (attachée à la
-    // scène via l'échappatoire `apply { addChildNode(...) }` du DSL).
     val geometryRoot = rememberNode(engine)
-
-    var loadedObjects by remember(scene) { mutableIntStateOf(-1) } // -1 = pas commencé
+    var status by remember(scene) { mutableStateOf("chargement 3D…") }
 
     LaunchedEffect(scene, mvrBytes) {
         val conv = conversionMatrix(center)
-        // 1) Hors thread : rassembler les refs .3ds, extraire (1 passe zip), parser.
-        val jobs = withContext(Dispatchers.Default) {
-            data class Ref(val world: Mat4, val fileName: String)
-            val refs = ArrayList<Ref>()
-            outer@ for (obj in scene.allObjects) {
-                for (g in obj.geometryRefs) {
-                    if (g is MvrGeometryRef.File && g.fileName.endsWith(".3ds", ignoreCase = true)) {
-                        val world = conv * drMat(obj.transform.m) * drMat(g.transform.m)
-                        refs.add(Ref(world, g.fileName))
-                        if (refs.size >= MAX_GEOMETRY_OBJECTS) break@outer
-                    }
-                }
+        // 1) Hors thread : résolution des refs (File + Symbol→Symdef récursif),
+        //    extraction zip en 1 passe, parsing .3ds par fichier UNIQUE.
+        val (refs, meshesByFile) = withContext(Dispatchers.Default) {
+            val refs = collectRenderRefs(scene, conv)
+            val names = refs.mapTo(HashSet()) { it.fileName }
+            val bytesByName = MvrParser.extractEntries(mvrBytes, names)
+            val meshes = HashMap<String, List<ThreeDSParser.Mesh>>(names.size)
+            for (n in names) {
+                val b = bytesByName[n] ?: continue
+                meshes[n] = runCatching { ThreeDSParser.parse(b) }.getOrDefault(emptyList())
             }
-            val bytesByName = MvrParser.extractEntries(mvrBytes, refs.map { it.fileName }.toSet())
-            val meshCache = HashMap<String, List<ThreeDSParser.Mesh>>()
-            refs.mapNotNull { r ->
-                val b = bytesByName[r.fileName] ?: return@mapNotNull null
-                val meshes = meshCache.getOrPut(r.fileName) {
-                    runCatching { ThreeDSParser.parse(b) }.getOrDefault(emptyList())
-                }
-                if (meshes.isEmpty()) null else r.world to meshes
-            }
+            refs to meshes
         }
-        // 2) Sur le thread moteur : construire les GeometryNode + attacher, par lots.
-        loadedObjects = 0
-        var done = 0
-        for ((world, meshes) in jobs) {
-            for (mesh in meshes) {
-                val geom = buildGeometry(engine, mesh) ?: continue
-                val node = GeometryNode(engine, geom, structureMaterial)
-                node.transform = world
+        // 2) Thread moteur : géométries UNIQUES par fichier (partagées), puis un
+        //    GeometryNode par instance — par lots, avec budget global.
+        val builtCache = HashMap<String, List<BuiltMesh>>()
+        val materialCache = HashMap<Int, MaterialInstance>()
+        fun material(color: Int) = materialCache.getOrPut(color) { materialLoader.createColorInstance(color) }
+        var nodes = 0
+        var triangles = 0L
+        var placed = 0
+        var truncated = false
+        for (r in refs) {
+            if (nodes >= MAX_NODES || triangles >= MAX_TRIANGLES) { truncated = true; break }
+            val meshes = meshesByFile[r.fileName]
+            if (meshes.isNullOrEmpty()) continue
+            val built = builtCache.getOrPut(r.fileName) { meshes.mapNotNull { buildMesh(engine, it) } }
+            for (bm in built) {
+                val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
+                node.transform = r.world
                 geometryRoot.addChildNode(node)
+                nodes++; triangles += bm.triangles
             }
-            done++
-            if (done % 12 == 0) { loadedObjects = done; yield() }
+            placed++
+            if (placed % 25 == 0) {
+                status = "$placed objets 3D…"
+                yield()
+            }
         }
-        loadedObjects = done
+        status = "$placed objets 3D" + if (truncated) " (tronqué)" else ""
     }
 
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
@@ -130,9 +134,7 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
             cameraNode = cameraNode,
             cameraManipulator = manipulator
         ) {
-            // Structure .3ds : la racine (remplie hors composition) attachée ici.
             Node(apply = { addChildNode(geometryRoot) })
-            // Projecteurs : cubes colorés par calque.
             val s = Float3(layout.cube, layout.cube, layout.cube)
             layout.positions.forEachIndexed { i, p ->
                 CubeNode(size = s, materialInstance = fixtureMaterials.getValue(layout.colors[i]), position = p)
@@ -145,9 +147,8 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.align(Alignment.TopStart).padding(top = 56.dp, start = 12.dp)
         ) {
-            val geo = if (loadedObjects >= 0) " · ${loadedObjects} objets 3D" else " · chargement 3D…"
             Text(
-                "${scene.layers.size} calque(s) · ${scene.allObjects.size} objet(s) · ${scene.fixtures.size} projecteur(s)$geo",
+                "${scene.layers.size} calque(s) · ${scene.allObjects.size} objet(s) · ${scene.fixtures.size} projecteur(s) · $status",
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
             )
         }
@@ -158,28 +159,69 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
     }
 }
 
-// ---- Géométrie ----
+// ---- Résolution des références de géométrie ----
 
-/** Construit une Geometry Filament (positions + normales lissées + indices). */
-private fun buildGeometry(engine: com.google.android.filament.Engine, mesh: ThreeDSParser.Mesh): Geometry? {
+private class RenderRef(val world: Mat4, val fileName: String)
+
+/**
+ * Aplati la scène en refs rendables : Geometry3D directs + Symbol→Symdef
+ * résolus récursivement (transforms composées obj·symbole·item…), garde-fou de
+ * profondeur (cycles) et plafond d'items par symdef (comme iOS).
+ */
+private fun collectRenderRefs(scene: MvrScene, conv: Mat4): List<RenderRef> {
+    val out = ArrayList<RenderRef>()
+    fun walk(refs: List<MvrGeometryRef>, parent: Mat4, depth: Int) {
+        if (depth > 8) return
+        for (g in refs) when (g) {
+            is MvrGeometryRef.File ->
+                if (g.fileName.endsWith(".3ds", ignoreCase = true)) {
+                    out.add(RenderRef(parent * drMat(g.transform.m), g.fileName))
+                }
+            is MvrGeometryRef.Symbol -> {
+                val sd = scene.symdefs[g.symdefUuid] ?: continue
+                walk(sd.items.take(MAX_SYMDEF_ITEMS), parent * drMat(g.transform.m), depth + 1)
+            }
+        }
+    }
+    for (obj in scene.allObjects) walk(obj.geometryRefs, conv * drMat(obj.transform.m), 0)
+    return out
+}
+
+// ---- Construction de géométrie (avec couleurs matériaux, comme toSCNNode iOS) ----
+
+private class BuiltMesh(val geometry: Geometry, val colors: List<Int>, val triangles: Int)
+
+private fun ThreeDSParser.Rgb.toColorInt(): Int {
+    fun c(v: Float) = (v * 255f).toInt().coerceIn(0, 255)
+    return (0xFF shl 24) or (c(r) shl 16) or (c(g) shl 8) or c(b)
+}
+
+/**
+ * Mesh 3ds → Geometry Filament : positions + normales lissées, et UN sous-mesh
+ * (primitive) PAR groupe matériau avec sa couleur — les faces sans matériau en
+ * gris clair. Sans groupe : un seul sous-mesh (couleur de l'unique matériau du
+ * fichier si présent, sinon gris). Fidèle à Mesh.toSCNNode côté iOS.
+ */
+private fun buildMesh(engine: Engine, mesh: ThreeDSParser.Mesh): BuiltMesh? {
     val vc = mesh.vertexCount
-    if (vc == 0 || mesh.triangleCount == 0) return null
+    val tc = mesh.triangleCount
+    if (vc == 0 || tc == 0) return null
     val vs = mesh.vertices
     val fi = mesh.faceIndices
+
+    // Normales lissées par sommet (le .3ds n'en stocke pas).
     val nx = FloatArray(vc); val ny = FloatArray(vc); val nz = FloatArray(vc)
     var i = 0
     while (i + 2 < fi.size) {
         val a = fi[i]; val b = fi[i + 1]; val c = fi[i + 2]
         if (a in 0 until vc && b in 0 until vc && c in 0 until vc) {
             val ax = vs[a * 3]; val ay = vs[a * 3 + 1]; val az = vs[a * 3 + 2]
-            val bx = vs[b * 3]; val by = vs[b * 3 + 1]; val bz = vs[b * 3 + 2]
-            val cx = vs[c * 3]; val cy = vs[c * 3 + 1]; val cz = vs[c * 3 + 2]
-            val ux = bx - ax; val uy = by - ay; val uz = bz - az
-            val wx = cx - ax; val wy = cy - ay; val wz = cz - az
-            val fnx = uy * wz - uz * wy; val fny = uz * wx - ux * wz; val fnz = ux * wy - uy * wx
-            nx[a] += fnx; ny[a] += fny; nz[a] += fnz
-            nx[b] += fnx; ny[b] += fny; nz[b] += fnz
-            nx[c] += fnx; ny[c] += fny; nz[c] += fnz
+            val ux = vs[b * 3] - ax; val uy = vs[b * 3 + 1] - ay; val uz = vs[b * 3 + 2] - az
+            val wx = vs[c * 3] - ax; val wy = vs[c * 3 + 1] - ay; val wz = vs[c * 3 + 2] - az
+            val fx = uy * wz - uz * wy; val fy = uz * wx - ux * wz; val fz = ux * wy - uy * wx
+            nx[a] += fx; ny[a] += fy; nz[a] += fz
+            nx[b] += fx; ny[b] += fy; nz[b] += fz
+            nx[c] += fx; ny[c] += fy; nz[c] += fz
         }
         i += 3
     }
@@ -189,15 +231,42 @@ private fun buildGeometry(engine: com.google.android.filament.Engine, mesh: Thre
         val n = if (len > 1e-6f) Float3(nx[v] / len, ny[v] / len, nz[v] / len) else Float3(0f, 0f, 1f)
         verts.add(Geometry.Vertex(position = Float3(vs[v * 3], vs[v * 3 + 1], vs[v * 3 + 2]), normal = n))
     }
-    val idx = ArrayList<Int>(fi.size)
-    for (f in fi) idx.add(f)
-    return Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
-        .vertices(verts).indices(idx).build(engine)
+
+    // Sous-meshes par matériau.
+    val prims = ArrayList<List<Int>>()
+    val colors = ArrayList<Int>()
+    if (mesh.materialGroups.isEmpty()) {
+        prims.add(fi.toList())
+        colors.add(if (mesh.materials.size == 1) mesh.materials.values.first().toColorInt() else GRAY)
+    } else {
+        val assigned = BooleanArray(tc)
+        for (g in mesh.materialGroups) {
+            val idx = ArrayList<Int>(g.triangles.size * 3)
+            for (t in g.triangles) if (t in 0 until tc) {
+                assigned[t] = true
+                idx.add(fi[t * 3]); idx.add(fi[t * 3 + 1]); idx.add(fi[t * 3 + 2])
+            }
+            if (idx.isNotEmpty()) {
+                prims.add(idx)
+                colors.add(mesh.materials[g.name]?.toColorInt() ?: GRAY)
+            }
+        }
+        val leftover = ArrayList<Int>()
+        for (t in 0 until tc) if (!assigned[t]) {
+            leftover.add(fi[t * 3]); leftover.add(fi[t * 3 + 1]); leftover.add(fi[t * 3 + 2])
+        }
+        if (leftover.isNotEmpty()) { prims.add(leftover); colors.add(GRAY) }
+        if (prims.isEmpty()) { prims.add(fi.toList()); colors.add(GRAY) }
+    }
+
+    val geom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+        .vertices(verts).primitivesIndices(prims).build(engine)
+    return BuiltMesh(geom, colors, tc)
 }
 
 // ---- Repère / matrices ----
 
-/** MvrModels.Mat4 (col-majeur) → dev.romainguy Mat4 (colonnes x,y,z,w). */
+/** MvrModels.Mat4 (col-majeur) → dev.romainguy Mat4. */
 private fun drMat(m: FloatArray): Mat4 = Mat4(
     Float4(m[0], m[1], m[2], m[3]),
     Float4(m[4], m[5], m[6], m[7]),
@@ -205,10 +274,7 @@ private fun drMat(m: FloatArray): Mat4 = Mat4(
     Float4(m[12], m[13], m[14], m[15])
 )
 
-/**
- * Conversion MVR (mm, Z-haut, centré sur `center`) → Filament (m, Y-haut).
- * C·p = Rx(−90°) · échelle(0.001) · (p − center). Colonnes ci-dessous.
- */
+/** MVR (mm, Z-haut, centré sur `center`) → Filament (m, Y-haut) : Rx(−90°)·S(0.001)·T(−center). */
 private fun conversionMatrix(center: Float3): Mat4 {
     val cx = center.x; val cy = center.y; val cz = center.z
     return Mat4(

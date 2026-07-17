@@ -52,7 +52,12 @@ object MvrParser {
                     names.contains(base) -> base
                     else -> null
                 }
-                if (key != null && !out.containsKey(key)) out[key] = zip.readBytes()
+                if (key != null && !out.containsKey(key)) {
+                    out[key] = zip.readBytes()
+                    // Tout trouvé → stop : évite de décompresser le reste du zip
+                    // (57 lots de glb sur un gros show = 57 parcours sinon).
+                    if (out.size == names.size) return out
+                }
                 entry = zip.nextEntry
             }
         }

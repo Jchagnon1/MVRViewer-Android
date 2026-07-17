@@ -80,20 +80,31 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
     LaunchedEffect(scene, mvrBytes) {
         val conv = conversionMatrix(center)
         // 1) Hors thread : résolution des refs (File + Symbol→Symdef récursif),
-        //    extraction zip en 1 passe, parsing .3ds par fichier UNIQUE.
-        val (refs, meshesByFile) = withContext(Dispatchers.Default) {
+        //    extraction zip en 1 passe des .3ds, parsing par fichier UNIQUE.
+        //    (Les .glb sont extraits PAR LOTS plus bas — un show peut en avoir
+        //    14 000, tout garder en mémoire d'un coup ferait un OOM.)
+        val prepared = withContext(Dispatchers.Default) {
             val refs = collectRenderRefs(scene, conv)
-            val names = refs.mapTo(HashSet()) { it.fileName }
-            val bytesByName = MvrParser.extractEntries(mvrBytes, names)
-            val meshes = HashMap<String, List<ThreeDSParser.Mesh>>(names.size)
-            for (n in names) {
+            val tdsNames = refs.tds.mapTo(HashSet()) { it.fileName }
+            val bytesByName = MvrParser.extractEntries(mvrBytes, tdsNames)
+            val meshes = HashMap<String, List<ThreeDSParser.Mesh>>(tdsNames.size)
+            for (n in tdsNames) {
                 val b = bytesByName[n] ?: continue
                 meshes[n] = runCatching { ThreeDSParser.parse(b) }.getOrDefault(emptyList())
             }
-            refs to meshes
+            // Textures externes potentielles des glb (le MVR embarque des .png) :
+            // servies au chargeur via resourceResolver, comme le fix iOS des
+            // textures manquantes.
+            val imageNames = MvrParser.listEntries(mvrBytes)
+                .filter { it.endsWith(".png", true) || it.endsWith(".jpg", true) || it.endsWith(".jpeg", true) }
+                .mapTo(HashSet()) { it.substringAfterLast('/') }
+            val images = if (imageNames.isEmpty()) emptyMap()
+                         else MvrParser.extractEntries(mvrBytes, imageNames)
+            Triple(refs, meshes, images)
         }
-        // 2) Thread moteur : géométries UNIQUES par fichier (partagées), puis un
-        //    GeometryNode par instance — par lots, avec budget global.
+        val (refs, meshesByFile, imageBytes) = prepared
+
+        // 2) Thread moteur : budget global de nœuds/triangles partagé 3ds+glb.
         val builtCache = HashMap<String, List<BuiltMesh>>()
         val materialCache = HashMap<Int, MaterialInstance>()
         fun material(color: Int) = materialCache.getOrPut(color) { materialLoader.createColorInstance(color) }
@@ -101,7 +112,9 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
         var triangles = 0L
         var placed = 0
         var truncated = false
-        for (r in refs) {
+
+        // 2a) .3ds : géométries uniques partagées + un GeometryNode par instance.
+        for (r in refs.tds) {
             if (nodes >= MAX_NODES || triangles >= MAX_TRIANGLES) { truncated = true; break }
             val meshes = meshesByFile[r.fileName]
             if (meshes.isNullOrEmpty()) continue
@@ -113,9 +126,42 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
                 nodes++; triangles += bm.triangles
             }
             placed++
-            if (placed % 25 == 0) {
-                status = "$placed objets 3D…"
-                yield()
+            if (placed % 25 == 0) { status = "$placed objets 3D…"; yield() }
+        }
+
+        // 2b) .glb : createInstancedModel (N instances d'un même fichier = 1 seul
+        //    parse), extraction du zip PAR LOTS de fichiers uniques.
+        if (refs.glb.isNotEmpty() && nodes < MAX_NODES) {
+            val byFile = LinkedHashMap<String, MutableList<Mat4>>()
+            for (r in refs.glb) byFile.getOrPut(r.fileName) { mutableListOf() }.add(r.world)
+            val resolver: (String) -> java.nio.Buffer? = { uri ->
+                imageBytes[uri.substringAfterLast('/')]?.let { java.nio.ByteBuffer.wrap(it) }
+            }
+            val names = byFile.keys.toList()
+            var i = 0
+            outer@ while (i < names.size) {
+                val chunk = names.subList(i, minOf(i + 250, names.size))
+                val bytesMap = withContext(Dispatchers.IO) { MvrParser.extractEntries(mvrBytes, chunk.toSet()) }
+                for (name in chunk) {
+                    val remaining = MAX_NODES - nodes
+                    if (remaining <= 0) { truncated = true; break@outer }
+                    val transforms = byFile.getValue(name)
+                    val take = minOf(transforms.size, remaining)
+                    if (take < transforms.size) truncated = true
+                    val data = bytesMap[name] ?: continue
+                    val instances = runCatching {
+                        modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), take, resolver)
+                    }.getOrNull() ?: continue
+                    for (k in 0 until minOf(take, instances.size)) {
+                        val node = io.github.sceneview.node.ModelNode(instances[k])
+                        node.transform = transforms[k]
+                        geometryRoot.addChildNode(node)
+                    }
+                    nodes += take
+                    placed += take
+                    if (placed % 100 < take) { status = "$placed objets 3D…"; yield() }
+                }
+                i += 250
             }
         }
         status = "$placed objets 3D" + if (truncated) " (tronqué)" else ""
@@ -162,21 +208,36 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
 // ---- Résolution des références de géométrie ----
 
 private class RenderRef(val world: Mat4, val fileName: String)
+private class RenderRefs(val tds: List<RenderRef>, val glb: List<RenderRef>)
+
+/** Les .glb MVR sont en MÈTRES, le monde MVR en mm → ×1000 (même fix qu'iOS). */
+private val GLB_SCALE = Mat4(
+    Float4(1000f, 0f, 0f, 0f), Float4(0f, 1000f, 0f, 0f),
+    Float4(0f, 0f, 1000f, 0f), Float4(0f, 0f, 0f, 1f)
+)
 
 /**
- * Aplati la scène en refs rendables : Geometry3D directs + Symbol→Symdef
- * résolus récursivement (transforms composées obj·symbole·item…), garde-fou de
- * profondeur (cycles) et plafond d'items par symdef (comme iOS).
+ * Aplati la scène en refs rendables (.3ds et .glb séparés — chargeurs
+ * différents) : Geometry3D directs + Symbol→Symdef résolus récursivement
+ * (transforms composées obj·symbole·item…), garde-fou de profondeur (cycles)
+ * et plafond d'items par symdef (comme iOS).
  */
-private fun collectRenderRefs(scene: MvrScene, conv: Mat4): List<RenderRef> {
-    val out = ArrayList<RenderRef>()
+private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
+    val tds = ArrayList<RenderRef>()
+    val glb = ArrayList<RenderRef>()
     fun walk(refs: List<MvrGeometryRef>, parent: Mat4, depth: Int) {
         if (depth > 8) return
         for (g in refs) when (g) {
-            is MvrGeometryRef.File ->
-                if (g.fileName.endsWith(".3ds", ignoreCase = true)) {
-                    out.add(RenderRef(parent * drMat(g.transform.m), g.fileName))
+            is MvrGeometryRef.File -> {
+                val world = parent * drMat(g.transform.m)
+                when {
+                    g.fileName.endsWith(".3ds", ignoreCase = true) ->
+                        tds.add(RenderRef(world, g.fileName))
+                    g.fileName.endsWith(".glb", ignoreCase = true) ||
+                        g.fileName.endsWith(".gltf", ignoreCase = true) ->
+                        glb.add(RenderRef(world * GLB_SCALE, g.fileName))
                 }
+            }
             is MvrGeometryRef.Symbol -> {
                 val sd = scene.symdefs[g.symdefUuid] ?: continue
                 walk(sd.items.take(MAX_SYMDEF_ITEMS), parent * drMat(g.transform.m), depth + 1)
@@ -184,7 +245,7 @@ private fun collectRenderRefs(scene: MvrScene, conv: Mat4): List<RenderRef> {
         }
     }
     for (obj in scene.allObjects) walk(obj.geometryRefs, conv * drMat(obj.transform.m), 0)
-    return out
+    return RenderRefs(tds, glb)
 }
 
 // ---- Construction de géométrie (avec couleurs matériaux, comme toSCNNode iOS) ----

@@ -1,15 +1,18 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,8 +69,17 @@ private const val GRAY = 0xFFBEBEC3.toInt()
  * PARTAGÉES entre instances (un Symdef référencé 300 fois = 1 seul
  * VertexBuffer). Repère MVR (mm, Z-haut) → Filament (m, Y-haut).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun Scene3DScreen(
+    scene: MvrScene,
+    mvrBytes: ByteArray,
+    options: SceneOptions,
+    onShowPlan: () -> Unit,
+    onShowPatch: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val engine = rememberEngine()
     val modelLoader = rememberModelLoader(engine)
     val materialLoader = rememberMaterialLoader(engine)
@@ -75,6 +87,8 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
     val center = remember(scene) { sceneCenterMm(scene) }
     val layout = remember(scene, center) { fixtureLayout(scene, center) }
 
+    // Matériau gris uniforme quand « couleurs par calque » est désactivé.
+    val grayMaterial = remember(materialLoader) { materialLoader.createColorInstance(GRAY) }
     val fixtureMaterials: Map<Int, MaterialInstance> = remember(materialLoader, layout) {
         layout.colors.toSet().associateWith { materialLoader.createColorInstance(it) }
     }
@@ -283,39 +297,49 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
     val cameraNode = rememberCameraNode(engine) { position = camHome }
     val manipulator = rememberCameraManipulator(orbitHomePosition = camHome, targetPosition = Float3(0f, 0f, 0f))
 
-    Box(modifier = modifier.fillMaxSize()) {
-        Scene(
-            modifier = Modifier.fillMaxSize(),
-            engine = engine,
-            modelLoader = modelLoader,
-            materialLoader = materialLoader,
-            cameraNode = cameraNode,
-            cameraManipulator = manipulator
-        ) {
-            Node(apply = { addChildNode(geometryRoot) })
-            val s = Float3(layout.cube, layout.cube, layout.cube)
-            layout.positions.forEachIndexed { i, p ->
-                // Cube de repli masqué dès que le projecteur a sa silhouette GDTF.
-                if (i !in gdtfFixtures) {
-                    CubeNode(size = s, materialInstance = fixtureMaterials.getValue(layout.colors[i]), position = p)
+    // Barre du haut EN DEHORS de la zone SceneView : celle-ci consomme tous les
+    // touchers, donc des contrôles flottants PAR-DESSUS (façon iOS) ne
+    // recevraient jamais les taps. Une vraie TopAppBar au-dessus reste cliquable.
+    Column(modifier = modifier.fillMaxSize()) {
+        TopAppBar(
+            title = {
+                Text(
+                    if (status.isBlank()) "Vue 3D" else "3D · $status",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1
+                )
+            },
+            navigationIcon = {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Projets")
+                }
+            },
+            actions = {
+                SceneOptionsMenu(
+                    options = options, tint = LocalContentColor.current,
+                    onShowPlan = onShowPlan, onShowPatch = onShowPatch
+                )
+            }
+        )
+        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0B0B0D))) {
+            Scene(
+                modifier = Modifier.fillMaxSize(),
+                engine = engine,
+                modelLoader = modelLoader,
+                materialLoader = materialLoader,
+                cameraNode = cameraNode,
+                cameraManipulator = manipulator
+            ) {
+                Node(apply = { addChildNode(geometryRoot) })
+                val s = Float3(layout.cube, layout.cube, layout.cube)
+                layout.positions.forEachIndexed { i, p ->
+                    // Cube de repli masqué dès que le projecteur a sa silhouette GDTF.
+                    if (i !in gdtfFixtures) {
+                        val mat = if (options.layerColors) fixtureMaterials.getValue(layout.colors[i]) else grayMaterial
+                        CubeNode(size = s, materialInstance = mat, position = p)
+                    }
                 }
             }
-        }
-
-        Surface(
-            color = Color.Black.copy(alpha = 0.45f),
-            contentColor = Color.White,
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.align(Alignment.TopStart).padding(top = 56.dp, start = 12.dp)
-        ) {
-            Text(
-                "${scene.layers.size} calque(s) · ${scene.allObjects.size} objet(s) · ${scene.fixtures.size} projecteur(s) · $status",
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-            )
-        }
-
-        IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
         }
     }
 }

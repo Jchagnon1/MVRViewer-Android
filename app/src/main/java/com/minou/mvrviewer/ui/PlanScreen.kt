@@ -49,7 +49,13 @@ import kotlin.math.min
  * de scénographie).
  */
 @Composable
-fun PlanScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun PlanScreen(
+    scene: MvrScene,
+    options: SceneOptions,
+    onBack: () -> Unit,
+    onShowPatch: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val layerIndex = remember(scene) { LayerColors.index(scene) }
     val data = remember(scene) { planData(scene) }
     val measurer = rememberTextMeasurer()
@@ -98,19 +104,21 @@ fun PlanScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Modifie
             val w = size.width; val h = size.height
 
             // Décor / structure : petits points gris (contexte du plan).
-            for (p in data.structure) {
-                val s = toScreen(p.first, p.second, w, h)
-                if (s.x in -20f..w + 20f && s.y in -20f..h + 20f) {
-                    drawCircle(STRUCT_COLOR, radius = 1.6f, center = s)
+            if (options.showStructure) {
+                for (p in data.structure) {
+                    val s = toScreen(p.first, p.second, w, h)
+                    if (s.x in -20f..w + 20f && s.y in -20f..h + 20f) {
+                        drawCircle(STRUCT_COLOR, radius = 1.6f, center = s)
+                    }
                 }
             }
 
             // Projecteurs : cercle coloré par calque + ID.
-            val showLabels = baseScale(w, h) * scale > 0.02f
+            val showLabels = options.showLabels && baseScale(w, h) * scale > 0.02f
             data.fixtures.forEachIndexed { i, f ->
                 val s = toScreen(f.px, f.py, w, h)
                 if (s.x !in -40f..w + 40f || s.y !in -40f..h + 40f) return@forEachIndexed
-                val c = Color(LayerColors.colorInt(layerIndex, f.layer))
+                val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
                 drawCircle(c, radius = 7f, center = s)
                 drawCircle(Color.White, radius = 7f, center = s, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
                 if (i == selected) {
@@ -136,8 +144,15 @@ fun PlanScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Modifie
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour", tint = Color(0xFF222222))
+        IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Vue 3D", tint = Color(0xFF222222))
+        }
+        Box(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
+            SceneOptionsMenu(
+                options = options, tint = Color(0xFF222222),
+                onShow3D = onBack, onShowPatch = onShowPatch,
+                showLabelsToggle = true, showStructureToggle = true
+            )
         }
 
         // Recherche d'un projecteur par Fixture ID : centre + sélectionne (comme

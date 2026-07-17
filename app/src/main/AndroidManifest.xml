@@ -3,6 +3,8 @@
 
     <!-- GDTF Share : téléchargement des modèles fabricants. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Position de l'utilisateur en direct sur le plan (après calibrage). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <application
         android:allowBackup="true"

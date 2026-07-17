@@ -17,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
@@ -30,6 +32,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,6 +80,13 @@ fun PlanScreen(
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
     var query by remember(scene) { mutableStateOf("") }
 
+    // Géolocalisation : position GPS en direct + calibration par ancres.
+    val calibration = remember(scene) { com.minou.mvrviewer.mvr.GeoCalibration() }
+    var showLocation by remember { mutableStateOf(false) }
+    var calibrating by remember { mutableStateOf(false) }
+    var calibVersion by remember { mutableIntStateOf(0) } // force le redraw à l'ajout d'ancre
+    val gps by rememberUserLocation(showLocation)
+
     // Transformée monde→écran : centrée sur le contenu, ajustée au Canvas, puis
     // zoom/pan utilisateur par-dessus.
     fun baseScale(w: Float, h: Float): Float {
@@ -86,6 +96,11 @@ fun PlanScreen(
     fun toScreen(px: Float, py: Float, w: Float, h: Float): Offset {
         val bs = baseScale(w, h) * scale
         return Offset(w / 2f + offset.x + bs * (px - data.cx), h / 2f + offset.y + bs * (py - data.cy))
+    }
+    // Inverse écran → coord plan (px, py) = (worldX, −worldY).
+    fun toPlan(sx: Float, sy: Float, w: Float, h: Float): Pair<Float, Float> {
+        val bs = baseScale(w, h) * scale
+        return (sx - w / 2f - offset.x) / bs + data.cx to (sy - h / 2f - offset.y) / bs + data.cy
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -119,9 +134,21 @@ fun PlanScreen(
                         }
                     }
                 }
-                .pointerInput(scene, rectMode) {
+                .pointerInput(scene, rectMode, calibrating) {
                     detectTapGestures { tap ->
                         val w = canvas.x; val h = canvas.y
+                        // Calibrage « je suis ici » : le tap pose une ancre (point
+                        // plan touché ↔ position GPS courante).
+                        val g = gps
+                        if (calibrating && g != null) {
+                            val (px, py) = toPlan(tap.x, tap.y, w, h)
+                            calibration.addAnchor(
+                                com.minou.mvrviewer.mvr.GeoAnchor(px, -py, g.latitude, g.longitude)
+                            )
+                            calibVersion++
+                            calibrating = false
+                            return@detectTapGestures
+                        }
                         var best = -1; var bestD = 40f * 40f
                         data.fixtures.forEachIndexed { i, f ->
                             val s = toScreen(f.px, f.py, w, h)
@@ -164,6 +191,20 @@ fun PlanScreen(
                 if (showLabels && f.id != null) {
                     val tl = measurer.measure("#${f.id}", style = TextStyle(fontSize = 9.sp, color = Color(0xFF222222)))
                     drawText(tl, topLeft = Offset(s.x + 8f, s.y - 6f))
+                }
+            }
+
+            // Position GPS de l'utilisateur (bleu), après calibrage.
+            calibVersion.let { /* redraw à l'ajout d'ancre */ }
+            val g = gps
+            if (showLocation && g != null && calibration.isCalibrated) {
+                val wp = calibration.worldPosition(g.latitude, g.longitude)
+                if (wp != null) {
+                    val s = toScreen(wp.first, -wp.second, w, h)
+                    drawCircle(Color(0x332979FF), radius = 26f, center = s)
+                    drawCircle(Color(0xFF2979FF), radius = 9f, center = s)
+                    drawCircle(Color.White, radius = 9f, center = s,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f))
                 }
             }
 
@@ -227,7 +268,7 @@ fun PlanScreen(
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
         )
 
-        // Bouton mode « sélection rectangle » (bas gauche), + effacer.
+        // Barre d'outils (bas gauche) : rectangle, position GPS, calibrage.
         Row(
             modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -239,6 +280,30 @@ fun PlanScreen(
                 FilledIconButton(onClick = { selected.clear() }) {
                     Icon(Icons.Filled.Clear, contentDescription = "Effacer la sélection")
                 }
+            }
+            FilledIconToggleButton(checked = showLocation, onCheckedChange = { showLocation = it; if (!it) calibrating = false }) {
+                Icon(Icons.Filled.MyLocation, contentDescription = "Ma position GPS")
+            }
+            if (showLocation) {
+                FilledIconToggleButton(checked = calibrating, onCheckedChange = { calibrating = it }) {
+                    Icon(Icons.Filled.Place, contentDescription = "Calibrer : je suis ici")
+                }
+            }
+        }
+        // Aide de calibrage.
+        if (calibrating) {
+            Surface(
+                color = Color(0xFFFFC400), contentColor = Color(0xFF111111),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
+            ) {
+                Text(
+                    if (gps == null) "En attente du GPS…"
+                    else if (calibration.anchors.isEmpty()) "Touchez VOTRE position sur le plan (1er point)"
+                    else "Touchez un 2e point (oriente + met à l'échelle)",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         }
 

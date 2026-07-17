@@ -256,7 +256,7 @@ fun PlanScreen(
                         append(f.name)
                         f.spec?.let { append("\n$it") }
                         append("\n${f.layer}")
-                        if (f.addr.isNotEmpty()) append(" · DMX ${f.addr}")
+                        if (f.addr.isNotEmpty()) append(" · DMX ${com.minou.mvrviewer.mvr.DmxAddress.format(f.addr)}")
                     },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.bodyMedium

@@ -102,7 +102,7 @@ private fun FixtureRow(f: MvrSceneObject, overrides: PatchOverrides, onClick: ()
         Text("$id${f.name}" + if (edited) "  ✎" else "", style = MaterialTheme.typography.bodyLarge)
         val spec = f.gdtfSpec ?: "—"
         val mode = overrides.effectiveMode(f) ?: "—"
-        val addr = overrides.effectiveAddress(f) ?: "—"
+        val addr = overrides.effectiveAddress(f)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "—"
         Text(
             "$spec · $mode · DMX $addr",
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),

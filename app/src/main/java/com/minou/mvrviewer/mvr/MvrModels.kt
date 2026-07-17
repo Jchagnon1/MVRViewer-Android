@@ -80,3 +80,16 @@ data class MvrScene(
 }
 
 class MvrParseException(message: String) : Exception(message)
+
+/** Adresse DMX « univers.adresse » — portage de DMXAddressFormatter (iOS). */
+object DmxAddress {
+    fun format(raw: String): String {
+        val t = raw.trim()
+        if (t.contains(".")) return t          // déjà « u.a »
+        val abs = t.toIntOrNull() ?: return t
+        if (abs <= 0) return t
+        val universe = (abs - 1) / 512 + 1
+        val address = (abs - 1) % 512 + 1
+        return "$universe.$address"
+    }
+}

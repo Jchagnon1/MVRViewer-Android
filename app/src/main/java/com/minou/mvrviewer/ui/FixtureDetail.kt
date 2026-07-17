@@ -81,7 +81,9 @@ fun FixtureDetailSheet(
     }
 
     var id by remember(fixture) { mutableStateOf(overrides.effectiveId(fixture) ?: "") }
-    var addr by remember(fixture) { mutableStateOf(overrides.effectiveAddress(fixture) ?: "") }
+    var addr by remember(fixture) {
+        mutableStateOf(overrides.effectiveAddress(fixture)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "")
+    }
     var modeName by remember(fixture) { mutableStateOf(overrides.effectiveMode(fixture)) }
     var modeMenu by remember { mutableStateOf(false) }
 

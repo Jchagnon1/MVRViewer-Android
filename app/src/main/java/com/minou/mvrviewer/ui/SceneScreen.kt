@@ -26,6 +26,7 @@ fun SceneScreen(
 ) {
     var mode by remember { mutableStateOf(SceneMode.THREE_D) }
     val options = remember { SceneOptions() }
+    val overrides = remember { PatchOverrides() }
 
     when (mode) {
         SceneMode.THREE_D -> Scene3DScreen(
@@ -46,6 +47,8 @@ fun SceneScreen(
         )
         SceneMode.PATCH -> PatchListScreen(
             scene = scene,
+            mvrBytes = mvrBytes,
+            overrides = overrides,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

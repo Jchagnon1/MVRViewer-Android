@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,12 +31,20 @@ import com.minou.mvrviewer.mvr.MvrSceneObject
 
 /**
  * Liste de patch — projecteurs du .mvr avec recherche/filtre (ID, nom, GDTF,
- * calque, adresse DMX). Équivalent simplifié de PatchListView (iOS).
+ * calque, adresse DMX). Toucher une ligne ouvre la fiche d'édition (ID /
+ * adresse / mode + détail des canaux). Équivalent PatchListView (iOS).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PatchListScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun PatchListScreen(
+    scene: MvrScene,
+    mvrBytes: ByteArray,
+    overrides: PatchOverrides,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     var query by remember(scene) { mutableStateOf("") }
+    var detail by remember { mutableStateOf<MvrSceneObject?>(null) }
     val fixtures = scene.fixtures
     val filtered = remember(scene, query) {
         val q = query.trim()
@@ -67,27 +76,35 @@ fun PatchListScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Mo
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
         )
         Text(
-            "${filtered.size} / ${fixtures.size} projecteur(s)",
+            "${filtered.size} / ${fixtures.size} projecteur(s) · touchez pour éditer",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(filtered) { f -> FixtureRow(f) }
+            items(filtered) { f -> FixtureRow(f, overrides) { detail = f } }
         }
+    }
+
+    detail?.let { f ->
+        FixtureDetailSheet(fixture = f, mvrBytes = mvrBytes, overrides = overrides, onDismiss = { detail = null })
     }
 }
 
 @Composable
-private fun FixtureRow(f: MvrSceneObject) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        val id = f.fixtureId?.let { "#$it  " } ?: ""
-        Text("$id${f.name}", style = MaterialTheme.typography.bodyLarge)
+private fun FixtureRow(f: MvrSceneObject, overrides: PatchOverrides, onClick: () -> Unit) {
+    val edited = overrides.isEdited(f)
+    Column(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        val id = overrides.effectiveId(f)?.let { "#$it  " } ?: ""
+        Text("$id${f.name}" + if (edited) "  ✎" else "", style = MaterialTheme.typography.bodyLarge)
         val spec = f.gdtfSpec ?: "—"
-        val addr = if (f.addresses.isNotEmpty()) f.addresses.joinToString(",") else "—"
+        val mode = overrides.effectiveMode(f) ?: "—"
+        val addr = overrides.effectiveAddress(f) ?: "—"
         Text(
-            "$spec · ${f.layerName} · DMX $addr",
+            "$spec · $mode · DMX $addr",
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

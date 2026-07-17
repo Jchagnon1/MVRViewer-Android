@@ -7,14 +7,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,6 +58,7 @@ fun PlanScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Modifie
     var offset by remember { mutableStateOf(Offset.Zero) }
     var canvas by remember { mutableStateOf(Offset.Zero) } // largeur/hauteur du Canvas
     var selected by remember(scene) { mutableStateOf<Int?>(null) } // index dans data.fixtures
+    var query by remember(scene) { mutableStateOf("") }
 
     // Transformée monde→écran : centrée sur le contenu, ajustée au Canvas, puis
     // zoom/pan utilisateur par-dessus.
@@ -134,6 +140,32 @@ fun PlanScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Modifie
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour", tint = Color(0xFF222222))
         }
 
+        // Recherche d'un projecteur par Fixture ID : centre + sélectionne (comme
+        // le bouton loupe iOS — usage terrain « où est le #152 »).
+        fun doSearch() {
+            val q = query.trim()
+            if (q.isEmpty()) return
+            val i = data.fixtures.indexOfFirst { it.id == q }
+                .let { if (it >= 0) it else data.fixtures.indexOfFirst { f -> f.id?.contains(q, true) == true } }
+            if (i < 0) return
+            selected = i
+            val f = data.fixtures[i]
+            val target = max(scale, 6f)
+            val bs = baseScale(canvas.x, canvas.y) * target
+            scale = target
+            offset = Offset(-bs * (f.px - data.cx), -bs * (f.py - data.cy))
+        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            placeholder = { Text("N° projecteur", style = MaterialTheme.typography.bodySmall) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { doSearch() }),
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
+        )
+
         // Fiche du projecteur sélectionné (bas).
         selected?.let { i ->
             val f = data.fixtures[i]
@@ -156,9 +188,6 @@ fun PlanScreen(scene: MvrScene, onBack: () -> Unit, modifier: Modifier = Modifie
             }
         }
     }
-    // "Ma position" (géoloc) viendra ici — placeholder d'icône pour la parité UI.
-    @Suppress("UNUSED_EXPRESSION")
-    Icons.Filled.MyLocation
 }
 
 private val STRUCT_COLOR = Color(0xFF9AA0A6)

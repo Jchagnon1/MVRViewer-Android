@@ -63,6 +63,18 @@ private const val FIXTURE_NODE_RESERVE = 2_500
 // Même plafond pragmatique qu'iOS (SceneKitContainerView.maxSymdefItems).
 private const val MAX_SYMDEF_ITEMS = 500
 private const val GRAY = 0xFFBEBEC3.toInt()
+// En dessous de cette taille (mm, dimension max du mesh), un objet 3ds est jugé
+// « petit » (siège, accessoire) et masqué pendant les mouvements de caméra.
+private const val LOD_SMALL_MM = 1200f
+
+/** État du LOD d'interaction (nœuds « petits » + suivi du mouvement caméra). */
+private class LodState {
+    val nodes = ArrayList<io.github.sceneview.node.Node>()
+    var lastX = Float.NaN; var lastY = Float.NaN; var lastZ = Float.NaN
+    var idle = 0
+    var hidden = false
+    fun reset() { nodes.clear(); lastX = Float.NaN; idle = 0; hidden = false }
+}
 
 /**
  * Vue 3D : structure/décor en VRAIE géométrie `.3ds` (couleurs matériaux
@@ -99,6 +111,10 @@ fun Scene3DScreen(
 
     val geometryRoot = rememberNode(engine)
     var status by remember(scene) { mutableStateOf("chargement 3D…") }
+    // LOD d'interaction : les petits objets (sièges, accessoires) sont masqués
+    // pendant que la caméra bouge, réaffichés à l'arrêt — divise les draw calls
+    // en navigation (comme iOS), sans toucher au rendu au repos.
+    val lod = remember(scene) { LodState() }
     // Indices (dans scene.fixtures) des projecteurs rendus avec leur VRAIE
     // silhouette GDTF — leurs cubes de repli sont masqués.
     var gdtfFixtures by remember(scene) { mutableStateOf(emptySet<Int>()) }
@@ -109,6 +125,7 @@ fun Scene3DScreen(
         // effet ; sans purge on empilerait la géométrie en double).
         geometryRoot.childNodes.toList().forEach { geometryRoot.removeChildNode(it) }
         gdtfFixtures = emptySet()
+        lod.reset()
         val conv = conversionMatrix(center)
         // 1) Hors thread : résolution des refs (File + Symbol→Symdef récursif),
         //    extraction zip en 1 passe des .3ds, parsing par fichier UNIQUE.
@@ -146,15 +163,19 @@ fun Scene3DScreen(
         val sceneNodeBudget = MAX_NODES - FIXTURE_NODE_RESERVE
 
         // 2a) .3ds : géométries uniques partagées + un GeometryNode par instance.
+        val smallByFile = HashMap<String, Boolean>()
         for (r in refs.tds) {
             if (nodes >= sceneNodeBudget || triangles >= MAX_TRIANGLES) { truncated = true; break }
             val meshes = meshesByFile[r.fileName]
             if (meshes.isNullOrEmpty()) continue
             val built = builtCache.getOrPut(r.fileName) { meshes.mapNotNull { buildMesh(engine, it) } }
+            // Petit objet (siège, accessoire) → candidat au LOD d'interaction.
+            val small = smallByFile.getOrPut(r.fileName) { meshesMaxDimension(meshes) < LOD_SMALL_MM }
             for (bm in built) {
                 val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
                 node.transform = r.world
                 geometryRoot.addChildNode(node)
+                if (small) lod.nodes.add(node)
                 nodes++; triangles += bm.triangles
             }
             placed++
@@ -342,10 +363,27 @@ fun Scene3DScreen(
                 cameraNode = cameraNode,
                 cameraManipulator = manipulator,
                 // Perf : pas d'ombres (des milliers d'objets = coût énorme) et
-                // qualité « Performance » (MSAA/post-process réduits). La
-                // fluidité de fond viendra surtout de la fusion des draw calls.
+                // qualité « Performance » (MSAA/post-process réduits).
                 renderQuality = RenderQuality.Performance,
-                mainLightNode = rememberMainLightNode(engine) { isShadowCaster = false }
+                mainLightNode = rememberMainLightNode(engine) { isShadowCaster = false },
+                // LOD d'interaction : détecte le mouvement caméra (position monde
+                // qui change) → masque les petits objets ; réaffiche après ~10
+                // frames stables.
+                onFrame = {
+                    val p = cameraNode.worldPosition
+                    val moved = lod.lastX.isNaN() ||
+                        (kotlin.math.abs(p.x - lod.lastX) + kotlin.math.abs(p.y - lod.lastY) + kotlin.math.abs(p.z - lod.lastZ)) > 0.02f
+                    lod.lastX = p.x; lod.lastY = p.y; lod.lastZ = p.z
+                    if (lod.nodes.isNotEmpty()) {
+                        if (moved) {
+                            lod.idle = 0
+                            if (!lod.hidden) { lod.nodes.forEach { it.isVisible = false }; lod.hidden = true }
+                        } else {
+                            lod.idle++
+                            if (lod.hidden && lod.idle > 10) { lod.nodes.forEach { it.isVisible = true }; lod.hidden = false }
+                        }
+                    }
+                }
             ) {
                 Node(apply = { addChildNode(geometryRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)

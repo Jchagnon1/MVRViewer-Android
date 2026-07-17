@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.google.android.filament.Engine
 import com.google.android.filament.MaterialInstance
 import com.google.android.filament.RenderableManager
+import com.minou.mvrviewer.mvr.GdtfLoader
 import com.minou.mvrviewer.mvr.MvrGeometryRef
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
@@ -49,7 +50,11 @@ import kotlin.math.sqrt
 // L'iOS gère les très gros shows par LOD ; ici on borne le TOTAL de triangles
 // et de nœuds — au-delà, on tronque et on l'affiche honnêtement.
 private const val MAX_TRIANGLES = 2_500_000L
-private const val MAX_NODES = 6_000
+private const val MAX_NODES = 10_000
+// Part du budget RÉSERVÉE aux silhouettes GDTF des projecteurs : le décor
+// s'arrête avant, pour que les projecteurs (cœur de l'app) soient TOUJOURS
+// rendus même sur un gros show (sinon le décor mangeait tout le budget).
+private const val FIXTURE_NODE_RESERVE = 2_500
 // Même plafond pragmatique qu'iOS (SceneKitContainerView.maxSymdefItems).
 private const val MAX_SYMDEF_ITEMS = 500
 private const val GRAY = 0xFFBEBEC3.toInt()
@@ -76,6 +81,9 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
 
     val geometryRoot = rememberNode(engine)
     var status by remember(scene) { mutableStateOf("chargement 3D…") }
+    // Indices (dans scene.fixtures) des projecteurs rendus avec leur VRAIE
+    // silhouette GDTF — leurs cubes de repli sont masqués.
+    var gdtfFixtures by remember(scene) { mutableStateOf(emptySet<Int>()) }
 
     LaunchedEffect(scene, mvrBytes) {
         val conv = conversionMatrix(center)
@@ -112,10 +120,11 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
         var triangles = 0L
         var placed = 0
         var truncated = false
+        val sceneNodeBudget = MAX_NODES - FIXTURE_NODE_RESERVE
 
         // 2a) .3ds : géométries uniques partagées + un GeometryNode par instance.
         for (r in refs.tds) {
-            if (nodes >= MAX_NODES || triangles >= MAX_TRIANGLES) { truncated = true; break }
+            if (nodes >= sceneNodeBudget || triangles >= MAX_TRIANGLES) { truncated = true; break }
             val meshes = meshesByFile[r.fileName]
             if (meshes.isNullOrEmpty()) continue
             val built = builtCache.getOrPut(r.fileName) { meshes.mapNotNull { buildMesh(engine, it) } }
@@ -131,7 +140,7 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
 
         // 2b) .glb : createInstancedModel (N instances d'un même fichier = 1 seul
         //    parse), extraction du zip PAR LOTS de fichiers uniques.
-        if (refs.glb.isNotEmpty() && nodes < MAX_NODES) {
+        if (refs.glb.isNotEmpty() && nodes < sceneNodeBudget) {
             val byFile = LinkedHashMap<String, MutableList<Mat4>>()
             for (r in refs.glb) byFile.getOrPut(r.fileName) { mutableListOf() }.add(r.world)
             val resolver: (String) -> java.nio.Buffer? = { uri ->
@@ -143,7 +152,7 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
                 val chunk = names.subList(i, minOf(i + 250, names.size))
                 val bytesMap = withContext(Dispatchers.IO) { MvrParser.extractEntries(mvrBytes, chunk.toSet()) }
                 for (name in chunk) {
-                    val remaining = MAX_NODES - nodes
+                    val remaining = sceneNodeBudget - nodes
                     if (remaining <= 0) { truncated = true; break@outer }
                     val transforms = byFile.getValue(name)
                     val take = minOf(transforms.size, remaining)
@@ -164,7 +173,110 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
                 i += 250
             }
         }
-        status = "$placed objets 3D" + if (truncated) " (tronqué)" else ""
+
+        // 2c) Projecteurs : vraie silhouette GDTF (Base/Yoke/Head assemblés) à
+        //    la place du cube. Un spec = UN assemblage préparé, instancié pour
+        //    chaque projecteur qui l'utilise (géométries 3ds partagées, glb via
+        //    createInstancedModel).
+        val fixtures = scene.fixtures
+        val bySpec = LinkedHashMap<String, MutableList<Int>>()
+        fixtures.forEachIndexed { fi2, f ->
+            val s = f.gdtfSpec?.trim()
+            if (!s.isNullOrEmpty()) bySpec.getOrPut(s) { mutableListOf() }.add(fi2)
+        }
+        val gdtfDone = HashSet<Int>()
+        specLoop@ for ((spec, idxs) in bySpec) {
+            if (nodes >= MAX_NODES) { truncated = true; break }
+            // Préparation hors moteur : extraction du .gdtf, parse de l'arbre,
+            // octets des modèles (+ parse .3ds).
+            val prep = withContext(Dispatchers.Default) {
+                val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
+                val gd = cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
+                    ?: return@withContext null
+                val asm = GdtfLoader.parseAssembly(gd) ?: return@withContext null
+                val files = HashMap<String, Triple<ByteArray, String, List<ThreeDSParser.Mesh>>>()
+                for ((mName, mInfo) in asm.models) {
+                    val fb = GdtfLoader.extractModelBytes(gd, mInfo.file) ?: continue
+                    val meshes = if (fb.second == "3ds")
+                        runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
+                    else emptyList()
+                    files[mName] = Triple(fb.first, fb.second, meshes)
+                }
+                asm to files
+            } ?: continue
+            val (asm, files) = prep
+            val placementsByModel = asm.placements.groupBy { it.modelName }
+
+            // Pré-construit chaque modèle du spec : soit des géométries 3ds
+            // partagées, soit une file d'instances glb.
+            class ModelBuild(val built: List<BuiltMesh>, val glbQueue: ArrayDeque<com.google.android.filament.gltfio.FilamentInstance>, val adjust: Mat4)
+            val builds = HashMap<String, ModelBuild>()
+            for ((mName, pls) in placementsByModel) {
+                val info = asm.models[mName] ?: continue
+                val (bytes, ext, meshes) = files[mName] ?: continue
+                if (ext == "3ds") {
+                    if (meshes.isEmpty()) continue
+                    val built = meshes.mapNotNull { buildMesh(engine, it) }
+                    if (built.isEmpty()) continue
+                    val rawMax = meshesMaxDimension(meshes)
+                    val s = when {
+                        info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
+                        rawMax > 10f -> 0.001f // pas de dimensions déclarées : mm supposés
+                        else -> 1f
+                    }
+                    builds[mName] = ModelBuild(built, ArrayDeque(), scaleMat(s))
+                } else {
+                    // glb/gltf : une instance par (placement × projecteur).
+                    val count = pls.size * idxs.size
+                    val instances = runCatching {
+                        modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(bytes), count)
+                    }.getOrNull() ?: continue
+                    val box = instances.firstOrNull()?.asset?.boundingBox
+                    val rawMax = box?.halfExtent?.let { 2f * maxOf(it[0], it[1], it[2]) } ?: 0f
+                    val s = when {
+                        info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
+                        rawMax > 10f -> 0.001f
+                        else -> 1f
+                    }
+                    // glTF est Y-haut, l'assemblage GDTF est Z-haut → Rx(+90°).
+                    builds[mName] = ModelBuild(emptyList(), ArrayDeque(instances), RX90 * scaleMat(s))
+                }
+            }
+            if (builds.isEmpty()) continue
+
+            for (fi2 in idxs) {
+                if (nodes >= MAX_NODES) { truncated = true; break@specLoop }
+                val worldFix = conv * drMat(fixtures[fi2].transform.m) * GLB_SCALE // assemblage m → mm
+                var any = false
+                for (p in asm.placements) {
+                    val b = builds[p.modelName] ?: continue
+                    val world = worldFix * p.transform * b.adjust
+                    if (b.built.isNotEmpty()) {
+                        for (bm in b.built) {
+                            val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
+                            node.transform = world
+                            geometryRoot.addChildNode(node)
+                            nodes++
+                        }
+                        any = true
+                    } else {
+                        val inst = b.glbQueue.removeFirstOrNull() ?: continue
+                        val node = io.github.sceneview.node.ModelNode(inst)
+                        node.transform = world
+                        geometryRoot.addChildNode(node)
+                        nodes++
+                        any = true
+                    }
+                }
+                if (any) gdtfDone.add(fi2)
+                if (gdtfDone.size % 40 == 0) { status = "$placed objets · ${gdtfDone.size} proj. GDTF…"; yield() }
+            }
+        }
+        gdtfFixtures = gdtfDone
+
+        status = "$placed objets 3D" +
+            (if (gdtfDone.isNotEmpty()) " · ${gdtfDone.size} proj. GDTF" else "") +
+            if (truncated) " (tronqué)" else ""
     }
 
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
@@ -183,7 +295,10 @@ fun Scene3DScreen(scene: MvrScene, mvrBytes: ByteArray, onBack: () -> Unit, modi
             Node(apply = { addChildNode(geometryRoot) })
             val s = Float3(layout.cube, layout.cube, layout.cube)
             layout.positions.forEachIndexed { i, p ->
-                CubeNode(size = s, materialInstance = fixtureMaterials.getValue(layout.colors[i]), position = p)
+                // Cube de repli masqué dès que le projecteur a sa silhouette GDTF.
+                if (i !in gdtfFixtures) {
+                    CubeNode(size = s, materialInstance = fixtureMaterials.getValue(layout.colors[i]), position = p)
+                }
             }
         }
 
@@ -334,6 +449,41 @@ private fun drMat(m: FloatArray): Mat4 = Mat4(
     Float4(m[8], m[9], m[10], m[11]),
     Float4(m[12], m[13], m[14], m[15])
 )
+
+/** Échelle uniforme. */
+private fun scaleMat(s: Float): Mat4 = Mat4(
+    Float4(s, 0f, 0f, 0f), Float4(0f, s, 0f, 0f),
+    Float4(0f, 0f, s, 0f), Float4(0f, 0f, 0f, 1f)
+)
+
+/** Rotation +90° autour de X (glTF Y-haut → repère GDTF Z-haut), col-majeur. */
+private val RX90 = Mat4(
+    Float4(1f, 0f, 0f, 0f), Float4(0f, 0f, 1f, 0f),
+    Float4(0f, -1f, 0f, 0f), Float4(0f, 0f, 0f, 1f)
+)
+
+/** Plus grande dimension (axes) de l'ensemble des meshes d'un fichier 3ds. */
+private fun meshesMaxDimension(meshes: List<ThreeDSParser.Mesh>): Float {
+    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+    var seen = false
+    for (m in meshes) {
+        val v = m.vertices
+        var i = 0
+        while (i + 2 < v.size) {
+            val x = v[i]; val y = v[i + 1]; val z = v[i + 2]
+            if (x.isFinite() && y.isFinite() && z.isFinite()) {
+                seen = true
+                if (x < minX) minX = x; if (x > maxX) maxX = x
+                if (y < minY) minY = y; if (y > maxY) maxY = y
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+            }
+            i += 3
+        }
+    }
+    if (!seen) return 0f
+    return maxOf(maxX - minX, maxY - minY, maxZ - minZ)
+}
 
 /** MVR (mm, Z-haut, centré sur `center`) → Filament (m, Y-haut) : Rx(−90°)·S(0.001)·T(−center). */
 private fun conversionMatrix(center: Float3): Mat4 {

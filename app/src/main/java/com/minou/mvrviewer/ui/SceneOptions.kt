@@ -2,6 +2,7 @@ package com.minou.mvrviewer.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.List
@@ -44,6 +45,7 @@ fun SceneOptionsMenu(
     onShow3D: (() -> Unit)? = null,
     onShowPlan: (() -> Unit)? = null,
     onShowPatch: (() -> Unit)? = null,
+    onShowGdtfShare: (() -> Unit)? = null,
     showLabelsToggle: Boolean = false,
     showStructureToggle: Boolean = false
 ) {
@@ -55,6 +57,7 @@ fun SceneOptionsMenu(
         onShow3D?.let { nav("Vue 3D", Icons.Filled.ViewInAr) { open = false; it() } }
         onShowPlan?.let { nav("Vue plan", Icons.Filled.Map) { open = false; it() } }
         onShowPatch?.let { nav("Liste de patch", Icons.AutoMirrored.Filled.List) { open = false; it() } }
+        onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
         HorizontalDivider()
         check("Couleurs par calque", options.layerColors) { options.layerColors = !options.layerColors }
         if (showLabelsToggle) check("Étiquettes (ID)", options.showLabels) { options.showLabels = !options.showLabels }

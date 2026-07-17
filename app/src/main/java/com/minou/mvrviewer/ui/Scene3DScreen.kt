@@ -77,8 +77,10 @@ fun Scene3DScreen(
     scene: MvrScene,
     mvrBytes: ByteArray,
     options: SceneOptions,
+    gdtfOverrides: GdtfOverrides,
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
+    onShowGdtfShare: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -101,7 +103,12 @@ fun Scene3DScreen(
     // silhouette GDTF — leurs cubes de repli sont masqués.
     var gdtfFixtures by remember(scene) { mutableStateOf(emptySet<Int>()) }
 
-    LaunchedEffect(scene, mvrBytes) {
+    // Reconstruit quand un modèle GDTF Share est appliqué (version bump).
+    LaunchedEffect(scene, mvrBytes, gdtfOverrides.version) {
+        // Repart d'une scène vide (une re-résolution GDTF Share re-déclenche cet
+        // effet ; sans purge on empilerait la géométrie en double).
+        geometryRoot.childNodes.toList().forEach { geometryRoot.removeChildNode(it) }
+        gdtfFixtures = emptySet()
         val conv = conversionMatrix(center)
         // 1) Hors thread : résolution des refs (File + Symbol→Symdef récursif),
         //    extraction zip en 1 passe des .3ds, parsing par fichier UNIQUE.
@@ -206,8 +213,10 @@ fun Scene3DScreen(
             // Préparation hors moteur : extraction du .gdtf, parse de l'arbre,
             // octets des modèles (+ parse .3ds).
             val prep = withContext(Dispatchers.Default) {
+                // Modèle GDTF Share (téléchargé) prioritaire sur l'embarqué.
                 val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
-                val gd = cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
+                val gd = gdtfOverrides.map[spec]
+                    ?: cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
                     ?: return@withContext null
                 val asm = GdtfLoader.parseAssembly(gd) ?: return@withContext null
                 val files = HashMap<String, Triple<ByteArray, String, List<ThreeDSParser.Mesh>>>()
@@ -319,7 +328,8 @@ fun Scene3DScreen(
             actions = {
                 SceneOptionsMenu(
                     options = options, tint = LocalContentColor.current,
-                    onShowPlan = onShowPlan, onShowPatch = onShowPatch
+                    onShowPlan = onShowPlan, onShowPatch = onShowPatch,
+                    onShowGdtfShare = onShowGdtfShare
                 )
             }
         )

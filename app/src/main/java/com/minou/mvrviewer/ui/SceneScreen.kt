@@ -8,7 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.minou.mvrviewer.mvr.MvrScene
 
-enum class SceneMode { THREE_D, PLAN, PATCH }
+enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE }
 
 /**
  * Hôte d'un .mvr ouvert. Comme iOS, la **vue 3D est l'écran principal** ; la
@@ -27,14 +27,17 @@ fun SceneScreen(
     var mode by remember { mutableStateOf(SceneMode.THREE_D) }
     val options = remember { SceneOptions() }
     val overrides = remember { PatchOverrides() }
+    val gdtfOverrides = remember { GdtfOverrides() }
 
     when (mode) {
         SceneMode.THREE_D -> Scene3DScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             options = options,
+            gdtfOverrides = gdtfOverrides,
             onShowPlan = { mode = SceneMode.PLAN },
             onShowPatch = { mode = SceneMode.PATCH },
+            onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },
             onClose = onClose,
             modifier = modifier
         )
@@ -49,6 +52,13 @@ fun SceneScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             overrides = overrides,
+            onBack = { mode = SceneMode.THREE_D },
+            modifier = modifier
+        )
+        SceneMode.GDTF_SHARE -> GdtfShareScreen(
+            scene = scene,
+            mvrBytes = mvrBytes,
+            overrides = gdtfOverrides,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

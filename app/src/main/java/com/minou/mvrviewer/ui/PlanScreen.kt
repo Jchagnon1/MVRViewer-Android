@@ -1,9 +1,12 @@
 package com.minou.mvrviewer.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,7 +15,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +30,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,7 +71,10 @@ fun PlanScreen(
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var canvas by remember { mutableStateOf(Offset.Zero) } // largeur/hauteur du Canvas
-    var selected by remember(scene) { mutableStateOf<Int?>(null) } // index dans data.fixtures
+    val selected = remember(scene) { mutableStateListOf<Int>() } // indices dans data.fixtures
+    var rectMode by remember { mutableStateOf(false) }
+    var rectStart by remember { mutableStateOf<Offset?>(null) }
+    var rectEnd by remember { mutableStateOf<Offset?>(null) }
     var query by remember(scene) { mutableStateOf("") }
 
     // Transformée monde→écran : centrée sur le contenu, ajustée au Canvas, puis
@@ -80,13 +91,35 @@ fun PlanScreen(
     Box(modifier = modifier.fillMaxSize()) {
         Canvas(
             modifier = Modifier.fillMaxSize()
-                .pointerInput(scene) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(0.05f, 200f)
-                        offset += pan
+                // En mode rectangle, le glissé trace le cadre de sélection ;
+                // sinon il déplace/zoome le plan (comme le mode dédié iOS).
+                .pointerInput(scene, rectMode) {
+                    if (rectMode) {
+                        detectDragGestures(
+                            onDragStart = { rectStart = it; rectEnd = it },
+                            onDrag = { change, _ -> rectEnd = change.position },
+                            onDragEnd = {
+                                val a = rectStart; val b = rectEnd
+                                if (a != null && b != null) {
+                                    val l = min(a.x, b.x); val r = max(a.x, b.x)
+                                    val t = min(a.y, b.y); val bo = max(a.y, b.y)
+                                    selected.clear()
+                                    data.fixtures.forEachIndexed { i, f ->
+                                        val s = toScreen(f.px, f.py, canvas.x, canvas.y)
+                                        if (s.x in l..r && s.y in t..bo) selected.add(i)
+                                    }
+                                }
+                                rectStart = null; rectEnd = null
+                            }
+                        )
+                    } else {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(0.05f, 200f)
+                            offset += pan
+                        }
                     }
                 }
-                .pointerInput(scene) {
+                .pointerInput(scene, rectMode) {
                     detectTapGestures { tap ->
                         val w = canvas.x; val h = canvas.y
                         var best = -1; var bestD = 40f * 40f
@@ -96,7 +129,10 @@ fun PlanScreen(
                             val d = dx * dx + dy * dy
                             if (d < bestD) { bestD = d; best = i }
                         }
-                        selected = if (best >= 0) best else null
+                        if (best < 0) { if (!rectMode) selected.clear() }
+                        else if (rectMode) { // toggle dans la sélection multiple
+                            if (!selected.remove(best)) selected.add(best)
+                        } else { selected.clear(); selected.add(best) }
                     }
                 }
         ) {
@@ -121,14 +157,24 @@ fun PlanScreen(
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
                 drawCircle(c, radius = 7f, center = s)
                 drawCircle(Color.White, radius = 7f, center = s, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
-                if (i == selected) {
-                    drawCircle(Color(0xFF111111), radius = 12f, center = s,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f))
+                if (i in selected) {
+                    drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
                 }
                 if (showLabels && f.id != null) {
                     val tl = measurer.measure("#${f.id}", style = TextStyle(fontSize = 9.sp, color = Color(0xFF222222)))
                     drawText(tl, topLeft = Offset(s.x + 8f, s.y - 6f))
                 }
+            }
+
+            // Cadre de sélection en cours.
+            val a = rectStart; val b = rectEnd
+            if (rectMode && a != null && b != null) {
+                val tl = Offset(min(a.x, b.x), min(a.y, b.y))
+                val sz = androidx.compose.ui.geometry.Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y))
+                drawRect(Color(0x33FFC400), topLeft = tl, size = sz)
+                drawRect(Color(0xFFFFC400), topLeft = tl, size = sz,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
             }
         }
 
@@ -163,7 +209,7 @@ fun PlanScreen(
             val i = data.fixtures.indexOfFirst { it.id == q }
                 .let { if (it >= 0) it else data.fixtures.indexOfFirst { f -> f.id?.contains(q, true) == true } }
             if (i < 0) return
-            selected = i
+            selected.clear(); selected.add(i)
             val f = data.fixtures[i]
             val target = max(scale, 6f)
             val bs = baseScale(canvas.x, canvas.y) * target
@@ -181,9 +227,24 @@ fun PlanScreen(
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
         )
 
-        // Fiche du projecteur sélectionné (bas).
-        selected?.let { i ->
-            val f = data.fixtures[i]
+        // Bouton mode « sélection rectangle » (bas gauche), + effacer.
+        Row(
+            modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilledIconToggleButton(checked = rectMode, onCheckedChange = { rectMode = it }) {
+                Icon(Icons.Filled.Crop, contentDescription = "Sélection rectangle")
+            }
+            if (selected.isNotEmpty()) {
+                FilledIconButton(onClick = { selected.clear() }) {
+                    Icon(Icons.Filled.Clear, contentDescription = "Effacer la sélection")
+                }
+            }
+        }
+
+        // Fiche du bas : 1 projecteur = détail ; plusieurs = compteur.
+        if (selected.size == 1) {
+            val f = data.fixtures[selected.first()]
             Surface(
                 color = Color.White, contentColor = Color(0xFF111111),
                 shape = RoundedCornerShape(12.dp), shadowElevation = 6.dp,
@@ -199,6 +260,18 @@ fun PlanScreen(
                     },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        } else if (selected.size > 1) {
+            Surface(
+                color = Color(0xFFFFC400), contentColor = Color(0xFF111111),
+                shape = RoundedCornerShape(12.dp), shadowElevation = 6.dp,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+            ) {
+                Text(
+                    "${selected.size} projecteurs sélectionnés",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.titleSmall
                 )
             }
         }

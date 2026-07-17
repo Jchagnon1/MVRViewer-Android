@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -41,8 +42,13 @@ fun SceneScreen(
     modifier: Modifier = Modifier
 ) {
     var show3D by remember { mutableStateOf(false) }
+    var showPlan by remember { mutableStateOf(false) }
     if (show3D) {
         Scene3DScreen(scene = scene, mvrBytes = mvrBytes, onBack = { show3D = false }, modifier = modifier)
+        return
+    }
+    if (showPlan) {
+        PlanScreen(scene = scene, onBack = { showPlan = false }, modifier = modifier)
         return
     }
 
@@ -56,6 +62,9 @@ fun SceneScreen(
                 }
             },
             actions = {
+                IconButton(onClick = { showPlan = true }) {
+                    Icon(Icons.Filled.Map, contentDescription = "Vue plan")
+                }
                 IconButton(onClick = { show3D = true }) {
                     Icon(Icons.Filled.ViewInAr, contentDescription = "Vue 3D")
                 }

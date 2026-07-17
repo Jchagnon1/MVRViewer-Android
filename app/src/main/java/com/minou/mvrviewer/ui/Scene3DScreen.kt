@@ -34,6 +34,7 @@ import com.minou.mvrviewer.mvr.ThreeDSParser
 import dev.romainguy.kotlin.math.Float3
 import dev.romainguy.kotlin.math.Float4
 import dev.romainguy.kotlin.math.Mat4
+import io.github.sceneview.RenderQuality
 import io.github.sceneview.Scene
 import io.github.sceneview.geometries.Geometry
 import io.github.sceneview.loaders.MaterialLoader
@@ -41,6 +42,7 @@ import io.github.sceneview.node.GeometryNode
 import io.github.sceneview.rememberCameraManipulator
 import io.github.sceneview.rememberCameraNode
 import io.github.sceneview.rememberEngine
+import io.github.sceneview.rememberMainLightNode
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNode
@@ -328,7 +330,12 @@ fun Scene3DScreen(
                 modelLoader = modelLoader,
                 materialLoader = materialLoader,
                 cameraNode = cameraNode,
-                cameraManipulator = manipulator
+                cameraManipulator = manipulator,
+                // Perf : pas d'ombres (des milliers d'objets = coût énorme) et
+                // qualité « Performance » (MSAA/post-process réduits). La
+                // fluidité de fond viendra surtout de la fusion des draw calls.
+                renderQuality = RenderQuality.Performance,
+                mainLightNode = rememberMainLightNode(engine) { isShadowCaster = false }
             ) {
                 Node(apply = { addChildNode(geometryRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)

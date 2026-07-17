@@ -34,6 +34,31 @@ object MvrParser {
         return null
     }
 
+    /**
+     * Extrait plusieurs entrées en UN SEUL parcours du ZIP (évite le O(n²) d'un
+     * extractEntry par fichier sur un show à des milliers de géométries).
+     * Les clés du résultat sont les noms DEMANDÉS (pas les chemins internes).
+     */
+    fun extractEntries(mvrBytes: ByteArray, names: Set<String>): Map<String, ByteArray> {
+        if (names.isEmpty()) return emptyMap()
+        val out = HashMap<String, ByteArray>(names.size)
+        ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                val full = entry.name
+                val base = full.substringAfterLast('/')
+                val key = when {
+                    names.contains(full) -> full
+                    names.contains(base) -> base
+                    else -> null
+                }
+                if (key != null && !out.containsKey(key)) out[key] = zip.readBytes()
+                entry = zip.nextEntry
+            }
+        }
+        return out
+    }
+
     /** Liste les entrées du ZIP (diagnostic). */
     fun listEntries(mvrBytes: ByteArray): List<String> {
         val out = mutableListOf<String>()

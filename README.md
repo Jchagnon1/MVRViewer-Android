@@ -38,5 +38,23 @@ et lister les projecteurs.
 4. Géolocalisation + carte (Google Maps / Mapbox) + calibration
 5. Édition de patch, DMX, etc.
 
-> ⚠️ Le premier build peut lever des erreurs de versions (Gradle/AGP/Compose) :
-> c'est normal pour un projet neuf. Envoie-moi le message d'erreur et je corrige.
+## Build en ligne de commande (vérifié)
+
+Sans passer par l'UI d'Android Studio :
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+./gradlew :app:assembleDebug
+# installer + lancer sur un émulateur démarré :
+$ANDROID_HOME/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
+$ANDROID_HOME/platform-tools/adb shell am start -n com.minou.mvrviewer/.MainActivity
+```
+
+> ℹ️ Le heap Gradle est réglé à **4 Go** (`gradle.properties`) — nécessaire pour
+> la compilation Jetpack Compose (à 2 Go le build rampait ~40 min).
+
+> ⚠️ Le premier build télécharge AGP/Kotlin/Compose (quelques minutes). Ensuite
+> ~2 min. Si Android Studio affiche `Unknown command-line option '--jvm-vendor'`,
+> c'est un réglage IDE : Settings → Build Tools → Gradle → « Gradle JDK » = un JDK
+> concret (jbr-21), pas un mode « Daemon JVM ».

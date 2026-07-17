@@ -1,5 +1,14 @@
 *.iml
 .gradle/
+.kotlin/
+# Artefacts d'un GRADLE_USER_HOME pointé par erreur dans le projet — jamais versionnés.
+gradle/.tmp/
+gradle/android/
+gradle/caches/
+gradle/daemon/
+gradle/kotlin-profile/
+gradle/native/
+gradle/wrapper/dists/
 /local.properties
 /.idea/
 .DS_Store

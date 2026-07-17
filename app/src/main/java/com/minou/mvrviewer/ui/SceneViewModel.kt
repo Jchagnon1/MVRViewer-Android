@@ -23,7 +23,9 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
     sealed interface UiState {
         data object Home : UiState
         data class Loading(val fileName: String) : UiState
-        data class Loaded(val scene: MvrScene, val fileName: String) : UiState
+        // `bytes` = octets bruts du .mvr, conservés pour extraire la géométrie
+        // (.3ds/.glb) à la demande lors du rendu 3D.
+        data class Loaded(val scene: MvrScene, val fileName: String, val bytes: ByteArray) : UiState
         data class Error(val message: String) : UiState
     }
 
@@ -41,11 +43,11 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                     val bytes = getApplication<Application>().contentResolver
                         .openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalStateException("Lecture du fichier impossible.")
-                    MvrParser.parse(bytes)
+                    bytes to MvrParser.parse(bytes)
                 }
             }
             _state.value = result.fold(
-                onSuccess = { UiState.Loaded(it, name) },
+                onSuccess = { (bytes, scene) -> UiState.Loaded(scene, name, bytes) },
                 onFailure = { UiState.Error(it.message ?: "Erreur inconnue.") }
             )
         }

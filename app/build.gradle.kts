@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.minou.mvrviewer"
-        minSdk = 26
+        minSdk = 28  // requis par SceneView/Filament (vue 3D)
         targetSdk = 35
         versionCode = 1
         versionName = "0.1"
@@ -30,8 +30,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+}
+
+// Kotlin 2.4 : l'ancien kotlinOptions{ jvmTarget } est supprimé → compilerOptions DSL.
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
 }
 
 dependencies {
@@ -46,5 +52,6 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.sceneview)
     debugImplementation(libs.androidx.ui.tooling)
 }

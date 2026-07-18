@@ -38,6 +38,7 @@ fun SceneScreen(
             mvrBytes = mvrBytes,
             options = options,
             gdtfOverrides = gdtfOverrides,
+            referencePlan = referencePlan,
             onShowPlan = { mode = SceneMode.PLAN },
             onShowPatch = { mode = SceneMode.PATCH },
             onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },

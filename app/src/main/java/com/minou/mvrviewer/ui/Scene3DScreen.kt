@@ -66,6 +66,10 @@ private const val GRAY = 0xFFBEBEC3.toInt()
 // En dessous de cette taille (mm, dimension max du mesh), un objet 3ds est jugé
 // « petit » (siège, accessoire) et masqué pendant les mouvements de caméra.
 private const val LOD_SMALL_MM = 1200f
+// Plan de repère DXF en 3D : couleur des lignes (bleu clair, lisible sur fond
+// sombre) + plafond de sommets (le vrai DXF V&B fait des millions de segments).
+private const val DXF_LINE_COLOR = 0xFF6FB7E8.toInt()
+private const val MAX_DXF_VERTS = 500_000
 
 /** État du LOD d'interaction (nœuds « petits » + suivi du mouvement caméra). */
 private class LodState {
@@ -90,6 +94,7 @@ fun Scene3DScreen(
     mvrBytes: ByteArray,
     options: SceneOptions,
     gdtfOverrides: GdtfOverrides,
+    referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
     onShowGdtfShare: () -> Unit,
@@ -110,6 +115,9 @@ fun Scene3DScreen(
     }
 
     val geometryRoot = rememberNode(engine)
+    // Sous-couche du plan de repère DXF (lignes), placée au sol par sa transformée.
+    val dxfRoot = rememberNode(engine)
+    val dxfMaterial = remember(materialLoader) { materialLoader.createUnlitColorInstance(DXF_LINE_COLOR) }
     var status by remember(scene) { mutableStateOf("chargement 3D…") }
     // LOD d'interaction : les petits objets (sièges, accessoires) sont masqués
     // pendant que la caméra bouge, réaffichés à l'arrêt — divise les draw calls
@@ -354,6 +362,72 @@ fun Scene3DScreen(
             if (truncated) " (tronqué)" else ""
     }
 
+    // Plan de repère DXF en 3D : lignes au sol, placées par la transformée du plan
+    // (offset/rotation/échelle/hauteur), dans le MÊME repère monde que les
+    // projecteurs (le retour en 3D recompose → reflète les derniers réglages).
+    LaunchedEffect(referencePlan) {
+        dxfRoot.childNodes.toList().forEach { dxfRoot.removeChildNode(it) }
+        val rp = referencePlan ?: return@LaunchedEffect
+        if (!rp.transform.visible || rp.plan.isEmpty) return@LaunchedEffect
+        val cx = center.x; val cy = center.y; val cz = center.z
+        // Prep HORS THREAD PRINCIPAL : chaque segment DXF devient un fin QUAD posé
+        // à plat au sol (2 triangles, double-face). On rend des TRIANGLES — le
+        // même chemin que la géométrie 3ds, fiable — plutôt que des primitives
+        // LINES que SceneView ne restitue pas correctement (elles se remplissent).
+        val prep = withContext(Dispatchers.Default) {
+            val tf = rp.transform
+            val s = tf.scale; val r = Math.toRadians(tf.rotationDeg)
+            val cc = kotlin.math.cos(r); val sn = kotlin.math.sin(r)
+            val ox = tf.offsetX; val oy = tf.offsetY; val hz = tf.heightZ.toFloat()
+            val fy = (hz - cz) / 1000f      // hauteur Filament (sol), constante
+            val hw = 0.03f                  // demi-largeur du trait (m) → ~6 cm
+            val verts = ArrayList<Geometry.Vertex>()
+            val idx = ArrayList<Int>()
+            val up = Float3(0f, 1f, 0f)
+            outer@ for (pl in rp.plan.polylines) {
+                val pts = pl.points; val n = pts.size / 2
+                if (n < 2) continue
+                // Sommets projetés en Filament (plan XZ), une fois par polyligne.
+                val fxz = FloatArray(n * 2)
+                for (k in 0 until n) {
+                    val sx = pts[k * 2] * s; val sy = pts[k * 2 + 1] * s
+                    val wx = ox + (sx * cc - sy * sn)   // monde mm X
+                    val wy = oy + (sx * sn + sy * cc)   // monde mm Y
+                    fxz[k * 2] = (wx.toFloat() - cx) / 1000f
+                    fxz[k * 2 + 1] = -(wy.toFloat() - cy) / 1000f
+                }
+                val segCount = (n - 1) + if (pl.closed && n > 2) 1 else 0
+                for (e in 0 until segCount) {
+                    val a = e; val b = (e + 1) % n
+                    val ax = fxz[a * 2]; val az = fxz[a * 2 + 1]
+                    val bx = fxz[b * 2]; val bz = fxz[b * 2 + 1]
+                    val dx = bx - ax; val dz = bz - az
+                    val len = sqrt(dx * dx + dz * dz)
+                    if (len < 1e-6f) continue
+                    val px = -dz / len * hw; val pz = dx / len * hw
+                    val base = verts.size
+                    verts.add(Geometry.Vertex(position = Float3(ax + px, fy, az + pz), normal = up)) // 0 A1
+                    verts.add(Geometry.Vertex(position = Float3(ax - px, fy, az - pz), normal = up)) // 1 A2
+                    verts.add(Geometry.Vertex(position = Float3(bx + px, fy, bz + pz), normal = up)) // 2 B1
+                    verts.add(Geometry.Vertex(position = Float3(bx - px, fy, bz - pz), normal = up)) // 3 B2
+                    // 2 triangles + leurs inverses (visible des deux côtés).
+                    idx.add(base); idx.add(base + 1); idx.add(base + 3)
+                    idx.add(base); idx.add(base + 3); idx.add(base + 2)
+                    idx.add(base); idx.add(base + 3); idx.add(base + 1)
+                    idx.add(base); idx.add(base + 2); idx.add(base + 3)
+                }
+                if (verts.size >= MAX_DXF_VERTS) break@outer
+            }
+            verts to idx
+        }
+        val (verts, idx) = prep
+        if (verts.size < 3 || idx.isEmpty()) return@LaunchedEffect
+        // Build moteur (thread principal) : 1 géométrie TRIANGLES, 1 nœud.
+        val geom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+            .vertices(verts).primitivesIndices(listOf(idx)).build(engine)
+        dxfRoot.addChildNode(GeometryNode(engine, geom, listOf(dxfMaterial)))
+    }
+
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
     val cameraNode = rememberCameraNode(engine) { position = camHome }
     val manipulator = rememberCameraManipulator(orbitHomePosition = camHome, targetPosition = Float3(0f, 0f, 0f))
@@ -391,6 +465,11 @@ fun Scene3DScreen(
                 materialLoader = materialLoader,
                 cameraNode = cameraNode,
                 cameraManipulator = manipulator,
+                // NE PAS recadrer la caméra sur le contenu : sinon un plan DXF
+                // importé plus grand que la scène recadre tout et « cache » le
+                // décor. La caméra reste pilotée par notre rig (camHome + orbite).
+                autoCenterContent = false,
+                autoFitContent = false,
                 // Perf : pas d'ombres (des milliers d'objets = coût énorme) et
                 // qualité « Performance » (MSAA/post-process réduits).
                 renderQuality = RenderQuality.Performance,
@@ -415,6 +494,7 @@ fun Scene3DScreen(
                 }
             ) {
                 Node(apply = { addChildNode(geometryRoot) })
+                Node(apply = { addChildNode(dxfRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)
                 layout.positions.forEachIndexed { i, p ->
                     // Cube de repli masqué dès que le projecteur a sa silhouette GDTF.

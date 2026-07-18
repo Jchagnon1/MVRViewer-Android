@@ -35,6 +35,7 @@ class SceneOptions {
     var layerColors by mutableStateOf(true)
     var showLabels by mutableStateOf(true)
     var showStructure by mutableStateOf(true)
+    var showLegend by mutableStateOf(true)        // légende des calques (vue plan)
     var labelContent by mutableStateOf(LabelContent.ID)
     var labelSize by mutableFloatStateOf(1f)     // 0.7 (S) · 1.0 (M) · 1.4 (L)
     var labelOffset by mutableFloatStateOf(1f)    // écart étiquette ↔ projecteur
@@ -54,7 +55,8 @@ fun SceneOptionsMenu(
     onShowPatch: (() -> Unit)? = null,
     onShowGdtfShare: (() -> Unit)? = null,
     showLabelsToggle: Boolean = false,
-    showStructureToggle: Boolean = false
+    showStructureToggle: Boolean = false,
+    showLegendToggle: Boolean = false
 ) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
@@ -68,6 +70,7 @@ fun SceneOptionsMenu(
         HorizontalDivider()
         check("Couleurs par calque", options.layerColors) { options.layerColors = !options.layerColors }
         if (showStructureToggle) check("Décor / structure", options.showStructure) { options.showStructure = !options.showStructure }
+        if (showLegendToggle) check("Légende", options.showLegend) { options.showLegend = !options.showLegend }
         if (showLabelsToggle) {
             check("Étiquettes", options.showLabels) { options.showLabels = !options.showLabels }
             if (options.showLabels) {

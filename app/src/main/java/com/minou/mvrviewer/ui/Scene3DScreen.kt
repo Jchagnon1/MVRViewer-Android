@@ -265,94 +265,104 @@ fun Scene3DScreen(
         class GdtfModelPrep(val ext: String, val bytes: ByteArray, val meshData: List<MeshData>, val rawMax: Float)
         specLoop@ for ((spec, idxs) in bySpec) {
             if (nodes >= MAX_NODES) { truncated = true; break }
-            // Préparation hors moteur : extraction du .gdtf, parse de l'arbre,
-            // octets des modèles + parse .3ds + normales (tout le CPU).
-            val prep = withContext(Dispatchers.Default) {
-                // Modèle GDTF Share (téléchargé) prioritaire sur l'embarqué.
+            // Sources candidates : le modèle GDTF Share (choisi/auto) PUIS le
+            // .gdtf embarqué du MVR. Si le téléchargé ne produit AUCUNE
+            // géométrie (profil photométrique sans modèle 3D, glb illisible…),
+            // on retombe sur l'embarqué au lieu de perdre la silhouette.
+            val sources = withContext(Dispatchers.Default) {
                 val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
-                val gd = gdtfOverrides.map[spec]
-                    ?: cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
-                    ?: return@withContext null
-                val asm = GdtfLoader.parseAssembly(gd) ?: return@withContext null
-                val files = HashMap<String, GdtfModelPrep>()
-                for ((mName, mInfo) in asm.models) {
-                    val fb = GdtfLoader.extractModelBytes(gd, mInfo.file) ?: continue
-                    if (fb.second == "3ds") {
-                        val meshes = runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
-                        files[mName] = GdtfModelPrep("3ds", fb.first, meshes.mapNotNull { prepareMeshData(it) }, meshesMaxDimension(meshes))
-                    } else {
-                        files[mName] = GdtfModelPrep(fb.second, fb.first, emptyList(), 0f)
-                    }
-                }
-                asm to files
-            } ?: continue
-            val (asm, files) = prep
-            val placementsByModel = asm.placements.groupBy { it.modelName }
-
-            // Pré-construit chaque modèle du spec : soit des géométries 3ds
-            // partagées, soit une file d'instances glb.
-            class ModelBuild(val built: List<BuiltMesh>, val glbQueue: ArrayDeque<com.google.android.filament.gltfio.FilamentInstance>, val adjust: Mat4)
-            val builds = HashMap<String, ModelBuild>()
-            for ((mName, pls) in placementsByModel) {
-                val info = asm.models[mName] ?: continue
-                val fp = files[mName] ?: continue
-                if (fp.ext == "3ds") {
-                    if (fp.meshData.isEmpty()) continue
-                    val built = fp.meshData.map { BuiltMesh(it.toGeometry(engine), it.colors, it.triangles) }
-                    val rawMax = fp.rawMax
-                    val s = when {
-                        info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
-                        rawMax > 10f -> 0.001f // pas de dimensions déclarées : mm supposés
-                        else -> 1f
-                    }
-                    builds[mName] = ModelBuild(built, ArrayDeque(), scaleMat(s))
-                } else {
-                    // glb/gltf : une instance par (placement × projecteur).
-                    val count = pls.size * idxs.size
-                    val instances = runCatching {
-                        modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(fp.bytes), count)
-                    }.getOrNull() ?: continue
-                    val box = instances.firstOrNull()?.asset?.boundingBox
-                    val rawMax = box?.halfExtent?.let { 2f * maxOf(it[0], it[1], it[2]) } ?: 0f
-                    val s = when {
-                        info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
-                        rawMax > 10f -> 0.001f
-                        else -> 1f
-                    }
-                    // glTF est Y-haut, l'assemblage GDTF est Z-haut → Rx(+90°).
-                    builds[mName] = ModelBuild(emptyList(), ArrayDeque(instances), RX90 * scaleMat(s))
-                }
-                slice()
+                val embedded = cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
+                // Un override sans AUCUN fichier de modèle 3D (profil photométrique)
+                // est écarté d'emblée : il masquerait la silhouette embarquée.
+                val over = gdtfOverrides.map[spec]?.takeIf { GdtfLoader.hasThreeDModel(it) }
+                listOfNotNull(over, embedded.takeIf { it !== over })
             }
-            if (builds.isEmpty()) continue
+            sourceLoop@ for (gd in sources) {
+                // Préparation hors moteur : parse de l'arbre GDTF, octets des
+                // modèles + parse .3ds + normales (tout le CPU).
+                val prep = withContext(Dispatchers.Default) {
+                    val asm = GdtfLoader.parseAssembly(gd) ?: return@withContext null
+                    val files = HashMap<String, GdtfModelPrep>()
+                    for ((mName, mInfo) in asm.models) {
+                        val fb = GdtfLoader.extractModelBytes(gd, mInfo.file) ?: continue
+                        if (fb.second == "3ds") {
+                            val meshes = runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
+                            files[mName] = GdtfModelPrep("3ds", fb.first, meshes.mapNotNull { prepareMeshData(it) }, meshesMaxDimension(meshes))
+                        } else {
+                            files[mName] = GdtfModelPrep(fb.second, fb.first, emptyList(), 0f)
+                        }
+                    }
+                    asm to files
+                } ?: continue@sourceLoop
+                val (asm, files) = prep
+                val placementsByModel = asm.placements.groupBy { it.modelName }
 
-            for (fi2 in idxs) {
-                if (nodes >= MAX_NODES) { truncated = true; break@specLoop }
-                val worldFix = conv * drMat(fixtures[fi2].transform.m) * GLB_SCALE // assemblage m → mm
-                var any = false
-                for (p in asm.placements) {
-                    val b = builds[p.modelName] ?: continue
-                    val world = worldFix * p.transform * b.adjust
-                    if (b.built.isNotEmpty()) {
-                        for (bm in b.built) {
-                            val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
+                // Pré-construit chaque modèle du spec : soit des géométries 3ds
+                // partagées, soit une file d'instances glb.
+                class ModelBuild(val built: List<BuiltMesh>, val glbQueue: ArrayDeque<com.google.android.filament.gltfio.FilamentInstance>, val adjust: Mat4)
+                val builds = HashMap<String, ModelBuild>()
+                for ((mName, pls) in placementsByModel) {
+                    val info = asm.models[mName] ?: continue
+                    val fp = files[mName] ?: continue
+                    if (fp.ext == "3ds") {
+                        if (fp.meshData.isEmpty()) continue
+                        val built = fp.meshData.map { BuiltMesh(it.toGeometry(engine), it.colors, it.triangles) }
+                        val rawMax = fp.rawMax
+                        val s = when {
+                            info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
+                            rawMax > 10f -> 0.001f // pas de dimensions déclarées : mm supposés
+                            else -> 1f
+                        }
+                        builds[mName] = ModelBuild(built, ArrayDeque(), scaleMat(s))
+                    } else {
+                        // glb/gltf : une instance par (placement × projecteur).
+                        val count = pls.size * idxs.size
+                        val instances = runCatching {
+                            modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(fp.bytes), count)
+                        }.getOrNull() ?: continue
+                        val box = instances.firstOrNull()?.asset?.boundingBox
+                        val rawMax = box?.halfExtent?.let { 2f * maxOf(it[0], it[1], it[2]) } ?: 0f
+                        val s = when {
+                            info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
+                            rawMax > 10f -> 0.001f
+                            else -> 1f
+                        }
+                        // glTF est Y-haut, l'assemblage GDTF est Z-haut → Rx(+90°).
+                        builds[mName] = ModelBuild(emptyList(), ArrayDeque(instances), RX90 * scaleMat(s))
+                    }
+                    slice()
+                }
+                if (builds.isEmpty()) continue@sourceLoop  // source suivante (repli embarqué)
+
+                for (fi2 in idxs) {
+                    if (nodes >= MAX_NODES) { truncated = true; break@specLoop }
+                    val worldFix = conv * drMat(fixtures[fi2].transform.m) * GLB_SCALE // assemblage m → mm
+                    var any = false
+                    for (p in asm.placements) {
+                        val b = builds[p.modelName] ?: continue
+                        val world = worldFix * p.transform * b.adjust
+                        if (b.built.isNotEmpty()) {
+                            for (bm in b.built) {
+                                val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
+                                node.transform = world
+                                geometryRoot.addChildNode(node)
+                                nodes++
+                            }
+                            any = true
+                        } else {
+                            val inst = b.glbQueue.removeFirstOrNull() ?: continue
+                            val node = io.github.sceneview.node.ModelNode(inst)
                             node.transform = world
                             geometryRoot.addChildNode(node)
                             nodes++
+                            any = true
                         }
-                        any = true
-                    } else {
-                        val inst = b.glbQueue.removeFirstOrNull() ?: continue
-                        val node = io.github.sceneview.node.ModelNode(inst)
-                        node.transform = world
-                        geometryRoot.addChildNode(node)
-                        nodes++
-                        any = true
                     }
+                    if (any) gdtfDone.add(fi2)
+                    if (gdtfDone.size % 40 == 0) status = "$placed objets · ${gdtfDone.size} proj. GDTF…"
+                    slice()
                 }
-                if (any) gdtfDone.add(fi2)
-                if (gdtfDone.size % 40 == 0) status = "$placed objets · ${gdtfDone.size} proj. GDTF…"
-                slice()
+                break@sourceLoop  // spec rendu — pas besoin du repli
             }
         }
         gdtfFixtures = gdtfDone

@@ -134,12 +134,23 @@ object GdtfLoader {
      * Octets d'un fichier modèle (référencé SANS extension dans le XML) :
      * emplacements standard glTF puis 3DS. Retourne (octets, extension).
      */
-    fun extractModelBytes(gdtfBytes: ByteArray, fileBase: String): Pair<ByteArray, String>? {
-        for ((path, ext) in listOf(
+    fun extractModelBytes(
+        gdtfBytes: ByteArray,
+        fileBase: String,
+        /**
+         * Vrai = sonder models/3ds/ EN PREMIER. Beaucoup de .gdtf embarquent les
+         * DEUX formats : la 3D (Filament) préfère le glb, mais le wireframe plan
+         * ne sait lire que le 3ds — sans cette priorité, le glb « masquerait »
+         * un 3ds pourtant présent et la silhouette serait perdue.
+         */
+        prefer3ds: Boolean = false
+    ): Pair<ByteArray, String>? {
+        val probes = listOf(
             "models/gltf/$fileBase.glb" to "glb",
             "models/gltf/$fileBase.gltf" to "gltf",
             "models/3ds/$fileBase.3ds" to "3ds"
-        )) {
+        ).let { if (prefer3ds) it.sortedByDescending { p -> p.second == "3ds" } else it }
+        for ((path, ext) in probes) {
             val data = MvrParser.extractEntry(gdtfBytes, path)
             if (data != null) return data to ext
         }

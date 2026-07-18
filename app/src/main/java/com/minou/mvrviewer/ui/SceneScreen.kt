@@ -51,6 +51,7 @@ fun SceneScreen(
             options = options,
             referencePlan = referencePlan,
             onSetReferencePlan = { referencePlan = it },
+            gdtfOverrides = gdtfOverrides,
             onBack = { mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },
             modifier = modifier

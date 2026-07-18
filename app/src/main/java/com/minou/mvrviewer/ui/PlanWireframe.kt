@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import com.minou.mvrviewer.mvr.GdtfLoader
 import com.minou.mvrviewer.mvr.MvrGeometryRef
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
@@ -110,6 +111,108 @@ object PlanWireframe {
         return Built(edgesByKey, radiusByKey, instances)
     }
 
+    // ---- Fil de fer des PROJECTEURS (silhouette GDTF projetée, comme iOS) ----
+
+    private const val MAX_FIXTURE_FLOATS = 120_000   // ~20k segments par spec
+
+    /** Échelle m → mm : l'assemblage GDTF (placements) est en MÈTRES. */
+    private val MM = RMat4(
+        Float4(1000f, 0f, 0f, 0f), Float4(0f, 1000f, 0f, 0f),
+        Float4(0f, 0f, 1000f, 0f), Float4(0f, 0f, 0f, 1f)
+    )
+
+    private fun scaleR(s: Float) = RMat4(
+        Float4(s, 0f, 0f, 0f), Float4(0f, s, 0f, 0f),
+        Float4(0f, 0f, s, 0f), Float4(0f, 0f, 0f, 1f)
+    )
+
+    /**
+     * Arêtes caractéristiques des projecteurs, PAR SPEC GDTF, dans le repère
+     * OBJET (mm) : Base/Yoke/Head assemblés (placements + échelle déclarée),
+     * mêmes conventions que la vue 3D. Un spec = une extraction, partagée par
+     * toutes ses instances. Les modèles glb (pas de lecteur de sommets) sont
+     * ignorés → l'instance garde sa pastille.
+     */
+    class FixtureWire(val edgesBySpec: Map<String, FloatArray>, val radiusBySpec: Map<String, Float>)
+
+    val EMPTY_FIXTURES = FixtureWire(emptyMap(), emptyMap())
+
+    /** À APPELER HORS THREAD PRINCIPAL. `overrides` = modèles GDTF Share par spec. */
+    fun buildFixtures(scene: MvrScene, mvrBytes: ByteArray, overrides: Map<String, ByteArray>): FixtureWire {
+        val specs = scene.fixtures.mapNotNull { it.gdtfSpec?.trim()?.ifEmpty { null } }.toHashSet()
+        if (specs.isEmpty()) return EMPTY_FIXTURES
+        val edges = HashMap<String, FloatArray>()
+        val radius = HashMap<String, Float>()
+        for (spec in specs) {
+            val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
+            // Même priorité que la 3D : modèle GDTF Share, sinon l'embarqué —
+            // et REPLI sur l'embarqué si le téléchargé n'a pas de 3ds lisible.
+            val sources = listOfNotNull(
+                overrides[spec],
+                cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
+            )
+            for (gd in sources) {
+                val asm = GdtfLoader.parseAssembly(gd) ?: continue
+                val buf = FloatBuf()
+                val byFile = HashMap<String, Pair<List<ThreeDSParser.Mesh>, Float>>()
+                for (p in asm.placements) {
+                    val info = asm.models[p.modelName] ?: continue
+                    val (meshes, rawMax) = byFile.getOrPut(info.file) {
+                        // prefer3ds : un glb présent ne doit pas masquer un 3ds lisible.
+                        val fb = GdtfLoader.extractModelBytes(gd, info.file, prefer3ds = true)
+                        if (fb == null || fb.second != "3ds") emptyList<ThreeDSParser.Mesh>() to 0f
+                        else runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
+                            .let { it to meshesMaxDim(it) }
+                    }
+                    if (meshes.isEmpty()) continue
+                    val s = when {
+                        info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
+                        rawMax > 10f -> 0.001f // pas de dimensions déclarées : mm supposés
+                        else -> 1f
+                    }
+                    // mesh-local → objet-local mm : S(1000, m→mm) · placement · S(échelle)
+                    val mat = MM * p.transform * scaleR(s)
+                    // Cellule de soudure = 1 mm RÉEL : 1000·s mm par unité brute
+                    // → quantum brut = 1/(1000·s). Sans ça, un mesh en mètres
+                    // (s≈1) serait soudé par cellules d'un MÈTRE et s'effondrerait.
+                    val q = (1f / (1000f * s)).coerceIn(1e-5f, 10f)
+                    for (m in meshes) featureEdges(m, mat, buf, q)
+                    if (buf.n > MAX_FIXTURE_FLOATS) break
+                }
+                if (buf.n > 0) {
+                    val arr = buf.toArray()
+                    edges[spec] = arr
+                    radius[spec] = halfDiagonal(arr)
+                    break // source suivante inutile
+                }
+            }
+        }
+        return FixtureWire(edges, radius)
+    }
+
+    /** Plus grande dimension (axes) d'un ensemble de meshes 3ds. */
+    private fun meshesMaxDim(meshes: List<ThreeDSParser.Mesh>): Float {
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+        var seen = false
+        for (m in meshes) {
+            val v = m.vertices
+            var i = 0
+            while (i + 2 < v.size) {
+                val x = v[i]; val y = v[i + 1]; val z = v[i + 2]
+                if (x.isFinite() && y.isFinite() && z.isFinite()) {
+                    seen = true
+                    if (x < minX) minX = x; if (x > maxX) maxX = x
+                    if (y < minY) minY = y; if (y > maxY) maxY = y
+                    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+                }
+                i += 3
+            }
+        }
+        if (!seen) return 0f
+        return maxOf(maxX - minX, maxY - minY, maxZ - minZ)
+    }
+
     /** Noms de fichiers .3ds référencés (récursif via symdefs). */
     private fun collectFileNames(o: MvrSceneObject, scene: MvrScene, out: HashSet<String>, depth: Int) {
         fun walk(refs: List<MvrGeometryRef>, d: Int) {
@@ -150,19 +253,22 @@ object PlanWireframe {
      * Arêtes caractéristiques d'un mesh (soudure 1mm + normales de face + pli),
      * transformées par `mat` (mesh-local → objet-local) et poussées dans `out`.
      */
-    private fun featureEdges(mesh: ThreeDSParser.Mesh, mat: RMat4, out: FloatBuf) {
+    private fun featureEdges(mesh: ThreeDSParser.Mesh, mat: RMat4, out: FloatBuf, quantum: Float = 1f) {
         val pos = mesh.vertices
         val vc = mesh.vertexCount
         if (vc < 3 || vc > MAX_VERTS_PER_MESH) return
 
-        // Soudure par position quantifiée (deux sommets < 1mm = fusionnés).
+        // Soudure par position quantifiée : cellule = `quantum` en UNITÉS BRUTES
+        // du mesh (1 unité = 1 mm pour les .3ds MVR ; pour un modèle GDTF en
+        // MÈTRES, l'appelant passe ~0.001 pour souder au mm réel — sinon toute
+        // la géométrie s'effondrerait dans une seule cellule d'un mètre).
         val canonical = IntArray(vc)
         val lookup = HashMap<Long, Int>(vc * 2)
         val wpos = FloatArray(vc * 3)
         var wc = 0
         for (i in 0 until vc) {
             val x = pos[i * 3]; val y = pos[i * 3 + 1]; val z = pos[i * 3 + 2]
-            val key = packKey(x, y, z)
+            val key = packKey(x / quantum, y / quantum, z / quantum)
             val existing = lookup[key]
             if (existing != null) canonical[i] = existing
             else {

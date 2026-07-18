@@ -120,22 +120,30 @@ object GdtfShareClient {
         }
     }
 
-    /** Meilleure révision correspondant à une identité GDTF, téléchargée (ou null). */
+    /**
+     * Meilleure révision correspondant à une identité GDTF, téléchargée — en ne
+     * retenant qu'une révision qui embarque un VRAI modèle 3D. Beaucoup de
+     * révisions GDTF Share n'ont que la photométrie : les appliquer ferait
+     * PERDRE la silhouette du .gdtf embarqué. On essaie donc les meilleures
+     * candidates (par FixtureTypeID d'abord — le plus fiable — puis
+     * fabricant+nom, tolérant aux suffixes Spot/Wash/Beam…), et on retourne la
+     * première avec un modèle 3D ; sinon null → l'embarqué est conservé.
+     */
     suspend fun downloadBest(identity: GdtfIdentity): ByteArray? {
         val entries = fixtureList()
-        // 1. Par FixtureTypeID (le plus fiable).
-        identity.fixtureTypeId?.let { uuid ->
-            val m = entries.filter { it.uuid.equals(uuid, true) }
-            (m.maxByOrNull { it.rating ?: 0.0 } ?: m.firstOrNull())?.let { return download(it.rid) }
-        }
-        // 2. Repli fabricant + nom (tolérant aux suffixes Spot/Wash/Beam…).
+        val byId = identity.fixtureTypeId?.let { uuid ->
+            entries.filter { it.uuid.equals(uuid, true) }
+        } ?: emptyList()
         val manu = identity.manufacturer?.lowercase(); val name = identity.name?.lowercase()
-        if (manu != null && name != null) {
-            val c = entries.filter { e ->
-                e.manufacturer.lowercase() == manu &&
-                    (e.fixture.lowercase() == name || e.fixture.lowercase().startsWith(name) || name.startsWith(e.fixture.lowercase()))
-            }
-            (c.maxByOrNull { it.rating ?: 0.0 } ?: c.firstOrNull())?.let { return download(it.rid) }
+        val byName = if (manu != null && name != null) entries.filter { e ->
+            e.manufacturer.lowercase() == manu &&
+                (e.fixture.lowercase() == name || e.fixture.lowercase().startsWith(name) || name.startsWith(e.fixture.lowercase()))
+        } else emptyList()
+        val candidates = (byId.sortedByDescending { it.rating ?: 0.0 } +
+            byName.sortedByDescending { it.rating ?: 0.0 }).distinctBy { it.rid }
+        for (e in candidates.take(4)) {
+            val data = runCatching { download(e.rid) }.getOrNull() ?: continue
+            if (GdtfLoader.hasThreeDModel(data)) return data
         }
         return null
     }

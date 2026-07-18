@@ -1,6 +1,8 @@
 package com.minou.mvrviewer.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -68,6 +70,7 @@ fun PlanScreen(
     options: SceneOptions,
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
     onSetReferencePlan: (com.minou.mvrviewer.mvr.ReferencePlan?) -> Unit = {},
+    gdtfOverrides: GdtfOverrides? = null,
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
     modifier: Modifier = Modifier
@@ -83,6 +86,14 @@ fun PlanScreen(
         wire = null
         wire = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             PlanWireframe.build(scene, mvrBytes)
+        }
+    }
+    // Silhouette fil de fer des PROJECTEURS (modèle GDTF par spec, comme iOS).
+    // Reconstruit quand un modèle GDTF Share est appliqué (version bump).
+    var fixWire by remember(scene) { mutableStateOf<PlanWireframe.FixtureWire?>(null) }
+    LaunchedEffect(scene, mvrBytes, gdtfOverrides?.version ?: 0) {
+        fixWire = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            PlanWireframe.buildFixtures(scene, mvrBytes, gdtfOverrides?.map?.toMap() ?: emptyMap())
         }
     }
     // Pendant un geste (pan/zoom), on retombe sur un point par structure (max
@@ -310,14 +321,62 @@ fun PlanScreen(
                 }
             }
 
-            // Projecteurs : cercle coloré par calque + ID.
+            // Projecteurs : SILHOUETTE FIL DE FER réelle (modèle GDTF projeté,
+            // comme iOS) quand elle est lisible à ce zoom, sinon pastille.
+            // PASSE 1 : silhouettes (un stroke par calque), avec un cull qui
+            // tient compte du RAYON écran — sinon une silhouette zoomée
+            // disparaîtrait dès que l'origine du projecteur sort du cadre.
             val showLabels = options.showLabels && baseScale(w, h) * scale > 0.02f
+            val fw = fixWire
+            val bsNow = baseScale(w, h) * scale
+            // Silhouette visible pour f ? (edges + rayon écran lisible)
+            fun silhouetteOf(f: PlanFixture): Pair<FloatArray, Float>? {
+                if (gesturing || fw == null) return null
+                val spec = f.spec?.trim() ?: return null
+                val e = fw.edgesBySpec[spec] ?: return null
+                val r = (fw.radiusBySpec[spec] ?: 0f) * bsNow
+                return if (r > 7f) e to r else null
+            }
+            if (!gesturing && fw != null) {
+                val fixPaths = HashMap<String, Pair<Color, androidx.compose.ui.graphics.Path>>()
+                for (f in data.fixtures) {
+                    val (edges, rPx) = silhouetteOf(f) ?: continue
+                    val s = toScreen(f.px, f.py, w, h)
+                    val m = 40f + rPx
+                    if (s.x !in -m..w + m || s.y !in -m..h + m) continue
+                    val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
+                    val world = f.world
+                    val path = fixPaths.getOrPut(f.layer) { c to androidx.compose.ui.graphics.Path() }.second
+                    var k = 0
+                    while (k < edges.size) {
+                        val ax = edges[k]; val ay = edges[k + 1]; val az = edges[k + 2]
+                        val bx = edges[k + 3]; val by = edges[k + 4]; val bz = edges[k + 5]
+                        k += 6
+                        val wax = world.x.x * ax + world.y.x * ay + world.z.x * az + world.w.x
+                        val way = world.x.y * ax + world.y.y * ay + world.z.y * az + world.w.y
+                        val wbx = world.x.x * bx + world.y.x * by + world.z.x * bz + world.w.x
+                        val wby = world.x.y * bx + world.y.y * by + world.z.y * bz + world.w.y
+                        val pa = toScreen(wax, -way, w, h)
+                        val pb = toScreen(wbx, -wby, w, h)
+                        path.moveTo(pa.x, pa.y); path.lineTo(pb.x, pb.y)
+                    }
+                }
+                for ((_, cp) in fixPaths) {
+                    drawPath(cp.second, cp.first, style = androidx.compose.ui.graphics.drawscope.Stroke(1.2f))
+                }
+            }
+            // PASSE 2 : pastilles / anneaux de sélection / étiquettes, PAR-DESSUS
+            // les silhouettes (lisibilité).
             data.fixtures.forEachIndexed { i, f ->
                 val s = toScreen(f.px, f.py, w, h)
                 if (s.x !in -40f..w + 40f || s.y !in -40f..h + 40f) return@forEachIndexed
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
-                drawCircle(c, radius = 7f, center = s)
-                drawCircle(Color.White, radius = 7f, center = s, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
+                if (silhouetteOf(f) != null) {
+                    drawCircle(c, radius = 3f, center = s)
+                } else {
+                    drawCircle(c, radius = 7f, center = s)
+                    drawCircle(Color.White, radius = 7f, center = s, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
+                }
                 if (i in selected) {
                     drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
@@ -378,11 +437,45 @@ fun PlanScreen(
         IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Vue 3D", tint = Color(0xFF222222))
         }
+
+        // Légende : couleur de chaque calque de projecteurs + compte (comme iOS).
+        if (options.showLegend) {
+            val legend = remember(scene) {
+                scene.fixtures.groupingBy { it.layerName }.eachCount()
+                    .toList().sortedByDescending { it.second }
+            }
+            if (legend.isNotEmpty()) {
+                Surface(
+                    color = Color.White.copy(alpha = 0.92f), contentColor = Color(0xFF222222),
+                    shape = RoundedCornerShape(10.dp), shadowElevation = 3.dp,
+                    modifier = Modifier.align(Alignment.TopStart).padding(top = 100.dp, start = 8.dp)
+                ) {
+                    androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        legend.take(10).forEach { (layer, n) ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                                androidx.compose.foundation.layout.Box(
+                                    Modifier.width(10.dp).height(10.dp).background(
+                                        if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer))
+                                        else Color(0xFF6E6E73),   // cohérent avec les pastilles
+                                        androidx.compose.foundation.shape.CircleShape
+                                    )
+                                ) {}
+                                Text("  $layer · $n", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        if (legend.size > 10) {
+                            Text("  +${legend.size - 10} autre(s) calque(s)", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
         Box(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
             SceneOptionsMenu(
                 options = options, tint = Color(0xFF222222),
                 onShow3D = onBack, onShowPatch = onShowPatch,
-                showLabelsToggle = true, showStructureToggle = true
+                showLabelsToggle = true, showStructureToggle = true,
+                showLegendToggle = true
             )
         }
 
@@ -552,8 +645,19 @@ private val DXF_COLOR = Color(0xB3384B66)   // bleu-gris, sous-couche de repère
 
 private class PlanFixture(
     val px: Float, val py: Float, val id: String?, val name: String,
-    val spec: String?, val layer: String, val addr: String, val mode: String?
+    val spec: String?, val layer: String, val addr: String, val mode: String?,
+    /** Transform MONDE (mm) de l'objet — oriente la silhouette wireframe. */
+    val world: dev.romainguy.kotlin.math.Mat4
 )
+
+/** MvrModels.Mat4 (col-majeur) → dev.romainguy Mat4. */
+private fun drMat(m: FloatArray): dev.romainguy.kotlin.math.Mat4 =
+    dev.romainguy.kotlin.math.Mat4(
+        dev.romainguy.kotlin.math.Float4(m[0], m[1], m[2], m[3]),
+        dev.romainguy.kotlin.math.Float4(m[4], m[5], m[6], m[7]),
+        dev.romainguy.kotlin.math.Float4(m[8], m[9], m[10], m[11]),
+        dev.romainguy.kotlin.math.Float4(m[12], m[13], m[14], m[15])
+    )
 
 private class PlanData(
     val fixtures: List<PlanFixture>,
@@ -578,7 +682,7 @@ private fun planData(scene: MvrScene): PlanData {
         if (o.isFixture) {
             fixtures.add(
                 PlanFixture(px, py, o.fixtureId, o.name, o.gdtfSpec, o.layerName,
-                    o.addresses.joinToString(","), o.gdtfMode)
+                    o.addresses.joinToString(","), o.gdtfMode, drMat(o.transform.m))
             )
             extend(px, py)
         } else {

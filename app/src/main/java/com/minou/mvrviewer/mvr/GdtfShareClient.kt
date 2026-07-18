@@ -45,17 +45,37 @@ object GdtfShareClient {
 
     class ShareException(message: String) : Exception(message)
 
+    /** Traduit les pannes réseau en message clair (au lieu de « Unable to resolve host… »). */
+    private inline fun <T> netCall(block: () -> T): T = try {
+        block()
+    } catch (e: java.net.UnknownHostException) {
+        throw ShareException("Impossible de joindre gdtf-share.com. Vérifie ta connexion Internet.")
+    } catch (e: java.net.ConnectException) {
+        throw ShareException("Connexion à gdtf-share.com impossible. Vérifie ta connexion Internet.")
+    } catch (e: java.net.SocketTimeoutException) {
+        throw ShareException("gdtf-share.com ne répond pas (délai dépassé). Réessaie.")
+    } catch (e: javax.net.ssl.SSLException) {
+        throw ShareException("Connexion sécurisée à gdtf-share.com impossible. Réessaie.")
+    }
+
     suspend fun login(user: String, password: String) = withContext(Dispatchers.IO) {
-        val conn = open("login.php", "POST")
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.doOutput = true
-        conn.outputStream.use { it.write(JSONObject().put("user", user).put("password", password).toString().toByteArray()) }
-        val code = conn.responseCode
-        val body = readBody(conn)
-        conn.disconnect()
-        if (code !in 200..299) throw ShareException("Échec de connexion (${code}) : ${body.take(200)}")
-        loggedIn = true
-        cachedList = null
+        netCall {
+            val conn = open("login.php", "POST")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(JSONObject().put("user", user).put("password", password).toString().toByteArray()) }
+            val code = conn.responseCode
+            val body = readBody(conn)
+            conn.disconnect()
+            if (code !in 200..299) {
+                // L'API renvoie 401 + {"result":false,"error":"…"} sur mauvais identifiants.
+                val msg = runCatching { JSONObject(body).optString("error") }.getOrNull()
+                    ?.takeIf { it.isNotBlank() } ?: "code $code"
+                throw ShareException("Identifiants refusés par GDTF Share : $msg")
+            }
+            loggedIn = true
+            cachedList = null
+        }
     }
 
     fun logout() {
@@ -67,14 +87,16 @@ object GdtfShareClient {
     suspend fun fixtureList(): List<GdtfShareEntry> = withContext(Dispatchers.IO) {
         cachedList?.let { return@withContext it }
         if (!loggedIn) throw ShareException("Non connecté à GDTF Share.")
-        val conn = open("getList.php", "GET")
-        val code = conn.responseCode
-        val body = readBody(conn)
-        conn.disconnect()
-        if (code !in 200..299) throw ShareException("getList.php a échoué (${code}).")
-        val entries = parseList(body)
-        cachedList = entries
-        entries
+        netCall {
+            val conn = open("getList.php", "GET")
+            val code = conn.responseCode
+            val body = readBody(conn)
+            conn.disconnect()
+            if (code !in 200..299) throw ShareException("getList.php a échoué (${code}).")
+            val entries = parseList(body)
+            cachedList = entries
+            entries
+        }
     }
 
     suspend fun search(query: String, limit: Int = 60): List<GdtfShareEntry> {
@@ -88,12 +110,14 @@ object GdtfShareClient {
 
     suspend fun download(rid: Int): ByteArray = withContext(Dispatchers.IO) {
         if (!loggedIn) throw ShareException("Non connecté à GDTF Share.")
-        val conn = open("downloadFile.php?rid=$rid", "GET")
-        val code = conn.responseCode
-        if (code !in 200..299) { conn.disconnect(); throw ShareException("Téléchargement échoué (rid $rid, code $code).") }
-        val bytes = conn.inputStream.use { it.readBytes() }
-        conn.disconnect()
-        bytes
+        netCall {
+            val conn = open("downloadFile.php?rid=$rid", "GET")
+            val code = conn.responseCode
+            if (code !in 200..299) { conn.disconnect(); throw ShareException("Téléchargement échoué (rid $rid, code $code).") }
+            val bytes = conn.inputStream.use { it.readBytes() }
+            conn.disconnect()
+            bytes
+        }
     }
 
     /** Meilleure révision correspondant à une identité GDTF, téléchargée (ou null). */

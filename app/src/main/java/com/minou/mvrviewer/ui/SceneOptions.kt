@@ -15,6 +15,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -26,11 +27,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * par calque, étiquettes, décor). Équivalent des @State d'affichage de
  * ContentView iOS, hissés au niveau du show.
  */
+/** Contenu affiché dans l'étiquette d'un projecteur (comme iOS LabelField). */
+enum class LabelContent(val label: String) { ID("N°"), DMX("Adresse DMX"), MODE("Mode"), NAME("Nom") }
+
 class SceneOptions {
     var backgroundDark by mutableStateOf(true)
     var layerColors by mutableStateOf(true)
     var showLabels by mutableStateOf(true)
     var showStructure by mutableStateOf(true)
+    var labelContent by mutableStateOf(LabelContent.ID)
+    var labelSize by mutableFloatStateOf(1f)     // 0.7 (S) · 1.0 (M) · 1.4 (L)
+    var labelOffset by mutableFloatStateOf(1f)    // écart étiquette ↔ projecteur
 }
 
 /**
@@ -60,8 +67,42 @@ fun SceneOptionsMenu(
         onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
         HorizontalDivider()
         check("Couleurs par calque", options.layerColors) { options.layerColors = !options.layerColors }
-        if (showLabelsToggle) check("Étiquettes (ID)", options.showLabels) { options.showLabels = !options.showLabels }
         if (showStructureToggle) check("Décor / structure", options.showStructure) { options.showStructure = !options.showStructure }
+        if (showLabelsToggle) {
+            check("Étiquettes", options.showLabels) { options.showLabels = !options.showLabels }
+            if (options.showLabels) {
+                // Contenu de l'étiquette (radio).
+                LabelContent.entries.forEach { c ->
+                    check("  ${c.label}", options.labelContent == c) { options.labelContent = c }
+                }
+                // Taille (cycle S · M · L).
+                val sizeName = when {
+                    options.labelSize <= 0.75f -> "petite"
+                    options.labelSize >= 1.3f -> "grande"
+                    else -> "moyenne"
+                }
+                nav("  Taille : $sizeName", Icons.Filled.Check) {
+                    options.labelSize = when {
+                        options.labelSize <= 0.75f -> 1f
+                        options.labelSize >= 1.3f -> 0.7f
+                        else -> 1.4f
+                    }
+                }
+                // Hauteur / écart (cycle).
+                val offName = when {
+                    options.labelOffset <= 0.6f -> "proche"
+                    options.labelOffset >= 1.6f -> "loin"
+                    else -> "normal"
+                }
+                nav("  Écart : $offName", Icons.Filled.Check) {
+                    options.labelOffset = when {
+                        options.labelOffset <= 0.6f -> 1f
+                        options.labelOffset >= 1.6f -> 0.5f
+                        else -> 2f
+                    }
+                }
+            }
+        }
     }
 }
 

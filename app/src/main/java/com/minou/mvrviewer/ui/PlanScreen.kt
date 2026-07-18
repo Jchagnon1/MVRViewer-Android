@@ -188,9 +188,19 @@ fun PlanScreen(
                     drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
                 }
-                if (showLabels && f.id != null) {
-                    val tl = measurer.measure("#${f.id}", style = TextStyle(fontSize = 9.sp, color = Color(0xFF222222)))
-                    drawText(tl, topLeft = Offset(s.x + 8f, s.y - 6f))
+                if (showLabels) {
+                    val text = when (options.labelContent) {
+                        LabelContent.ID -> f.id?.let { "#$it" }
+                        LabelContent.DMX -> f.addr.ifEmpty { null }?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) }
+                        LabelContent.MODE -> f.mode?.ifEmpty { null }
+                        LabelContent.NAME -> f.name
+                    }
+                    if (text != null) {
+                        val fs = (9f * options.labelSize)
+                        val off = 8f * options.labelOffset
+                        val tl = measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = Color(0xFF222222)))
+                        drawText(tl, topLeft = Offset(s.x + off, s.y - fs * 0.7f))
+                    }
                 }
             }
 
@@ -347,7 +357,7 @@ private val STRUCT_COLOR = Color(0xFF9AA0A6)
 
 private class PlanFixture(
     val px: Float, val py: Float, val id: String?, val name: String,
-    val spec: String?, val layer: String, val addr: String
+    val spec: String?, val layer: String, val addr: String, val mode: String?
 )
 
 private class PlanData(
@@ -373,7 +383,7 @@ private fun planData(scene: MvrScene): PlanData {
         if (o.isFixture) {
             fixtures.add(
                 PlanFixture(px, py, o.fixtureId, o.name, o.gdtfSpec, o.layerName,
-                    o.addresses.joinToString(","))
+                    o.addresses.joinToString(","), o.gdtfMode)
             )
             extend(px, py)
         } else {

@@ -64,20 +64,30 @@ private const val FIXTURE_NODE_RESERVE = 2_500
 private const val MAX_SYMDEF_ITEMS = 500
 private const val GRAY = 0xFFBEBEC3.toInt()
 // En dessous de cette taille (mm, dimension max du mesh), un objet 3ds est jugé
-// « petit » (siège, accessoire) et masqué pendant les mouvements de caméra.
-private const val LOD_SMALL_MM = 1200f
+// « petit » (siège, accessoire, petit décor) et masqué pendant les mouvements
+// de caméra. Relevé de 1200 → 3000 pour masquer aussi le décor moyen en nav
+// (le gros décor — ponts, scène — reste, pour garder le repère spatial).
+private const val LOD_SMALL_MM = 3000f
 // Plan de repère DXF en 3D : couleur des lignes (bleu clair, lisible sur fond
 // sombre) + plafond de sommets (le vrai DXF V&B fait des millions de segments).
 private const val DXF_LINE_COLOR = 0xFF6FB7E8.toInt()
 private const val MAX_DXF_VERTS = 500_000
 
-/** État du LOD d'interaction (nœuds « petits » + suivi du mouvement caméra). */
+/**
+ * État du LOD d'interaction. Pendant que la caméra bouge, on MASQUE le détail
+ * coûteux (`nodes` : petits décors + silhouettes GDTF des projecteurs, qui
+ * dominent les draw calls) et on affiche à la place des cubes simples
+ * (`proxies` : un par projecteur). À l'arrêt : détail réaffiché, cubes masqués.
+ * Même principe que le LOD à proxies d'iOS (les projecteurs = ~63% des draw
+ * calls sur un gros show → les masquer en nav change tout).
+ */
 private class LodState {
     val nodes = ArrayList<io.github.sceneview.node.Node>()
+    val proxies = ArrayList<io.github.sceneview.node.Node>()
     var lastX = Float.NaN; var lastY = Float.NaN; var lastZ = Float.NaN
     var idle = 0
     var hidden = false
-    fun reset() { nodes.clear(); lastX = Float.NaN; idle = 0; hidden = false }
+    fun reset() { nodes.clear(); proxies.clear(); lastX = Float.NaN; idle = 0; hidden = false }
 }
 
 /**
@@ -346,6 +356,7 @@ fun Scene3DScreen(
                                 val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
                                 node.transform = world
                                 geometryRoot.addChildNode(node)
+                                lod.nodes.add(node)   // détail masqué en navigation
                                 nodes++
                             }
                             any = true
@@ -354,11 +365,26 @@ fun Scene3DScreen(
                             val node = io.github.sceneview.node.ModelNode(inst)
                             node.transform = world
                             geometryRoot.addChildNode(node)
+                            lod.nodes.add(node)
                             nodes++
                             any = true
                         }
                     }
-                    if (any) gdtfDone.add(fi2)
+                    if (any) {
+                        gdtfDone.add(fi2)
+                        // Cube-proxy (1 par projecteur) affiché À LA PLACE du détail
+                        // pendant les mouvements — commence masqué (on est au repos).
+                        if (fi2 < layout.positions.size) {
+                            val cubeMat = material(layout.colors[fi2])
+                            val proxy = io.github.sceneview.node.CubeNode(
+                                engine, Float3(layout.cube, layout.cube, layout.cube),
+                                layout.positions[fi2], cubeMat
+                            )
+                            proxy.isVisible = false
+                            geometryRoot.addChildNode(proxy)
+                            lod.proxies.add(proxy)
+                        }
+                    }
                     if (gdtfDone.size % 40 == 0) status = "$placed objets · ${gdtfDone.size} proj. GDTF…"
                     slice()
                 }
@@ -492,13 +518,22 @@ fun Scene3DScreen(
                     val moved = lod.lastX.isNaN() ||
                         (kotlin.math.abs(p.x - lod.lastX) + kotlin.math.abs(p.y - lod.lastY) + kotlin.math.abs(p.z - lod.lastZ)) > 0.02f
                     lod.lastX = p.x; lod.lastY = p.y; lod.lastZ = p.z
-                    if (lod.nodes.isNotEmpty()) {
+                    if (lod.nodes.isNotEmpty() || lod.proxies.isNotEmpty()) {
                         if (moved) {
                             lod.idle = 0
-                            if (!lod.hidden) { lod.nodes.forEach { it.isVisible = false }; lod.hidden = true }
+                            if (!lod.hidden) {
+                                // Masque le détail, montre les cubes-proxies.
+                                lod.nodes.forEach { it.isVisible = false }
+                                lod.proxies.forEach { it.isVisible = true }
+                                lod.hidden = true
+                            }
                         } else {
                             lod.idle++
-                            if (lod.hidden && lod.idle > 10) { lod.nodes.forEach { it.isVisible = true }; lod.hidden = false }
+                            if (lod.hidden && lod.idle > 8) {
+                                lod.nodes.forEach { it.isVisible = true }
+                                lod.proxies.forEach { it.isVisible = false }
+                                lod.hidden = false
+                            }
                         }
                     }
                 }

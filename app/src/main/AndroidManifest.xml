@@ -16,6 +16,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density|fontScale|locale|layoutDirection"
             android:theme="@style/Theme.MVRViewer">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -32,12 +33,28 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = mutableStateOf<UiState>(UiState.Home)
     val state: State<UiState> = _state
 
-    fun reset() { _state.value = UiState.Home }
+    // Fichier en cours (chargé ou en chargement) : rend `open` IDEMPOTENT.
+    // Le ViewModel survit aux recréations d'activité (rotation, mode sombre,
+    // retour depuis le multitâche) → si la même URI est re-livrée, on NE
+    // recharge PAS. Le job tourne dans `viewModelScope` → le chargement CONTINUE
+    // quand l'appli passe en arrière-plan (il n'est annulé qu'à la fermeture).
+    private var currentUri: Uri? = null
+    private var loadJob: Job? = null
+
+    fun reset() {
+        loadJob?.cancel()
+        currentUri = null
+        _state.value = UiState.Home
+    }
 
     fun open(uri: Uri) {
+        // Même fichier déjà chargé / en cours → ne rien refaire (anti-rechargement).
+        if (uri == currentUri && (_state.value is UiState.Loaded || _state.value is UiState.Loading)) return
+        currentUri = uri
+        loadJob?.cancel()
         val name = displayName(uri)
         _state.value = UiState.Loading(name)
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val bytes = getApplication<Application>().contentResolver

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
@@ -65,6 +66,8 @@ fun PlanScreen(
     scene: MvrScene,
     mvrBytes: ByteArray,
     options: SceneOptions,
+    referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
+    onSetReferencePlan: (com.minou.mvrviewer.mvr.ReferencePlan?) -> Unit = {},
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
     modifier: Modifier = Modifier
@@ -91,6 +94,37 @@ fun PlanScreen(
         gesturing = true
         kotlinx.coroutines.delay(180)
         gesturing = false
+    }
+
+    // Import d'un plan de repère DXF + réglage de son placement. La transformée
+    // est un objet mutable non observable → dxfVersion force le redraw.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var dxfVersion by remember { mutableIntStateOf(0) }
+    var importing by remember { mutableStateOf(false) }
+    var pickedUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var showDxfPanel by remember { mutableStateOf(false) }
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) { pickedUri = uri; importing = true } }
+    LaunchedEffect(pickedUri) {
+        val uri = pickedUri ?: return@LaunchedEffect
+        val plan = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { com.minou.mvrviewer.mvr.DxfParser.parse(it) }
+            }.getOrNull()
+        }
+        importing = false
+        pickedUri = null
+        if (plan != null && !plan.isEmpty) {
+            // Centrer le DXF sur le centre de la scène MVR (repère monde).
+            val tf = com.minou.mvrviewer.mvr.ReferencePlanTransform(
+                offsetX = (data.cx - plan.centerX).toDouble(),
+                offsetY = (-data.cy - plan.centerY).toDouble()
+            )
+            onSetReferencePlan(com.minou.mvrviewer.mvr.ReferencePlan(plan, tf))
+            showDxfPanel = true
+            dxfVersion++
+        }
     }
 
     var scale by remember { mutableFloatStateOf(1f) }
@@ -188,6 +222,38 @@ fun PlanScreen(
         ) {
             canvas = Offset(size.width, size.height)
             val w = size.width; val h = size.height
+
+            // ---- Plan de repère DXF importé (sous tout le reste) ----
+            dxfVersion.let { }  // dépendance de redraw
+            val rp = referencePlan
+            if (rp != null && rp.transform.visible && !gesturing) {
+                val tf = rp.transform
+                val sfac = tf.scale.toFloat()
+                val rr = Math.toRadians(tf.rotationDeg)
+                val cc = kotlin.math.cos(rr).toFloat(); val sn = kotlin.math.sin(rr).toFloat()
+                val ox = tf.offsetX.toFloat(); val oy = tf.offsetY.toFloat()
+                val path = androidx.compose.ui.graphics.Path()
+                var drawn = 0
+                loop@ for (pl in rp.plan.polylines) {
+                    val pts = pl.points
+                    var first = true
+                    var i = 0
+                    while (i < pts.size) {
+                        val lx = pts[i] * sfac; val ly = pts[i + 1] * sfac; i += 2
+                        val wx = ox + (lx * cc - ly * sn); val wy = oy + (lx * sn + ly * cc)
+                        val s = toScreen(wx, -wy, w, h)
+                        if (first) { path.moveTo(s.x, s.y); first = false } else path.lineTo(s.x, s.y)
+                    }
+                    if (pl.closed && pts.size >= 4) {
+                        val lx = pts[0] * sfac; val ly = pts[1] * sfac
+                        val wx = ox + (lx * cc - ly * sn); val wy = oy + (lx * sn + ly * cc)
+                        val s = toScreen(wx, -wy, w, h); path.lineTo(s.x, s.y)
+                    }
+                    drawn += pts.size / 2
+                    if (drawn > 400_000) break@loop  // garde-fou de dessin
+                }
+                drawPath(path, DXF_COLOR, style = androidx.compose.ui.graphics.drawscope.Stroke(0.7f))
+            }
 
             // Décor / structure : FIL DE FER VECTORIEL (arêtes caractéristiques
             // réelles de la géométrie 3D). Pendant un geste, ou tant que le fil
@@ -367,6 +433,66 @@ fun PlanScreen(
                     Icon(Icons.Filled.Place, contentDescription = "Calibrer : je suis ici")
                 }
             }
+            // Plan de repère DXF : importer, ou basculer le panneau de placement.
+            FilledIconToggleButton(
+                checked = referencePlan != null && showDxfPanel,
+                onCheckedChange = {
+                    if (referencePlan == null) importLauncher.launch(arrayOf("*/*"))
+                    else showDxfPanel = !showDxfPanel
+                }
+            ) {
+                if (importing) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.width(20.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Filled.Layers, contentDescription = "Plan DXF")
+            }
+        }
+
+        // Panneau de placement du plan DXF importé.
+        val rpPanel = referencePlan
+        if (rpPanel != null && showDxfPanel) {
+            val tf = rpPanel.transform
+            val step = max(200.0, rpPanel.plan.width * 0.05)
+            fun bump() { dxfVersion++ }
+            Surface(
+                color = Color.White, contentColor = Color(0xFF111111),
+                shape = RoundedCornerShape(12.dp), shadowElevation = 8.dp,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp).width(230.dp)
+            ) {
+                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Plan DXF · ${rpPanel.plan.unitLabel}", style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f))
+                        androidx.compose.material3.TextButton(onClick = { onSetReferencePlan(null); showDxfPanel = false }) {
+                            Text("Retirer", color = Color(0xFFC62828))
+                        }
+                    }
+                    Text("${rpPanel.plan.segmentCount} segments" + if (rpPanel.plan.truncatedSegments > 0) " (+${rpPanel.plan.truncatedSegments} tronqués)" else "",
+                        style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Visible", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.Switch(checked = tf.visible, onCheckedChange = { tf.visible = it; bump() })
+                    }
+                    // Déplacement (mm monde) : libellé au-dessus + 4 flèches.
+                    val pad = androidx.compose.foundation.layout.PaddingValues(2.dp)
+                    Text("Déplacer", style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetX -= step; bump() }) { Text("←") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetX += step; bump() }) { Text("→") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetY += step; bump() }) { Text("↑") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetY -= step; bump() }) { Text("↓") }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Rotation", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.rotationDeg -= 5; bump() }) { Text("−5°") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.rotationDeg += 5; bump() }) { Text("+5°") }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Échelle", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale /= 1.1; bump() }) { Text("÷") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale *= 1.1; bump() }) { Text("×") }
+                    }
+                }
+            }
         }
         // Aide de calibrage.
         if (calibrating) {
@@ -422,6 +548,7 @@ fun PlanScreen(
 }
 
 private val STRUCT_COLOR = Color(0xFF9AA0A6)
+private val DXF_COLOR = Color(0xB3384B66)   // bleu-gris, sous-couche de repère
 
 private class PlanFixture(
     val px: Float, val py: Float, val id: String?, val name: String,

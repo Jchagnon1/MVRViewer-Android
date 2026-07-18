@@ -28,6 +28,9 @@ fun SceneScreen(
     val options = remember { SceneOptions() }
     val overrides = remember { PatchOverrides() }
     val gdtfOverrides = remember { GdtfOverrides() }
+    // Plan de repère DXF importé — hissé ici pour survivre aux allers-retours
+    // 3D ↔ plan (PlanScreen est recréé à chaque bascule).
+    var referencePlan by remember { mutableStateOf<com.minou.mvrviewer.mvr.ReferencePlan?>(null) }
 
     when (mode) {
         SceneMode.THREE_D -> Scene3DScreen(
@@ -45,6 +48,8 @@ fun SceneScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             options = options,
+            referencePlan = referencePlan,
+            onSetReferencePlan = { referencePlan = it },
             onBack = { mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },
             modifier = modifier

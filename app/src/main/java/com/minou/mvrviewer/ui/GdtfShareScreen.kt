@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +41,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.GdtfShareClient
@@ -243,6 +246,11 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
     var loading by remember { mutableStateOf(true) }
     var downloadingRid by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
+    // Disponibilité d'un VRAI modèle 3D par révision (rid) : absent = pas encore
+    // vérifié (spinner). Le .gdtf téléchargé pour la vérif est réutilisé au choix.
+    val modelAvail = remember { mutableStateMapOf<Int, Boolean>() }
+    val prefetched = remember { HashMap<Int, ByteArray>() }
+    val checking = remember { mutableStateMapOf<Int, Boolean>() }
 
     // Recherche initiale + à chaque frappe (léger anti-rebond).
     LaunchedEffect(query) {
@@ -282,6 +290,19 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
         }
         LazyColumn(Modifier.fillMaxSize()) {
             items(results, key = { it.rid }) { entry ->
+                // Vérifie en arrière-plan (à l'affichage de la ligne) si cette
+                // révision embarque un vrai modèle 3D — throttlé aux lignes visibles.
+                LaunchedEffect(entry.rid) {
+                    if (modelAvail.containsKey(entry.rid) || checking.containsKey(entry.rid)) return@LaunchedEffect
+                    checking[entry.rid] = true
+                    val data = runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
+                    checking.remove(entry.rid)
+                    if (data == null) { modelAvail[entry.rid] = false; return@LaunchedEffect }
+                    prefetched[entry.rid] = data
+                    modelAvail[entry.rid] = withContext(Dispatchers.Default) {
+                        com.minou.mvrviewer.mvr.GdtfLoader.hasThreeDModel(data)
+                    }
+                }
                 HorizontalDivider()
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -289,14 +310,27 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
                         .clickable(enabled = downloadingRid == null) {
                             scope.launch {
                                 downloadingRid = entry.rid; error = null
-                                val data = runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
+                                val data = prefetched[entry.rid]
+                                    ?: runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
                                 downloadingRid = null
                                 if (data != null) onChosen(data) else error = "Téléchargement échoué."
                             }
                         }
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Column(Modifier.weight(1f)) {
+                    // Pastille « vrai modèle 3D » : vert = oui, orange = non, spinner = en cours.
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.width(28.dp), contentAlignment = Alignment.Center
+                    ) {
+                        when (modelAvail[entry.rid]) {
+                            true -> Icon(Icons.Filled.ViewInAr, "Modèle 3D disponible",
+                                tint = Color(0xFF2E7D32), modifier = Modifier.width(22.dp))
+                            false -> Icon(Icons.Outlined.ViewInAr, "Pas de modèle 3D (formes génériques)",
+                                tint = Color(0xFFEF6C00), modifier = Modifier.width(22.dp))
+                            null -> CircularProgressIndicator(Modifier.width(16.dp), strokeWidth = 2.dp)
+                        }
+                    }
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
                         Text("${entry.manufacturer} — ${entry.fixture}",
                             style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                         entry.rating?.let {

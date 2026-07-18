@@ -25,6 +25,19 @@ object GdtfLoader {
     class Placement(val modelName: String, val transform: Mat4)
     class Assembly(val models: Map<String, ModelInfo>, val placements: List<Placement>)
 
+    /**
+     * Vrai si le .gdtf embarque un VRAI modèle 3D (fichier sous models/gltf/ ou
+     * models/3ds/), pas seulement des données 2D/photométriques. Port de
+     * GDTFLoader.hasThreeDModel (iOS) : la seule façon fiable de savoir si une
+     * révision GDTF Share a une géométrie est d'inspecter son contenu.
+     */
+    fun hasThreeDModel(gdtfBytes: ByteArray): Boolean =
+        MvrParser.listEntries(gdtfBytes).any { e ->
+            val p = e.lowercase()
+            (p.startsWith("models/gltf/") || p.startsWith("models/3ds/")) &&
+                (p.endsWith(".glb") || p.endsWith(".gltf") || p.endsWith(".3ds"))
+        }
+
     private class Item(
         val name: String,
         val element: String,

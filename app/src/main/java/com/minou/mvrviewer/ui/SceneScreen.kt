@@ -5,10 +5,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.minou.mvrviewer.mvr.MvrScene
+import com.minou.mvrviewer.mvr.ProjectStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE }
 
@@ -51,6 +56,33 @@ fun SceneScreen(
     // Plan de repère DXF importé — hissé ici pour survivre aux allers-retours
     // 3D ↔ plan (PlanScreen est recréé à chaque bascule).
     var referencePlan by remember { mutableStateOf<com.minou.mvrviewer.mvr.ReferencePlan?>(null) }
+    // Calibration GPS hissée ici : sinon elle était perdue à chaque bascule
+    // plan↔3D (PlanScreen recréé). Persiste aussi avec le projet.
+    val calibration = remember(scene) { com.minou.mvrviewer.mvr.GeoCalibration() }
+    val scope = rememberCoroutineScope()
+
+    // PERSISTANCE PROJET : clé = empreinte du contenu du .mvr (comme iOS). On
+    // restaure le travail à l'ouverture (plan DXF placé, overrides GDTF,
+    // calibration), et on ré-enregistre à chaque changement.
+    val projectKey = remember(mvrBytes) { ProjectStore.keyFor(mvrBytes) }
+    var restored by remember(projectKey) { mutableStateOf(false) }
+    LaunchedEffect(projectKey) {
+        val rp = withContext(Dispatchers.IO) { ProjectStore.loadReferencePlan(ctx, projectKey) }
+        val ov = withContext(Dispatchers.IO) { ProjectStore.loadOverrides(ctx, projectKey) }
+        val anchors = withContext(Dispatchers.IO) { ProjectStore.loadCalibration(ctx, projectKey) }
+        if (rp != null && referencePlan == null) referencePlan = rp
+        ov?.let { (map, manual) ->
+            map.forEach { (s, b) -> if (s in manual) gdtfOverrides.setManual(s, b) else gdtfOverrides.set(s, b) }
+        }
+        if (calibration.anchors.isEmpty()) anchors.forEach { calibration.addAnchor(it) }
+        restored = true
+    }
+    // Sauvegarde des modèles GDTF appliqués quand ils changent (action utilisateur).
+    LaunchedEffect(gdtfOverrides.version) {
+        if (restored && gdtfOverrides.version > 0) withContext(Dispatchers.IO) {
+            ProjectStore.saveOverrides(ctx, projectKey, gdtfOverrides.map.toMap(), gdtfOverrides.manualSpecs.toSet())
+        }
+    }
 
     when (mode) {
         SceneMode.THREE_D -> Scene3DScreen(
@@ -70,7 +102,16 @@ fun SceneScreen(
             mvrBytes = mvrBytes,
             options = options,
             referencePlan = referencePlan,
-            onSetReferencePlan = { referencePlan = it },
+            onSetReferencePlan = { rp ->
+                referencePlan = rp
+                // Import / retrait par l'utilisateur → persiste la géométrie DXF.
+                scope.launch(Dispatchers.IO) {
+                    if (rp != null) ProjectStore.saveReferencePlan(ctx, projectKey, rp, null)
+                    else ProjectStore.removeReferencePlan(ctx, projectKey)
+                }
+            },
+            calibration = calibration,
+            projectKey = projectKey,
             gdtfOverrides = gdtfOverrides,
             onBack = { mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },

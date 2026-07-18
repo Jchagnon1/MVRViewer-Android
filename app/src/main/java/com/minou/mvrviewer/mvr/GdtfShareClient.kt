@@ -84,6 +84,18 @@ object GdtfShareClient {
         (CookieHandler.getDefault() as? CookieManager)?.cookieStore?.removeAll()
     }
 
+    /**
+     * Reconnexion SILENCIEUSE depuis les identifiants enregistrés (le cookie de
+     * session n'est pas persisté — comme iOS, on refait un login au besoin pour
+     * obtenir un cookie frais). Renvoie true si (déjà) connecté. Échec silencieux
+     * (hors ligne, identifiants changés) → l'utilisateur voit le formulaire.
+     */
+    suspend fun ensureLoggedIn(ctx: android.content.Context): Boolean {
+        if (loggedIn) return true
+        val creds = GdtfCredentialStore.load(ctx) ?: return false
+        return runCatching { login(creds.first, creds.second) }.isSuccess
+    }
+
     suspend fun fixtureList(): List<GdtfShareEntry> = withContext(Dispatchers.IO) {
         cachedList?.let { return@withContext it }
         if (!loggedIn) throw ShareException("Non connecté à GDTF Share.")

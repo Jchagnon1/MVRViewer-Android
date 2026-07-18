@@ -93,6 +93,7 @@ fun GdtfShareScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     var loggedIn by remember { mutableStateOf(GdtfShareClient.loggedIn) }
@@ -100,6 +101,17 @@ fun GdtfShareScreen(
     var status by remember { mutableStateOf("") }
     var searchSpec by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    // Reconnexion automatique depuis les identifiants enregistrés (le compte
+    // reste connecté d'un lancement à l'autre — plus besoin de se reconnecter).
+    LaunchedEffect(Unit) {
+        if (!loggedIn && com.minou.mvrviewer.mvr.GdtfCredentialStore.username(ctx) != null) {
+            busy = true; status = "Reconnexion…"
+            loggedIn = GdtfShareClient.ensureLoggedIn(ctx)
+            status = if (loggedIn) "Connecté." else ""
+            busy = false
+        }
+    }
 
     // Types de projecteurs (spec → nombre), triés — comme la liste iOS.
     val specSummaries = remember(scene) {
@@ -149,7 +161,11 @@ fun GdtfShareScreen(
                         scope.launch {
                             busy = true; status = "Connexion…"
                             runCatching { GdtfShareClient.login(user.trim(), pass) }.fold(
-                                onSuccess = { loggedIn = true; status = "Connecté." },
+                                onSuccess = {
+                                    // Identifiants mémorisés (chiffrés) pour rester connecté.
+                                    com.minou.mvrviewer.mvr.GdtfCredentialStore.save(ctx, user.trim(), pass)
+                                    loggedIn = true; status = "Connecté."
+                                },
                                 onFailure = { status = it.message ?: "Échec de connexion." }
                             )
                             busy = false
@@ -215,7 +231,7 @@ fun GdtfShareScreen(
                 }
 
                 OutlinedButton(
-                    onClick = { GdtfShareClient.logout(); loggedIn = false; status = "" },
+                    onClick = { GdtfShareClient.logout(); com.minou.mvrviewer.mvr.GdtfCredentialStore.clear(ctx); loggedIn = false; status = "" },
                     enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
                 ) { Text("Se déconnecter") }
             }

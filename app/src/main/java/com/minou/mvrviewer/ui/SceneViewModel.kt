@@ -1,6 +1,7 @@
 package com.minou.mvrviewer.ui
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.runtime.State
@@ -53,6 +54,13 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
         currentUri = uri
         loadJob?.cancel()
         val name = displayName(uri)
+        // Rendre la permission SAF PERSISTANTE : sans ça, l'URI d'un .mvr choisi
+        // via le sélecteur n'est plus lisible après un redémarrage → « projet perdu ».
+        runCatching {
+            getApplication<Application>().contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
         _state.value = UiState.Loading(name)
         loadJob = viewModelScope.launch {
             val result = runCatching {
@@ -64,8 +72,16 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _state.value = result.fold(
-                onSuccess = { (bytes, scene) -> UiState.Loaded(scene, name, bytes) },
-                onFailure = { UiState.Error(it.message ?: "Erreur inconnue.") }
+                onSuccess = { (bytes, scene) ->
+                    // Projet ouvert avec succès → mémorisé dans les récents.
+                    runCatching { RecentProjects.record(getApplication(), uri.toString(), name, System.currentTimeMillis()) }
+                    UiState.Loaded(scene, name, bytes)
+                },
+                onFailure = {
+                    // URI périmée (permission perdue, fichier déplacé) → retirée des récents.
+                    runCatching { RecentProjects.remove(getApplication(), uri.toString()) }
+                    UiState.Error(it.message ?: "Erreur inconnue.")
+                }
             )
         }
     }

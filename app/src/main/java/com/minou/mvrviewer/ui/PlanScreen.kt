@@ -71,11 +71,14 @@ fun PlanScreen(
     options: SceneOptions,
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
     onSetReferencePlan: (com.minou.mvrviewer.mvr.ReferencePlan?) -> Unit = {},
+    calibration: com.minou.mvrviewer.mvr.GeoCalibration = remember { com.minou.mvrviewer.mvr.GeoCalibration() },
+    projectKey: String? = null,
     gdtfOverrides: GdtfOverrides? = null,
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val ctxPlan = androidx.compose.ui.platform.LocalContext.current
     val layerIndex = remember(scene) { LayerColors.index(scene) }
     val data = remember(scene) { planData(scene) }
     val measurer = rememberTextMeasurer()
@@ -148,12 +151,31 @@ fun PlanScreen(
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
     var query by remember(scene) { mutableStateOf("") }
 
-    // Géolocalisation : position GPS en direct + calibration par ancres.
-    val calibration = remember(scene) { com.minou.mvrviewer.mvr.GeoCalibration() }
+    // Géolocalisation : position GPS en direct + calibration par ancres (la
+    // calibration est HISSÉE dans SceneScreen → survit aux bascules + persistée).
     var showLocation by remember { mutableStateOf(false) }
     var calibrating by remember { mutableStateOf(false) }
     var calibVersion by remember { mutableIntStateOf(0) } // force le redraw à l'ajout d'ancre
     val gps by rememberUserLocation(showLocation)
+
+    // Persistance projet : réenregistre le placement du plan DXF (glissé/rotation/
+    // échelle → dxfVersion) et la calibration, débouncé, quand ça change.
+    if (projectKey != null) {
+        val rpForSave = referencePlan
+        LaunchedEffect(dxfVersion, rpForSave) {
+            if (rpForSave != null) {
+                kotlinx.coroutines.delay(500)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.minou.mvrviewer.mvr.ProjectStore.saveTransform(ctxPlan, projectKey, rpForSave.transform)
+                }
+            }
+        }
+        LaunchedEffect(calibVersion) {
+            if (calibVersion > 0) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.minou.mvrviewer.mvr.ProjectStore.saveCalibration(ctxPlan, projectKey, calibration.anchors.toList())
+            }
+        }
+    }
 
     // Transformée monde→écran : centrée sur le contenu, ajustée au Canvas, puis
     // zoom/pan utilisateur par-dessus.

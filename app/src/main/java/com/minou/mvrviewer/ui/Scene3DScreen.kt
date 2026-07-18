@@ -127,30 +127,52 @@ fun Scene3DScreen(
         gdtfFixtures = emptySet()
         lod.reset()
         val conv = conversionMatrix(center)
-        // 1) Hors thread : résolution des refs (File + Symbol→Symdef récursif),
-        //    extraction zip en 1 passe des .3ds, parsing par fichier UNIQUE.
-        //    (Les .glb sont extraits PAR LOTS plus bas — un show peut en avoir
-        //    14 000, tout garder en mémoire d'un coup ferait un OOM.)
-        val prepared = withContext(Dispatchers.Default) {
-            val refs = collectRenderRefs(scene, conv)
-            val tdsNames = refs.tds.mapTo(HashSet()) { it.fileName }
-            val bytesByName = MvrParser.extractEntries(mvrBytes, tdsNames)
-            val meshes = HashMap<String, List<ThreeDSParser.Mesh>>(tdsNames.size)
-            for (n in tdsNames) {
-                val b = bytesByName[n] ?: continue
-                meshes[n] = runCatching { ThreeDSParser.parse(b) }.getOrDefault(emptyList())
-            }
-            // Textures externes potentielles des glb (le MVR embarque des .png) :
-            // servies au chargeur via resourceResolver, comme le fix iOS des
-            // textures manquantes.
-            val imageNames = MvrParser.listEntries(mvrBytes)
-                .filter { it.endsWith(".png", true) || it.endsWith(".jpg", true) || it.endsWith(".jpeg", true) }
-                .mapTo(HashSet()) { it.substringAfterLast('/') }
-            val images = if (imageNames.isEmpty()) emptyMap()
-                         else MvrParser.extractEntries(mvrBytes, imageNames)
-            Triple(refs, meshes, images)
+
+        // Découpe temporelle : les appels Filament (build Geometry, GeometryNode,
+        // addChildNode, createInstancedModel) DOIVENT rester sur le thread moteur,
+        // mais on rend la main toutes les ~6 ms pour ne JAMAIS bloquer l'UI plus
+        // d'une trame — c'était la cause de l'ANR au chargement d'un gros show.
+        var lastYield = System.nanoTime()
+        suspend fun slice() {
+            val now = System.nanoTime()
+            if (now - lastYield > 6_000_000L) { yield(); lastYield = System.nanoTime() }
         }
-        val (refs, meshesByFile, imageBytes) = prepared
+
+        // 1) Prep CPU HORS THREAD PRINCIPAL (résolution des refs, extraction zip
+        //    des .3ds, parse + normales), MISE EN CACHE par scène : un retour en
+        //    3D après un détour par le plan réutilise tout (plus de re-parse ~30s).
+        //    Les .glb sont extraits PAR LOTS plus bas (un show peut en avoir 14 000).
+        val holder = Prepared3DCache.get(scene)
+        if (!holder.ready) {
+            val prep = withContext(Dispatchers.Default) {
+                val r = collectRenderRefs(scene, conv)
+                val tdsNames = r.tds.mapTo(HashSet()) { it.fileName }
+                val bytesByName = MvrParser.extractEntries(mvrBytes, tdsNames)
+                val md = HashMap<String, List<MeshData>>(tdsNames.size)
+                val dim = HashMap<String, Float>(tdsNames.size)
+                for (n in tdsNames) {
+                    val b = bytesByName[n] ?: continue
+                    val meshes = runCatching { ThreeDSParser.parse(b) }.getOrDefault(emptyList())
+                    md[n] = meshes.mapNotNull { prepareMeshData(it) }
+                    dim[n] = meshesMaxDimension(meshes)
+                }
+                // Textures externes potentielles des glb (le MVR embarque des .png).
+                val imageNames = MvrParser.listEntries(mvrBytes)
+                    .filter { it.endsWith(".png", true) || it.endsWith(".jpg", true) || it.endsWith(".jpeg", true) }
+                    .mapTo(HashSet()) { it.substringAfterLast('/') }
+                val images = if (imageNames.isEmpty()) emptyMap()
+                             else MvrParser.extractEntries(mvrBytes, imageNames)
+                Prepared3DHolder().also {
+                    it.refs = r; it.meshDataByFile = md; it.maxDimByFile = dim; it.imageBytes = images
+                }
+            }
+            holder.refs = prep.refs; holder.meshDataByFile = prep.meshDataByFile
+            holder.maxDimByFile = prep.maxDimByFile; holder.imageBytes = prep.imageBytes
+        }
+        val refs = holder.refs!!
+        val meshDataByFile = holder.meshDataByFile!!
+        val maxDimByFile = holder.maxDimByFile!!
+        val imageBytes = holder.imageBytes ?: emptyMap()
 
         // 2) Thread moteur : budget global de nœuds/triangles partagé 3ds+glb.
         val builtCache = HashMap<String, List<BuiltMesh>>()
@@ -163,14 +185,13 @@ fun Scene3DScreen(
         val sceneNodeBudget = MAX_NODES - FIXTURE_NODE_RESERVE
 
         // 2a) .3ds : géométries uniques partagées + un GeometryNode par instance.
-        val smallByFile = HashMap<String, Boolean>()
         for (r in refs.tds) {
             if (nodes >= sceneNodeBudget || triangles >= MAX_TRIANGLES) { truncated = true; break }
-            val meshes = meshesByFile[r.fileName]
-            if (meshes.isNullOrEmpty()) continue
-            val built = builtCache.getOrPut(r.fileName) { meshes.mapNotNull { buildMesh(engine, it) } }
+            val md = meshDataByFile[r.fileName]
+            if (md.isNullOrEmpty()) continue
+            val built = builtCache.getOrPut(r.fileName) { md.map { BuiltMesh(it.toGeometry(engine), it.colors, it.triangles) } }
             // Petit objet (siège, accessoire) → candidat au LOD d'interaction.
-            val small = smallByFile.getOrPut(r.fileName) { meshesMaxDimension(meshes) < LOD_SMALL_MM }
+            val small = (maxDimByFile[r.fileName] ?: Float.MAX_VALUE) < LOD_SMALL_MM
             for (bm in built) {
                 val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
                 node.transform = r.world
@@ -179,7 +200,8 @@ fun Scene3DScreen(
                 nodes++; triangles += bm.triangles
             }
             placed++
-            if (placed % 25 == 0) { status = "$placed objets 3D…"; yield() }
+            if (placed % 40 == 0) status = "$placed objets 3D…"
+            slice()
         }
 
         // 2b) .glb : createInstancedModel (N instances d'un même fichier = 1 seul
@@ -209,10 +231,11 @@ fun Scene3DScreen(
                         val node = io.github.sceneview.node.ModelNode(instances[k])
                         node.transform = transforms[k]
                         geometryRoot.addChildNode(node)
+                        slice()
                     }
                     nodes += take
                     placed += take
-                    if (placed % 100 < take) { status = "$placed objets 3D…"; yield() }
+                    status = "$placed objets 3D…"
                 }
                 i += 250
             }
@@ -229,10 +252,13 @@ fun Scene3DScreen(
             if (!s.isNullOrEmpty()) bySpec.getOrPut(s) { mutableListOf() }.add(fi2)
         }
         val gdtfDone = HashSet<Int>()
+        // Modèle GDTF préparé HORS THREAD MOTEUR : octets + ext + MeshData (déjà
+        // normalisés) + dimension brute (pour l'échelle), au lieu de meshes bruts.
+        class GdtfModelPrep(val ext: String, val bytes: ByteArray, val meshData: List<MeshData>, val rawMax: Float)
         specLoop@ for ((spec, idxs) in bySpec) {
             if (nodes >= MAX_NODES) { truncated = true; break }
             // Préparation hors moteur : extraction du .gdtf, parse de l'arbre,
-            // octets des modèles (+ parse .3ds).
+            // octets des modèles + parse .3ds + normales (tout le CPU).
             val prep = withContext(Dispatchers.Default) {
                 // Modèle GDTF Share (téléchargé) prioritaire sur l'embarqué.
                 val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
@@ -240,13 +266,15 @@ fun Scene3DScreen(
                     ?: cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
                     ?: return@withContext null
                 val asm = GdtfLoader.parseAssembly(gd) ?: return@withContext null
-                val files = HashMap<String, Triple<ByteArray, String, List<ThreeDSParser.Mesh>>>()
+                val files = HashMap<String, GdtfModelPrep>()
                 for ((mName, mInfo) in asm.models) {
                     val fb = GdtfLoader.extractModelBytes(gd, mInfo.file) ?: continue
-                    val meshes = if (fb.second == "3ds")
-                        runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
-                    else emptyList()
-                    files[mName] = Triple(fb.first, fb.second, meshes)
+                    if (fb.second == "3ds") {
+                        val meshes = runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
+                        files[mName] = GdtfModelPrep("3ds", fb.first, meshes.mapNotNull { prepareMeshData(it) }, meshesMaxDimension(meshes))
+                    } else {
+                        files[mName] = GdtfModelPrep(fb.second, fb.first, emptyList(), 0f)
+                    }
                 }
                 asm to files
             } ?: continue
@@ -259,12 +287,11 @@ fun Scene3DScreen(
             val builds = HashMap<String, ModelBuild>()
             for ((mName, pls) in placementsByModel) {
                 val info = asm.models[mName] ?: continue
-                val (bytes, ext, meshes) = files[mName] ?: continue
-                if (ext == "3ds") {
-                    if (meshes.isEmpty()) continue
-                    val built = meshes.mapNotNull { buildMesh(engine, it) }
-                    if (built.isEmpty()) continue
-                    val rawMax = meshesMaxDimension(meshes)
+                val fp = files[mName] ?: continue
+                if (fp.ext == "3ds") {
+                    if (fp.meshData.isEmpty()) continue
+                    val built = fp.meshData.map { BuiltMesh(it.toGeometry(engine), it.colors, it.triangles) }
+                    val rawMax = fp.rawMax
                     val s = when {
                         info.maxDeclaredDimension != null && rawMax > 0f -> info.maxDeclaredDimension!! / rawMax
                         rawMax > 10f -> 0.001f // pas de dimensions déclarées : mm supposés
@@ -275,7 +302,7 @@ fun Scene3DScreen(
                     // glb/gltf : une instance par (placement × projecteur).
                     val count = pls.size * idxs.size
                     val instances = runCatching {
-                        modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(bytes), count)
+                        modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(fp.bytes), count)
                     }.getOrNull() ?: continue
                     val box = instances.firstOrNull()?.asset?.boundingBox
                     val rawMax = box?.halfExtent?.let { 2f * maxOf(it[0], it[1], it[2]) } ?: 0f
@@ -287,6 +314,7 @@ fun Scene3DScreen(
                     // glTF est Y-haut, l'assemblage GDTF est Z-haut → Rx(+90°).
                     builds[mName] = ModelBuild(emptyList(), ArrayDeque(instances), RX90 * scaleMat(s))
                 }
+                slice()
             }
             if (builds.isEmpty()) continue
 
@@ -315,7 +343,8 @@ fun Scene3DScreen(
                     }
                 }
                 if (any) gdtfDone.add(fi2)
-                if (gdtfDone.size % 40 == 0) { status = "$placed objets · ${gdtfDone.size} proj. GDTF…"; yield() }
+                if (gdtfDone.size % 40 == 0) status = "$placed objets · ${gdtfDone.size} proj. GDTF…"
+                slice()
             }
         }
         gdtfFixtures = gdtfDone
@@ -446,18 +475,62 @@ private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
 
 private class BuiltMesh(val geometry: Geometry, val colors: List<Int>, val triangles: Int)
 
+/**
+ * Données de mesh PRÊTES au moteur, calculées HORS THREAD PRINCIPAL (normales,
+ * listes de sommets/indices, couleurs). Ne touche PAS l'Engine Filament → peut
+ * être construit sur `Dispatchers.Default` et mis en cache. Le seul appel moteur
+ * (`toGeometry`) est trivial (upload GPU) et reste sur le thread moteur.
+ */
+private class MeshData(
+    val verts: List<Geometry.Vertex>,
+    val prims: List<List<Int>>,
+    val colors: List<Int>,
+    val triangles: Int
+)
+
+private fun MeshData.toGeometry(engine: Engine): Geometry =
+    Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+        .vertices(verts).primitivesIndices(prims).build(engine)
+
+/** Cache de préparation CPU d'une scène (survit aux bascules 3D↔plan). */
+private class Prepared3DHolder {
+    var refs: RenderRefs? = null
+    var meshDataByFile: Map<String, List<MeshData>>? = null
+    var maxDimByFile: Map<String, Float>? = null
+    var imageBytes: Map<String, ByteArray>? = null
+    val ready: Boolean get() = refs != null
+}
+
+/**
+ * Cache mono-entrée par identité de scène : rouvrir la MÊME scène (retour en 3D
+ * après un détour par le plan/patch) réutilise la prep CPU (parse .3ds +
+ * normales), au lieu de tout recalculer (~30 s). Une nouvelle scène remplace
+ * l'entrée (mémoire bornée à un show).
+ */
+private object Prepared3DCache {
+    private var keyScene: MvrScene? = null
+    private var holder: Prepared3DHolder? = null
+    fun get(scene: MvrScene): Prepared3DHolder {
+        val h = holder
+        if (keyScene !== scene || h == null) {
+            keyScene = scene
+            return Prepared3DHolder().also { holder = it }
+        }
+        return h
+    }
+}
+
 private fun ThreeDSParser.Rgb.toColorInt(): Int {
     fun c(v: Float) = (v * 255f).toInt().coerceIn(0, 255)
     return (0xFF shl 24) or (c(r) shl 16) or (c(g) shl 8) or c(b)
 }
 
 /**
- * Mesh 3ds → Geometry Filament : positions + normales lissées, et UN sous-mesh
- * (primitive) PAR groupe matériau avec sa couleur — les faces sans matériau en
- * gris clair. Sans groupe : un seul sous-mesh (couleur de l'unique matériau du
- * fichier si présent, sinon gris). Fidèle à Mesh.toSCNNode côté iOS.
+ * Mesh 3ds → MeshData (positions + normales lissées, et UN sous-mesh PAR groupe
+ * matériau avec sa couleur — faces sans matériau en gris clair). PUR CPU, aucun
+ * appel Engine → à exécuter hors thread principal. Fidèle à Mesh.toSCNNode iOS.
  */
-private fun buildMesh(engine: Engine, mesh: ThreeDSParser.Mesh): BuiltMesh? {
+private fun prepareMeshData(mesh: ThreeDSParser.Mesh): MeshData? {
     val vc = mesh.vertexCount
     val tc = mesh.triangleCount
     if (vc == 0 || tc == 0) return null
@@ -513,10 +586,7 @@ private fun buildMesh(engine: Engine, mesh: ThreeDSParser.Mesh): BuiltMesh? {
         if (leftover.isNotEmpty()) { prims.add(leftover); colors.add(GRAY) }
         if (prims.isEmpty()) { prims.add(fi.toList()); colors.add(GRAY) }
     }
-
-    val geom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
-        .vertices(verts).primitivesIndices(prims).build(engine)
-    return BuiltMesh(geom, colors, tc)
+    return MeshData(verts, prims, colors, tc)
 }
 
 // ---- Repère / matrices ----

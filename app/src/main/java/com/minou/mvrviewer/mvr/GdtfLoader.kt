@@ -127,7 +127,16 @@ object GdtfLoader {
         if (placements.isEmpty()) {
             for (name in models.keys) placements.add(Placement(name, Mat4.identity()))
         }
-        return Assembly(models, placements)
+        // Dé-doublonnage : certains exports (Vectorworks) empilent des DIZAINES de
+        // géométries « Dummy » AU MÊME point (mêmes modèle + transformée) — 42 sur
+        // un Esprite. Rendues telles quelles : autant de cylindres superposés,
+        // invisibles à l'œil (ils coïncident) mais qui saturent le budget de nœuds
+        // → des projecteurs entiers finissent tronqués (« éléments mélangés /
+        // mauvaises géométries »). On n'en garde qu'un : rendu IDENTIQUE à l'œil.
+        val seen = HashSet<String>(placements.size)
+        val deduped = ArrayList<Placement>(placements.size)
+        for (p in placements) if (seen.add(p.modelName + "|" + placementKey(p.transform))) deduped.add(p)
+        return Assembly(models, deduped)
     }
 
     /**
@@ -192,6 +201,15 @@ object GdtfLoader {
             Float4(vals[2][0], vals[2][1], vals[2][2], 0f),
             Float4(vals[3][0], vals[3][1], vals[3][2], 1f)
         )
+    }
+
+    /** Clé d'une transformée (rotation 3×3 + translation, arrondie) pour dé-doublonner. */
+    private fun placementKey(m: Mat4): String {
+        fun r(v: Float) = Math.round(v * 1e4f)
+        return "${r(m.x.x)},${r(m.x.y)},${r(m.x.z)}," +
+            "${r(m.y.x)},${r(m.y.y)},${r(m.y.z)}," +
+            "${r(m.z.x)},${r(m.z.y)},${r(m.z.z)}," +
+            "${r(m.w.x)},${r(m.w.y)},${r(m.w.z)}"
     }
 
     /** Multiplie la seule TRANSLATION (rotation/échelle préservées). */

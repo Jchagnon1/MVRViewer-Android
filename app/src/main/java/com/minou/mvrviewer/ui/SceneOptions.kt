@@ -1,8 +1,16 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.List
@@ -12,6 +20,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,8 +28,11 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 
 /**
  * Réglages d'affichage partagés entre les vues d'un même show (fond, couleurs
@@ -32,6 +44,10 @@ enum class LabelContent(val label: String) { ID("N°"), DMX("Adresse DMX"), MODE
 
 class SceneOptions {
     var backgroundDark by mutableStateOf(true)
+    // Couleur de fond choisie par l'utilisateur, par vue (défauts noir / blanc,
+    // comme iOS). Semées depuis BackgroundColorStore et persistées dans SceneScreen.
+    var background3D by mutableStateOf(BackgroundColorStore.DEFAULT_3D)
+    var background2D by mutableStateOf(BackgroundColorStore.DEFAULT_2D)
     var layerColors by mutableStateOf(true)
     var showLabels by mutableStateOf(true)
     var showStructure by mutableStateOf(true)
@@ -56,9 +72,16 @@ fun SceneOptionsMenu(
     onShowGdtfShare: (() -> Unit)? = null,
     showLabelsToggle: Boolean = false,
     showStructureToggle: Boolean = false,
-    showLegendToggle: Boolean = false
+    showLegendToggle: Boolean = false,
+    // Section « Couleur du fond » : activée quand la vue fournit sa couleur
+    // courante + un setter. Presets = (nom, ARGB). null → section masquée.
+    background: Color? = null,
+    backgroundDefault: Color = Color.Black,
+    backgroundPresets: List<Pair<String, Long>> = emptyList(),
+    onPickBackground: ((Color) -> Unit)? = null
 ) {
     var open by remember { mutableStateOf(false) }
+    var showCustom by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
         Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = tint)
     }
@@ -67,6 +90,26 @@ fun SceneOptionsMenu(
         onShowPlan?.let { nav("Vue plan", Icons.Filled.Map) { open = false; it() } }
         onShowPatch?.let { nav("Liste de patch", Icons.AutoMirrored.Filled.List) { open = false; it() } }
         onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
+        if (background != null && onPickBackground != null) {
+            HorizontalDivider()
+            Text("Couleur du fond", style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF888888),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+            backgroundPresets.forEach { (name, argb) ->
+                val c = Color(argb)
+                val active = background.sameRgb(c)
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    leadingIcon = {
+                        Box(Modifier.width(16.dp).height(16.dp).clip(CircleShape)
+                            .background(c).border(1.dp, Color(0x55808080), CircleShape))
+                    },
+                    trailingIcon = { if (active) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = { onPickBackground(c) }
+                )
+            }
+            nav("Personnalisée…", Icons.Filled.Colorize) { open = false; showCustom = true }
+        }
         HorizontalDivider()
         check("Couleurs par calque", options.layerColors) { options.layerColors = !options.layerColors }
         if (showStructureToggle) check("Décor / structure", options.showStructure) { options.showStructure = !options.showStructure }
@@ -107,6 +150,22 @@ fun SceneOptionsMenu(
             }
         }
     }
+
+    if (showCustom && background != null && onPickBackground != null) {
+        BackgroundColorDialog(
+            title = "Couleur du fond",
+            initial = background,
+            default = backgroundDefault,
+            onColorChange = onPickBackground,
+            onDismiss = { showCustom = false }
+        )
+    }
+}
+
+/** Égalité sur le RGB (ignore l'alpha) — les presets/fonds sont opaques. */
+private fun Color.sameRgb(o: Color): Boolean {
+    fun ch(v: Float) = (v * 255f + 0.5f).toInt()
+    return ch(red) == ch(o.red) && ch(green) == ch(o.green) && ch(blue) == ch(o.blue)
 }
 
 @Composable

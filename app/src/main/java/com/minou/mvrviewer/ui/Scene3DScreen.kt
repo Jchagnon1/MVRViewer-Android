@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.google.android.filament.Engine
 import com.google.android.filament.MaterialInstance
 import com.google.android.filament.RenderableManager
+import com.google.android.filament.Skybox
 import com.google.android.filament.gltfio.FilamentAsset
 import com.minou.mvrviewer.mvr.GdtfLoader
 import com.minou.mvrviewer.mvr.MvrGeometryRef
@@ -44,6 +45,8 @@ import io.github.sceneview.rememberCameraManipulator
 import io.github.sceneview.rememberCameraNode
 import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMainLightNode
+import io.github.sceneview.rememberEnvironment
+import io.github.sceneview.rememberEnvironmentLoader
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNode
@@ -73,6 +76,18 @@ private const val LOD_SMALL_MM = 3000f
 // sombre) + plafond de sommets (le vrai DXF V&B fait des millions de segments).
 private const val DXF_LINE_COLOR = 0xFF6FB7E8.toInt()
 private const val MAX_DXF_VERTS = 500_000
+
+// Presets de couleur de fond de la vue 3D (nom, ARGB) — mêmes choix qu'iOS.
+private val BG_3D_PRESETS = listOf(
+    "Noir" to 0xFF000000L, "Anthracite" to 0xFF1C1C1EL, "Bleu nuit" to 0xFF0B1026L,
+    "Gris" to 0xFF8E8E93L, "Blanc" to 0xFFFFFFFFL
+)
+
+/** sRGB [0,1] → linéaire (la clearColor Filament est en espace linéaire). */
+private fun srgbToLinear(s: Float): Double {
+    val v = s.toDouble()
+    return if (v <= 0.04045) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4)
+}
 
 /**
  * État du LOD d'interaction. Pendant que la caméra bouge, on MASQUE le détail
@@ -115,6 +130,24 @@ fun Scene3DScreen(
     val engine = rememberEngine()
     val modelLoader = rememberModelLoader(engine)
     val materialLoader = rememberMaterialLoader(engine)
+    // Couleur de fond 3D = SKYBOX de la scène Filament (SceneView pose
+    // scene.skybox = environment.skybox ; c'est CE qui remplit le fond, pas le
+    // clearColor). On garde l'IBL de l'environnement par défaut (éclairage
+    // inchangé) et on n'échange que le skybox. UN seul skybox, dont on met la
+    // couleur à jour en direct (setColor) → aucune fuite. Filament attend du
+    // LINÉAIRE → conversion depuis le sRGB du sélecteur.
+    // baseEnv = environnement PAR DÉFAUT via le loader (le MÊME que Scene utilise
+    // en interne) : il charge l'IBL KTX embarqué qui éclaire la scène. On garde
+    // son IBL + ses harmoniques et on n'échange QUE le skybox (copy) — sinon
+    // l'éclairage s'assombrit (rememberEnvironment(engine) n'a pas d'IBL).
+    val environmentLoader = rememberEnvironmentLoader(engine)
+    val baseEnv = rememberEnvironment(environmentLoader)
+    val skybox = remember(engine) { Skybox.Builder().color(0f, 0f, 0f, 1f).build(engine) }
+    val bgEnv = remember(baseEnv, skybox) { baseEnv.copy(skybox = skybox) }
+    LaunchedEffect(skybox, options.background3D) {
+        val c = options.background3D
+        skybox.setColor(srgbToLinear(c.red).toFloat(), srgbToLinear(c.green).toFloat(), srgbToLinear(c.blue).toFloat(), 1f)
+    }
 
     val center = remember(scene) { sceneCenterMm(scene) }
     val layout = remember(scene, center) { fixtureLayout(scene, center) }
@@ -149,6 +182,9 @@ fun Scene3DScreen(
     // Indices (dans scene.fixtures) des projecteurs rendus avec leur VRAIE
     // silhouette GDTF — leurs cubes de repli sont masqués.
     var gdtfFixtures by remember(scene) { mutableStateOf(emptySet<Int>()) }
+    // Projecteurs qui ont DÉJÀ leur propre géométrie 3D (rendue par 2a/2b) : ni
+    // silhouette GDTF (évite la superposition), ni cube de repli.
+    val ownGeomFixtures = remember(scene) { fixturesWithOwnGeometry(scene) }
 
     // Reconstruit quand un modèle GDTF Share est appliqué (version bump).
     LaunchedEffect(scene, mvrBytes, gdtfOverrides.version) {
@@ -300,7 +336,9 @@ fun Scene3DScreen(
         val bySpec = LinkedHashMap<String, MutableList<Int>>()
         fixtures.forEachIndexed { fi2, f ->
             val s = f.gdtfSpec?.trim()
-            if (!s.isNullOrEmpty()) bySpec.getOrPut(s) { mutableListOf() }.add(fi2)
+            // GDTF = REPLI : on ignore les projecteurs qui ont déjà leur géométrie
+            // propre (sinon silhouette GDTF superposée au modèle embarqué).
+            if (!s.isNullOrEmpty() && fi2 !in ownGeomFixtures) bySpec.getOrPut(s) { mutableListOf() }.add(fi2)
         }
         val gdtfDone = HashSet<Int>()
         // Modèle GDTF préparé HORS THREAD MOTEUR : octets + ext + MeshData (déjà
@@ -536,11 +574,15 @@ fun Scene3DScreen(
                 SceneOptionsMenu(
                     options = options, tint = LocalContentColor.current,
                     onShowPlan = onShowPlan, onShowPatch = onShowPatch,
-                    onShowGdtfShare = onShowGdtfShare
+                    onShowGdtfShare = onShowGdtfShare,
+                    background = options.background3D,
+                    backgroundDefault = BackgroundColorStore.DEFAULT_3D,
+                    backgroundPresets = BG_3D_PRESETS,
+                    onPickBackground = { options.background3D = it }
                 )
             }
         )
-        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0B0B0D))) {
+        Box(modifier = Modifier.fillMaxSize().background(options.background3D)) {
             Scene(
                 modifier = Modifier.fillMaxSize(),
                 engine = engine,
@@ -548,6 +590,8 @@ fun Scene3DScreen(
                 materialLoader = materialLoader,
                 cameraNode = cameraNode,
                 cameraManipulator = manipulator,
+                // Environnement à skybox coloré = couleur de fond choisie.
+                environment = bgEnv,
                 // NE PAS recadrer la caméra sur le contenu : sinon un plan DXF
                 // importé plus grand que la scène recadre tout et « cache » le
                 // décor. La caméra reste pilotée par notre rig (camHome + orbite).
@@ -589,9 +633,9 @@ fun Scene3DScreen(
                 Node(apply = { addChildNode(dxfRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)
                 layout.positions.forEachIndexed { i, p ->
-                    // Cube de repli masqué dès que le projecteur a sa silhouette GDTF,
-                    // ou si sa position est invalide (translation non finie).
-                    if (i !in gdtfFixtures && layout.valid[i]) {
+                    // Cube de repli SEULEMENT pour un projecteur « nu » : ni géométrie
+                    // propre (2a/2b), ni silhouette GDTF, et position valide.
+                    if (i !in gdtfFixtures && i !in ownGeomFixtures && layout.valid[i]) {
                         val mat = if (options.layerColors) fixtureMaterials.getValue(layout.colors[i]) else grayMaterial
                         CubeNode(size = s, materialInstance = mat, position = p)
                     }
@@ -642,6 +686,33 @@ private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
     }
     for (obj in scene.allObjects) walk(obj.geometryRefs, conv * drMat(obj.transform.m), 0)
     return RenderRefs(tds, glb)
+}
+
+/**
+ * Indices (dans scene.fixtures) des projecteurs qui possèdent DÉJÀ leur propre
+ * géométrie 3D (une réf .3ds/.glb/.gltf, directe ou via Symbol→Symdef). Ceux-là
+ * sont rendus par les passes décor (2a/2b) ; ils NE doivent PAS recevoir en plus
+ * la silhouette GDTF, sinon les deux maillages se superposent au même point
+ * (« mauvaises géométries / éléments mélangés »). Miroir de la règle iOS
+ * `if !hasContent { nodeForGDTF }` (SceneKitContainerView : GDTF = REPLI).
+ */
+private fun fixturesWithOwnGeometry(scene: MvrScene): Set<Int> {
+    fun hasGeom(refs: List<MvrGeometryRef>, depth: Int): Boolean {
+        if (depth > 8) return false
+        for (g in refs) when (g) {
+            is MvrGeometryRef.File ->
+                if (g.fileName.endsWith(".3ds", true) || g.fileName.endsWith(".glb", true) ||
+                    g.fileName.endsWith(".gltf", true)) return true
+            is MvrGeometryRef.Symbol -> {
+                val sd = scene.symdefs[g.symdefUuid]
+                if (sd != null && hasGeom(sd.items.take(MAX_SYMDEF_ITEMS), depth + 1)) return true
+            }
+        }
+        return false
+    }
+    val out = HashSet<Int>()
+    scene.fixtures.forEachIndexed { i, f -> if (hasGeom(f.geometryRefs, 0)) out.add(i) }
+    return out
 }
 
 // ---- Construction de géométrie (avec couleurs matériaux, comme toSCNNode iOS) ----
@@ -745,19 +816,32 @@ private fun prepareMeshData(mesh: ThreeDSParser.Mesh): MeshData? {
         verts.add(Geometry.Vertex(position = Float3(vs[v * 3], vs[v * 3 + 1], vs[v * 3 + 2]), normal = n))
     }
 
+    // Émet les 3 indices d'un triangle SEULEMENT s'ils sont tous valides (okTri).
+    fun emit(out: ArrayList<Int>, t: Int) {
+        val o = t * 3; out.add(fi[o]); out.add(fi[o + 1]); out.add(fi[o + 2])
+    }
+    fun allValidTris(): ArrayList<Int> {
+        val out = ArrayList<Int>(tc * 3)
+        for (t in 0 until tc) if (okTri(t)) emit(out, t)
+        return out
+    }
+
     // Sous-meshes par matériau.
     val prims = ArrayList<List<Int>>()
     val colors = ArrayList<Int>()
     if (mesh.materialGroups.isEmpty()) {
-        prims.add(fi.toList())
-        colors.add(if (mesh.materials.size == 1) mesh.materials.values.first().toColorInt() else GRAY)
+        val all = allValidTris()
+        if (all.isNotEmpty()) {
+            prims.add(all)
+            colors.add(if (mesh.materials.size == 1) mesh.materials.values.first().toColorInt() else GRAY)
+        }
     } else {
         val assigned = BooleanArray(tc)
         for (g in mesh.materialGroups) {
             val idx = ArrayList<Int>(g.triangles.size * 3)
-            for (t in g.triangles) if (t in 0 until tc) {
+            for (t in g.triangles) if (t in 0 until tc && okTri(t)) {
                 assigned[t] = true
-                idx.add(fi[t * 3]); idx.add(fi[t * 3 + 1]); idx.add(fi[t * 3 + 2])
+                emit(idx, t)
             }
             if (idx.isNotEmpty()) {
                 prims.add(idx)
@@ -765,12 +849,10 @@ private fun prepareMeshData(mesh: ThreeDSParser.Mesh): MeshData? {
             }
         }
         val leftover = ArrayList<Int>()
-        for (t in 0 until tc) if (!assigned[t]) {
-            leftover.add(fi[t * 3]); leftover.add(fi[t * 3 + 1]); leftover.add(fi[t * 3 + 2])
-        }
+        for (t in 0 until tc) if (!assigned[t] && okTri(t)) emit(leftover, t)
         if (leftover.isNotEmpty()) { prims.add(leftover); colors.add(GRAY) }
-        if (prims.isEmpty()) { prims.add(fi.toList()); colors.add(GRAY) }
     }
+    if (prims.isEmpty()) return null
     return MeshData(verts, prims, colors, tc)
 }
 

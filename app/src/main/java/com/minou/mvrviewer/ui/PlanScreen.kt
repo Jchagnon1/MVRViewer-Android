@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.input.ImeAction
@@ -170,7 +171,15 @@ fun PlanScreen(
         return (sx - w / 2f - offset.x) / bs + data.cx to (sy - h / 2f - offset.y) / bs + data.cy
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    // Fond de plan choisi + contraste : sur fond sombre, les tracés/étiquettes
+    // dessinés en foncé doivent s'éclaircir pour rester lisibles (le décor par
+    // calque et les pastilles restent vifs et passent sur les deux).
+    val planBg = options.background2D
+    val bgDark = BackgroundColorStore.isDark(planBg)
+    val inkColor = if (bgDark) Color(0xFFECECEC) else Color(0xFF222222)
+    val dxfColor = if (bgDark) DXF_COLOR_DARK_BG else DXF_COLOR
+
+    Box(modifier = modifier.fillMaxSize().background(planBg)) {
         Canvas(
             modifier = Modifier.fillMaxSize()
                 // En mode rectangle, le glissé trace le cadre de sélection ;
@@ -263,7 +272,7 @@ fun PlanScreen(
                     drawn += pts.size / 2
                     if (drawn > 400_000) break@loop  // garde-fou de dessin
                 }
-                drawPath(path, DXF_COLOR, style = androidx.compose.ui.graphics.drawscope.Stroke(0.7f))
+                drawPath(path, dxfColor, style = androidx.compose.ui.graphics.drawscope.Stroke(0.7f))
             }
 
             // Décor / structure : FIL DE FER VECTORIEL (arêtes caractéristiques
@@ -391,7 +400,7 @@ fun PlanScreen(
                     if (text != null) {
                         val fs = (9f * options.labelSize)
                         val off = 8f * options.labelOffset
-                        val tl = measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = Color(0xFF222222)))
+                        val tl = measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = inkColor))
                         drawText(tl, topLeft = Offset(s.x + off, s.y - fs * 0.7f))
                     }
                 }
@@ -422,9 +431,10 @@ fun PlanScreen(
             }
         }
 
-        // Barre du haut : retour + stats.
+        // Barre du haut : retour + stats. Le voile s'inverse sur fond sombre.
         Surface(
-            color = Color.Black.copy(alpha = 0.05f), contentColor = Color(0xFF222222),
+            color = if (bgDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.05f),
+            contentColor = inkColor,
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.align(Alignment.TopStart).padding(top = 52.dp, start = 56.dp)
         ) {
@@ -435,7 +445,7 @@ fun PlanScreen(
             )
         }
         IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Vue 3D", tint = Color(0xFF222222))
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Vue 3D", tint = inkColor)
         }
 
         // Légende : couleur de chaque calque de projecteurs + compte (comme iOS).
@@ -472,10 +482,14 @@ fun PlanScreen(
         }
         Box(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
             SceneOptionsMenu(
-                options = options, tint = Color(0xFF222222),
+                options = options, tint = inkColor,
                 onShow3D = onBack, onShowPatch = onShowPatch,
                 showLabelsToggle = true, showStructureToggle = true,
-                showLegendToggle = true
+                showLegendToggle = true,
+                background = options.background2D,
+                backgroundDefault = BackgroundColorStore.DEFAULT_2D,
+                backgroundPresets = BG_2D_PRESETS,
+                onPickBackground = { options.background2D = it }
             )
         }
 
@@ -502,6 +516,17 @@ fun PlanScreen(
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { doSearch() }),
+            // Couleurs pilotées par le fond (le thème ne suit pas la couleur de
+            // fond choisie) → sinon le champ est illisible sur fond sombre.
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = inkColor, unfocusedTextColor = inkColor,
+                cursorColor = inkColor,
+                focusedBorderColor = inkColor.copy(alpha = 0.7f),
+                unfocusedBorderColor = inkColor.copy(alpha = 0.4f),
+                focusedLeadingIconColor = inkColor, unfocusedLeadingIconColor = inkColor.copy(alpha = 0.7f),
+                focusedPlaceholderColor = inkColor.copy(alpha = 0.6f),
+                unfocusedPlaceholderColor = inkColor.copy(alpha = 0.6f)
+            ),
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
         )
 
@@ -641,7 +666,14 @@ fun PlanScreen(
 }
 
 private val STRUCT_COLOR = Color(0xFF9AA0A6)
-private val DXF_COLOR = Color(0xB3384B66)   // bleu-gris, sous-couche de repère
+private val DXF_COLOR = Color(0xB3384B66)         // bleu-gris (sous-couche, fond clair)
+private val DXF_COLOR_DARK_BG = Color(0xB39FC0E4) // bleu-gris clair (fond sombre)
+
+// Presets de couleur de fond de la vue plan (nom, ARGB) — mêmes choix qu'iOS.
+private val BG_2D_PRESETS = listOf(
+    "Blanc" to 0xFFFFFFFFL, "Gris clair" to 0xFFE9E9ECL, "Beige" to 0xFFF2ECDDL,
+    "Anthracite" to 0xFF1C1C1EL, "Noir" to 0xFF000000L
+)
 
 private class PlanFixture(
     val px: Float, val py: Float, val id: String?, val name: String,

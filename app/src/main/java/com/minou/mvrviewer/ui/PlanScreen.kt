@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -62,6 +63,7 @@ import kotlin.math.min
 @Composable
 fun PlanScreen(
     scene: MvrScene,
+    mvrBytes: ByteArray,
     options: SceneOptions,
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
@@ -70,6 +72,26 @@ fun PlanScreen(
     val layerIndex = remember(scene) { LayerColors.index(scene) }
     val data = remember(scene) { planData(scene) }
     val measurer = rememberTextMeasurer()
+
+    // Fil de fer VECTORIEL des structures (arêtes caractéristiques réelles de la
+    // géométrie .3ds, comme iOS). Construit hors thread principal.
+    var wire by remember(scene) { mutableStateOf<PlanWireframe.Built?>(null) }
+    LaunchedEffect(scene, mvrBytes) {
+        wire = null
+        wire = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            PlanWireframe.build(scene, mvrBytes)
+        }
+    }
+    // Pendant un geste (pan/zoom), on retombe sur un point par structure (max
+    // fluidité) ; le fil de fer complet réapparaît 180 ms après le dernier geste.
+    var gesturing by remember { mutableStateOf(false) }
+    var gestureTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(gestureTick) {
+        if (gestureTick == 0) return@LaunchedEffect
+        gesturing = true
+        kotlinx.coroutines.delay(180)
+        gesturing = false
+    }
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -131,6 +153,7 @@ fun PlanScreen(
                         detectTransformGestures { _, pan, zoom, _ ->
                             scale = (scale * zoom).coerceIn(0.05f, 200f)
                             offset += pan
+                            gestureTick++
                         }
                     }
                 }
@@ -166,12 +189,57 @@ fun PlanScreen(
             canvas = Offset(size.width, size.height)
             val w = size.width; val h = size.height
 
-            // Décor / structure : petits points gris (contexte du plan).
+            // Décor / structure : FIL DE FER VECTORIEL (arêtes caractéristiques
+            // réelles de la géométrie 3D). Pendant un geste, ou tant que le fil
+            // de fer se construit, on retombe sur un point par structure.
             if (options.showStructure) {
-                for (p in data.structure) {
-                    val s = toScreen(p.first, p.second, w, h)
-                    if (s.x in -20f..w + 20f && s.y in -20f..h + 20f) {
-                        drawCircle(STRUCT_COLOR, radius = 1.6f, center = s)
+                val wf = wire
+                val bs = baseScale(w, h) * scale
+                if (wf != null && !wf.isEmpty && !gesturing) {
+                    val pathByLayer = HashMap<String, androidx.compose.ui.graphics.Path>()
+                    for (inst in wf.instances) {
+                        val edges = wf.edgesByKey[inst.key]
+                        if (edges == null) {
+                            val s = toScreen(inst.cx, inst.cy, w, h)
+                            if (s.x in -20f..w + 20f && s.y in -20f..h + 20f) {
+                                drawCircle(STRUCT_COLOR, radius = 1.6f, center = s)
+                            }
+                            continue
+                        }
+                        // Cull grossier : centre + rayon écran de la structure.
+                        val cs = toScreen(inst.cx, inst.cy, w, h)
+                        val rPx = (wf.radiusByKey[inst.key] ?: 0f) * bs
+                        val margin = 220f + rPx
+                        if (cs.x < -margin || cs.x > w + margin || cs.y < -margin || cs.y > h + margin) continue
+                        val world = inst.world
+                        val path = pathByLayer.getOrPut(inst.layer) { androidx.compose.ui.graphics.Path() }
+                        var i = 0
+                        while (i < edges.size) {
+                            val ax = edges[i]; val ay = edges[i+1]; val az = edges[i+2]
+                            val bx = edges[i+3]; val by = edges[i+4]; val bz = edges[i+5]
+                            i += 6
+                            // Transform monde puis projection top (worldX, −worldY).
+                            val wax = world.x.x*ax + world.y.x*ay + world.z.x*az + world.w.x
+                            val way = world.x.y*ax + world.y.y*ay + world.z.y*az + world.w.y
+                            val wbx = world.x.x*bx + world.y.x*by + world.z.x*bz + world.w.x
+                            val wby = world.x.y*bx + world.y.y*by + world.z.y*bz + world.w.y
+                            val pa = toScreen(wax, -way, w, h)
+                            val pb = toScreen(wbx, -wby, w, h)
+                            if ((pa.x < -20f && pb.x < -20f) || (pa.x > w+20f && pb.x > w+20f) ||
+                                (pa.y < -20f && pb.y < -20f) || (pa.y > h+20f && pb.y > h+20f)) continue
+                            path.moveTo(pa.x, pa.y); path.lineTo(pb.x, pb.y)
+                        }
+                    }
+                    for ((layer, path) in pathByLayer) {
+                        val col = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer)) else STRUCT_COLOR
+                        drawPath(path, col, style = androidx.compose.ui.graphics.drawscope.Stroke(0.8f))
+                    }
+                } else {
+                    for (p in data.structure) {
+                        val s = toScreen(p.first, p.second, w, h)
+                        if (s.x in -20f..w + 20f && s.y in -20f..h + 20f) {
+                            drawCircle(STRUCT_COLOR, radius = 1.6f, center = s)
+                        }
                     }
                 }
             }

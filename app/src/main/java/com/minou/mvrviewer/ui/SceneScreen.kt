@@ -43,6 +43,7 @@ fun SceneScreen(
         )
         SceneMode.PLAN -> PlanScreen(
             scene = scene,
+            mvrBytes = mvrBytes,
             options = options,
             onBack = { mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },

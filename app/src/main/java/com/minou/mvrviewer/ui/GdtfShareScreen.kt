@@ -1,16 +1,24 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -19,18 +27,22 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.GdtfShareClient
+import com.minou.mvrviewer.mvr.GdtfShareEntry
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
 import kotlinx.coroutines.Dispatchers
@@ -40,19 +52,28 @@ import kotlinx.coroutines.withContext
 /**
  * Modèles GDTF téléchargés depuis GDTF Share, PAR SPEC MVR, appliqués par-dessus
  * les .gdtf embarqués (comme les gdtfOverrides iOS). `version` déclenche la
- * reconstruction de la 3D quand un modèle change.
+ * reconstruction de la 3D quand un modèle change. `manualSpecs` = types dont le
+ * modèle a été choisi À LA MAIN (vs résolus automatiquement).
  */
 class GdtfOverrides {
     val map: SnapshotStateMap<String, ByteArray> = mutableStateMapOf()
+    val manualSpecs = mutableStateListOf<String>()
     var version by mutableIntStateOf(0)
     fun set(spec: String, bytes: ByteArray) { map[spec] = bytes; version++ }
+    fun setManual(spec: String, bytes: ByteArray) {
+        map[spec] = bytes
+        if (spec !in manualSpecs) manualSpecs.add(spec)
+        version++
+    }
 }
 
 /**
- * Écran GDTF Share : connexion (compte gratuit gdtf-share.com) puis
- * « améliorer les modèles » — pour chaque type de projecteur, récupère le
- * meilleur profil fabricant et remplace le modèle 3D. Portage de
- * GDTFShareResolver + GDTFShareSettingsView (iOS).
+ * Écran GDTF Share : connexion, puis DEUX façons de remplacer les modèles 3D
+ * des projecteurs (comme iOS) :
+ *  - « Améliorer tout » : résolution AUTOMATIQUE (par FixtureTypeID puis
+ *    fabricant+nom) — rapide mais peut ne pas tout trouver ;
+ *  - liste des TYPES de projecteurs → on ouvre une RECHERCHE GDTF Share et on
+ *    choisit soi-même le bon modèle (port de GDTFMappingListView + GDTFModelSearchView).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +89,25 @@ fun GdtfShareScreen(
     var loggedIn by remember { mutableStateOf(GdtfShareClient.loggedIn) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
+    var searchSpec by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    // Types de projecteurs (spec → nombre), triés — comme la liste iOS.
+    val specSummaries = remember(scene) {
+        scene.allObjects.mapNotNull { it.gdtfSpec?.trim()?.ifEmpty { null } }
+            .groupingBy { it }.eachCount().toList().sortedBy { it.first.lowercase() }
+    }
+
+    // Volet RECHERCHE d'un type précis (plein écran, comme la sheet iOS).
+    val sp = searchSpec
+    if (loggedIn && sp != null) {
+        GdtfSearchPane(
+            spec = sp,
+            onBack = { searchSpec = null },
+            onChosen = { data -> overrides.setManual(sp, data); searchSpec = null }
+        )
+        return
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -112,19 +151,12 @@ fun GdtfShareScreen(
                 ) { Text("Se connecter") }
             } else {
                 Text("Connecté à GDTF Share.", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "« Améliorer les modèles » télécharge, pour chaque type de projecteur du show, " +
-                        "le meilleur profil fabricant (par FixtureTypeID, sinon fabricant + nom) et remplace " +
-                        "le modèle 3D. Reviens en vue 3D pour voir le résultat.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 12.dp)
-                )
+                // 1) Résolution automatique de tout.
                 Button(
                     onClick = {
                         scope.launch {
                             busy = true
-                            val specs = scene.fixtures.mapNotNull { it.gdtfSpec?.trim()?.ifEmpty { null } }.toSet()
+                            val specs = specSummaries.map { it.first }.toSet()
                             var done = 0; var applied = 0
                             for (spec in specs) {
                                 status = "Résolution ${done + 1}/${specs.size}…"
@@ -138,20 +170,52 @@ fun GdtfShareScreen(
                                 if (bytes != null) { overrides.set(spec, bytes); applied++ }
                                 done++
                             }
-                            status = "$applied / ${specs.size} type(s) remplacé(s). Ouvre la vue 3D."
+                            status = "$applied / ${specs.size} type(s) trouvé(s) automatiquement."
                             busy = false
                         }
                     },
-                    enabled = !busy, modifier = Modifier.fillMaxWidth()
-                ) { Text("Améliorer les modèles des projecteurs") }
+                    enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                ) { Text("Améliorer tout automatiquement") }
+
+                Text(
+                    "…ou choisis toi-même le modèle pour chaque type (utile quand l'auto ne trouve pas) :",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                )
+                // 2) Liste des types → recherche manuelle.
+                specSummaries.forEach { (spec, count) ->
+                    HorizontalDivider()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable(enabled = !busy) { searchSpec = spec }
+                            .padding(vertical = 12.dp)
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(spec, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                            Text(
+                                "$count projecteur(s) · ${statusLabel(spec, overrides)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
                 OutlinedButton(
                     onClick = { GdtfShareClient.logout(); loggedIn = false; status = "" },
-                    enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
                 ) { Text("Se déconnecter") }
             }
 
             if (busy) {
-                Row3(status)
+                Column(Modifier.padding(top = 16.dp)) {
+                    CircularProgressIndicator()
+                    Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+                }
             } else if (status.isNotEmpty()) {
                 Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 16.dp))
             }
@@ -159,10 +223,93 @@ fun GdtfShareScreen(
     }
 }
 
+private fun statusLabel(spec: String, overrides: GdtfOverrides): String = when {
+    spec in overrides.manualSpecs -> "choisi à la main"
+    overrides.map.containsKey(spec) -> "modèle réel (auto)"
+    else -> "formes génériques"
+}
+
+/**
+ * Recherche GDTF Share pour UN type de projecteur (port de GDTFModelSearchView).
+ * Champ de recherche + liste des révisions (fabricant — modèle, note). Toucher
+ * une ligne télécharge le .gdtf et l'applique à ce type.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Row3(status: String) {
-    Column(Modifier.padding(top = 16.dp)) {
-        CircularProgressIndicator()
-        Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArray) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<GdtfShareEntry>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var downloadingRid by remember { mutableStateOf<Int?>(null) }
+    val scope = rememberCoroutineScope()
+
+    // Recherche initiale + à chaque frappe (léger anti-rebond).
+    LaunchedEffect(query) {
+        loading = true
+        kotlinx.coroutines.delay(250)
+        runCatching { GdtfShareClient.search(query) }.fold(
+            onSuccess = { results = it; error = null },
+            onFailure = { error = it.message ?: "Recherche impossible." }
+        )
+        loading = false
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text(spec, style = MaterialTheme.typography.titleSmall, maxLines = 1) },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
+                }
+            }
+        )
+        OutlinedTextField(
+            value = query, onValueChange = { query = it },
+            label = { Text("Fabricant ou modèle") }, singleLine = true,
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        }
+        if (loading && results.isEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(results, key = { it.rid }) { entry ->
+                HorizontalDivider()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable(enabled = downloadingRid == null) {
+                            scope.launch {
+                                downloadingRid = entry.rid; error = null
+                                val data = runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
+                                downloadingRid = null
+                                if (data != null) onChosen(data) else error = "Téléchargement échoué."
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${entry.manufacturer} — ${entry.fixture}",
+                            style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                        entry.rating?.let {
+                            Text("Note : ${"%.1f".format(it)}/5",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (downloadingRid == entry.rid) {
+                        CircularProgressIndicator(modifier = Modifier.width(22.dp), strokeWidth = 2.dp)
+                    }
+                }
+            }
+        }
     }
 }

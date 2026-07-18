@@ -104,6 +104,15 @@ object ProjectStore {
         }
     }
 
+    // ---- Fond satellite (juste le drapeau on/off, comme iOS) ----
+
+    fun saveShowSatellite(ctx: Context, key: String, on: Boolean) {
+        val m = readManifest(ctx, key); m.put("showSatellite", on); writeManifest(ctx, key, m)
+    }
+
+    fun loadShowSatellite(ctx: Context, key: String): Boolean =
+        readManifest(ctx, key).optBoolean("showSatellite", false)
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
     fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) {

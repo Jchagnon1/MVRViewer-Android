@@ -55,6 +55,10 @@ class SceneOptions {
     var labelContent by mutableStateOf(LabelContent.ID)
     var labelSize by mutableFloatStateOf(1f)     // 0.7 (S) · 1.0 (M) · 1.4 (L)
     var labelOffset by mutableFloatStateOf(1f)    // écart étiquette ↔ projecteur
+    // Fond satellite géo-référencé (sous le plan / en 3D) — nécessite la
+    // calibration GPS. Persisté par projet ; opacité de session (défaut 0.55).
+    var showSatellite by mutableStateOf(false)
+    var satelliteOpacity by mutableFloatStateOf(0.55f)
 }
 
 /**

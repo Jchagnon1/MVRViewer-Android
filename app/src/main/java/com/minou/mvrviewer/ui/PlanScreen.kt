@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
@@ -46,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -73,6 +76,8 @@ fun PlanScreen(
     onSetReferencePlan: (com.minou.mvrviewer.mvr.ReferencePlan?) -> Unit = {},
     calibration: com.minou.mvrviewer.mvr.GeoCalibration = remember { com.minou.mvrviewer.mvr.GeoCalibration() },
     projectKey: String? = null,
+    satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
+    onCalibrationChanged: () -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
@@ -245,6 +250,7 @@ fun PlanScreen(
                                 com.minou.mvrviewer.mvr.GeoAnchor(px, -py, g.latitude, g.longitude)
                             )
                             calibVersion++
+                            onCalibrationChanged()
                             calibrating = false
                             return@detectTapGestures
                         }
@@ -264,6 +270,28 @@ fun PlanScreen(
         ) {
             canvas = Offset(size.width, size.height)
             val w = size.width; val h = size.height
+
+            // ---- Fond satellite géo-référencé, SOUS tout le reste ----
+            // L'image porte ses 4 coins en monde MVR ; on la dessine comme un
+            // quad via toScreen (même projection que le plan) → alignée sur les
+            // projecteurs. Transformée affine à partir de 3 coins (NW, NE, SW).
+            val sat = satellite
+            if (options.showSatellite && sat != null && !gesturing && sat.bitmap.width > 0) {
+                val nw = toScreen(sat.nwX, -sat.nwY, w, h)
+                val ne = toScreen(sat.neX, -sat.neY, w, h)
+                val sw = toScreen(sat.swX, -sat.swY, w, h)
+                val iw = sat.bitmap.width.toFloat(); val ih = sat.bitmap.height.toFloat()
+                val a = (ne.x - nw.x) / iw; val b = (ne.y - nw.y) / iw
+                val c = (sw.x - nw.x) / ih; val d = (sw.y - nw.y) / ih
+                val m = android.graphics.Matrix().apply {
+                    setValues(floatArrayOf(a, c, nw.x, b, d, nw.y, 0f, 0f, 1f))
+                }
+                val paint = android.graphics.Paint().apply {
+                    isAntiAlias = true; isFilterBitmap = true
+                    alpha = (options.satelliteOpacity.coerceIn(0f, 1f) * 255f).toInt()
+                }
+                drawIntoCanvas { it.nativeCanvas.drawBitmap(sat.bitmap, m, paint) }
+            }
 
             // ---- Plan de repère DXF importé (sous tout le reste) ----
             dxfVersion.let { }  // dépendance de redraw
@@ -573,6 +601,12 @@ fun PlanScreen(
                     Icon(Icons.Filled.Place, contentDescription = "Calibrer : je suis ici")
                 }
             }
+            // Fond satellite : dispo seulement une fois calibré (géo-référence).
+            if (calibration.isCalibrated) {
+                FilledIconToggleButton(checked = options.showSatellite, onCheckedChange = { options.showSatellite = it }) {
+                    Icon(Icons.Filled.Public, contentDescription = "Fond satellite")
+                }
+            }
             // Plan de repère DXF : importer, ou basculer le panneau de placement.
             FilledIconToggleButton(
                 checked = referencePlan != null && showDxfPanel,
@@ -583,6 +617,27 @@ fun PlanScreen(
             ) {
                 if (importing) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.width(20.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Filled.Layers, contentDescription = "Plan DXF")
+            }
+        }
+
+        // Opacité du fond satellite : curseur flottant (impossible dans un menu).
+        if (options.showSatellite && satellite != null) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.4f), shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 78.dp).width(230.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
+                    Icon(Icons.Filled.Public, contentDescription = null, tint = Color.White, modifier = Modifier.width(18.dp))
+                    androidx.compose.material3.Slider(
+                        value = options.satelliteOpacity,
+                        onValueChange = { options.satelliteOpacity = it },
+                        valueRange = 0.05f..1f,
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                    )
+                    Text("${(options.satelliteOpacity * 100).toInt()}%",
+                        color = Color.White, style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
 

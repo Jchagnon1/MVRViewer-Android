@@ -3,6 +3,7 @@ package com.minou.mvrviewer.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,6 +76,8 @@ fun SceneScreen(
             map.forEach { (s, b) -> if (s in manual) gdtfOverrides.setManual(s, b) else gdtfOverrides.set(s, b) }
         }
         if (calibration.anchors.isEmpty()) anchors.forEach { calibration.addAnchor(it) }
+        // Fond satellite : drapeau restauré seulement si calibré (sinon rien à géo-référencer).
+        if (calibration.isCalibrated) options.showSatellite = ProjectStore.loadShowSatellite(ctx, projectKey)
         restored = true
     }
     // Sauvegarde des modèles GDTF appliqués quand ils changent (action utilisateur).
@@ -82,6 +85,27 @@ fun SceneScreen(
         if (restored && gdtfOverrides.version > 0) withContext(Dispatchers.IO) {
             ProjectStore.saveOverrides(ctx, projectKey, gdtfOverrides.map.toMap(), gdtfOverrides.manualSpecs.toSet())
         }
+    }
+    LaunchedEffect(options.showSatellite) {
+        if (restored) withContext(Dispatchers.IO) { ProjectStore.saveShowSatellite(ctx, projectKey, options.showSatellite) }
+    }
+
+    // Fond satellite géo-référencé, partagé plan + 3D. Téléchargé quand activé
+    // ET calibré ; re-téléchargé si la calibration (calibTick) ou le plan change.
+    val fixturesXY = remember(scene) {
+        scene.fixtures.mapNotNull {
+            val t = it.transform.translation
+            if (t[0].isFinite() && t[1].isFinite()) t[0] to t[1] else null
+        }
+    }
+    var calibTick by remember(scene) { mutableIntStateOf(0) }
+    var satellite by remember(scene) { mutableStateOf<com.minou.mvrviewer.mvr.SatelliteOverlay?>(null) }
+    LaunchedEffect(options.showSatellite, calibTick, referencePlan) {
+        if (!options.showSatellite || !calibration.isCalibrated) { satellite = null; return@LaunchedEffect }
+        val b = com.minou.mvrviewer.mvr.SatelliteFetcher.worldBounds(fixturesXY, referencePlan) ?: return@LaunchedEffect
+        val key = com.minou.mvrviewer.mvr.SatelliteFetcher.keyFor(calibration, b[0], b[1], b[2], b[3])
+        if (satellite?.key == key) return@LaunchedEffect
+        com.minou.mvrviewer.mvr.SatelliteFetcher.fetch(calibration, b[0], b[1], b[2], b[3])?.let { satellite = it }
     }
 
     when (mode) {
@@ -112,6 +136,8 @@ fun SceneScreen(
             },
             calibration = calibration,
             projectKey = projectKey,
+            satellite = satellite,
+            onCalibrationChanged = { calibTick++ },
             gdtfOverrides = gdtfOverrides,
             onBack = { mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },

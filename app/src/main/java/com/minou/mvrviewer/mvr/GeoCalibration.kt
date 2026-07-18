@@ -57,4 +57,19 @@ class GeoCalibration {
         val y = (e.first * sn + e.second * c) * s + a.worldY
         return x.toFloat() to y.toFloat()
     }
+
+    /** Point monde MVR (mm) → (lat, lon) — INVERSE de worldPosition (comme iOS
+     *  latLon(forWorld:)). Sert à géo-référencer le fond satellite. */
+    fun latLonOf(worldX: Float, worldY: Float): Pair<Double, Double>? {
+        val a = anchors.firstOrNull() ?: return null
+        val (rot, s) = rotationAndScale()
+        val c = cos(rot); val sn = sin(rot)
+        val dx = (worldX - a.worldX).toDouble() / s
+        val dy = (worldY - a.worldY).toDouble() / s
+        val east = dx * c + dy * sn
+        val north = -dx * sn + dy * c
+        val lat = a.latitude + (north / earthR) * 180.0 / PI
+        val lon = a.longitude + (east / (earthR * cos(a.latitude * PI / 180.0))) * 180.0 / PI
+        return lat to lon
+    }
 }

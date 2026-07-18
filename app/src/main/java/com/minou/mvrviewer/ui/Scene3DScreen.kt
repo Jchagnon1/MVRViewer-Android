@@ -33,6 +33,7 @@ import com.minou.mvrviewer.mvr.MvrGeometryRef
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.ThreeDSParser
+import dev.romainguy.kotlin.math.Float2
 import dev.romainguy.kotlin.math.Float3
 import dev.romainguy.kotlin.math.Float4
 import dev.romainguy.kotlin.math.Mat4
@@ -51,6 +52,7 @@ import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlin.math.sqrt
@@ -106,6 +108,12 @@ private class LodState {
     fun reset() { nodes.clear(); proxies.clear(); lastX = Float.NaN; idle = 0; hidden = false }
 }
 
+/** Ressources GPU du quad satellite 3D à libérer à chaque reconstruction. */
+private class SatGpu {
+    var texture: com.google.android.filament.Texture? = null
+    var material: MaterialInstance? = null
+}
+
 /**
  * Vue 3D : structure/décor en VRAIE géométrie `.3ds` (couleurs matériaux
  * incluses), projecteurs en cubes colorés par calque. Les références Symbol →
@@ -121,6 +129,8 @@ fun Scene3DScreen(
     options: SceneOptions,
     gdtfOverrides: GdtfOverrides,
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
+    calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
+    satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
     onShowGdtfShare: () -> Unit,
@@ -174,6 +184,13 @@ fun Scene3DScreen(
     // Sous-couche du plan de repère DXF (lignes), placée au sol par sa transformée.
     val dxfRoot = rememberNode(engine)
     val dxfMaterial = remember(materialLoader) { materialLoader.createUnlitColorInstance(DXF_LINE_COLOR) }
+    // Fond satellite géo-référencé posé au sol (quad texturé) — même image et
+    // mêmes coins monde-mm que la vue plan, donc l'alignement est identique.
+    val satRoot = rememberNode(engine)
+    // Texture + instance de matériau du quad satellite courant, gardées pour être
+    // LIBÉRÉES à la reconstruction (changement d'image ou d'opacité) : sinon
+    // chaque rebuild fuyait une texture GPU (l'image fait ~1–3 Mo).
+    val satGpu = remember { SatGpu() }
     var status by remember(scene) { mutableStateOf("chargement 3D…") }
     // LOD d'interaction : les petits objets (sièges, accessoires) sont masqués
     // pendant que la caméra bouge, réaffichés à l'arrêt — divise les draw calls
@@ -213,16 +230,26 @@ fun Scene3DScreen(
             runCatching { modelLoader.assetLoader.destroyAsset(asset) }
         }
         glbAssets.clear()
+        // On MASQUE la géométrie pendant la construction : sinon chaque `yield`
+        // re-dessine la scène EN COURS (de plus en plus lourde) → le rendu
+        // intermédiaire dominait le temps de chargement d'un gros show. Caché,
+        // les trames sont vides (rapides) ; on révèle tout à la fin.
+        geometryRoot.isVisible = false
         val conv = conversionMatrix(center)
 
         // Découpe temporelle : les appels Filament (build Geometry, GeometryNode,
         // addChildNode, createInstancedModel) DOIVENT rester sur le thread moteur,
         // mais on rend la main toutes les ~6 ms pour ne JAMAIS bloquer l'UI plus
         // d'une trame — c'était la cause de l'ANR au chargement d'un gros show.
+        // On rend la main périodiquement pour ne pas bloquer l'UI (ANR), MAIS
+        // chaque yield re-dessine la scène en cours de construction (de plus en
+        // plus lourde) → yielder trop souvent (6 ms) triplait le temps de
+        // chargement d'un gros show. 40 ms reste bien sous le seuil d'ANR (5 s)
+        // tout en divisant le nombre de re-rendus intermédiaires.
         var lastYield = System.nanoTime()
         suspend fun slice() {
             val now = System.nanoTime()
-            if (now - lastYield > 6_000_000L) { yield(); lastYield = System.nanoTime() }
+            if (now - lastYield > 40_000_000L) { yield(); lastYield = System.nanoTime() }
         }
 
         // 1) Prep CPU HORS THREAD PRINCIPAL (résolution des refs, extraction zip
@@ -298,33 +325,44 @@ fun Scene3DScreen(
             val resolver: (String) -> java.nio.Buffer? = { uri ->
                 imageBytes[uri.substringAfterLast('/')]?.let { java.nio.ByteBuffer.wrap(it) }
             }
-            val names = byFile.keys.toList()
-            var i = 0
-            outer@ while (i < names.size) {
-                val chunk = names.subList(i, minOf(i + 250, names.size))
-                val bytesMap = withContext(Dispatchers.IO) { MvrParser.extractEntries(mvrBytes, chunk.toSet()) }
-                for (name in chunk) {
-                    val remaining = sceneNodeBudget - nodes
-                    if (remaining <= 0) { truncated = true; break@outer }
-                    val transforms = byFile.getValue(name)
-                    val take = minOf(transforms.size, remaining)
-                    if (take < transforms.size) truncated = true
-                    val data = bytesMap[name] ?: continue
-                    val instances = runCatching {
-                        modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), take, resolver)
-                    }.getOrNull() ?: continue
-                    instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
-                    for (k in 0 until minOf(take, instances.size)) {
-                        val node = io.github.sceneview.node.ModelNode(instances[k])
-                        node.transform = transforms[k]
-                        geometryRoot.addChildNode(node)
-                        slice()
-                    }
-                    nodes += take
-                    placed += take
-                    status = "$placed objets 3D…"
+            // PIPELINE : on décompresse le PROCHAIN lot de .glb en arrière-plan
+            // (Dispatchers.IO) PENDANT que le lot courant est construit sur le
+            // thread moteur (createInstancedModel). L'extraction (CPU) et le build
+            // (GPU) se recouvrent → gros gain sur un show à 14 000 .glb (comme le
+            // décodeur parallèle iOS). Extraction EN MÉMOIRE (le zip est déjà chargé).
+            val chunks = byFile.keys.chunked(250)
+            kotlinx.coroutines.coroutineScope {
+                var pending = chunks.firstOrNull()?.let {
+                    async(Dispatchers.IO) { MvrParser.extractEntries(mvrBytes, it.toSet()) }
                 }
-                i += 250
+                loop@ for (ci in chunks.indices) {
+                    val bytesMap = pending?.await() ?: emptyMap()
+                    // Extraction du lot suivant lancée AVANT de construire celui-ci.
+                    pending = chunks.getOrNull(ci + 1)?.let {
+                        async(Dispatchers.IO) { MvrParser.extractEntries(mvrBytes, it.toSet()) }
+                    }
+                    for (name in chunks[ci]) {
+                        val remaining = sceneNodeBudget - nodes
+                        if (remaining <= 0) { truncated = true; pending?.cancel(); break@loop }
+                        val transforms = byFile.getValue(name)
+                        val take = minOf(transforms.size, remaining)
+                        if (take < transforms.size) truncated = true
+                        val data = bytesMap[name] ?: continue
+                        val instances = runCatching {
+                            modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), take, resolver)
+                        }.getOrNull() ?: continue
+                        instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
+                        for (k in 0 until minOf(take, instances.size)) {
+                            val node = io.github.sceneview.node.ModelNode(instances[k])
+                            node.transform = transforms[k]
+                            geometryRoot.addChildNode(node)
+                            slice()
+                        }
+                        nodes += take
+                        placed += take
+                        status = "$placed objets 3D…"
+                    }
+                }
             }
         }
 
@@ -464,6 +502,7 @@ fun Scene3DScreen(
             }
         }
         gdtfFixtures = gdtfDone
+        geometryRoot.isVisible = true   // scène complète → on la révèle
 
         status = "$placed objets 3D" +
             (if (gdtfDone.isNotEmpty()) " · ${gdtfDone.size} proj. GDTF" else "") +
@@ -539,6 +578,72 @@ fun Scene3DScreen(
         dxfRoot.addChildNode(GeometryNode(engine, geom, listOf(dxfMaterial)))
     }
 
+    // Fond satellite en 3D : un quad texturé posé au sol, aux MÊMES 4 coins
+    // monde-mm que la vue plan (donc parfaitement aligné avec elle et avec les
+    // projecteurs). Reconstruit quand l'image OU l'opacité change. L'opacité est
+    // CUITE dans l'alpha du bitmap : le matériau « image » de SceneView n'expose
+    // que le paramètre `texture` (pas d'alpha réglable) → on la peint à l'alpha
+    // voulu, puis on téléverse. Débounce léger pour absorber le glissé du curseur.
+    LaunchedEffect(satellite, options.showSatellite, options.satelliteOpacity) {
+        // Purge de l'ancien quad + ses ressources GPU (idempotent).
+        satRoot.childNodes.toList().forEach {
+            satRoot.removeChildNode(it); runCatching { it.destroy() }
+        }
+        satGpu.material?.let { m -> runCatching { engine.destroyMaterialInstance(m) } }; satGpu.material = null
+        satGpu.texture?.let { t -> runCatching { engine.destroyTexture(t) } }; satGpu.texture = null
+        val sat = satellite
+        if (!options.showSatellite || sat == null || sat.bitmap.width <= 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(120)   // absorbe les frames de glissé du curseur d'opacité
+        // Alpha cuite dans le bitmap (hors thread principal).
+        val op = options.satelliteOpacity.coerceIn(0.05f, 1f)
+        val baked = withContext(Dispatchers.Default) {
+            runCatching {
+                val src = sat.bitmap
+                val out = android.graphics.Bitmap.createBitmap(src.width, src.height, android.graphics.Bitmap.Config.ARGB_8888)
+                val cnv = android.graphics.Canvas(out)
+                val paint = android.graphics.Paint().apply {
+                    isFilterBitmap = true
+                    alpha = (op * 255f).toInt().coerceIn(0, 255)
+                }
+                cnv.drawBitmap(src, 0f, 0f, paint)
+                out
+            }.getOrNull()
+        } ?: return@LaunchedEffect
+        // Texture + matériau image (unlit, texturé, mélangé). CLAMP pour ne pas
+        // répéter les bords, filtrage linéaire. Sans culling → visible aussi de
+        // dessous ; sans écriture de profondeur → ne masque rien au-dessus.
+        val tex = runCatching {
+            io.github.sceneview.texture.ImageTexture.Builder().bitmap(baked).build(engine)
+        }.getOrNull() ?: return@LaunchedEffect
+        val sampler = com.google.android.filament.TextureSampler(
+            com.google.android.filament.TextureSampler.MinFilter.LINEAR,
+            com.google.android.filament.TextureSampler.MagFilter.LINEAR,
+            com.google.android.filament.TextureSampler.WrapMode.CLAMP_TO_EDGE
+        )
+        val mat = materialLoader.createImageInstance(tex, sampler).apply {
+            runCatching { setCullingMode(com.google.android.filament.Material.CullingMode.NONE) }
+            runCatching { setDepthWrite(false) }
+        }
+        satGpu.texture = tex; satGpu.material = mat
+        // Quad aux 4 coins monde-mm, projetés en Filament comme la géométrie 3ds,
+        // 2 cm SOUS le sol MVR (z=0) pour passer sous le plan DXF sans z-fighting.
+        val cx = center.x; val cy = center.y; val cz = center.z
+        val groundFy = -cz / 1000f - 0.02f
+        fun fp(x: Float, y: Float) = Float3((x - cx) / 1000f, groundFy, -(y - cy) / 1000f)
+        val up = Float3(0f, 1f, 0f)
+        // NO(0,0) NE(1,0) SE(1,1) SO(0,1) : l'image est nord-en-haut (bbox maxLat
+        // en première ligne), comme la vue plan.
+        val quad = listOf(
+            Geometry.Vertex(position = fp(sat.nwX, sat.nwY), normal = up, uvCoordinate = Float2(0f, 0f)),
+            Geometry.Vertex(position = fp(sat.neX, sat.neY), normal = up, uvCoordinate = Float2(1f, 0f)),
+            Geometry.Vertex(position = fp(sat.seX, sat.seY), normal = up, uvCoordinate = Float2(1f, 1f)),
+            Geometry.Vertex(position = fp(sat.swX, sat.swY), normal = up, uvCoordinate = Float2(0f, 1f))
+        )
+        val satGeom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+            .vertices(quad).primitivesIndices(listOf(listOf(0, 1, 2, 0, 2, 3))).build(engine)
+        satRoot.addChildNode(GeometryNode(engine, satGeom, listOf(mat)))
+    }
+
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
     val cameraNode = rememberCameraNode(engine) { position = camHome }
     // Vitesse de pinch-zoom PROPORTIONNELLE à la taille de la scène : le zoom
@@ -575,6 +680,7 @@ fun Scene3DScreen(
                     options = options, tint = LocalContentColor.current,
                     onShowPlan = onShowPlan, onShowPatch = onShowPatch,
                     onShowGdtfShare = onShowGdtfShare,
+                    showSatelliteToggle = calibration?.isCalibrated == true,
                     background = options.background3D,
                     backgroundDefault = BackgroundColorStore.DEFAULT_3D,
                     backgroundPresets = BG_3D_PRESETS,
@@ -629,6 +735,7 @@ fun Scene3DScreen(
                     }
                 }
             ) {
+                Node(apply = { addChildNode(satRoot) })
                 Node(apply = { addChildNode(geometryRoot) })
                 Node(apply = { addChildNode(dxfRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)

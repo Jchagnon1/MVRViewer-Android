@@ -3,6 +3,7 @@ package com.minou.mvrviewer.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.DropdownMenu
@@ -21,7 +23,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -77,6 +81,10 @@ fun SceneOptionsMenu(
     showLabelsToggle: Boolean = false,
     showStructureToggle: Boolean = false,
     showLegendToggle: Boolean = false,
+    // Bascule du fond satellite (dispo seulement une fois la calibration GPS
+    // posée) : la vue 3D n'a pas de contrôle flottant (SurfaceView), donc elle
+    // pilote le satellite depuis ce menu, opacité comprise.
+    showSatelliteToggle: Boolean = false,
     // Section « Couleur du fond » : activée quand la vue fournit sa couleur
     // courante + un setter. Presets = (nom, ARGB). null → section masquée.
     background: Color? = null,
@@ -113,6 +121,29 @@ fun SceneOptionsMenu(
                 )
             }
             nav("Personnalisée…", Icons.Filled.Colorize) { open = false; showCustom = true }
+        }
+        if (showSatelliteToggle) {
+            HorizontalDivider()
+            check("Fond satellite (carte)", options.showSatellite) { options.showSatellite = !options.showSatellite }
+            if (options.showSatellite) {
+                // Opacité : curseur compact dans le menu (le glissé horizontal ne
+                // gêne pas le défilement vertical du menu).
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp)
+                ) {
+                    Icon(Icons.Filled.Public, contentDescription = null,
+                        modifier = Modifier.width(18.dp), tint = Color(0xFF888888))
+                    Slider(
+                        value = options.satelliteOpacity,
+                        onValueChange = { options.satelliteOpacity = it },
+                        valueRange = 0.05f..1f,
+                        modifier = Modifier.width(120.dp).padding(horizontal = 8.dp)
+                    )
+                    Text("${(options.satelliteOpacity * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall, color = Color(0xFF888888))
+                }
+            }
         }
         HorizontalDivider()
         check("Couleurs par calque", options.layerColors) { options.layerColors = !options.layerColors }

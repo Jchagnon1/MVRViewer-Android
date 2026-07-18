@@ -115,6 +115,8 @@ fun SceneScreen(
             options = options,
             gdtfOverrides = gdtfOverrides,
             referencePlan = referencePlan,
+            calibration = calibration,
+            satellite = satellite,
             onShowPlan = { mode = SceneMode.PLAN },
             onShowPatch = { mode = SceneMode.PATCH },
             onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },

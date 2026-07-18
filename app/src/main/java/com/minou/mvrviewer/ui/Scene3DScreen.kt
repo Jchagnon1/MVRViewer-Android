@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.google.android.filament.Engine
 import com.google.android.filament.MaterialInstance
 import com.google.android.filament.RenderableManager
+import com.google.android.filament.gltfio.FilamentAsset
 import com.minou.mvrviewer.mvr.GdtfLoader
 import com.minou.mvrviewer.mvr.MvrGeometryRef
 import com.minou.mvrviewer.mvr.MvrParser
@@ -125,6 +126,18 @@ fun Scene3DScreen(
     }
 
     val geometryRoot = rememberNode(engine)
+    // Assets glTF (.glb) créés par createInstancedModel, gardés pour être LIBÉRÉS
+    // à la reconstruction : ModelNode.destroy() NE libère PAS le FilamentAsset
+    // (entités + VertexBuffer/IndexBuffer/textures) — seul assetLoader.destroyAsset
+    // le fait. Persiste au-delà des version bumps (durée de vie du moteur), vidé
+    // au purge. Sans ça, chaque « appliquer un modèle GDTF » sur un show à .glb
+    // fuyait toute la mémoire GPU glTF → crash.
+    val glbAssets = remember { ArrayList<FilamentAsset>() }
+    // Cache des matériaux couleur de la build 3D, RÉUTILISÉ d'une reconstruction
+    // à l'autre : le MaterialLoader retient chaque createColorInstance et ne le
+    // libère qu'au dispose — le recréer à chaque « appliquer GDTF » (version
+    // bump) fuyait les instances de la build précédente.
+    val buildMaterialCache = remember(materialLoader) { HashMap<Int, MaterialInstance>() }
     // Sous-couche du plan de repère DXF (lignes), placée au sol par sa transformée.
     val dxfRoot = rememberNode(engine)
     val dxfMaterial = remember(materialLoader) { materialLoader.createUnlitColorInstance(DXF_LINE_COLOR) }
@@ -139,11 +152,31 @@ fun Scene3DScreen(
 
     // Reconstruit quand un modèle GDTF Share est appliqué (version bump).
     LaunchedEffect(scene, mvrBytes, gdtfOverrides.version) {
-        // Repart d'une scène vide (une re-résolution GDTF Share re-déclenche cet
-        // effet ; sans purge on empilerait la géométrie en double).
-        geometryRoot.childNodes.toList().forEach { geometryRoot.removeChildNode(it) }
-        gdtfFixtures = emptySet()
+        // Repart d'une scène vide (appliquer un modèle GDTF Share re-déclenche cet
+        // effet). ⚠️ On DÉTRUIT les anciens nœuds (removeChildNode NE libère PAS
+        // les ressources Filament : VertexBuffer/IndexBuffer/renderable). Sans ça,
+        // chaque reconstruction FUYAIT toute la géométrie GPU → saturation mémoire
+        // → CRASH après quelques changements de modèle. `destroy()` (via
+        // safeDestroyGeometry) est idempotent → géométrie partagée OK.
+        // On vide le LOD AVANT de détruire (sinon onFrame toucherait un nœud
+        // détruit pendant la reconstruction → crash).
         lod.reset()
+        gdtfFixtures = emptySet()
+        geometryRoot.childNodes.toList().forEach {
+            geometryRoot.removeChildNode(it)
+            runCatching { it.destroy() }
+        }
+        // Les nœuds détruits, on libère les FilamentAsset .glb de la build
+        // précédente. destroyModel EN PREMIER (retire de `models` pour que le
+        // dispose ne repasse pas dessus + releaseSourceData tant que l'asset est
+        // valide), puis destroyAsset (libère entités + buffers GPU). RenderableNode
+        // .destroy() n'a fait que retirer le COMPOSANT renderable des entités —
+        // pas de double-free. Idempotent (runCatching).
+        glbAssets.forEach { asset ->
+            runCatching { modelLoader.destroyModel(asset) }
+            runCatching { modelLoader.assetLoader.destroyAsset(asset) }
+        }
+        glbAssets.clear()
         val conv = conversionMatrix(center)
 
         // Découpe temporelle : les appels Filament (build Geometry, GeometryNode,
@@ -194,8 +227,7 @@ fun Scene3DScreen(
 
         // 2) Thread moteur : budget global de nœuds/triangles partagé 3ds+glb.
         val builtCache = HashMap<String, List<BuiltMesh>>()
-        val materialCache = HashMap<Int, MaterialInstance>()
-        fun material(color: Int) = materialCache.getOrPut(color) { materialLoader.createColorInstance(color) }
+        fun material(color: Int) = buildMaterialCache.getOrPut(color) { materialLoader.createColorInstance(color) }
         var nodes = 0
         var triangles = 0L
         var placed = 0
@@ -245,6 +277,7 @@ fun Scene3DScreen(
                     val instances = runCatching {
                         modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), take, resolver)
                     }.getOrNull() ?: continue
+                    instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
                     for (k in 0 until minOf(take, instances.size)) {
                         val node = io.github.sceneview.node.ModelNode(instances[k])
                         node.transform = transforms[k]
@@ -330,6 +363,7 @@ fun Scene3DScreen(
                         val instances = runCatching {
                             modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(fp.bytes), count)
                         }.getOrNull() ?: continue
+                        instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
                         val box = instances.firstOrNull()?.asset?.boundingBox
                         val rawMax = box?.halfExtent?.let { 2f * maxOf(it[0], it[1], it[2]) } ?: 0f
                         val s = when {
@@ -374,7 +408,7 @@ fun Scene3DScreen(
                         gdtfDone.add(fi2)
                         // Cube-proxy (1 par projecteur) affiché À LA PLACE du détail
                         // pendant les mouvements — commence masqué (on est au repos).
-                        if (fi2 < layout.positions.size) {
+                        if (fi2 < layout.positions.size && layout.valid[fi2]) {
                             val cubeMat = material(layout.colors[fi2])
                             val proxy = io.github.sceneview.node.CubeNode(
                                 engine, Float3(layout.cube, layout.cube, layout.cube),
@@ -402,7 +436,10 @@ fun Scene3DScreen(
     // (offset/rotation/échelle/hauteur), dans le MÊME repère monde que les
     // projecteurs (le retour en 3D recompose → reflète les derniers réglages).
     LaunchedEffect(referencePlan) {
-        dxfRoot.childNodes.toList().forEach { dxfRoot.removeChildNode(it) }
+        dxfRoot.childNodes.toList().forEach {
+            dxfRoot.removeChildNode(it)
+            runCatching { it.destroy() }   // libère VertexBuffer/IndexBuffer (sinon fuite à chaque ré-import)
+        }
         val rp = referencePlan ?: return@LaunchedEffect
         if (!rp.transform.visible || rp.plan.isEmpty) return@LaunchedEffect
         val cx = center.x; val cy = center.y; val cz = center.z
@@ -466,7 +503,17 @@ fun Scene3DScreen(
 
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
     val cameraNode = rememberCameraNode(engine) { position = camHome }
-    val manipulator = rememberCameraManipulator(orbitHomePosition = camHome, targetPosition = Float3(0f, 0f, 0f))
+    // Vitesse de pinch-zoom PROPORTIONNELLE à la taille de la scène : le zoom
+    // orbite Filament déplace la caméra d'un pas en unités MONDE (mètres), donc
+    // sur un gros show (ACF, Vega…) le pas par défaut (0,0555) fait avancer d'un
+    // rien → il fallait pincer 10 fois. On l'échelonne sur le rayon.
+    val target = remember { Float3(0f, 0f, 0f) }
+    val zoomSpeed = remember(layout) { (layout.radius * 0.006f).coerceIn(0.0555f, 12f) }
+    val manipulator = rememberCameraManipulator(orbitHomePosition = camHome, targetPosition = target) {
+        io.github.sceneview.gesture.CameraGestureDetector.DefaultCameraManipulator(
+            orbitHomePosition = camHome, targetPosition = target, pinchZoomSpeed = zoomSpeed
+        )
+    }
 
     // Barre du haut EN DEHORS de la zone SceneView : celle-ci consomme tous les
     // touchers, donc des contrôles flottants PAR-DESSUS (façon iOS) ne
@@ -542,8 +589,9 @@ fun Scene3DScreen(
                 Node(apply = { addChildNode(dxfRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)
                 layout.positions.forEachIndexed { i, p ->
-                    // Cube de repli masqué dès que le projecteur a sa silhouette GDTF.
-                    if (i !in gdtfFixtures) {
+                    // Cube de repli masqué dès que le projecteur a sa silhouette GDTF,
+                    // ou si sa position est invalide (translation non finie).
+                    if (i !in gdtfFixtures && layout.valid[i]) {
                         val mat = if (options.layerColors) fixtureMaterials.getValue(layout.colors[i]) else grayMaterial
                         CubeNode(size = s, materialInstance = mat, position = p)
                     }
@@ -662,6 +710,18 @@ private fun prepareMeshData(mesh: ThreeDSParser.Mesh): MeshData? {
     val vs = mesh.vertices
     val fi = mesh.faceIndices
 
+    // Le .3ds stocke les indices de face en U16 bruts, SANS garantie qu'ils
+    // pointent dans le tableau de sommets (fichier corrompu / mal exporté). Un
+    // indice ≥ vc chargé tel quel fait lire le GPU HORS du VertexBuffer au dessin
+    // → corruption ou abort natif (surtout sur pilotes sans robust-buffer-access).
+    // On ne garde que les triangles dont les 3 indices sont valides.
+    fun okTri(t: Int): Boolean {
+        val o = t * 3
+        if (o + 2 >= fi.size) return false
+        val a = fi[o]; val b = fi[o + 1]; val c = fi[o + 2]
+        return a in 0 until vc && b in 0 until vc && c in 0 until vc
+    }
+
     // Normales lissées par sommet (le .3ds n'en stocke pas).
     val nx = FloatArray(vc); val ny = FloatArray(vc); val nz = FloatArray(vc)
     var i = 0
@@ -772,7 +832,7 @@ private fun conversionMatrix(center: Float3): Mat4 {
 
 // ---- Projecteurs (cubes) ----
 
-private class FixtureLayout(val positions: List<Float3>, val colors: List<Int>, val radius: Float, val cube: Float)
+private class FixtureLayout(val positions: List<Float3>, val colors: List<Int>, val valid: List<Boolean>, val radius: Float, val cube: Float)
 
 private val LAYER_PALETTE = intArrayOf(
     0xFFE53935.toInt(), 0xFF8E24AA.toInt(), 0xFF3949AB.toInt(), 0xFF1E88E5.toInt(),
@@ -794,15 +854,27 @@ private fun sceneCenterMm(scene: MvrScene): Float3 {
 private fun fixtureLayout(scene: MvrScene, center: Float3): FixtureLayout {
     val layerIndex = scene.layers.withIndex().associate { (i, l) -> l.name to i }
     val src = scene.fixtures.ifEmpty { scene.allObjects.take(2000) }
-    val positions = ArrayList<Float3>(); val colors = ArrayList<Int>()
+    // Aligné 1:1 sur `src` (= scene.fixtures quand non vide) : la build GDTF
+    // indexe layout.positions/colors par l'index PLEIN du projecteur (fi2) et
+    // gdtfFixtures stocke ces mêmes index. Un projecteur à translation non finie
+    // GARDE son entrée (valid=false, jamais dessinée) pour ne PAS décaler les
+    // index des suivants — sinon proxy/cube tombaient sur le mauvais projecteur.
+    val positions = ArrayList<Float3>(src.size); val colors = ArrayList<Int>(src.size)
+    val valid = ArrayList<Boolean>(src.size)
     for (o in src) {
         val t = o.transform.translation
-        if (!(t[0].isFinite() && t[1].isFinite() && t[2].isFinite())) continue
-        positions.add(Float3((t[0] - center.x) / 1000f, (t[2] - center.z) / 1000f, -(t[1] - center.y) / 1000f))
+        val ok = t[0].isFinite() && t[1].isFinite() && t[2].isFinite()
+        valid.add(ok)
+        positions.add(
+            if (ok) Float3((t[0] - center.x) / 1000f, (t[2] - center.z) / 1000f, -(t[1] - center.y) / 1000f)
+            else Float3(0f, 0f, 0f)
+        )
         colors.add(LAYER_PALETTE[(layerIndex[o.layerName] ?: 0) % LAYER_PALETTE.size])
     }
     var r = 0f
-    for (p in positions) { val d = sqrt(p.x * p.x + p.y * p.y + p.z * p.z); if (d > r) r = d }
+    for (i in positions.indices) if (valid[i]) {
+        val p = positions[i]; val d = sqrt(p.x * p.x + p.y * p.y + p.z * p.z); if (d > r) r = d
+    }
     if (r <= 0f || !r.isFinite()) r = 5f
-    return FixtureLayout(positions, colors, r, (r * 0.03f).coerceIn(0.1f, 1.5f))
+    return FixtureLayout(positions, colors, valid, r, (r * 0.03f).coerceIn(0.1f, 1.5f))
 }

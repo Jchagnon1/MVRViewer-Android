@@ -20,17 +20,23 @@ object MvrParser {
 
     /** Extrait les octets d'une entrée nommée du ZIP (null si absente). */
     fun extractEntry(mvrBytes: ByteArray, name: String): ByteArray? {
-        ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                // Le MVR peut ranger les fichiers dans des sous-dossiers : on
-                // compare le nom simple aussi.
-                if (entry.name == name || entry.name.substringAfterLast('/') == name) {
-                    return zip.readBytes()
+        // Le ZIP peut être corrompu/tronqué (un .gdtf téléchargé de GDTF Share
+        // via un CDN/proxy fautif, un transfert coupé) : on ATTRAPE l'erreur au
+        // lieu de la laisser remonter — sinon elle traversait la coroutine de
+        // reconstruction et FAISAIT CRASHER l'app (« charger une fixture GDTF »).
+        try {
+            ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    // Le MVR peut ranger les fichiers dans des sous-dossiers : on
+                    // compare le nom simple aussi.
+                    if (entry.name == name || entry.name.substringAfterLast('/') == name) {
+                        return zip.readBytes()
+                    }
+                    entry = zip.nextEntry
                 }
-                entry = zip.nextEntry
             }
-        }
+        } catch (_: Exception) { /* ZIP illisible → traité comme entrée absente */ }
         return null
     }
 
@@ -42,35 +48,43 @@ object MvrParser {
     fun extractEntries(mvrBytes: ByteArray, names: Set<String>): Map<String, ByteArray> {
         if (names.isEmpty()) return emptyMap()
         val out = HashMap<String, ByteArray>(names.size)
-        ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                val full = entry.name
-                val base = full.substringAfterLast('/')
-                val key = when {
-                    names.contains(full) -> full
-                    names.contains(base) -> base
-                    else -> null
+        // ZIP corrompu → on renvoie ce qu'on a déjà extrait (jamais d'exception
+        // remontante : cf. extractEntry).
+        try {
+            ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val full = entry.name
+                    val base = full.substringAfterLast('/')
+                    val key = when {
+                        names.contains(full) -> full
+                        names.contains(base) -> base
+                        else -> null
+                    }
+                    if (key != null && !out.containsKey(key)) {
+                        out[key] = zip.readBytes()
+                        // Tout trouvé → stop : évite de décompresser le reste du zip
+                        // (57 lots de glb sur un gros show = 57 parcours sinon).
+                        if (out.size == names.size) return out
+                    }
+                    entry = zip.nextEntry
                 }
-                if (key != null && !out.containsKey(key)) {
-                    out[key] = zip.readBytes()
-                    // Tout trouvé → stop : évite de décompresser le reste du zip
-                    // (57 lots de glb sur un gros show = 57 parcours sinon).
-                    if (out.size == names.size) return out
-                }
-                entry = zip.nextEntry
             }
-        }
+        } catch (_: Exception) { /* ZIP illisible → on renvoie l'extrait partiel */ }
         return out
     }
 
     /** Liste les entrées du ZIP (diagnostic). */
     fun listEntries(mvrBytes: ByteArray): List<String> {
         val out = mutableListOf<String>()
-        ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) { out.add(entry.name); entry = zip.nextEntry }
-        }
+        // ZIP corrompu → liste partielle (jamais d'exception : hasThreeDModel
+        // s'appuie dessus sur des octets GDTF Share potentiellement fautifs).
+        try {
+            ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) { out.add(entry.name); entry = zip.nextEntry }
+            }
+        } catch (_: Exception) { /* ZIP illisible → liste partielle */ }
         return out
     }
 

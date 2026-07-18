@@ -50,6 +50,8 @@ import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
@@ -78,6 +80,10 @@ class GdtfOverrides {
  *  - liste des TYPES de projecteurs → on ouvre une RECHERCHE GDTF Share et on
  *    choisit soi-même le bon modèle (port de GDTFMappingListView + GDTFModelSearchView).
  */
+// Plafond du cache de .gdtf préchargés dans la recherche (chaque entrée pèse
+// plusieurs Mo) : au-delà, on ne garde plus les octets (re-téléchargement au choix).
+private const val PREFETCH_CAP = 40
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GdtfShareScreen(
@@ -249,13 +255,21 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
     // Disponibilité d'un VRAI modèle 3D par révision (rid) : absent = pas encore
     // vérifié (spinner). Le .gdtf téléchargé pour la vérif est réutilisé au choix.
     val modelAvail = remember { mutableStateMapOf<Int, Boolean>() }
+    // Cache des .gdtf préchargés (réutilisés au choix d'une ligne). BORNÉ : chaque
+    // .gdtf pèse plusieurs Mo → sans plafond ni purge, faire défiler/rechercher
+    // faisait exploser la mémoire. Vidé à chaque nouvelle requête.
     val prefetched = remember { HashMap<Int, ByteArray>() }
     val checking = remember { mutableStateMapOf<Int, Boolean>() }
+    // Limite les téléchargements de sonde simultanés (défilement rapide).
+    val probeGate = remember { Semaphore(4) }
 
     // Recherche initiale + à chaque frappe (léger anti-rebond).
     LaunchedEffect(query) {
         loading = true
         kotlinx.coroutines.delay(250)
+        // Nouvelle requête → on oublie les .gdtf préchargés de la précédente
+        // (sinon la map grossit sans borne au fil des recherches).
+        prefetched.clear(); modelAvail.clear(); checking.clear()
         runCatching { GdtfShareClient.search(query) }.fold(
             onSuccess = { results = it; error = null },
             onFailure = { error = it.message ?: "Recherche impossible." }
@@ -295,10 +309,14 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
                 LaunchedEffect(entry.rid) {
                     if (modelAvail.containsKey(entry.rid) || checking.containsKey(entry.rid)) return@LaunchedEffect
                     checking[entry.rid] = true
-                    val data = runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
+                    val data = probeGate.withPermit {
+                        runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
+                    }
                     checking.remove(entry.rid)
                     if (data == null) { modelAvail[entry.rid] = false; return@LaunchedEffect }
-                    prefetched[entry.rid] = data
+                    // Ne garde le .gdtf que si le cache n'est pas déjà plein (borne
+                    // mémoire) : au-delà, le choix de la ligne re-téléchargera.
+                    if (prefetched.size < PREFETCH_CAP) prefetched[entry.rid] = data
                     modelAvail[entry.rid] = withContext(Dispatchers.Default) {
                         com.minou.mvrviewer.mvr.GdtfLoader.hasThreeDModel(data)
                     }

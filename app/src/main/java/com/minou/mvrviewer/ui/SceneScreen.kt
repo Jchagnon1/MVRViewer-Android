@@ -34,6 +34,9 @@ fun SceneScreen(
 ) {
     var mode by remember { mutableStateOf(SceneMode.THREE_D) }
     val ctx = LocalContext.current
+    // Fil d'Ariane pour le journal de diagnostic : on saura dans quelle vue
+    // l'appli était juste avant un plantage/gel (ex. « vue plan »).
+    LaunchedEffect(mode) { com.minou.mvrviewer.CrashReporter.note("vue affichée : $mode ($fileName)") }
     // Couleurs de fond semées depuis la préférence globale persistée, puis
     // ré-enregistrées à chaque changement (comme les @State + onChange iOS).
     val options = remember {

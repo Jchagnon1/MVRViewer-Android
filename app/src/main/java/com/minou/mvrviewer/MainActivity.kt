@@ -30,6 +30,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Journal de diagnostic (plantages + gels) le plus tôt possible, pour
+        // capturer même un problème au tout démarrage. Cf. CrashReporter.
+        CrashReporter.install(this)
         enableEdgeToEdge()
         incomingUri.value = uriFrom(intent)
         setContent {

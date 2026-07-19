@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -25,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -127,7 +129,34 @@ fun HomeScreen(
                         }
                     }
                 }
+                // Rapport de diagnostic : n'apparaît que si un plantage/gel a été
+                // journalisé. Le testeur (Stéphane) peut ainsi nous l'envoyer.
+                val hasDiag = remember(state) {
+                    com.minou.mvrviewer.CrashReporter.logFile(ctx).let { it.exists() && it.length() > 0L }
+                }
+                if (hasDiag) {
+                    TextButton(onClick = { shareDiag(ctx) }, modifier = Modifier.padding(top = 20.dp)) {
+                        Icon(Icons.Filled.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  Envoyer le rapport de diagnostic")
+                    }
+                }
             }
         }
     }
+}
+
+/** Partage le journal de diagnostic (plantages + gels) via ACTION_SEND. */
+private fun shareDiag(ctx: android.content.Context) {
+    val f = com.minou.mvrviewer.CrashReporter.logFile(ctx)
+    if (!f.exists() || f.length() == 0L) return
+    val uri = runCatching {
+        androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+    }.getOrNull() ?: return
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "MVR Viewer — rapport de diagnostic")
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { ctx.startActivity(android.content.Intent.createChooser(send, "Envoyer le rapport")) }
 }

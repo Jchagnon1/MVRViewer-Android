@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Journal de diagnostic dans le dossier privé externe de l'appli. -->
+    <external-files-path name="diag" path="." />
+</paths>

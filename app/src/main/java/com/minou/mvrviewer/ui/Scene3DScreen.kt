@@ -36,6 +36,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -707,6 +709,11 @@ fun Scene3DScreen(
     // Bumpé quand la caméra bouge → force le re-calcul des projections écran des
     // surbrillances (les positions monde ne sont pas des états Compose).
     var projVersion by remember(scene) { mutableIntStateOf(0) }
+    // Position (fenêtre) du coin haut-gauche de la zone SceneView. Sert à
+    // convertir les coordonnées ÉCRAN-ABSOLUES d'un MotionEvent (e.rawX/rawY, seul
+    // repère fiable — e.x/e.y sont dans un repère décalé) vers le repère de la
+    // SceneView = celui de worldToScreenPoint (comme la position d'un geste Compose).
+    var scenePos by remember { mutableStateOf(Offset.Zero) }
 
     // Projette la position monde (Filament) d'un projecteur en pixels écran de la
     // SceneView (origine coin haut-gauche, comme Compose). null si derrière la
@@ -723,6 +730,34 @@ fun Scene3DScreen(
         }.getOrNull() ?: return null
         if (!sp.x.isFinite() || !sp.y.isFinite()) return null
         return Offset(sp.x, sp.y)
+    }
+
+    // TAP : sélectionne le projecteur le plus proche du point touché (≤ ~55 px)
+    // → l'AJOUTE (ou le retire s'il y est déjà) ; toucher dans le vide / sur un
+    // élément qui n'est PAS un projecteur → désélectionne TOUT. On travaille dans
+    // le repère de l'overlay Compose (mêmes coordonnées que worldToScreenPoint —
+    // le geste natif de SceneView, lui, décalait de la hauteur de la barre du haut).
+    fun handleTap(pos: Offset) {
+        var best = -1; var bestD = 55f
+        for (i in layout.positions.indices) {
+            val o = projectFixture(i) ?: continue
+            val d = kotlin.math.hypot(o.x - pos.x, o.y - pos.y)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        if (best < 0) selected.clear()
+        else if (!selected.remove(best)) selected.add(best)
+    }
+
+    // Tap via le détecteur natif de SceneView (il FIRE bien, contrairement à
+    // detectTapGestures/awaitEachGesture d'un overlay Compose que la SceneView
+    // court-circuite). Les coordonnées MotionEvent sont dans le repère de la
+    // SceneView = même repère que worldToScreenPoint → handleTap(Offset(e.x,e.y)).
+    val tapListener = remember(scene) {
+        object : io.github.sceneview.gesture.GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapUp(e: android.view.MotionEvent, node: io.github.sceneview.node.Node?) {
+                handleTap(Offset(e.rawX - scenePos.x, e.rawY - scenePos.y))
+            }
+        }
     }
 
     // Barre du haut dans une vraie TopAppBar (au-dessus de la SceneView). NB :
@@ -757,7 +792,8 @@ fun Scene3DScreen(
                 )
             }
         )
-        Box(modifier = Modifier.fillMaxSize().background(options.background3D)) {
+        Box(modifier = Modifier.fillMaxSize().background(options.background3D)
+            .onGloballyPositioned { scenePos = it.positionInWindow() }) {
             Scene(
                 modifier = Modifier.fillMaxSize(),
                 engine = engine,
@@ -765,6 +801,7 @@ fun Scene3DScreen(
                 materialLoader = materialLoader,
                 cameraNode = cameraNode,
                 cameraManipulator = manipulator,
+                onGestureListener = tapListener,
                 // Environnement à skybox coloré = couleur de fond choisie.
                 environment = bgEnv,
                 // NE PAS recadrer la caméra sur le contenu : sinon un plan DXF
@@ -820,10 +857,11 @@ fun Scene3DScreen(
                 }
             }
 
-            // Couche de sélection PAR-DESSUS la scène. En mode rectangle, elle
-            // CAPTE le glissé (la SceneView en dessous ne bouge donc pas la caméra)
-            // et trace le cadre ; à la fin on sélectionne les projecteurs projetés
-            // dedans. Le dessin (cadre + surbrillances) est toujours actif.
+            // Couche de sélection : présente UNIQUEMENT en mode rectangle, où elle
+            // CAPTE le glissé (la SceneView en dessous ne bouge donc pas la caméra) et
+            // trace le cadre. IMPORTANT : hors de ce mode on ne met AUCUN overlay
+            // pointerInput — même inerte, il capterait le tap et empêcherait le
+            // détecteur natif de la SceneView (tapListener) de le recevoir.
             if (rectMode) {
                 Box(
                     Modifier.fillMaxSize().pointerInput(scene) {
@@ -836,10 +874,11 @@ fun Scene3DScreen(
                                     val l = minOf(a.x, b.x); val r = maxOf(a.x, b.x)
                                     val t = minOf(a.y, b.y); val bo = maxOf(a.y, b.y)
                                     if (r - l > 8f && bo - t > 8f) {
-                                        selected.clear()
+                                        // ADDITIF : le cadre AJOUTE à la sélection existante
+                                        // (plusieurs cadres cumulent), sans doublon.
                                         for (i in layout.positions.indices) {
                                             val o = projectFixture(i) ?: continue
-                                            if (o.x in l..r && o.y in t..bo) selected.add(i)
+                                            if (o.x in l..r && o.y in t..bo && i !in selected) selected.add(i)
                                         }
                                     }
                                 }

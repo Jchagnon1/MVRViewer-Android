@@ -1,27 +1,44 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.google.android.filament.Engine
 import com.google.android.filament.MaterialInstance
@@ -679,9 +696,40 @@ fun Scene3DScreen(
         )
     }
 
-    // Barre du haut EN DEHORS de la zone SceneView : celle-ci consomme tous les
-    // touchers, donc des contrôles flottants PAR-DESSUS (façon iOS) ne
-    // recevraient jamais les taps. Une vraie TopAppBar au-dessus reste cliquable.
+    // ---- Sélection par cadre (rectangle) dans la vue 3D (comme la vue plan et
+    // iOS) : en « mode rectangle », le glissé trace un cadre et sélectionne tous
+    // les projecteurs dont la projection écran tombe dedans. Hors ce mode, le
+    // glissé pilote la caméra normalement. `selected` = index dans layout/fixtures.
+    val selected = remember(scene) { mutableStateListOf<Int>() }
+    var rectMode by remember(scene) { mutableStateOf(false) }
+    var rectStart by remember { mutableStateOf<Offset?>(null) }
+    var rectEnd by remember { mutableStateOf<Offset?>(null) }
+    // Bumpé quand la caméra bouge → force le re-calcul des projections écran des
+    // surbrillances (les positions monde ne sont pas des états Compose).
+    var projVersion by remember(scene) { mutableIntStateOf(0) }
+
+    // Projette la position monde (Filament) d'un projecteur en pixels écran de la
+    // SceneView (origine coin haut-gauche, comme Compose). null si derrière la
+    // caméra ou invalide. La caméra orbite → son axe avant = vers la cible.
+    fun projectFixture(i: Int): Offset? {
+        if (i !in layout.positions.indices || !layout.valid[i]) return null
+        val wp = layout.positions[i]
+        val cam = cameraNode.worldPosition
+        val fdx = target.x - cam.x; val fdy = target.y - cam.y; val fdz = target.z - cam.z
+        val dx = wp.x - cam.x; val dy = wp.y - cam.y; val dz = wp.z - cam.z
+        if (fdx * dx + fdy * dy + fdz * dz <= 0f) return null // derrière la caméra
+        val sp = runCatching {
+            cameraNode.worldToScreenPoint(io.github.sceneview.collision.Vector3(wp.x, wp.y, wp.z))
+        }.getOrNull() ?: return null
+        if (!sp.x.isFinite() || !sp.y.isFinite()) return null
+        return Offset(sp.x, sp.y)
+    }
+
+    // Barre du haut dans une vraie TopAppBar (au-dessus de la SceneView). NB :
+    // contrairement à ce qu'on croyait, des contrôles Compose flottants PAR-DESSUS
+    // la SceneView SONT bien visibles ET cliquables, et un overlay pointerInput
+    // capte le glissé avant la caméra — c'est ce qui rend possible la barre d'outils
+    // de sélection et le cadre de sélection plus bas.
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
@@ -736,6 +784,8 @@ fun Scene3DScreen(
                     val moved = lod.lastX.isNaN() ||
                         (kotlin.math.abs(p.x - lod.lastX) + kotlin.math.abs(p.y - lod.lastY) + kotlin.math.abs(p.z - lod.lastZ)) > 0.02f
                     lod.lastX = p.x; lod.lastY = p.y; lod.lastZ = p.z
+                    // La caméra a bougé → re-projeter les surbrillances de sélection.
+                    if (moved && selected.isNotEmpty()) projVersion++
                     if (lod.nodes.isNotEmpty() || lod.proxies.isNotEmpty()) {
                         if (moved) {
                             lod.idle = 0
@@ -767,6 +817,89 @@ fun Scene3DScreen(
                         val mat = if (options.layerColors) fixtureMaterials.getValue(layout.colors[i]) else grayMaterial
                         CubeNode(size = s, materialInstance = mat, position = p)
                     }
+                }
+            }
+
+            // Couche de sélection PAR-DESSUS la scène. En mode rectangle, elle
+            // CAPTE le glissé (la SceneView en dessous ne bouge donc pas la caméra)
+            // et trace le cadre ; à la fin on sélectionne les projecteurs projetés
+            // dedans. Le dessin (cadre + surbrillances) est toujours actif.
+            if (rectMode) {
+                Box(
+                    Modifier.fillMaxSize().pointerInput(scene) {
+                        detectDragGestures(
+                            onDragStart = { rectStart = it; rectEnd = it },
+                            onDrag = { change, _ -> change.consume(); rectEnd = change.position },
+                            onDragEnd = {
+                                val a = rectStart; val b = rectEnd
+                                if (a != null && b != null) {
+                                    val l = minOf(a.x, b.x); val r = maxOf(a.x, b.x)
+                                    val t = minOf(a.y, b.y); val bo = maxOf(a.y, b.y)
+                                    if (r - l > 8f && bo - t > 8f) {
+                                        selected.clear()
+                                        for (i in layout.positions.indices) {
+                                            val o = projectFixture(i) ?: continue
+                                            if (o.x in l..r && o.y in t..bo) selected.add(i)
+                                        }
+                                    }
+                                }
+                                rectStart = null; rectEnd = null
+                            },
+                            onDragCancel = { rectStart = null; rectEnd = null }
+                        )
+                    }
+                )
+            }
+            Canvas(Modifier.fillMaxSize()) {
+                projVersion // dépendance de redraw quand la caméra bouge
+                // Surbrillances des projecteurs sélectionnés.
+                selected.forEach { i ->
+                    val o = projectFixture(i) ?: return@forEach
+                    drawCircle(Color(0xFFFFC400), radius = 26f, center = o, style = Stroke(width = 4f))
+                }
+                // Cadre en cours de tracé.
+                val a = rectStart; val b = rectEnd
+                if (rectMode && a != null && b != null) {
+                    val tl = Offset(minOf(a.x, b.x), minOf(a.y, b.y))
+                    val sz = Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y))
+                    drawRect(Color(0x33FFC400), topLeft = tl, size = sz)
+                    drawRect(Color(0xFFFFC400), topLeft = tl, size = sz, style = Stroke(width = 2f))
+                }
+            }
+
+            // Barre d'outils flottante (bas-gauche) : bascule du mode rectangle +
+            // effacer la sélection. Même emplacement que la vue plan.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
+            ) {
+                FilledIconToggleButton(
+                    checked = rectMode,
+                    onCheckedChange = { rectMode = it; if (!it) { rectStart = null; rectEnd = null } }
+                ) { Icon(Icons.Filled.Crop, contentDescription = "Sélection rectangle") }
+                if (selected.isNotEmpty()) {
+                    FilledIconButton(onClick = { selected.clear() }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Effacer la sélection")
+                    }
+                }
+            }
+
+            // Panneau d'info de sélection (bas-centre).
+            if (selected.isNotEmpty()) {
+                val label = if (selected.size == 1 && selected.first() in scene.fixtures.indices) {
+                    val f = scene.fixtures[selected.first()]
+                    "N° ${f.fixtureId ?: "?"} · ${f.name}"
+                } else "${selected.size} projecteurs sélectionnés"
+                Surface(
+                    color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
+                ) {
+                    Text(
+                        label, color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
                 }
             }
         }

@@ -230,26 +230,27 @@ fun Scene3DScreen(
             runCatching { modelLoader.assetLoader.destroyAsset(asset) }
         }
         glbAssets.clear()
-        // On MASQUE la géométrie pendant la construction : sinon chaque `yield`
-        // re-dessine la scène EN COURS (de plus en plus lourde) → le rendu
-        // intermédiaire dominait le temps de chargement d'un gros show. Caché,
-        // les trames sont vides (rapides) ; on révèle tout à la fin.
-        geometryRoot.isVisible = false
+        // NB : on ne masque PLUS la géométrie pendant la construction. Tout
+        // révéler d'un coup à la fin concentrait le tout premier rendu de la
+        // scène complète (des milliers de nœuds) dans UNE seule trame → gros
+        // blocage du thread principal (ANR « MVR Viewer ne répond pas », signalé
+        // par Samsung Device Care). En construisant à vue, chaque trame ne rend
+        // qu'un incrément → le coût est étalé et l'appli reste réactive.
         val conv = conversionMatrix(center)
 
         // Découpe temporelle : les appels Filament (build Geometry, GeometryNode,
         // addChildNode, createInstancedModel) DOIVENT rester sur le thread moteur,
         // mais on rend la main toutes les ~6 ms pour ne JAMAIS bloquer l'UI plus
         // d'une trame — c'était la cause de l'ANR au chargement d'un gros show.
-        // On rend la main périodiquement pour ne pas bloquer l'UI (ANR), MAIS
-        // chaque yield re-dessine la scène en cours de construction (de plus en
-        // plus lourde) → yielder trop souvent (6 ms) triplait le temps de
-        // chargement d'un gros show. 40 ms reste bien sous le seuil d'ANR (5 s)
-        // tout en divisant le nombre de re-rendus intermédiaires.
+        // On rend la main TRÈS souvent (~8 ms) pour ne jamais bloquer l'UI : un
+        // seuil trop haut (40 ms) laissait le thread principal enchaîner trop de
+        // travail Filament d'affilée → sur un appareil lent, ça franchissait le
+        // seuil d'ANR (5 s) et déclenchait « l'appli ne répond pas ». La réactivité
+        // prime sur la vitesse brute de chargement.
         var lastYield = System.nanoTime()
         suspend fun slice() {
             val now = System.nanoTime()
-            if (now - lastYield > 40_000_000L) { yield(); lastYield = System.nanoTime() }
+            if (now - lastYield > 16_000_000L) { yield(); lastYield = System.nanoTime() }
         }
 
         // 1) Prep CPU HORS THREAD PRINCIPAL (résolution des refs, extraction zip
@@ -502,7 +503,6 @@ fun Scene3DScreen(
             }
         }
         gdtfFixtures = gdtfDone
-        geometryRoot.isVisible = true   // scène complète → on la révèle
 
         status = "$placed objets 3D" +
             (if (gdtfDone.isNotEmpty()) " · ${gdtfDone.size} proj. GDTF" else "") +

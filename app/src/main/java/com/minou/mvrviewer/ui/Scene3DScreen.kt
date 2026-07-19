@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -240,7 +241,13 @@ fun Scene3DScreen(
         // recalcul ; on détruit ensuite les ressources Filament de chacun.
         val oldChildren = geometryRoot.childNodes.toList()
         runCatching { geometryRoot.clearChildNodes() }
-        oldChildren.forEach { runCatching { it.destroy() } }
+        // destroy() par nœud = un appel natif (TransformManager.nDestroy) → détruire
+        // des MILLIERS de nœuds d'affilée gèlerait le thread principal (> 6 s = ANR)
+        // au rebuild GDTF d'un gros show. On rend la main tous les 128 nœuds.
+        oldChildren.forEachIndexed { idx, n ->
+            runCatching { n.destroy() }
+            if (idx and 127 == 0) yield()
+        }
         // Les nœuds détruits, on libère les FilamentAsset .glb de la build
         // précédente. destroyModel EN PREMIER (retire de `models` pour que le
         // dispose ne repasse pas dessus + releaseSourceData tant que l'asset est
@@ -939,6 +946,24 @@ fun Scene3DScreen(
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                     )
+                }
+            }
+
+            // LIBÉRATION À LA SORTIE — correctif du GEL confirmé par le journal de
+            // Stéphane (Samsung A55, gros show Vega) : en quittant/fermant la vue 3D,
+            // SceneView DÉTRUIT les nœuds UN PAR UN (TransformManager.nDestroy natif)
+            // récursivement → des milliers de nœuds = > 6 s sur le thread principal
+            // → ANR. Ici on DÉTACHE geometryRoot/dxfRoot/satRoot d'un coup
+            // (clearChildNodes = léger, aucun destroy natif) AVANT que SceneView n'y
+            // descende ; le dispose du moteur (rememberEngine) libère ensuite TOUTES
+            // les ressources en bloc. Placé en dernier dans le Box → sa libération
+            // s'exécute AVANT celle de la scène (ordre inverse de composition).
+            DisposableEffect(Unit) {
+                onDispose {
+                    lod.reset()
+                    runCatching { geometryRoot.clearChildNodes() }
+                    runCatching { dxfRoot.clearChildNodes() }
+                    runCatching { satRoot.clearChildNodes() }
                 }
             }
         }

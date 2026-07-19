@@ -215,10 +215,13 @@ fun Scene3DScreen(
         // détruit pendant la reconstruction → crash).
         lod.reset()
         gdtfFixtures = emptySet()
-        geometryRoot.childNodes.toList().forEach {
-            geometryRoot.removeChildNode(it)
-            runCatching { it.destroy() }
-        }
+        // Détacher TOUT d'un coup : removeChildNode() recalcule le Set d'enfants à
+        // CHAQUE appel (O(n)) → détacher des milliers de nœuds un par un = O(n²) et
+        // gelait le thread principal au rebuild GDTF. clearChildNodes() = un seul
+        // recalcul ; on détruit ensuite les ressources Filament de chacun.
+        val oldChildren = geometryRoot.childNodes.toList()
+        runCatching { geometryRoot.clearChildNodes() }
+        oldChildren.forEach { runCatching { it.destroy() } }
         // Les nœuds détruits, on libère les FilamentAsset .glb de la build
         // précédente. destroyModel EN PREMIER (retire de `models` pour que le
         // dispose ne repasse pas dessus + releaseSourceData tant que l'asset est
@@ -251,6 +254,25 @@ fun Scene3DScreen(
         suspend fun slice() {
             val now = System.nanoTime()
             if (now - lastYield > 16_000_000L) { yield(); lastYield = System.nanoTime() }
+        }
+
+        // AJOUT DES NŒUDS PAR LOTS — correctif du gel confirmé par le journal :
+        // Node.addChildNode() recalcule tout le Set d'enfants du parent à CHAQUE
+        // appel (setChildNodes fait un diff de Set). Ajouter des milliers d'objets
+        // un par un à geometryRoot était donc O(n²) → le thread principal partait
+        // dans des millions d'opérations HashSet (pile bloquée dans
+        // Node.setChildNodes). On accumule et on pousse le lot en UN SEUL
+        // addChildNodes(Set) (un seul recalcul), toutes les ~200 entrées.
+        val pendingAdd = HashSet<io.github.sceneview.node.Node>(400)
+        suspend fun flushAdds() {
+            if (pendingAdd.isEmpty()) return
+            runCatching { geometryRoot.addChildNodes(HashSet(pendingAdd)) }
+            pendingAdd.clear()
+            slice()
+        }
+        suspend fun enqueueAdd(node: io.github.sceneview.node.Node) {
+            pendingAdd.add(node)
+            if (pendingAdd.size >= 200) flushAdds()
         }
 
         // 1) Prep CPU HORS THREAD PRINCIPAL (résolution des refs, extraction zip
@@ -309,13 +331,12 @@ fun Scene3DScreen(
             for (bm in built) {
                 val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
                 node.transform = r.world
-                geometryRoot.addChildNode(node)
+                enqueueAdd(node)
                 if (small) lod.nodes.add(node)
                 nodes++; triangles += bm.triangles
             }
             placed++
             if (placed % 40 == 0) status = "$placed objets 3D…"
-            slice()
         }
 
         // 2b) .glb : createInstancedModel (N instances d'un même fichier = 1 seul
@@ -356,8 +377,7 @@ fun Scene3DScreen(
                         for (k in 0 until minOf(take, instances.size)) {
                             val node = io.github.sceneview.node.ModelNode(instances[k])
                             node.transform = transforms[k]
-                            geometryRoot.addChildNode(node)
-                            slice()
+                            enqueueAdd(node)
                         }
                         nodes += take
                         placed += take
@@ -466,7 +486,7 @@ fun Scene3DScreen(
                             for (bm in b.built) {
                                 val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
                                 node.transform = world
-                                geometryRoot.addChildNode(node)
+                                enqueueAdd(node)
                                 lod.nodes.add(node)   // détail masqué en navigation
                                 nodes++
                             }
@@ -475,7 +495,7 @@ fun Scene3DScreen(
                             val inst = b.glbQueue.removeFirstOrNull() ?: continue
                             val node = io.github.sceneview.node.ModelNode(inst)
                             node.transform = world
-                            geometryRoot.addChildNode(node)
+                            enqueueAdd(node)
                             lod.nodes.add(node)
                             nodes++
                             any = true
@@ -492,7 +512,7 @@ fun Scene3DScreen(
                                 layout.positions[fi2], cubeMat
                             )
                             proxy.isVisible = false
-                            geometryRoot.addChildNode(proxy)
+                            enqueueAdd(proxy)
                             lod.proxies.add(proxy)
                         }
                     }
@@ -502,6 +522,7 @@ fun Scene3DScreen(
                 break@sourceLoop  // spec rendu — pas besoin du repli
             }
         }
+        flushAdds()   // pousse le dernier lot de nœuds en attente
         gdtfFixtures = gdtfDone
 
         status = "$placed objets 3D" +

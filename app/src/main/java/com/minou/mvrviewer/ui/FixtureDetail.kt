@@ -42,6 +42,37 @@ import kotlinx.coroutines.withContext
 /** Modification de patch d'un projecteur (ID / adresse DMX / mode). */
 data class PatchEdit(val fixtureId: String?, val address: String?, val modeName: String?)
 
+/**
+ * Une adresse DMX s'écrit « univers.adresse » : QUE des chiffres et UN seul
+ * point. On filtre la saisie (des lettres n'ont aucun sens ici) et on convertit
+ * la virgule — le clavier décimal français en produit une.
+ */
+internal fun sanitizeDmxAddress(raw: String): String {
+    val sb = StringBuilder()
+    var dotUsed = false
+    for (ch in raw) {
+        when {
+            ch.isDigit() -> sb.append(ch)
+            (ch == '.' || ch == ',') && !dotUsed && sb.isNotEmpty() -> { sb.append('.'); dotUsed = true }
+        }
+    }
+    return sb.toString()
+}
+
+/** Vide ou en cours de frappe = accepté ; sinon univers ≥ 1 et adresse 1..512. */
+internal fun isPlausibleDmxAddress(s: String): Boolean {
+    if (s.isBlank() || s.endsWith(".")) return true          // saisie en cours
+    val parts = s.split(".")
+    return when (parts.size) {
+        1 -> (parts[0].toIntOrNull() ?: 0) >= 1               // adresse absolue
+        2 -> {
+            val u = parts[0].toIntOrNull(); val a = parts[1].toIntOrNull()
+            u != null && a != null && u >= 1 && a in 1..512
+        }
+        else -> false
+    }
+}
+
 /** Plages de valeurs DMX d'un canal : ChannelSet nommés (« 0–7 Fermé »), sinon
  *  plage physique continue (Pan/Tilt/Dimmer). Miroir de displayRanges iOS. */
 private fun channelRanges(ch: com.minou.mvrviewer.mvr.DmxChannel): List<kotlin.Pair<String, String>> {
@@ -154,8 +185,17 @@ fun FixtureDetailSheet(
                     modifier = Modifier.weight(1f)
                 )
                 OutlinedTextField(
-                    value = addr, onValueChange = { addr = it }, label = { Text("Adresse DMX") },
-                    singleLine = true, modifier = Modifier.weight(1f)
+                    value = addr,
+                    onValueChange = { addr = sanitizeDmxAddress(it) },
+                    label = { Text("Adresse DMX") },
+                    placeholder = { Text("univers.adresse") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    isError = !isPlausibleDmxAddress(addr),
+                    supportingText = if (!isPlausibleDmxAddress(addr)) {
+                        { Text("Format : univers.adresse (1–512)") }
+                    } else null,
+                    modifier = Modifier.weight(1f)
                 )
             }
 
@@ -219,7 +259,11 @@ fun FixtureDetailSheet(
                 }
             }
 
+            // Adresse vide (= inchangée) ou complète et valide ; « 1. » est une
+            // saisie en cours, on n'enregistre pas.
+            val addrOk = addr.isBlank() || (!addr.endsWith(".") && isPlausibleDmxAddress(addr))
             Button(
+                enabled = addrOk,
                 onClick = { overrides.set(fixture, id, addr, modeName); onDismiss() },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
             ) { Text("Enregistrer le patch") }

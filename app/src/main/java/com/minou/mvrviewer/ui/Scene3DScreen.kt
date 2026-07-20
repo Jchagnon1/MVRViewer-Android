@@ -20,6 +20,9 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PhotoSizeSelectSmall
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
@@ -740,15 +743,18 @@ fun Scene3DScreen(
 
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
     val cameraNode = rememberCameraNode(engine) { position = camHome }
-    // Vitesse de pinch-zoom PROPORTIONNELLE à la taille de la scène : le zoom
-    // orbite Filament déplace la caméra d'un pas en unités MONDE (mètres), donc
-    // sur un gros show (ACF, Vega…) le pas par défaut (0,0555) fait avancer d'un
-    // rien → il fallait pincer 10 fois. On l'échelonne sur le rayon.
     val target = remember { Float3(0f, 0f, 0f) }
+    // Point de vue courant (State) : le CHANGER re-crée le manipulateur (remember
+    // keyé ci-dessous) → SceneView ré-attache le manipulateur au détecteur de
+    // gestes et re-sème le viewport, donc la caméra SAUTE au preset ET l'orbite
+    // continue de fonctionner. (rememberCameraManipulator, lui, n'est PAS re-keyé
+    // sur orbitHomePosition quand on passe son propre créateur → on hisse le
+    // nôtre.) Vitesse de pinch-zoom échelonnée sur le rayon de la scène.
+    var camEye by remember(layout) { mutableStateOf(camHome) }
     val zoomSpeed = remember(layout) { (layout.radius * 0.006f).coerceIn(0.0555f, 12f) }
-    val manipulator = rememberCameraManipulator(orbitHomePosition = camHome, targetPosition = target) {
+    val manipulator = remember(camEye, target, zoomSpeed) {
         io.github.sceneview.gesture.CameraGestureDetector.DefaultCameraManipulator(
-            orbitHomePosition = camHome, targetPosition = target, pinchZoomSpeed = zoomSpeed
+            orbitHomePosition = camEye, targetPosition = target, pinchZoomSpeed = zoomSpeed
         )
     }
 
@@ -857,6 +863,28 @@ fun Scene3DScreen(
                 }
             },
             actions = {
+                // Points de vue caméra (dessus / face / côté / iso / reset) : on
+                // change camEye → le manipulateur est re-créé (remember keyé) et
+                // SceneView re-sème la caméra à ce point de vue, orbite préservée.
+                var camMenu by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { camMenu = true }) {
+                        Icon(Icons.Filled.Videocam, contentDescription = "Points de vue",
+                            tint = LocalContentColor.current)
+                    }
+                    DropdownMenu(expanded = camMenu, onDismissRequest = { camMenu = false }) {
+                        val r = layout.radius * 2f
+                        fun set(x: Float, y: Float, z: Float) {
+                            camEye = Float3(target.x + x, target.y + y, target.z + z); camMenu = false
+                        }
+                        DropdownMenuItem(text = { Text("Dessus") }, onClick = { set(0f, r, 0.001f) })
+                        DropdownMenuItem(text = { Text("Face") }, onClick = { set(0f, 0f, r) })
+                        DropdownMenuItem(text = { Text("Côté") }, onClick = { set(r, 0f, 0f) })
+                        DropdownMenuItem(text = { Text("Isométrique") }, onClick = { set(0.7f * r, 0.7f * r, 0.7f * r) })
+                        DropdownMenuItem(text = { Text("Réinitialiser la vue") },
+                            onClick = { camEye = camHome; camMenu = false })
+                    }
+                }
                 SceneOptionsMenu(
                     options = options, tint = LocalContentColor.current,
                     onShowPlan = onShowPlan, onShowPatch = onShowPatch,

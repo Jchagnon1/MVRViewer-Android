@@ -2,10 +2,9 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    // SYNCHRO CLOUD — décommenter APRÈS avoir déposé app/google-services.json
-    // (app Android `com.minou.mvrviewer` ajoutée au projet Firebase mvrviewermulti).
-    // Sans le plist, l'app tourne sur le backend LOCAL de démo (rien ne casse).
-    // alias(libs.plugins.google.services)
+    // Le plugin google-services N'est PAS appliqué ici : il l'est plus bas, mais
+    // SEULEMENT si app/google-services.json est présent (voir en bas du fichier) →
+    // un clone sans ce fichier compile quand même (backend LOCAL de démo).
 }
 
 android {
@@ -42,6 +41,15 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+// SYNCHRO CLOUD : on applique le plugin google-services UNIQUEMENT si le fichier
+// de config Firebase est présent (déposé par l'utilisateur, cf. ANDROID_FIREBASE_SETUP.md).
+// Ainsi l'app bascule AUTOMATIQUEMENT sur Firebase quand le json est là, et
+// reste buildable (backend LOCAL) sinon — sans édition manuelle. Le json est
+// dans .gitignore (config projet, non versionnée).
+if (project.file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 dependencies {

@@ -2,6 +2,10 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // SYNCHRO CLOUD — décommenter APRÈS avoir déposé app/google-services.json
+    // (app Android `com.minou.mvrviewer` ajoutée au projet Firebase mvrviewermulti).
+    // Sans le plist, l'app tourne sur le backend LOCAL de démo (rien ne casse).
+    // alias(libs.plugins.google.services)
 }
 
 android {
@@ -52,6 +56,14 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services) // .await() sur les Task Firebase
     implementation(libs.sceneview)
+    // Firebase (synchro cloud). Les classes SDK compilent SANS le plugin
+    // google-services ; sans google-services.json, FirebaseApp ne s'initialise
+    // pas → BackendSelector bascule sur le backend LOCAL.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
     debugImplementation(libs.androidx.ui.tooling)
 }

@@ -47,6 +47,10 @@ class GeoCalibration {
         return (atan2(vy, vx) - atan2(e2.second, e2.first)) to (lPlan / lReal)
     }
 
+    /** Convertit une distance réelle (mètres) en mm de plan à l'échelle calibrée
+     *  (sert à dimensionner le cercle de précision GPS). */
+    fun planMillimeters(meters: Double): Double = meters * rotationAndScale().second
+
     /** Position GPS → point monde MVR (mm), ou null si non calibré. */
     fun worldPosition(lat: Double, lon: Double): Pair<Float, Float>? {
         val a = anchors.firstOrNull() ?: return null

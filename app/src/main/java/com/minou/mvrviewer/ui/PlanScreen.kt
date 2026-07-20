@@ -78,6 +78,7 @@ fun PlanScreen(
     projectKey: String? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
     onCalibrationChanged: () -> Unit = {},
+    onTransformChanged: (com.minou.mvrviewer.mvr.ReferencePlanTransform) -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
@@ -162,6 +163,25 @@ fun PlanScreen(
     var calibrating by remember { mutableStateOf(false) }
     var calibVersion by remember { mutableIntStateOf(0) } // force le redraw à l'ajout d'ancre
     val gps by rememberUserLocation(showLocation)
+    // Historique court des relevés → moyenne pondérée par 1/précision au calibrage
+    // (l'utilisateur est immobile ; ça enlève la gigue GPS de la ligne de base).
+    val recentFixes = remember { ArrayList<android.location.Location>() }
+    LaunchedEffect(gps) {
+        gps?.let { f ->
+            if (f.latitude.isFinite() && f.longitude.isFinite()) {
+                recentFixes.add(f); if (recentFixes.size > 12) recentFixes.removeAt(0)
+            }
+        }
+    }
+    fun averagedLatLon(): Pair<Double, Double>? {
+        if (recentFixes.isEmpty()) return null
+        var wsum = 0.0; var lat = 0.0; var lon = 0.0
+        for (f in recentFixes) {
+            val w = 1.0 / maxOf(1.0, f.accuracy.toDouble())
+            wsum += w; lat += f.latitude * w; lon += f.longitude * w
+        }
+        return if (wsum > 0) lat / wsum to lon / wsum else null
+    }
 
     // Persistance projet : réenregistre le placement du plan DXF (glissé/rotation/
     // échelle → dxfVersion) et la calibration, débouncé, quand ça change.
@@ -173,11 +193,23 @@ fun PlanScreen(
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     com.minou.mvrviewer.mvr.ProjectStore.saveTransform(ctxPlan, projectKey, rpForSave.transform)
                 }
+                // SYNCHRO : après le débounce, pousse le placement au cloud (item 5).
+                onTransformChanged(rpForSave.transform)
             }
         }
         LaunchedEffect(calibVersion) {
             if (calibVersion > 0) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 com.minou.mvrviewer.mvr.ProjectStore.saveCalibration(ctxPlan, projectKey, calibration.anchors.toList())
+            }
+        }
+        // Affichage de la position GPS : persisté par projet (survit à la bascule
+        // plan↔3D et à la réouverture), comme le drapeau satellite.
+        LaunchedEffect(Unit) {
+            showLocation = com.minou.mvrviewer.mvr.ProjectStore.loadShowUserLocation(ctxPlan, projectKey)
+        }
+        LaunchedEffect(showLocation) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.minou.mvrviewer.mvr.ProjectStore.saveShowUserLocation(ctxPlan, projectKey, showLocation)
             }
         }
     }
@@ -246,8 +278,9 @@ fun PlanScreen(
                         val g = gps
                         if (calibrating && g != null) {
                             val (px, py) = toPlan(tap.x, tap.y, w, h)
+                            val avg = averagedLatLon() ?: (g.latitude to g.longitude)
                             calibration.addAnchor(
-                                com.minou.mvrviewer.mvr.GeoAnchor(px, -py, g.latitude, g.longitude)
+                                com.minou.mvrviewer.mvr.GeoAnchor(px, -py, avg.first, avg.second)
                             )
                             calibVersion++
                             onCalibrationChanged()
@@ -463,10 +496,39 @@ fun PlanScreen(
                 val wp = calibration.worldPosition(g.latitude, g.longitude)
                 if (wp != null) {
                     val s = toScreen(wp.first, -wp.second, w, h)
-                    drawCircle(Color(0x332979FF), radius = 26f, center = s)
-                    drawCircle(Color(0xFF2979FF), radius = 9f, center = s)
-                    drawCircle(Color.White, radius = 9f, center = s,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f))
+                    val onScreen = s.x in 0f..w && s.y in 0f..h
+                    if (onScreen) {
+                        // Cercle de PRÉCISION dimensionné sur la vraie exactitude GPS.
+                        val bsNow = baseScale(w, h) * scale
+                        val accPx = (calibration.planMillimeters(g.accuracy.toDouble()) * bsNow)
+                            .toFloat().coerceIn(14f, 400f)
+                        drawCircle(Color(0x332979FF), radius = accPx, center = s)
+                        drawCircle(Color(0xFF2979FF), radius = 9f, center = s)
+                        drawCircle(Color.White, radius = 9f, center = s,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f))
+                    } else {
+                        // Hors cadre : flèche de bord pointant vers la position.
+                        val inset = 30f
+                        val cxs = w / 2f; val cys = h / 2f
+                        val dx = s.x - cxs; val dy = s.y - cys
+                        val rx = w / 2f - inset; val ry = h / 2f - inset
+                        val tScale = minOf(
+                            if (dx != 0f) rx / kotlin.math.abs(dx) else Float.MAX_VALUE,
+                            if (dy != 0f) ry / kotlin.math.abs(dy) else Float.MAX_VALUE
+                        )
+                        val ex = cxs + dx * tScale; val ey = cys + dy * tScale
+                        val ang = kotlin.math.atan2(dy, dx)
+                        drawCircle(Color(0xFF2979FF), radius = 12f, center = Offset(ex, ey))
+                        drawCircle(Color.White, radius = 12f, center = Offset(ex, ey),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
+                        val tri = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(ex + 17f * kotlin.math.cos(ang), ey + 17f * kotlin.math.sin(ang))
+                            lineTo(ex + 9f * kotlin.math.cos(ang + 2.5f), ey + 9f * kotlin.math.sin(ang + 2.5f))
+                            lineTo(ex + 9f * kotlin.math.cos(ang - 2.5f), ey + 9f * kotlin.math.sin(ang - 2.5f))
+                            close()
+                        }
+                        drawPath(tri, Color(0xFF2979FF))
+                    }
                 }
             }
 
@@ -478,6 +540,32 @@ fun PlanScreen(
                 drawRect(Color(0x33FFC400), topLeft = tl, size = sz)
                 drawRect(Color(0xFFFFC400), topLeft = tl, size = sz,
                     style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
+            }
+
+            // ---- Barre d'échelle (bas-gauche) : longueur « ronde » à l'échelle courante.
+            run {
+                val ppm = baseScale(w, h) * scale // pixels par mm
+                if (ppm > 1e-6f) {
+                    val rawMm = 90f / ppm
+                    val mag = Math.pow(10.0, Math.floor(Math.log10(rawMm.toDouble()))).toFloat()
+                    val niceMm = when {
+                        rawMm / mag < 1.5f -> 1f * mag
+                        rawMm / mag < 3.5f -> 2f * mag
+                        rawMm / mag < 7.5f -> 5f * mag
+                        else -> 10f * mag
+                    }
+                    val barPx = niceMm * ppm
+                    val x0 = 20f; val y0 = h - 172f
+                    drawLine(inkColor, Offset(x0, y0), Offset(x0 + barPx, y0), strokeWidth = 2.5f)
+                    drawLine(inkColor, Offset(x0, y0 - 5f), Offset(x0, y0 + 5f), strokeWidth = 2.5f)
+                    drawLine(inkColor, Offset(x0 + barPx, y0 - 5f), Offset(x0 + barPx, y0 + 5f), strokeWidth = 2.5f)
+                    val label = if (niceMm >= 1000f) {
+                        val m = niceMm / 1000f
+                        (if (m % 1f == 0f) m.toInt().toString() else m.toString()) + " m"
+                    } else "${niceMm.toInt()} mm"
+                    val tl = measurer.measure(label, style = TextStyle(fontSize = 11.sp, color = inkColor))
+                    drawText(tl, topLeft = Offset(x0, y0 - 22f))
+                }
             }
         }
 

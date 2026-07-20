@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.Button
@@ -28,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,9 +50,13 @@ import androidx.compose.ui.unit.dp
 fun HomeScreen(
     state: SceneViewModel.UiState,
     onOpen: (Uri) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    sync: com.minou.mvrviewer.sync.SyncViewModel? = null,
+    onOpenCloudProject: (com.minou.mvrviewer.sync.CloudProject) -> Unit = {}
 ) {
     val ctx = LocalContext.current
+    var showAccount by remember { mutableStateOf(false) }
+    var showJoin by remember { mutableStateOf(false) }
     // Le MVR n'a pas de type MIME standard : on ouvre en "*/*".
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -84,6 +91,42 @@ fun HomeScreen(
                 Button(onClick = { picker.launch(arrayOf("*/*")) }) {
                     Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp))
                     Text("  Ouvrir un fichier .mvr")
+                }
+                // Synchro cloud : compte + rejoindre un projet partagé.
+                if (sync != null) {
+                    val auth by sync.auth.collectAsState()
+                    Row(modifier = Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { showAccount = true }) {
+                            Text(if (auth.isSignedIn) "Mon compte" else "Se connecter")
+                        }
+                        TextButton(onClick = { showJoin = true }) { Text("Rejoindre un projet") }
+                    }
+                    // Projets partagés (cloud) : ouverts en un tap (comme iOS RootView).
+                    val projects by sync.cloudProjects.collectAsState()
+                    if (projects.isNotEmpty()) {
+                        Text("Projets partagés", style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 20.dp, bottom = 4.dp))
+                        LazyColumn(modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth().heightIn(max = 170.dp)) {
+                            items(projects, key = { it.id }) { p ->
+                                HorizontalDivider()
+                                Row(verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().clickable { onOpenCloudProject(p) }
+                                        .padding(vertical = 12.dp)) {
+                                    Icon(Icons.Filled.CloudDownload, contentDescription = null,
+                                        modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                        Text(p.name, style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("${p.memberUids.size} membre(s) · v${p.mvrVersion}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 if (state is SceneViewModel.UiState.Error) {
                     Text(
@@ -140,6 +183,14 @@ fun HomeScreen(
                         Text("  Envoyer le rapport de diagnostic")
                     }
                 }
+            }
+        }
+
+        // Dialogues de synchro cloud (accueil).
+        if (sync != null) {
+            if (showAccount) AccountDialog(sync) { showAccount = false }
+            if (showJoin) JoinProjectDialog(sync, onDismiss = { showJoin = false }) { project ->
+                onOpenCloudProject(project)
             }
         }
     }

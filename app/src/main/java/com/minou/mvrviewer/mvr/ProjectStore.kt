@@ -113,6 +113,15 @@ object ProjectStore {
     fun loadShowSatellite(ctx: Context, key: String): Boolean =
         readManifest(ctx, key).optBoolean("showSatellite", false)
 
+    // ---- Position GPS affichée (drapeau on/off, persistant par projet) ----
+
+    fun saveShowUserLocation(ctx: Context, key: String, on: Boolean) {
+        val m = readManifest(ctx, key); m.put("showUserLocation", on); writeManifest(ctx, key, m)
+    }
+
+    fun loadShowUserLocation(ctx: Context, key: String): Boolean =
+        readManifest(ctx, key).optBoolean("showUserLocation", false)
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
     fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) {

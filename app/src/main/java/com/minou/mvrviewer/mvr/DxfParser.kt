@@ -20,8 +20,9 @@ import kotlin.math.tan
  * les corps de blocs (plafonnés) sont bufferisés → mémoire bornée quel que soit
  * le poids du fichier.
  *
- * v1 : LINE, LWPOLYLINE (arcs de bulge), POLYLINE/VERTEX, CIRCLE, ARC,
- * BLOCKS + INSERT, $INSUNITS. Vue de dessus (Z ignoré). SPLINE/ELLIPSE/
+ * LINE, LWPOLYLINE (arcs de bulge), POLYLINE/VERTEX (dont polyface mesh &
+ * grille M×N — arêtes réelles, pas de zigzags fantômes), CIRCLE, ARC, ELLIPSE,
+ * SPLINE (de Boor), BLOCKS + INSERT, $INSUNITS. Vue de dessus (Z ignoré).
  * 3DFACE/SOLID/HATCH/TEXT et les couleurs par calque = à venir.
  */
 object DxfParser {
@@ -194,6 +195,9 @@ object DxfParser {
 
     private class Block(val baseX: Double, val baseY: Double, val pairs: List<Pair>)
 
+    /** Sommet POLYLINE brut : position + flags (70) + bulge (42) + indices de face. */
+    private class RawVertex(val x: Double?, val y: Double?, val flags: Int, val bulge: Double, val face: IntArray)
+
     private class Machine {
         private var section = 0 // 0 none,1 header,2 tables,3 blocks,4 entities,5 skip
         private var awaitingSectionName = false
@@ -346,27 +350,86 @@ object DxfParser {
                         addPolyline(tessellateBulges(xs, ys, bulges, closed), closed, layer, t)
                     }
                     "POLYLINE" -> {
-                        val closed = (int(g, 70) ?: 0) and 1 == 1
-                        val xs = ArrayList<Double>(); val ys = ArrayList<Double>()
-                        // Les VERTEX suivent dans le même chunk (jusqu'au SEQEND).
+                        // Le code 70 du POLYLINE change RADICALEMENT la sémantique :
+                        // bit 64 = polyface mesh (les sommets ne sont PAS une suite à
+                        // relier — des FACE records donnent la connectivité), bit 16 =
+                        // grille M×N. Tout relier fabriquait des zigzags fantômes.
+                        val plFlags = int(g, 70) ?: 0
+                        // Sommets VERTEX suivants (jusqu'au SEQEND) : pos + flags (70)
+                        // + bulge (42) + indices de face (71-74).
+                        val verts = ArrayList<RawVertex>()
                         var k = j
-                        while (k < pairs.size) {
-                            if (pairs[k].code == 0) {
-                                val vt = pairs[k].str
-                                if (vt == "VERTEX") {
-                                    var m = k + 1; var vx: Double? = null; var vy: Double? = null
-                                    while (m < pairs.size && pairs[m].code != 0) {
-                                        when (pairs[m].code) { 10 -> vx = pairs[m].double; 20 -> vy = pairs[m].double }
-                                        m++
-                                    }
-                                    if (vx != null && vy != null) { xs.add(vx); ys.add(vy) }
-                                    k = m
-                                } else if (vt == "SEQEND") { k++; break } else break
-                            } else k++
+                        while (k < pairs.size && pairs[k].code == 0 && pairs[k].str == "VERTEX") {
+                            var m = k + 1
+                            var vx: Double? = null; var vy: Double? = null
+                            var vf = 0; var vb = 0.0; val face = ArrayList<Int>()
+                            while (m < pairs.size && pairs[m].code != 0) {
+                                when (pairs[m].code) {
+                                    10 -> vx = pairs[m].double
+                                    20 -> vy = pairs[m].double
+                                    42 -> vb = pairs[m].double ?: 0.0
+                                    70 -> vf = pairs[m].int ?: 0
+                                    71, 72, 73, 74 -> pairs[m].int?.let { if (it != 0) face.add(it) }
+                                }
+                                m++
+                            }
+                            verts.add(RawVertex(vx, vy, vf, vb, face.toIntArray()))
+                            k = m
                         }
-                        val flat = DoubleArray(xs.size * 2)
-                        for (v in xs.indices) { flat[v * 2] = xs[v]; flat[v * 2 + 1] = ys[v] }
-                        addPolyline(flat, closed, layer, t)
+                        if (k < pairs.size && pairs[k].code == 0 && pairs[k].str == "SEQEND") {
+                            var m = k + 1
+                            while (m < pairs.size && pairs[m].code != 0) m++
+                            k = m
+                        }
+
+                        if (plFlags and 64 != 0) {
+                            // POLYFACE MESH : sommets géométrie (flag 64) + faces
+                            // (flag 128, coords sans sens). Indices 1-based ;
+                            // NÉGATIF = arête invisible. Arêtes dé-doublonnées.
+                            val geo = verts.filter { it.flags and 64 != 0 && it.x != null && it.y != null }
+                            val seen = HashSet<Long>()
+                            for (v in verts) {
+                                if (v.flags and 128 == 0 || v.flags and 64 != 0 || v.face.isEmpty()) continue
+                                val c = v.face
+                                for (e in c.indices) {
+                                    val raw1 = c[e]; val raw2 = c[(e + 1) % c.size]
+                                    if (raw1 <= 0) continue // arête invisible / nulle
+                                    val i1 = abs(raw1) - 1; val i2 = abs(raw2) - 1
+                                    if (i1 < 0 || i1 >= geo.size || i2 < 0 || i2 >= geo.size || i1 == i2) continue
+                                    val key = (minOf(i1, i2).toLong() shl 32) or maxOf(i1, i2).toLong()
+                                    if (!seen.add(key)) continue
+                                    val a = geo[i1]; val b = geo[i2]
+                                    addPolyline(doubleArrayOf(a.x!!, a.y!!, b.x!!, b.y!!), false, layer, t)
+                                }
+                            }
+                        } else if (plFlags and 16 != 0) {
+                            // GRILLE M×N : lignes + colonnes (fermeture selon bits 1/32).
+                            val mCount = int(g, 71) ?: 0; val nCount = int(g, 72) ?: 0
+                            val geo = verts.mapNotNull { if (it.x != null && it.y != null) doubleArrayOf(it.x, it.y) else null }
+                            if (mCount >= 2 && nCount >= 2 && geo.size >= mCount * nCount) {
+                                for (row in 0 until mCount) {
+                                    val flat = DoubleArray(nCount * 2)
+                                    for (cIdx in 0 until nCount) { val p = geo[row * nCount + cIdx]; flat[cIdx * 2] = p[0]; flat[cIdx * 2 + 1] = p[1] }
+                                    addPolyline(flat, plFlags and 32 != 0, layer, t)
+                                }
+                                for (col in 0 until nCount) {
+                                    val flat = DoubleArray(mCount * 2)
+                                    for (rIdx in 0 until mCount) { val p = geo[rIdx * nCount + col]; flat[rIdx * 2] = p[0]; flat[rIdx * 2 + 1] = p[1] }
+                                    addPolyline(flat, plFlags and 1 != 0, layer, t)
+                                }
+                            }
+                        } else {
+                            // Classique : écarter la charpente de spline (flag 16) et
+                            // les FACE records orphelins (flag 128 sans flag 64).
+                            val closed = plFlags and 1 == 1
+                            val xs = ArrayList<Double>(); val ys = ArrayList<Double>(); val bulges = ArrayList<Double>()
+                            for (v in verts) {
+                                if (v.flags and 16 != 0) continue
+                                if (v.flags and 128 != 0 && v.flags and 64 == 0) continue
+                                if (v.x != null && v.y != null) { xs.add(v.x); ys.add(v.y); bulges.add(v.bulge) }
+                            }
+                            addPolyline(tessellateBulges(xs, ys, bulges, closed), closed, layer, t)
+                        }
                         j = k
                     }
                     "CIRCLE" -> {
@@ -377,6 +440,44 @@ object DxfParser {
                         val cx = dbl(g, 10); val cy = dbl(g, 20); val r = dbl(g, 40)
                         if (cx != null && cy != null && r != null && r > 0)
                             addPolyline(arcPoints(cx, cy, r, dbl(g, 50) ?: 0.0, dbl(g, 51) ?: 360.0), false, layer, t)
+                    }
+                    "ELLIPSE" -> {
+                        val cx = dbl(g, 10); val cy = dbl(g, 20)
+                        val mx = dbl(g, 11); val my = dbl(g, 21); val ratio = dbl(g, 40)
+                        if (cx != null && cy != null && mx != null && my != null && ratio != null) {
+                            val a0 = dbl(g, 41) ?: 0.0; val a1 = dbl(g, 42) ?: (2 * Math.PI)
+                            addPolyline(ellipsePoints(cx, cy, mx, my, ratio, a0, a1),
+                                abs((a1 - a0) - 2 * Math.PI) < 1e-6, layer, t)
+                        }
+                    }
+                    "SPLINE" -> {
+                        // Points de LISSAGE (11/21) si présents ; sinon ÉVALUATION de
+                        // la B-spline (de Boor) depuis points de contrôle (10/20) +
+                        // nœuds (40) + degré (71). Relier les points de contrôle
+                        // dessinait le polygone de contrôle, pas la courbe.
+                        val fitX = ArrayList<Double>(); val fitY = ArrayList<Double>()
+                        val ctrlX = ArrayList<Double>(); val ctrlY = ArrayList<Double>()
+                        val knots = ArrayList<Double>(); val weights = ArrayList<Double>()
+                        var pxp: Double? = null; var cxp: Double? = null
+                        for (pair in g) when (pair.code) {
+                            11 -> pxp = pair.double
+                            21 -> { val x = pxp; val y = pair.double; if (x != null && y != null) { fitX.add(x); fitY.add(y); pxp = null } }
+                            10 -> cxp = pair.double
+                            20 -> { val x = cxp; val y = pair.double; if (x != null && y != null) { ctrlX.add(x); ctrlY.add(y); cxp = null } }
+                            40 -> pair.double?.let { knots.add(it) }
+                            41 -> pair.double?.let { weights.add(it) }
+                        }
+                        val closed = (int(g, 70) ?: 0) and 1 == 1
+                        val degree = int(g, 71) ?: 3
+                        val pts = if (fitX.isNotEmpty()) {
+                            val flat = DoubleArray(fitX.size * 2)
+                            for (v in fitX.indices) { flat[v * 2] = fitX[v]; flat[v * 2 + 1] = fitY[v] }
+                            flat
+                        } else {
+                            sampleBSpline(ctrlX.toDoubleArray(), ctrlY.toDoubleArray(), knots.toDoubleArray(),
+                                degree, if (weights.size == ctrlX.size) weights.toDoubleArray() else null)
+                        }
+                        addPolyline(pts, closed, layer, t)
                     }
                     "INSERT" -> {
                         val name = str(g, 2); val block = if (name != null) blocks[name] else null
@@ -453,6 +554,69 @@ object DxfParser {
             }
         }
         return out.toDoubleArray()
+    }
+
+    /** Ellipse : `maj` = extrémité du grand axe RELATIVE au centre, `ratio` =
+     *  petit/grand axe, `t0/t1` = paramètres (radians, depuis le grand axe). */
+    private fun ellipsePoints(cx: Double, cy: Double, majX: Double, majY: Double,
+                              ratio: Double, t0: Double, t1: Double): DoubleArray {
+        val phi = atan2(majY, majX)
+        val majorLen = hypot(majX, majY)
+        val minorLen = majorLen * ratio
+        var sweep = t1 - t0
+        while (sweep <= 1e-9) sweep += 2 * Math.PI
+        val n = maxOf(4, (sweep / (2 * Math.PI) * 72).toInt())
+        val cphi = cos(phi); val sphi = sin(phi)
+        val out = DoubleArray((n + 1) * 2)
+        for (k in 0..n) {
+            val th = t0 + sweep * k / n
+            val ex = majorLen * cos(th); val ey = minorLen * sin(th)
+            out[k * 2] = cx + ex * cphi - ey * sphi
+            out[k * 2 + 1] = cy + ex * sphi + ey * cphi
+        }
+        return out
+    }
+
+    /** Échantillonne une B-spline (de Boor), rationnelle si `weights` fourni.
+     *  Renvoie les points de contrôle à plat en repli si l'entrée est incohérente. */
+    private fun sampleBSpline(ctrlX: DoubleArray, ctrlY: DoubleArray, knots: DoubleArray,
+                             degree: Int, weights: DoubleArray?): DoubleArray {
+        val p = maxOf(1, degree)
+        val n = ctrlX.size
+        fun ctrlFlat(): DoubleArray {
+            val f = DoubleArray(n * 2)
+            for (i in 0 until n) { f[i * 2] = ctrlX[i]; f[i * 2 + 1] = ctrlY[i] }
+            return f
+        }
+        if (n <= p || knots.size != n + p + 1) return ctrlFlat()
+        val uMin = knots[p]; val uMax = knots[n]
+        if (uMax <= uMin) return ctrlFlat()
+        val hx = DoubleArray(n); val hy = DoubleArray(n); val hw = DoubleArray(n)
+        for (i in 0 until n) { val w = weights?.get(i) ?: 1.0; hx[i] = ctrlX[i] * w; hy[i] = ctrlY[i] * w; hw[i] = w }
+        val sampleCount = minOf(96, maxOf(16, n * 6))
+        val out = ArrayList<Double>((sampleCount + 1) * 2)
+        for (s in 0..sampleCount) {
+            val u = uMin + (uMax - uMin) * s / sampleCount
+            var k = p
+            while (k < n - 1 && u >= knots[k + 1]) k++
+            val dx = DoubleArray(p + 1); val dy = DoubleArray(p + 1); val dw = DoubleArray(p + 1)
+            for (a in 0..p) { dx[a] = hx[k - p + a]; dy[a] = hy[k - p + a]; dw[a] = hw[k - p + a] }
+            for (r in 1..p) {
+                var jj = p
+                while (jj >= r) {
+                    val i = k - p + jj
+                    val denom = knots[i + p - r + 1] - knots[i]
+                    val alpha = if (denom > 0) (u - knots[i]) / denom else 0.0
+                    dx[jj] = dx[jj - 1] * (1 - alpha) + dx[jj] * alpha
+                    dy[jj] = dy[jj - 1] * (1 - alpha) + dy[jj] * alpha
+                    dw[jj] = dw[jj - 1] * (1 - alpha) + dw[jj] * alpha
+                    jj--
+                }
+            }
+            val w = dw[p]
+            if (w != 0.0 && dx[p].isFinite() && dy[p].isFinite()) { out.add(dx[p] / w); out.add(dy[p] / w) }
+        }
+        return if (out.size >= 4) out.toDoubleArray() else ctrlFlat()
     }
 
     private fun circlePoints(cx: Double, cy: Double, r: Double): DoubleArray = arcPoints(cx, cy, r, 0.0, 360.0)

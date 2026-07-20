@@ -13,13 +13,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.minou.mvrviewer.sync.SyncViewModel
 import com.minou.mvrviewer.ui.HomeScreen
 import com.minou.mvrviewer.ui.SceneScreen
 import com.minou.mvrviewer.ui.SceneViewModel
 import com.minou.mvrviewer.ui.theme.MvrViewerTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -70,6 +73,11 @@ private fun App(
     onUriConsumed: () -> Unit = {}
 ) {
     val vm: SceneViewModel = viewModel()
+    // Cerveau de la synchro cloud, partagé accueil ↔ scène. Reconnexion silencieuse
+    // au démarrage (session Firebase persistée, ou compte stub local).
+    val sync: SyncViewModel = viewModel()
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { sync.restoreSessionIfPossible() }
 
     // Ouverture externe : dès qu'une URI arrive, on la charge (une seule fois).
     LaunchedEffect(incomingUri) {
@@ -84,8 +92,23 @@ private fun App(
         is SceneViewModel.UiState.Home,
         is SceneViewModel.UiState.Loading,
         is SceneViewModel.UiState.Error ->
-            HomeScreen(state = s, modifier = modifier, onOpen = { uri: Uri -> vm.open(uri) })
+            HomeScreen(
+                state = s, modifier = modifier, onOpen = { uri: Uri -> vm.open(uri) },
+                sync = sync,
+                onOpenCloudProject = { project ->
+                    scope.launch {
+                        runCatching { sync.downloadMvr(project) }.getOrNull()?.let {
+                            vm.openBytes(it, project.name)
+                        }
+                    }
+                }
+            )
         is SceneViewModel.UiState.Loaded ->
-            SceneScreen(scene = s.scene, fileName = s.fileName, mvrBytes = s.bytes, modifier = modifier, onClose = vm::reset)
+            SceneScreen(
+                scene = s.scene, fileName = s.fileName, mvrBytes = s.bytes, modifier = modifier,
+                onClose = { sync.detach(); vm.reset() },
+                sync = sync,
+                onReopenBytes = { bytes, name -> vm.openBytes(bytes, name) }
+            )
     }
 }

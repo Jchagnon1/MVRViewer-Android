@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -41,19 +42,66 @@ import kotlinx.coroutines.withContext
 /** Modification de patch d'un projecteur (ID / adresse DMX / mode). */
 data class PatchEdit(val fixtureId: String?, val address: String?, val modeName: String?)
 
+/** Plages de valeurs DMX d'un canal : ChannelSet nommés (« 0–7 Fermé »), sinon
+ *  plage physique continue (Pan/Tilt/Dimmer). Miroir de displayRanges iOS. */
+private fun channelRanges(ch: com.minou.mvrviewer.mvr.DmxChannel): List<kotlin.Pair<String, String>> {
+    val sets = ch.functions.flatMap { it.channelSets }.sortedBy { it.dmxFrom }
+    if (sets.isNotEmpty()) {
+        return sets.mapIndexed { i, s ->
+            val to = if (i + 1 < sets.size) sets[i + 1].dmxFrom - 1 else 255
+            "${s.dmxFrom}–$to" to s.name
+        }
+    }
+    val f = ch.functions.firstOrNull()
+    if (f?.physicalFrom != null && f.physicalTo != null) {
+        return listOf("0–255" to "${fmtPhys(f.physicalFrom)} → ${fmtPhys(f.physicalTo)}")
+    }
+    return emptyList()
+}
+
+private fun fmtPhys(v: Float): String =
+    if (v % 1f == 0f) v.toInt().toString() else "%.2f".format(v)
+
 /**
  * Modifications de patch en mémoire, appliquées PAR-DESSUS le MVR d'origine
  * (comme les overrides iOS). Clé = uuid du projecteur (repli nom|calque).
+ *
+ * SYNCHRO : `onCommit` est appelé après une édition UTILISATEUR (pas les
+ * applications distantes), avec l'ancienne et la nouvelle valeur → sert à
+ * journaliser (audit qui/quoi/avant→après), persister et pousser au cloud.
  */
 class PatchOverrides {
     val edits: SnapshotStateMap<String, PatchEdit> = mutableStateMapOf()
-    private fun key(o: MvrSceneObject) = o.uuid ?: "${o.name}|${o.layerName}"
+    /** Bumpé à chaque édition (utilisateur OU distante) — pour re-déclencher un effet. */
+    var version by mutableStateOf(0)
+        private set
+    /** Hook de commit UTILISATEUR : (projecteur, ancien édit effectif, nouvel édit). */
+    var onCommit: ((MvrSceneObject, PatchEdit, PatchEdit) -> Unit)? = null
+
+    fun key(o: MvrSceneObject) = o.uuid ?: "${o.name}|${o.layerName}"
     fun effectiveId(o: MvrSceneObject) = edits[key(o)]?.fixtureId ?: o.fixtureId
     fun effectiveAddress(o: MvrSceneObject) = edits[key(o)]?.address ?: o.addresses.firstOrNull()
     fun effectiveMode(o: MvrSceneObject) = edits[key(o)]?.modeName ?: o.gdtfMode
     fun isEdited(o: MvrSceneObject) = edits.containsKey(key(o))
+
     fun set(o: MvrSceneObject, id: String?, address: String?, mode: String?) {
-        edits[key(o)] = PatchEdit(id?.ifBlank { null }, address?.ifBlank { null }, mode)
+        val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o))
+        val new = PatchEdit(id?.ifBlank { null }, address?.ifBlank { null }, mode)
+        edits[key(o)] = new
+        version++
+        onCommit?.invoke(o, old, new)
+    }
+
+    /** État persistable (clé → édit) pour PatchStore / mapping cloud. */
+    fun toPersistedList(): List<com.minou.mvrviewer.sync.PersistedPatchEdit> =
+        edits.map { (k, e) ->
+            com.minou.mvrviewer.sync.PersistedPatchEdit(k, e.fixtureId, e.address, e.modeName)
+        }
+
+    /** Applique des édits (restauration disque OU distant) SANS déclencher onCommit. */
+    fun applyPersisted(list: List<com.minou.mvrviewer.sync.PersistedPatchEdit>) {
+        for (e in list) edits[e.key] = PatchEdit(e.fixtureId, e.address, e.modeName)
+        version++
     }
 }
 
@@ -146,10 +194,25 @@ fun FixtureDetailSheet(
                             Text(ch.attribute, style = MaterialTheme.typography.bodyMedium)
                             Text(
                                 "offset $addrOff" + (ch.defaultValue?.let { " · défaut $it" } ?: "") +
-                                    (ch.functions.firstOrNull()?.let { " · ${it.name}" } ?: ""),
+                                    (ch.geometry?.let { " · $it" } ?: ""),
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            // Plages de valeurs DMX nommées (ChannelSet) ou plage
+                            // physique continue — comme DMXModeSummaryView iOS.
+                            val ranges = channelRanges(ch)
+                            ranges.take(10).forEach { (range, label) ->
+                                Row(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                                    Text(range, modifier = Modifier.width(66.dp),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                        color = MaterialTheme.colorScheme.primary)
+                                    Text(label, style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                            }
+                            if (ranges.size > 10) Text("  +${ranges.size - 10}…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }

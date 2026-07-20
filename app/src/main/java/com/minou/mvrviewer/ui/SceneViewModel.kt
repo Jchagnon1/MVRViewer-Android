@@ -86,6 +86,24 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Ouvre un .mvr fourni en OCTETS (pas d'URI) — pour rejoindre un projet cloud
+     * ou rouvrir une nouvelle version téléchargée. Jamais mis dans les récents
+     * (pas d'URI SAF re-résoluble).
+     */
+    fun openBytes(bytes: ByteArray, name: String) {
+        loadJob?.cancel()
+        currentUri = null
+        _state.value = UiState.Loading(name)
+        loadJob = viewModelScope.launch {
+            val result = runCatching { withContext(Dispatchers.IO) { bytes to MvrParser.parse(bytes) } }
+            _state.value = result.fold(
+                onSuccess = { (b, scene) -> UiState.Loaded(scene, name, b) },
+                onFailure = { UiState.Error(it.message ?: "Erreur inconnue.") }
+            )
+        }
+    }
+
     private fun displayName(uri: Uri): String {
         val resolver = getApplication<Application>().contentResolver
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->

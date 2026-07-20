@@ -15,8 +15,8 @@ android {
         applicationId = "com.minou.mvrviewer"
         minSdk = 28  // requis par SceneView/Filament (vue 3D)
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.5"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -74,4 +74,6 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.storage)
     debugImplementation(libs.androidx.ui.tooling)
+    // Tests unitaires JVM (calcul du zoom caméra, cf. DistanceZoomTest).
+    testImplementation("junit:junit:4.13.2")
 }

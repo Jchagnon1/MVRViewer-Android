@@ -781,11 +781,32 @@ fun Scene3DScreen(
     // continue de fonctionner. (rememberCameraManipulator, lui, n'est PAS re-keyé
     // sur orbitHomePosition quand on passe son propre créateur → on hisse le
     // nôtre.) Vitesse de pinch-zoom échelonnée sur le rayon de la scène.
-    var camEye by remember(layout) { mutableStateOf(camHome) }
-    val zoomSpeed = remember(layout) { (layout.radius * 0.006f).coerceIn(0.0555f, 12f) }
-    val manipulator = remember(camEye, target, zoomSpeed) {
-        io.github.sceneview.gesture.CameraGestureDetector.DefaultCameraManipulator(
-            orbitHomePosition = camEye, targetPosition = target, pinchZoomSpeed = zoomSpeed
+    // neverEqualPolicy : re-choisir le MÊME preset (ou « réinitialiser la vue »
+    // après avoir seulement tourné autour) doit re-créer le manipulateur.
+    // Avec l'égalité structurelle par défaut, Float3 étant une data class,
+    // réécrire la même valeur n'était pas un changement → bouton sans effet.
+    var camEye by remember(layout) {
+        mutableStateOf(camHome, androidx.compose.runtime.neverEqualPolicy())
+    }
+    val zoomDensity = androidx.compose.ui.platform.LocalDensity.current.density
+    val manipulator = remember(camEye, target, layout, zoomDensity) {
+        // On construit NOUS-MÊMES le manipulateur Filament pour pouvoir piloter le
+        // zoom (cf. DistanceZoomManipulator). zoomSpeed = 1 → une unité de
+        // `scroll` = un mètre, ce qui rend notre calcul lisible.
+        val fm = com.google.android.filament.utils.Manipulator.Builder()
+            .orbitHomePosition(camEye.x, camEye.y, camEye.z)
+            .targetPosition(target.x, target.y, target.z)
+            .orbitSpeed(0.003f, 0.003f)   // mêmes valeurs que le manipulateur par défaut
+            .zoomSpeed(1f)
+            .build(com.google.android.filament.utils.Manipulator.Mode.ORBIT)
+        val dx = camEye.x - target.x; val dy = camEye.y - target.y; val dz = camEye.z - target.z
+        DistanceZoomManipulator(
+            fm = fm,
+            startDistance = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz),
+            minDistance = (layout.radius * 0.002f).coerceAtLeast(0.05f),
+            maxDistance = (layout.radius * 60f).coerceAtLeast(50f),
+            density = if (zoomDensity > 0f) zoomDensity else 1f,
+            inner = io.github.sceneview.gesture.CameraGestureDetector.DefaultCameraManipulator(fm),
         )
     }
 
@@ -1404,6 +1425,75 @@ private fun conversionMatrix(center: Float3): Mat4 {
         Float4(0f, 0.001f, 0f, 0f),
         Float4(-0.001f * cx, -0.001f * cz, 0.001f * cy, 1f)
     )
+}
+
+// ---- Zoom caméra : proportionnel à la distance ET au mouvement des doigts ----
+
+/**
+ * Le zoom d'origine était inutilisable sur un vrai show, pour deux raisons
+ * vérifiées dans le bytecode de SceneView 4.22 / Filament 1.71 :
+ *
+ * 1. Le manipulateur ORBIT de Filament fait une translation d'un nombre FIXE de
+ *    MÈTRES par unité de scroll (`eye += gaze * zoomSpeed * -delta`) — aucun
+ *    terme de distance. À 100 m du rig, un pincement plein écran n'avançait que
+ *    de quelques mètres ; collé à un projecteur, le même geste traversait tout.
+ * 2. SceneView compressait en plus l'écart des doigts par `|Δpx|^0.7`, ce qui
+ *    PÉNALISE les gestes amples : plus on pinçait vite, moins ça payait.
+ *
+ * Ici chaque pixel d'écartement déplace la caméra d'une FRACTION de la distance
+ * courante, linéairement en Δpx : la vitesse suit le mouvement, et l'approche
+ * est exponentielle (jamais lente au loin, jamais brutale au près).
+ *
+ * La distance est suivie côté Kotlin : elle n'est pas lisible depuis le
+ * manipulateur, car `scroll` translate l'œil ET la cible (|œil − cible| est
+ * invariant) tandis que le PIVOT d'orbite, lui, ne bouge pas. Ni l'orbite ni le
+ * panoramique ne changent la distance au pivot → notre suivi reste exact.
+ */
+internal class DistanceZoomManipulator(
+    private val fm: com.google.android.filament.utils.Manipulator,
+    startDistance: Float,
+    private val minDistance: Float,
+    private val maxDistance: Float,
+    /** px physiques par dp — le geste est mesuré en pixels bruts par SceneView. */
+    private val density: Float,
+    inner: io.github.sceneview.gesture.CameraGestureDetector.CameraManipulator,
+) : io.github.sceneview.gesture.CameraGestureDetector.CameraManipulator by inner {
+
+    var distance = clampStart(startDistance, minDistance, maxDistance)
+        private set
+
+    override fun scrollUpdate(x: Int, y: Int, previousSeparation: Float, currentSeparation: Float) {
+        // Écartement des doigts en pixels : positif = on écarte = zoom AVANT.
+        val dpx = currentSeparation - previousSeparation
+        val wanted = step(distance, dpx, density, minDistance, maxDistance) ?: return
+        val forward = distance - wanted            // mètres à avancer (>0 = vers la scène)
+        if (forward == 0f) return
+        distance = wanted
+        // zoomSpeed du manipulateur = 1 → `scroll(delta)` avance de −delta mètres.
+        fm.scroll(x, y, -forward)
+    }
+
+    /**
+     * Cœur du calcul, isolé du natif pour être testable (cf. DistanceZoomTest).
+     * Rend la NOUVELLE distance au pivot, ou `null` s'il n'y a rien à faire.
+     */
+    companion object {
+        /** 0,6 % de la distance par dp : un pincement de ~300 dp ≈ ×6. */
+        const val RATE_PER_DP = 0.006f
+
+        fun clampStart(start: Float, min: Float, max: Float): Float =
+            (if (start.isFinite() && start > 0f) start else 1f).coerceIn(min, max)
+
+        fun step(distance: Float, dpx: Float, density: Float, min: Float, max: Float): Float? {
+            if (!dpx.isFinite() || dpx == 0f) return null
+            val d = if (density.isFinite() && density > 0f) density else 1f
+            // Fraction de la distance courante par dp parcouru — LINÉAIRE, donc
+            // un geste deux fois plus ample zoome deux fois plus. Bornée pour
+            // qu'un saut d'événement (doigt reposé) ne téléporte pas la caméra.
+            val frac = (RATE_PER_DP * dpx / d).coerceIn(-0.6f, 0.6f)
+            return (distance * (1f - frac)).coerceIn(min, max)
+        }
+    }
 }
 
 // ---- Projecteurs (cubes) ----

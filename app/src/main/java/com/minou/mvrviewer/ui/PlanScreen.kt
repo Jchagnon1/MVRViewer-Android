@@ -49,6 +49,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -104,33 +106,56 @@ fun PlanScreen(
     val layerIndex = remember(scene) { LayerColors.index(scene) }
     val data = remember(scene) { planData(scene) }
     val measurer = rememberTextMeasurer()
+    // Étiquettes déjà mesurées (le cache interne du TextMeasurer ne retient que
+    // 8 entrées → sans ça, chaque étiquette est re-mise en page à chaque frame).
+    val labelDensity = androidx.compose.ui.platform.LocalDensity.current
+    val labelCache = remember(
+        scene, options.labelSize, options.background2D, options.labelContent,
+        labelDensity.density, labelDensity.fontScale
+    ) { HashMap<String, androidx.compose.ui.text.TextLayoutResult>() }
 
     // Fil de fer VECTORIEL des structures (arêtes caractéristiques réelles de la
     // géométrie .3ds, comme iOS). Construit hors thread principal.
-    var wire by remember(scene) { mutableStateOf<PlanWireframe.Built?>(null) }
+    // CACHÉ au niveau processus : sans ça, chaque aller-retour 3D↔plan relançait
+    // le dézip + le parse .3ds + l'extraction d'arêtes de TOUT le show (des
+    // dizaines de secondes sur un gros fichier) — c'était la « lenteur
+    // d'affichage des ponts ». On ne remet PAS à null pendant la reconstruction :
+    // l'ancien fil de fer reste à l'écran au lieu de retomber sur des points.
+    var wire by remember(scene) { mutableStateOf(PlanWireCache.structures(scene)) }
     LaunchedEffect(scene, mvrBytes) {
-        wire = null
+        if (wire != null) return@LaunchedEffect
         wire = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            PlanWireframe.build(scene, mvrBytes)
+            PlanWireCache.buildStructures(scene, mvrBytes)
         }
     }
     // Silhouette fil de fer des PROJECTEURS (modèle GDTF par spec, comme iOS).
     // Reconstruit quand un modèle GDTF Share est appliqué (version bump).
-    var fixWire by remember(scene) { mutableStateOf<PlanWireframe.FixtureWire?>(null) }
-    LaunchedEffect(scene, mvrBytes, gdtfOverrides?.version ?: 0) {
+    val ovVersion = gdtfOverrides?.version ?: 0
+    var fixWire by remember(scene) { mutableStateOf(PlanWireCache.fixtures(scene, ovVersion)) }
+    LaunchedEffect(scene, mvrBytes, ovVersion) {
+        if (fixWire != null && PlanWireCache.fixturesFresh(scene, ovVersion)) return@LaunchedEffect
         fixWire = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            PlanWireframe.buildFixtures(scene, mvrBytes, gdtfOverrides?.map?.toMap() ?: emptyMap())
+            PlanWireCache.buildFixtures(scene, mvrBytes, ovVersion, gdtfOverrides?.map?.toMap() ?: emptyMap())
         }
     }
     // Pendant un geste (pan/zoom), on retombe sur un point par structure (max
     // fluidité) ; le fil de fer complet réapparaît 180 ms après le dernier geste.
+    //
+    // ATTENTION : la version précédente incrémentait un compteur d'état à CHAQUE
+    // événement tactile, et ce compteur était lu au niveau du composable (clé de
+    // LaunchedEffect) → tout PlanScreen se recomposait à la fréquence du doigt,
+    // et une coroutine était annulée/relancée des centaines de fois par seconde.
+    // Ici l'horloge du geste est un simple LongArray (pas un état observable) et
+    // `gesturing` ne bascule que DEUX fois par geste.
     var gesturing by remember { mutableStateOf(false) }
-    var gestureTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(gestureTick) {
-        if (gestureTick == 0) return@LaunchedEffect
-        gesturing = true
-        kotlinx.coroutines.delay(180)
-        gesturing = false
+    val gestureClock = remember { longArrayOf(0L) }
+    LaunchedEffect(gesturing) {
+        if (!gesturing) return@LaunchedEffect
+        while (true) {
+            val idle = android.os.SystemClock.uptimeMillis() - gestureClock[0]
+            if (idle >= 180L) { gesturing = false; break }
+            kotlinx.coroutines.delay(180L - idle)
+        }
     }
 
     // Import d'un plan de repère DXF + réglage de son placement. La transformée
@@ -161,6 +186,40 @@ fun PlanScreen(
             onSetReferencePlan(com.minou.mvrviewer.mvr.ReferencePlan(plan, tf))
             showDxfPanel = true
             dxfVersion++
+        }
+    }
+
+    // ---- Tracés PRÉ-CONSTRUITS (cf. PlanPathCache) ----
+    // Tout ce qui ne dépend pas du zoom/pan est fabriqué UNE fois, hors thread
+    // principal, en coordonnées plan (ou locales pour le DXF). Le dessin n'est
+    // plus qu'une matrice appliquée au Canvas : plus aucun calcul par sommet à
+    // 60 Hz. C'était la cause n°1 des saccades au pan/zoom.
+    val structPaths by produceState<StructPaths?>(null, wire) {
+        val wf = wire
+        value = if (wf == null || wf.isEmpty) null
+        else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            buildStructurePaths(wf)
+        }
+    }
+    // Structures sans fil de fer (géométrie .glb) → un point ; et le repli
+    // « un point par objet » utilisé pendant les gestes.
+    val structDots = remember(wire) { dotsPath(structureDots(wire)) }
+    val fallbackDots = remember(data) { dotsPath(data.structure) }
+    val fixPaths by produceState<FixturePaths?>(null, fixWire, data) {
+        val fw = fixWire
+        value = if (fw == null) null
+        else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            buildFixturePaths(data, fw)
+        }
+    }
+    // Le DXF est tracé dans SES coordonnées locales : placement (décalage /
+    // rotation / échelle) et zoom deviennent une matrice → déplacer le plan de
+    // repère aux curseurs ne reconstruit plus rien.
+    val dxfPaths by produceState<DxfPaths?>(null, referencePlan?.plan) {
+        val plan = referencePlan?.plan
+        value = if (plan == null) null
+        else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            buildDxfPaths(plan)
         }
     }
 
@@ -304,7 +363,11 @@ fun PlanScreen(
                             }
                             scale = new
                             offset += pan
-                            gestureTick++
+                            // Horloge du geste : un tableau ordinaire, PAS un état
+                            // observable → aucun recomposition par événement tactile.
+                            // `gesturing` ne change qu'aux deux transitions.
+                            gestureClock[0] = android.os.SystemClock.uptimeMillis()
+                            gesturing = true
                         }
                     }
                 }
@@ -365,126 +428,74 @@ fun PlanScreen(
             }
 
             // ---- Plan de repère DXF importé (sous tout le reste) ----
-            dxfVersion.let { }  // dépendance de redraw
+            // Les tracés sont déjà construits (coordonnées locales du DXF) : ici
+            // on ne fait qu'empiler placement du DXF + projection plan→écran
+            // dans la matrice du Canvas. Rien n'est recalculé par sommet.
+            dxfVersion.let { }  // dépendance de redraw (transformée mutable)
             val rp = referencePlan
-            if (rp != null && rp.transform.visible && !gesturing) {
+            val dxf = dxfPaths
+            val bsPlan = baseScale(w, h) * scale
+            // Un plan léger reste affiché PENDANT le geste (plus de clignotement
+            // au pan/zoom) ; un plan lourd s'efface encore, pour tenir 60 fps.
+            if (rp != null && dxf != null && rp.transform.visible && bsPlan > 0f &&
+                (!gesturing || dxf.light)) {
                 val tf = rp.transform
                 val sfac = tf.scale.toFloat()
-                val rr = Math.toRadians(tf.rotationDeg)
-                val cc = kotlin.math.cos(rr).toFloat(); val sn = kotlin.math.sin(rr).toFloat()
-                val ox = tf.offsetX.toFloat(); val oy = tf.offsetY.toFloat()
-                // ---- Zones remplies (HATCH/SOLID) : dessinées SOUS les traits,
-                // en semi-transparent pour ne pas masquer projecteurs et décor.
-                if (rp.plan.fills.isNotEmpty()) {
-                    val fillPaths = HashMap<Pair<Int, Boolean>, androidx.compose.ui.graphics.Path>()
-                    for (fl in rp.plan.fills) {
-                        if (fl.layer in hiddenLayers) continue
-                        val fp = fillPaths.getOrPut(fl.color to fl.solid) {
-                            androidx.compose.ui.graphics.Path().apply {
-                                fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
-                            }
-                        }
-                        for (ring in fl.rings) {
-                            if (ring.size < 6) continue
-                            var k = 0
-                            var firstPt = true
-                            while (k < ring.size) {
-                                val lx = ring[k] * sfac; val ly = ring[k + 1] * sfac; k += 2
-                                val wx = ox + (lx * cc - ly * sn); val wy = oy + (lx * sn + ly * cc)
-                                val s = toScreen(wx, -wy, w, h)
-                                if (firstPt) { fp.moveTo(s.x, s.y); firstPt = false } else fp.lineTo(s.x, s.y)
-                            }
-                            fp.close()
-                        }
-                    }
-                    for ((key, fp) in fillPaths) {
-                        val (rgb, solid) = key
+                val ppu = bsPlan * sfac              // pixels par unité locale du DXF
+                withTransform({
+                    translate(w / 2f + offset.x, h / 2f + offset.y)
+                    scale(bsPlan, bsPlan, Offset.Zero)
+                    translate(-data.cx, -data.cy)
+                    // Repère plan = (x, −y) : la rotation du placement s'y lit
+                    // donc à l'envers, et le décalage Y aussi.
+                    translate(tf.offsetX.toFloat(), -tf.offsetY.toFloat())
+                    rotate(-tf.rotationDeg.toFloat(), Offset.Zero)
+                    scale(sfac, sfac, Offset.Zero)
+                }) {
+                    // Zones remplies (HATCH/SOLID) SOUS les traits, en
+                    // semi-transparent pour ne pas masquer projecteurs et décor.
+                    for ((key, fp) in dxf.fills) {
+                        val (layer, rgb, solid) = key
+                        if (layer in hiddenLayers) continue
                         drawPath(fp, dxfDisplayColor(rgb, bgDark).copy(alpha = if (solid) 0.40f else 0.20f))
                     }
-                }
-
-                // Un Path par couleur d'entité résolue (ACI/true-color) → tracés
-                // colorés comme dans AutoCAD, avec adaptation au fond (contraste).
-                val pathByColor = HashMap<Int, androidx.compose.ui.graphics.Path>()
-                var drawn = 0
-                loop@ for (pl in rp.plan.polylines) {
-                    if (pl.layer in hiddenLayers) continue@loop
-                    val path = pathByColor.getOrPut(pl.color) { androidx.compose.ui.graphics.Path() }
-                    val pts = pl.points
-                    var first = true
-                    var i = 0
-                    while (i < pts.size) {
-                        val lx = pts[i] * sfac; val ly = pts[i + 1] * sfac; i += 2
-                        val wx = ox + (lx * cc - ly * sn); val wy = oy + (lx * sn + ly * cc)
-                        val s = toScreen(wx, -wy, w, h)
-                        if (first) { path.moveTo(s.x, s.y); first = false } else path.lineTo(s.x, s.y)
+                    // Un tracé par couleur d'entité résolue (ACI/true-color) →
+                    // couleurs d'AutoCAD, adaptées au fond (contraste).
+                    if (ppu > 0f) {
+                        val sw = 0.7f / ppu   // épaisseur constante À L'ÉCRAN
+                        for ((key, path) in dxf.strokes) {
+                            val (layer, rgb) = key
+                            if (layer in hiddenLayers) continue
+                            drawPath(path, dxfDisplayColor(rgb, bgDark),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
+                        }
                     }
-                    if (pl.closed && pts.size >= 4) {
-                        val lx = pts[0] * sfac; val ly = pts[1] * sfac
-                        val wx = ox + (lx * cc - ly * sn); val wy = oy + (lx * sn + ly * cc)
-                        val s = toScreen(wx, -wy, w, h); path.lineTo(s.x, s.y)
-                    }
-                    drawn += pts.size / 2
-                    if (drawn > 400_000) break@loop  // garde-fou de dessin
-                }
-                for ((rgb, path) in pathByColor) {
-                    drawPath(path, dxfDisplayColor(rgb, bgDark),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(0.7f))
                 }
             }
 
             // Décor / structure : FIL DE FER VECTORIEL (arêtes caractéristiques
             // réelles de la géométrie 3D). Pendant un geste, ou tant que le fil
             // de fer se construit, on retombe sur un point par structure.
-            if (options.showStructure) {
-                val wf = wire
-                val bs = baseScale(w, h) * scale
-                if (wf != null && !wf.isEmpty && !gesturing) {
-                    val pathByLayer = HashMap<String, androidx.compose.ui.graphics.Path>()
-                    for (inst in wf.instances) {
-                        val edges = wf.edgesByKey[inst.key]
-                        if (edges == null) {
-                            val s = toScreen(inst.cx, inst.cy, w, h)
-                            if (s.x in -20f..w + 20f && s.y in -20f..h + 20f) {
-                                drawCircle(STRUCT_COLOR, radius = 1.6f, center = s)
-                            }
-                            continue
-                        }
-                        // Cull grossier : centre + rayon écran de la structure.
-                        val cs = toScreen(inst.cx, inst.cy, w, h)
-                        val rPx = (wf.radiusByKey[inst.key] ?: 0f) * bs
-                        val margin = 220f + rPx
-                        if (cs.x < -margin || cs.x > w + margin || cs.y < -margin || cs.y > h + margin) continue
-                        val world = inst.world
-                        val path = pathByLayer.getOrPut(inst.layer) { androidx.compose.ui.graphics.Path() }
-                        var i = 0
-                        while (i < edges.size) {
-                            val ax = edges[i]; val ay = edges[i+1]; val az = edges[i+2]
-                            val bx = edges[i+3]; val by = edges[i+4]; val bz = edges[i+5]
-                            i += 6
-                            // Transform monde puis projection top (worldX, −worldY).
-                            val wax = world.x.x*ax + world.y.x*ay + world.z.x*az + world.w.x
-                            val way = world.x.y*ax + world.y.y*ay + world.z.y*az + world.w.y
-                            val wbx = world.x.x*bx + world.y.x*by + world.z.x*bz + world.w.x
-                            val wby = world.x.y*bx + world.y.y*by + world.z.y*bz + world.w.y
-                            val pa = toScreen(wax, -way, w, h)
-                            val pb = toScreen(wbx, -wby, w, h)
-                            if ((pa.x < -20f && pb.x < -20f) || (pa.x > w+20f && pb.x > w+20f) ||
-                                (pa.y < -20f && pb.y < -20f) || (pa.y > h+20f && pb.y > h+20f)) continue
-                            path.moveTo(pa.x, pa.y); path.lineTo(pb.x, pb.y)
+            if (options.showStructure && bsPlan > 0f) {
+                val sp = structPaths
+                withTransform({
+                    translate(w / 2f + offset.x, h / 2f + offset.y)
+                    scale(bsPlan, bsPlan, Offset.Zero)
+                    translate(-data.cx, -data.cy)
+                }) {
+                    val wireOk = sp != null && (!gesturing || sp.light)
+                    if (wireOk) {
+                        val sw = 0.8f / bsPlan
+                        for ((layer, path) in sp.byLayer) {
+                            val col = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer)) else STRUCT_COLOR
+                            drawPath(path, col, style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
                         }
                     }
-                    for ((layer, path) in pathByLayer) {
-                        val col = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer)) else STRUCT_COLOR
-                        drawPath(path, col, style = androidx.compose.ui.graphics.drawscope.Stroke(0.8f))
-                    }
-                } else {
-                    for (p in data.structure) {
-                        val s = toScreen(p.first, p.second, w, h)
-                        if (s.x in -20f..w + 20f && s.y in -20f..h + 20f) {
-                            drawCircle(STRUCT_COLOR, radius = 1.6f, center = s)
-                        }
-                    }
+                    // Structures sans fil de fer (ou repli pendant un geste) : un
+                    // point chacune, en UN SEUL tracé (Skia élague hors écran).
+                    val dots = if (wireOk) structDots else fallbackDots
+                    drawPath(dots, STRUCT_COLOR, style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 3.2f / bsPlan, cap = androidx.compose.ui.graphics.StrokeCap.Round))
                 }
             }
 
@@ -493,43 +504,35 @@ fun PlanScreen(
             // PASSE 1 : silhouettes (un stroke par calque), avec un cull qui
             // tient compte du RAYON écran — sinon une silhouette zoomée
             // disparaîtrait dès que l'origine du projecteur sort du cadre.
-            val showLabels = options.showLabels && baseScale(w, h) * scale > 0.02f
+            val showLabels = options.showLabels && bsPlan > 0.02f
             val fw = fixWire
-            val bsNow = baseScale(w, h) * scale
-            // Silhouette visible pour f ? (edges + rayon écran lisible)
-            fun silhouetteOf(f: PlanFixture): Pair<FloatArray, Float>? {
-                if (gesturing || fw == null) return null
-                val spec = f.spec?.trim() ?: return null
-                val e = fw.edgesBySpec[spec] ?: return null
-                val r = (fw.radiusBySpec[spec] ?: 0f) * bsNow
-                return if (r > 7f) e to r else null
+            val bsNow = bsPlan
+            val fp = fixPaths
+            // Silhouette LISIBLE pour cette spec à ce zoom ? (sinon : pastille)
+            // On exige que le TRACÉ existe déjà (il est construit hors thread
+            // principal, et le budget mémoire peut écarter une spec) : sinon la
+            // pastille serait réduite à 3 px alors que rien n'est dessiné.
+            fun silhouetteVisible(spec: String?): Boolean {
+                if (gesturing || fw == null || fp == null || spec == null) return false
+                val s = spec.trim()
+                if (s !in fp.specs || fw.edgesBySpec[s] == null) return false
+                return (fw.radiusBySpec[s] ?: 0f) * bsNow > 7f
             }
-            if (!gesturing && fw != null) {
-                val fixPaths = HashMap<String, Pair<Color, androidx.compose.ui.graphics.Path>>()
-                for (f in data.fixtures) {
-                    val (edges, rPx) = silhouetteOf(f) ?: continue
-                    val s = toScreen(f.px, f.py, w, h)
-                    val m = 40f + rPx
-                    if (s.x !in -m..w + m || s.y !in -m..h + m) continue
-                    val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
-                    val world = f.world
-                    val path = fixPaths.getOrPut(f.layer) { c to androidx.compose.ui.graphics.Path() }.second
-                    var k = 0
-                    while (k < edges.size) {
-                        val ax = edges[k]; val ay = edges[k + 1]; val az = edges[k + 2]
-                        val bx = edges[k + 3]; val by = edges[k + 4]; val bz = edges[k + 5]
-                        k += 6
-                        val wax = world.x.x * ax + world.y.x * ay + world.z.x * az + world.w.x
-                        val way = world.x.y * ax + world.y.y * ay + world.z.y * az + world.w.y
-                        val wbx = world.x.x * bx + world.y.x * by + world.z.x * bz + world.w.x
-                        val wby = world.x.y * bx + world.y.y * by + world.z.y * bz + world.w.y
-                        val pa = toScreen(wax, -way, w, h)
-                        val pb = toScreen(wbx, -wby, w, h)
-                        path.moveTo(pa.x, pa.y); path.lineTo(pb.x, pb.y)
+            if (!gesturing && fp != null && bsPlan > 0f) {
+                withTransform({
+                    translate(w / 2f + offset.x, h / 2f + offset.y)
+                    scale(bsPlan, bsPlan, Offset.Zero)
+                    translate(-data.cx, -data.cy)
+                }) {
+                    val sw = 1.2f / bsPlan
+                    for ((key, path) in fp.byKey) {
+                        val sep = key.indexOf(PATH_KEY_SEP)
+                        if (sep < 0) continue
+                        val layer = key.substring(0, sep)
+                        if (!silhouetteVisible(key.substring(sep + 1))) continue
+                        val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer)) else Color(0xFF6E6E73)
+                        drawPath(path, c, style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
                     }
-                }
-                for ((_, cp) in fixPaths) {
-                    drawPath(cp.second, cp.first, style = androidx.compose.ui.graphics.drawscope.Stroke(1.2f))
                 }
             }
             // PASSE 2 : pastilles / anneaux de sélection / étiquettes, PAR-DESSUS
@@ -538,7 +541,7 @@ fun PlanScreen(
                 val s = toScreen(f.px, f.py, w, h)
                 if (s.x !in -40f..w + 40f || s.y !in -40f..h + 40f) return@forEachIndexed
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
-                if (silhouetteOf(f) != null) {
+                if (silhouetteVisible(f.spec)) {
                     drawCircle(c, radius = 3f, center = s)
                 } else {
                     drawCircle(c, radius = 7f, center = s)
@@ -548,7 +551,7 @@ fun PlanScreen(
                     drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
                 }
-                if (showLabels) {
+                if (showLabels && !gesturing) {
                     val text = when (options.labelContent) {
                         LabelContent.ID -> f.id?.let { "#$it" }
                         LabelContent.DMX -> f.addr.ifEmpty { null }?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) }
@@ -558,7 +561,13 @@ fun PlanScreen(
                     if (text != null) {
                         val fs = (9f * options.labelSize)
                         val off = 8f * options.labelOffset
-                        val tl = measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = inkColor))
+                        // Mesurer un texte est cher : le cache LRU par défaut du
+                        // TextMeasurer ne fait que 8 entrées, donc chaque étiquette
+                        // était re-composée À CHAQUE FRAME. Ici on mémorise le
+                        // résultat par texte (vidé si la taille/l'encre change).
+                        val tl = labelCache.getOrPut(text) {
+                            measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = inkColor))
+                        }
                         drawText(tl, topLeft = Offset(s.x + off, s.y - fs * 0.7f))
                     }
                 }
@@ -967,6 +976,237 @@ private val BG_2D_PRESETS = listOf(
     "Blanc" to 0xFFFFFFFFL, "Gris clair" to 0xFFE9E9ECL, "Beige" to 0xFFF2ECDDL,
     "Anthracite" to 0xFF1C1C1EL, "Noir" to 0xFF000000L
 )
+
+// ---------------------------------------------------------------------------
+// Cache des fils de fer + tracés pré-construits
+// ---------------------------------------------------------------------------
+
+/**
+ * Fils de fer conservés au niveau PROCESSUS.
+ *
+ * Le fil de fer des structures coûte un dézip du .mvr + un parse de chaque .3ds
+ * + une extraction d'arêtes : des dizaines de secondes sur un gros show. Il
+ * était refait à CHAQUE entrée dans la vue plan (donc à chaque aller-retour
+ * 3D↔plan), ce qui donnait « les ponts mettent très longtemps à s'afficher ».
+ * On garde la dernière scène construite — comme le fait déjà la vue 3D pour sa
+ * géométrie (Prepared3DCache).
+ */
+private object PlanWireCache {
+    // Références FAIBLES/SOUPLES : sur un gros show ces tableaux d'arêtes pèsent
+    // lourd, et l'app a un historique d'OOM. La scène n'est pas retenue (weak),
+    // et le fil de fer est rendu au GC en cas de pression mémoire (soft) — on
+    // le reconstruira alors, comme avant.
+    private var structScene: java.lang.ref.WeakReference<MvrScene>? = null
+    private var structBuilt: java.lang.ref.SoftReference<PlanWireframe.Built>? = null
+    private var fixScene: java.lang.ref.WeakReference<MvrScene>? = null
+    private var fixVersion: Int = -1
+    private var fixBuilt: java.lang.ref.SoftReference<PlanWireframe.FixtureWire>? = null
+
+    @Synchronized
+    fun structures(scene: MvrScene): PlanWireframe.Built? =
+        if (structScene?.get() === scene) structBuilt?.get() else null
+
+    // @Synchronized sur TOUTE la construction : deux entrées simultanées dans la
+    // vue plan (aller-retour rapide 3D↔plan) lançaient sinon deux constructions
+    // complètes en parallèle → pic mémoire doublé.
+    @Synchronized
+    fun buildStructures(scene: MvrScene, mvrBytes: ByteArray): PlanWireframe.Built {
+        structures(scene)?.let { return it }
+        val built = PlanWireframe.build(scene, mvrBytes)
+        structScene = java.lang.ref.WeakReference(scene)
+        structBuilt = java.lang.ref.SoftReference(built)
+        return built
+    }
+
+    @Synchronized
+    fun fixturesFresh(scene: MvrScene, version: Int): Boolean =
+        fixScene?.get() === scene && fixVersion == version && fixBuilt?.get() != null
+
+    @Synchronized
+    fun fixtures(scene: MvrScene, version: Int): PlanWireframe.FixtureWire? =
+        if (fixScene?.get() === scene && fixVersion == version) fixBuilt?.get() else null
+
+    @Synchronized
+    fun buildFixtures(
+        scene: MvrScene, mvrBytes: ByteArray, version: Int, overrides: Map<String, ByteArray>
+    ): PlanWireframe.FixtureWire {
+        fixtures(scene, version)?.let { return it }
+        val built = PlanWireframe.buildFixtures(scene, mvrBytes, overrides)
+        fixScene = java.lang.ref.WeakReference(scene)
+        fixVersion = version
+        fixBuilt = java.lang.ref.SoftReference(built)
+        return built
+    }
+}
+
+/** Tracés DXF pré-construits, en coordonnées LOCALES du DXF (y déjà inversé). */
+private class DxfPaths(
+    /** (calque, couleur) → tracé : masquer un calque ne reconstruit RIEN. */
+    val strokes: Map<Pair<String, Int>, androidx.compose.ui.graphics.Path>,
+    /** (calque, couleur, plein) → zone remplie. */
+    val fills: Map<Triple<String, Int, Boolean>, androidx.compose.ui.graphics.Path>,
+    val points: Int
+) {
+    /** Assez léger pour RESTER dessiné pendant un pan/zoom (sinon il s'efface). */
+    val light: Boolean get() = points < 60_000
+}
+
+/** Fil de fer des structures prêt à dessiner (coordonnées plan). */
+private class StructPaths(
+    val byLayer: Map<String, androidx.compose.ui.graphics.Path>,
+    val edges: Int
+) {
+    val light: Boolean get() = edges < 40_000
+}
+
+/** Sépare calque et spec dans les clés de `buildFixturePaths`. */
+private const val PATH_KEY_SEP = '\u0000'
+
+/**
+ * Arêtes des structures, transformées en coordonnées PLAN une fois pour toutes
+ * (un tracé par calque). Avant, ces multiplications matricielles étaient
+ * refaites pour chaque arête à CHAQUE frame.
+ */
+private fun buildStructurePaths(wf: PlanWireframe.Built): StructPaths {
+    val out = HashMap<String, androidx.compose.ui.graphics.Path>()
+    var count = 0
+    for (inst in wf.instances) {
+        val edges = wf.edgesByKey[inst.key] ?: continue
+        val world = inst.world
+        if (count > MAX_STRUCT_PATH_SEGMENTS) break   // garde-fou mémoire
+        val path = out.getOrPut(inst.layer) { androidx.compose.ui.graphics.Path() }
+        count += edges.size / 6
+        var i = 0
+        while (i + 5 < edges.size) {
+            val ax = edges[i]; val ay = edges[i + 1]; val az = edges[i + 2]
+            val bx = edges[i + 3]; val by = edges[i + 4]; val bz = edges[i + 5]
+            i += 6
+            val wax = world.x.x * ax + world.y.x * ay + world.z.x * az + world.w.x
+            val way = world.x.y * ax + world.y.y * ay + world.z.y * az + world.w.y
+            val wbx = world.x.x * bx + world.y.x * by + world.z.x * bz + world.w.x
+            val wby = world.x.y * bx + world.y.y * by + world.z.y * bz + world.w.y
+            path.moveTo(wax, -way); path.lineTo(wbx, -wby)
+        }
+    }
+    return StructPaths(out, count)
+}
+
+/**
+ * Structures SANS fil de fer (ex. géométrie .glb) → un point chacune, sous forme
+ * de TRACÉ : un sous-chemin de longueur nulle dessiné en bout rond donne un
+ * point, et Skia élague ce qui sort de l'écran. (Un `drawPoints` aurait fait un
+ * appel natif par point — c'est ce que faisait déjà l'ancienne boucle de
+ * `drawCircle`, mais sans profiter de l'élagage.)
+ */
+private fun dotsPath(points: List<Pair<Float, Float>>): androidx.compose.ui.graphics.Path {
+    val p = androidx.compose.ui.graphics.Path()
+    for ((x, y) in points) { p.moveTo(x, y); p.lineTo(x, y) }
+    return p
+}
+
+private fun structureDots(wf: PlanWireframe.Built?): List<Pair<Float, Float>> =
+    if (wf == null || wf.isEmpty) emptyList()
+    else wf.instances.mapNotNull {
+        if (wf.edgesByKey[it.key] == null) it.cx to it.cy else null
+    }
+
+/** Silhouettes des projecteurs, prêtes à dessiner. */
+private class FixturePaths(
+    val byKey: Map<String, androidx.compose.ui.graphics.Path>,
+    /** Specs réellement TRACÉES (le budget peut en écarter) → pastille sinon. */
+    val specs: Set<String>,
+    val segments: Int
+)
+
+/**
+ * Silhouettes des projecteurs en coordonnées PLAN, un tracé par
+ * « calque + spec » : la lisibilité de la silhouette dépend du zoom et se
+ * décide donc au dessin, spec par spec, sans rien reconstruire.
+ *
+ * BUDGET : chaque projecteur recopie les arêtes de sa spec ; sur un très gros
+ * show cela peut représenter des centaines de Mo de SkPath natif (l'app a un
+ * historique d'OOM). Au-delà du budget, les specs restantes ne sont pas
+ * tracées — les projecteurs concernés gardent leur pastille.
+ */
+private fun buildFixturePaths(
+    data: PlanData, fw: PlanWireframe.FixtureWire
+): FixturePaths {
+    val out = HashMap<String, androidx.compose.ui.graphics.Path>()
+    val specs = HashSet<String>()
+    var segments = 0
+    for (f in data.fixtures) {
+        val spec = f.spec?.trim() ?: continue
+        val edges = fw.edgesBySpec[spec] ?: continue
+        // Budget dépassé : on n'ouvre plus de nouvelle spec, mais on finit
+        // celles déjà commencées (sinon des projecteurs identiques seraient
+        // dessinés différemment selon leur rang dans la liste).
+        if (segments > MAX_FIXTURE_PATH_SEGMENTS && spec !in specs) continue
+        val world = f.world
+        specs.add(spec)
+        val path = out.getOrPut(f.layer + PATH_KEY_SEP + spec) { androidx.compose.ui.graphics.Path() }
+        segments += edges.size / 6
+        var k = 0
+        while (k + 5 < edges.size) {
+            val ax = edges[k]; val ay = edges[k + 1]; val az = edges[k + 2]
+            val bx = edges[k + 3]; val by = edges[k + 4]; val bz = edges[k + 5]
+            k += 6
+            val wax = world.x.x * ax + world.y.x * ay + world.z.x * az + world.w.x
+            val way = world.x.y * ax + world.y.y * ay + world.z.y * az + world.w.y
+            val wbx = world.x.x * bx + world.y.x * by + world.z.x * bz + world.w.x
+            val wby = world.x.y * bx + world.y.y * by + world.z.y * bz + world.w.y
+            path.moveTo(wax, -way); path.lineTo(wbx, -wby)
+        }
+    }
+    return FixturePaths(out, specs, segments)
+}
+
+/** ~14 Mo de SkPath au maximum pour les silhouettes de projecteurs. */
+private const val MAX_FIXTURE_PATH_SEGMENTS = 800_000
+
+/** Idem pour le fil de fer du décor. */
+private const val MAX_STRUCT_PATH_SEGMENTS = 800_000
+
+/**
+ * Tracés DXF, dans les coordonnées LOCALES du fichier avec l'axe Y déjà inversé
+ * (repère « plan »). Le placement (décalage / rotation / échelle) est appliqué
+ * au dessin sous forme de matrice : le régler aux curseurs ne coûte plus rien.
+ */
+private fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
+    val fills = HashMap<Triple<String, Int, Boolean>, androidx.compose.ui.graphics.Path>()
+    for (fl in plan.fills) {
+        val fp = fills.getOrPut(Triple(fl.layer, fl.color, fl.solid)) {
+            androidx.compose.ui.graphics.Path().apply {
+                fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+            }
+        }
+        for (ring in fl.rings) {
+            if (ring.size < 6) continue
+            var k = 0
+            var first = true
+            while (k + 1 < ring.size) {
+                val x = ring[k]; val y = -ring[k + 1]; k += 2
+                if (first) { fp.moveTo(x, y); first = false } else fp.lineTo(x, y)
+            }
+            fp.close()
+        }
+    }
+    val strokes = HashMap<Pair<String, Int>, androidx.compose.ui.graphics.Path>()
+    var drawn = 0
+    loop@ for (pl in plan.polylines) {
+        val path = strokes.getOrPut(pl.layer to pl.color) { androidx.compose.ui.graphics.Path() }
+        val pts = pl.points
+        var i = 0
+        var first = true
+        while (i + 1 < pts.size) {
+            val x = pts[i]; val y = -pts[i + 1]; i += 2
+            if (first) { path.moveTo(x, y); first = false } else path.lineTo(x, y)
+        }
+        if (pl.closed && pts.size >= 4) path.lineTo(pts[0], -pts[1])
+        drawn += pts.size / 2
+        if (drawn > 1_500_000) break@loop  // garde-fou mémoire (construit UNE fois)
+    }
+    return DxfPaths(strokes, fills, drawn)
+}
 
 private class PlanFixture(
     val px: Float, val py: Float, val id: String?, val name: String,

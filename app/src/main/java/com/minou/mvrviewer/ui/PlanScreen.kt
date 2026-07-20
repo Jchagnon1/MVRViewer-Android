@@ -2,6 +2,7 @@ package com.minou.mvrviewer.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -10,9 +11,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -79,6 +87,8 @@ fun PlanScreen(
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
     onCalibrationChanged: () -> Unit = {},
     onTransformChanged: (com.minou.mvrviewer.mvr.ReferencePlanTransform) -> Unit = {},
+    hiddenLayers: Set<String> = emptySet(),
+    onToggleLayer: (String) -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
@@ -338,6 +348,7 @@ fun PlanScreen(
                 val path = androidx.compose.ui.graphics.Path()
                 var drawn = 0
                 loop@ for (pl in rp.plan.polylines) {
+                    if (pl.layer in hiddenLayers) continue@loop
                     val pts = pl.points
                     var first = true
                     var i = 0
@@ -773,6 +784,33 @@ fun PlanScreen(
                         Text("Échelle", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale /= 1.1; bump() }) { Text("÷") }
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale *= 1.1; bump() }) { Text("×") }
+                    }
+                    // Calques du plan DXF : masquer/afficher (rend lisible un plan
+                    // d'architecte surchargé). L'état est persisté et synchronisé.
+                    val dxfLayers = remember(rpPanel) {
+                        rpPanel.plan.layerCounts.entries.sortedByDescending { it.value }
+                    }
+                    if (dxfLayers.isNotEmpty()) {
+                        Text("Calques (${dxfLayers.size})", style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                        androidx.compose.foundation.layout.Column(
+                            Modifier.heightIn(max = 150.dp).verticalScroll(rememberScrollState())
+                        ) {
+                            dxfLayers.forEach { (layer, count) ->
+                                Row(verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().clickable { onToggleLayer(layer) }) {
+                                    Checkbox(
+                                        checked = layer !in hiddenLayers,
+                                        onCheckedChange = { onToggleLayer(layer) },
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                    Text(layer, style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f).padding(start = 6.dp))
+                                    Text("$count", style = MaterialTheme.typography.labelSmall, color = Color(0xFF888888))
+                                }
+                            }
+                        }
                     }
                 }
             }

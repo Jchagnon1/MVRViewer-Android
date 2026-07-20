@@ -122,6 +122,20 @@ object ProjectStore {
     fun loadShowUserLocation(ctx: Context, key: String): Boolean =
         readManifest(ctx, key).optBoolean("showUserLocation", false)
 
+    // ---- Calques DXF masqués (visibilité par calque du plan de repère) ----
+
+    fun saveRefPlanHiddenLayers(ctx: Context, key: String, layers: Set<String>) {
+        val m = readManifest(ctx, key)
+        if (layers.isEmpty()) m.remove("refPlanHiddenLayers")
+        else m.put("refPlanHiddenLayers", JSONArray(layers.toList()))
+        writeManifest(ctx, key, m)
+    }
+
+    fun loadRefPlanHiddenLayers(ctx: Context, key: String): Set<String> {
+        val arr = readManifest(ctx, key).optJSONArray("refPlanHiddenLayers") ?: return emptySet()
+        return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }.toSet()
+    }
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
     fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) {

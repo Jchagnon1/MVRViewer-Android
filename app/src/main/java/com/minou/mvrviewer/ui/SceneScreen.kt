@@ -94,6 +94,11 @@ fun SceneScreen(
     // calibration), et on ré-enregistre à chaque changement.
     val projectKey = remember(mvrBytes) { ProjectStore.keyFor(mvrBytes) }
     var restored by remember(projectKey) { mutableStateOf(false) }
+    // Calques DXF masqués (visibilité par calque) — déclaré tôt car chargé dans la
+    // restauration ci-dessous ; partagé plan/3D, persisté par projet, synchronisé.
+    var hiddenLayers by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
+    fun hiddenSig(s: Set<String>) = s.sorted().joinToString("|")
     LaunchedEffect(projectKey) {
         val rp = withContext(Dispatchers.IO) { ProjectStore.loadReferencePlan(ctx, projectKey) }
         val ov = withContext(Dispatchers.IO) { ProjectStore.loadOverrides(ctx, projectKey) }
@@ -105,6 +110,8 @@ fun SceneScreen(
         if (calibration.anchors.isEmpty()) anchors.forEach { calibration.addAnchor(it) }
         // Fond satellite : drapeau restauré seulement si calibré (sinon rien à géo-référencer).
         if (calibration.isCalibrated) options.showSatellite = ProjectStore.loadShowSatellite(ctx, projectKey)
+        val hidden = withContext(Dispatchers.IO) { ProjectStore.loadRefPlanHiddenLayers(ctx, projectKey) }
+        if (hidden.isNotEmpty()) { hiddenLayers = hidden; lastHiddenSig = hiddenSig(hidden) }
         restored = true
     }
     // Sauvegarde des modèles GDTF appliqués quand ils changent (action utilisateur).
@@ -142,10 +149,6 @@ fun SceneScreen(
     var lastCalibSig by remember(projectKey) { mutableStateOf("") }
     var lastSatellitePushed by remember(projectKey) { mutableStateOf<Boolean?>(null) }
     var lastTransformSig by remember(projectKey) { mutableStateOf("") }
-    // Calques DXF masqués connus du cloud : Android n'a pas encore d'éditeur de
-    // calques, mais on ré-émet cette valeur (au lieu d'une liste vide) → un push
-    // manifeste (satellite/plan) n'efface pas la sélection d'un collègue iOS.
-    var remoteHiddenLayers by remember(projectKey) { mutableStateOf<List<String>>(emptyList()) }
     val authState = sync?.auth?.collectAsState()
     val curProject = sync?.currentProject?.collectAsState()
 
@@ -170,7 +173,10 @@ fun SceneScreen(
             is SectionPayload.Manifest -> {
                 val m = p.dto
                 m.refPlanBlobSHA?.let { refPlanSha = it }
-                remoteHiddenLayers = m.refPlanHiddenLayers
+                val remoteHidden = m.refPlanHiddenLayers.toSet()
+                hiddenLayers = remoteHidden
+                lastHiddenSig = hiddenSig(remoteHidden)
+                withContext(Dispatchers.IO) { ProjectStore.saveRefPlanHiddenLayers(ctx, projectKey, remoteHidden) }
                 m.showSatellite?.let { lastSatellitePushed = it; options.showSatellite = it }
                 m.refPlanTransform?.let { t ->
                     val nt = LocalMapper.toTransform(t)
@@ -206,8 +212,9 @@ fun SceneScreen(
         refPlanSha = sha
         rp?.transform?.let { lastTransformSig = transformSig(it) }
         s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), rp?.transform,
-            remoteHiddenLayers, options.showSatellite, sha)
+            hiddenLayers.toList(), options.showSatellite, sha)
         lastSatellitePushed = options.showSatellite
+        lastHiddenSig = hiddenSig(hiddenLayers)
         if (calibration.isCalibrated) {
             lastCalibSig = calibration.anchors.joinToString("|") { "${it.worldX},${it.worldY},${it.latitude},${it.longitude}" }
             s.pushCalibration(calibration.anchors)
@@ -284,7 +291,21 @@ fun SceneScreen(
         if (lastSatellitePushed == options.showSatellite) return@LaunchedEffect
         lastSatellitePushed = options.showSatellite
         s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), referencePlan?.transform,
-            remoteHiddenLayers, options.showSatellite, refPlanSha)
+            hiddenLayers.toList(), options.showSatellite, refPlanSha)
+    }
+
+    // Visibilité des calques DXF : persiste (par projet) + pousse le manifeste
+    // quand l'utilisateur masque/affiche un calque, sauf écho distant.
+    LaunchedEffect(hiddenLayers) {
+        if (!restored) return@LaunchedEffect
+        withContext(Dispatchers.IO) { ProjectStore.saveRefPlanHiddenLayers(ctx, projectKey, hiddenLayers) }
+        val s = sync ?: return@LaunchedEffect
+        if (!s.isCurrentProjectShared) return@LaunchedEffect
+        val sig = hiddenSig(hiddenLayers)
+        if (sig == lastHiddenSig) return@LaunchedEffect
+        lastHiddenSig = sig
+        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), referencePlan?.transform,
+            hiddenLayers.toList(), options.showSatellite, refPlanSha)
     }
 
     // Dialogues de synchro.
@@ -302,6 +323,7 @@ fun SceneScreen(
             options = options,
             gdtfOverrides = gdtfOverrides,
             referencePlan = referencePlan,
+            hiddenLayers = hiddenLayers,
             calibration = calibration,
             satellite = satellite,
             onShowPlan = { mode = SceneMode.PLAN },
@@ -330,13 +352,17 @@ fun SceneScreen(
                             s.uploadRefPlan(RefPlanInterop.encode(rp.plan)) else null
                         rp?.transform?.let { lastTransformSig = transformSig(it) }
                         s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey),
-                            rp?.transform, remoteHiddenLayers, options.showSatellite, refPlanSha)
+                            rp?.transform, hiddenLayers.toList(), options.showSatellite, refPlanSha)
                     }
                 }
             },
             calibration = calibration,
             projectKey = projectKey,
             satellite = satellite,
+            hiddenLayers = hiddenLayers,
+            onToggleLayer = { layer ->
+                hiddenLayers = if (layer in hiddenLayers) hiddenLayers - layer else hiddenLayers + layer
+            },
             onCalibrationChanged = { calibTick++ },
             onTransformChanged = { t ->
                 // Push live du placement, sauf s'il vient d'être APPLIQUÉ à distance.
@@ -347,7 +373,7 @@ fun SceneScreen(
                             lastTransformSig = sig
                             scope.launch {
                                 s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), t,
-                                    remoteHiddenLayers, options.showSatellite, refPlanSha)
+                                    hiddenLayers.toList(), options.showSatellite, refPlanSha)
                             }
                         }
                     }

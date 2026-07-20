@@ -162,6 +162,7 @@ fun Scene3DScreen(
     options: SceneOptions,
     gdtfOverrides: GdtfOverrides,
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
+    hiddenLayers: Set<String> = emptySet(),
     calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
     onShowPlan: () -> Unit,
@@ -580,7 +581,7 @@ fun Scene3DScreen(
     // Plan de repère DXF en 3D : lignes au sol, placées par la transformée du plan
     // (offset/rotation/échelle/hauteur), dans le MÊME repère monde que les
     // projecteurs (le retour en 3D recompose → reflète les derniers réglages).
-    LaunchedEffect(referencePlan) {
+    LaunchedEffect(referencePlan, hiddenLayers) {
         dxfRoot.childNodes.toList().forEach {
             dxfRoot.removeChildNode(it)
             runCatching { it.destroy() }   // libère VertexBuffer/IndexBuffer (sinon fuite à chaque ré-import)
@@ -603,6 +604,7 @@ fun Scene3DScreen(
             val idx = ArrayList<Int>()
             val up = Float3(0f, 1f, 0f)
             outer@ for (pl in rp.plan.polylines) {
+                if (pl.layer in hiddenLayers) continue@outer
                 val pts = pl.points; val n = pts.size / 2
                 if (n < 2) continue
                 // Sommets projetés en Filament (plan XZ), une fois par polyligne.

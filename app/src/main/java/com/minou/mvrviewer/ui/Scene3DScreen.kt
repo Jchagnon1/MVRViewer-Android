@@ -9,11 +9,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PhotoSizeSelectSmall
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
@@ -21,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -28,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -211,6 +221,13 @@ fun Scene3DScreen(
     // LIBÉRÉES à la reconstruction (changement d'image ou d'opacité) : sinon
     // chaque rebuild fuyait une texture GPU (l'image fait ~1–3 Mo).
     val satGpu = remember { SatGpu() }
+    // Marqueur « ma position » (GPS) en 3D : nœud dédié, mis à jour SANS
+    // reconstruire la scène (même principe non destructif que le quad satellite /
+    // le plan DXF). Bleu, non éclairé → toujours visible.
+    val markerRoot = rememberNode(engine)
+    val markerMaterial = remember(materialLoader) { materialLoader.createUnlitColorInstance(0xFF2979FF.toInt()) }
+    var showLocation by remember { mutableStateOf(false) }
+    val gps by rememberUserLocation(showLocation)
     var status by remember(scene) { mutableStateOf("chargement 3D…") }
     // LOD d'interaction : les petits objets (sièges, accessoires) sont masqués
     // pendant que la caméra bouge, réaffichés à l'arrêt — divise les draw calls
@@ -691,6 +708,36 @@ fun Scene3DScreen(
         satRoot.addChildNode(GeometryNode(engine, satGeom, listOf(mat)))
     }
 
+    // Marqueur GPS : reconstruit à chaque relevé (peu fréquent) tant que
+    // « ma position » est actif ET que la scène est calibrée. Un poteau + une
+    // tête, à la position monde de l'utilisateur convertie en repère Filament.
+    LaunchedEffect(gps, showLocation, options.gpsMarkerScale, calibration?.isCalibrated, layout) {
+        markerRoot.childNodes.toList().forEach {
+            markerRoot.removeChildNode(it); runCatching { it.destroy() }
+        }
+        val g = gps
+        val cal = calibration
+        if (!showLocation || cal == null || !cal.isCalibrated || g == null) return@LaunchedEffect
+        val wp = cal.worldPosition(g.latitude, g.longitude) ?: return@LaunchedEffect
+        val cx = center.x; val cy = center.y; val cz = center.z
+        val groundFy = -cz / 1000f
+        val fx = (wp.first - cx) / 1000f
+        val fz = -(wp.second - cy) / 1000f
+        // Unité proportionnelle à la scène (mètres Filament), bornée et réglable.
+        val u = (layout.radius * 0.02f).coerceIn(0.15f, 4f) * options.gpsMarkerScale
+        val poleH = u * 5f
+        val pole = io.github.sceneview.node.CubeNode(
+            engine, Float3(u * 0.35f, poleH, u * 0.35f),
+            Float3(fx, groundFy + poleH / 2f, fz), markerMaterial
+        )
+        val head = io.github.sceneview.node.CubeNode(
+            engine, Float3(u * 1.6f, u * 1.6f, u * 1.6f),
+            Float3(fx, groundFy + poleH + u * 0.8f, fz), markerMaterial
+        )
+        markerRoot.addChildNode(pole)
+        markerRoot.addChildNode(head)
+    }
+
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
     val cameraNode = rememberCameraNode(engine) { position = camHome }
     // Vitesse de pinch-zoom PROPORTIONNELLE à la taille de la scène : le zoom
@@ -721,6 +768,29 @@ fun Scene3DScreen(
     // repère fiable — e.x/e.y sont dans un repère décalé) vers le repère de la
     // SceneView = celui de worldToScreenPoint (comme la position d'un geste Compose).
     var scenePos by remember { mutableStateOf(Offset.Zero) }
+
+    // Recherche d'un projecteur par N° / nom → le sélectionne (la surbrillance le
+    // montre s'il est à l'écran ; sinon l'utilisateur oriente l'orbite pour le
+    // trouver). Classement : id exact > préfixe > contenu > nom.
+    var query by remember(scene) { mutableStateOf("") }
+    fun doSearch3D() {
+        val q = query.trim(); if (q.isEmpty()) return
+        val fx = scene.fixtures
+        var best = -1; var bestRank = Int.MAX_VALUE
+        fx.forEachIndexed { i, f ->
+            if (i !in layout.positions.indices || !layout.valid[i]) return@forEachIndexed
+            val id = f.fixtureId
+            val rank = when {
+                id != null && id.equals(q, true) -> 0
+                id != null && id.startsWith(q, true) -> 1
+                id != null && id.contains(q, true) -> 2
+                f.name.contains(q, true) -> 3
+                else -> Int.MAX_VALUE
+            }
+            if (rank < bestRank) { bestRank = rank; best = i }
+        }
+        if (best >= 0) { selected.clear(); selected.add(best) }
+    }
 
     // Projette la position monde (Filament) d'un projecteur en pixels écran de la
     // SceneView (origine coin haut-gauche, comme Compose). null si derrière la
@@ -853,6 +923,7 @@ fun Scene3DScreen(
                 Node(apply = { addChildNode(satRoot) })
                 Node(apply = { addChildNode(geometryRoot) })
                 Node(apply = { addChildNode(dxfRoot) })
+                Node(apply = { addChildNode(markerRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)
                 layout.positions.forEachIndexed { i, p ->
                     // Cube de repli SEULEMENT pour un projecteur « nu » : ni géométrie
@@ -913,8 +984,30 @@ fun Scene3DScreen(
                 }
             }
 
+            // Recherche d'un projecteur par N° (haut-droite) — le sélectionne.
+            OutlinedTextField(
+                value = query, onValueChange = { query = it }, singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                placeholder = { Text("N° projecteur") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { doSearch3D() }),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.Black.copy(alpha = 0.45f),
+                    unfocusedContainerColor = Color.Black.copy(alpha = 0.35f),
+                    focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                    cursorColor = Color.White,
+                    focusedBorderColor = Color.White.copy(alpha = 0.7f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.4f),
+                    focusedLeadingIconColor = Color.White,
+                    unfocusedLeadingIconColor = Color.White.copy(alpha = 0.7f),
+                    focusedPlaceholderColor = Color.White.copy(alpha = 0.6f),
+                    unfocusedPlaceholderColor = Color.White.copy(alpha = 0.6f)
+                ),
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).width(180.dp)
+            )
+
             // Barre d'outils flottante (bas-gauche) : bascule du mode rectangle +
-            // effacer la sélection. Même emplacement que la vue plan.
+            // effacer la sélection + position GPS (si calibré). Même emplacement que la vue plan.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -927,6 +1020,21 @@ fun Scene3DScreen(
                 if (selected.isNotEmpty()) {
                     FilledIconButton(onClick = { selected.clear() }) {
                         Icon(Icons.Filled.Close, contentDescription = "Effacer la sélection")
+                    }
+                }
+                // « Ma position » en 3D : dispo une fois la scène calibrée (comme le satellite).
+                if (calibration?.isCalibrated == true) {
+                    FilledIconToggleButton(checked = showLocation, onCheckedChange = { showLocation = it }) {
+                        Icon(Icons.Filled.MyLocation, contentDescription = "Ma position (3D)")
+                    }
+                    if (showLocation) {
+                        FilledIconButton(onClick = {
+                            options.gpsMarkerScale = when {
+                                options.gpsMarkerScale <= 0.7f -> 1f
+                                options.gpsMarkerScale >= 1.5f -> 0.6f
+                                else -> 1.6f
+                            }
+                        }) { Icon(Icons.Filled.PhotoSizeSelectSmall, contentDescription = "Taille du marqueur") }
                     }
                 }
             }

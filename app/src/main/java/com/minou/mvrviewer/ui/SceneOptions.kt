@@ -63,6 +63,8 @@ class SceneOptions {
     // calibration GPS. Persisté par projet ; opacité de session (défaut 0.55).
     var showSatellite by mutableStateOf(false)
     var satelliteOpacity by mutableFloatStateOf(0.55f)
+    // Taille du marqueur « ma position » en 3D (multiplicateur, S 0.6 · M 1 · L 1.6).
+    var gpsMarkerScale by mutableFloatStateOf(1f)
 }
 
 /**

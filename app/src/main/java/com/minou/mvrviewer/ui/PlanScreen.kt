@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -345,10 +346,13 @@ fun PlanScreen(
                 val rr = Math.toRadians(tf.rotationDeg)
                 val cc = kotlin.math.cos(rr).toFloat(); val sn = kotlin.math.sin(rr).toFloat()
                 val ox = tf.offsetX.toFloat(); val oy = tf.offsetY.toFloat()
-                val path = androidx.compose.ui.graphics.Path()
+                // Un Path par couleur d'entité résolue (ACI/true-color) → tracés
+                // colorés comme dans AutoCAD, avec adaptation au fond (contraste).
+                val pathByColor = HashMap<Int, androidx.compose.ui.graphics.Path>()
                 var drawn = 0
                 loop@ for (pl in rp.plan.polylines) {
                     if (pl.layer in hiddenLayers) continue@loop
+                    val path = pathByColor.getOrPut(pl.color) { androidx.compose.ui.graphics.Path() }
                     val pts = pl.points
                     var first = true
                     var i = 0
@@ -366,7 +370,10 @@ fun PlanScreen(
                     drawn += pts.size / 2
                     if (drawn > 400_000) break@loop  // garde-fou de dessin
                 }
-                drawPath(path, dxfColor, style = androidx.compose.ui.graphics.drawscope.Stroke(0.7f))
+                for ((rgb, path) in pathByColor) {
+                    drawPath(path, dxfDisplayColor(rgb, bgDark),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(0.7f))
+                }
             }
 
             // Décor / structure : FIL DE FER VECTORIEL (arêtes caractéristiques
@@ -804,6 +811,11 @@ fun PlanScreen(
                                         onCheckedChange = { onToggleLayer(layer) },
                                         modifier = Modifier.size(30.dp)
                                     )
+                                    rpPanel.plan.layerColors[layer]?.let { lc ->
+                                        androidx.compose.foundation.layout.Box(
+                                            Modifier.size(11.dp).clip(RoundedCornerShape(2.dp))
+                                                .background(dxfDisplayColor(lc, bgDark)))
+                                    }
                                     Text(layer, style = MaterialTheme.typography.bodySmall, maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f).padding(start = 6.dp))
@@ -865,6 +877,22 @@ fun PlanScreen(
                 )
             }
         }
+    }
+}
+
+/** Couleur d'affichage d'une entité DXF (0xRRGGBB) adaptée au fond : sur fond
+ *  sombre on éclaircit les couleurs quasi noires, sur fond clair on assombrit le
+ *  blanc — comme l'adaptation de contraste iOS. */
+private fun dxfDisplayColor(rgb: Int, bgDark: Boolean): Color {
+    val r = (rgb shr 16) and 0xFF; val g = (rgb shr 8) and 0xFF; val b = rgb and 0xFF
+    val lum = 0.299 * r + 0.587 * g + 0.114 * b
+    return when {
+        bgDark && lum < 60 -> Color(
+            minOf(255, (r * 2.2f).toInt() + 40),
+            minOf(255, (g * 2.2f).toInt() + 40),
+            minOf(255, (b * 2.2f).toInt() + 40))
+        !bgDark && lum > 205 -> Color((r * 0.55f).toInt(), (g * 0.55f).toInt(), (b * 0.55f).toInt())
+        else -> Color(0xFF000000.toInt() or (rgb and 0xFFFFFF))
     }
 }
 

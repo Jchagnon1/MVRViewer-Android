@@ -14,7 +14,10 @@ class DxfPolyline(
     /** Sommets à plat [x0,y0, x1,y1, …] en mm (repère local DXF). */
     val points: FloatArray,
     val closed: Boolean,
-    val layer: String
+    val layer: String,
+    /** Couleur RÉSOLUE de l'entité (0xRRGGBB) : true color (420) sinon ACI (62),
+     *  BYLAYER/BYBLOCK résolus. Défaut 0xFFFFFF (blanc → géré par le contraste). */
+    val color: Int = 0xFFFFFF
 )
 
 class DxfPlan(
@@ -25,7 +28,11 @@ class DxfPlan(
     val segmentCount: Int,
     val layerCounts: Map<String, Int>,
     /** Segments écartés (plafond mémoire atteint) ; 0 = import complet. */
-    val truncatedSegments: Int
+    val truncatedSegments: Int,
+    /** Couleur par calque (0xRRGGBB) — résolution BYLAYER. */
+    val layerColors: Map<String, Int> = emptyMap(),
+    /** Calques éteints/gelés à l'import → masqués par défaut. */
+    val defaultHiddenLayers: Set<String> = emptySet()
 ) {
     val isEmpty: Boolean get() = polylines.isEmpty()
     val width: Float get() = maxX - minX

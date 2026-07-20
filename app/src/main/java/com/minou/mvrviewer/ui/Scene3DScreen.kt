@@ -118,6 +118,18 @@ private val BG_3D_PRESETS = listOf(
     "Gris" to 0xFF8E8E93L, "Blanc" to 0xFFFFFFFFL
 )
 
+/** Couleur DXF (0xRRGGBB) → ARGB pour un matériau non éclairé, en éclaircissant
+ *  les couleurs quasi noires (le fond 3D est en général sombre). */
+private fun dxf3DColorInt(rgb: Int): Int {
+    val r = (rgb shr 16) and 0xFF; val g = (rgb shr 8) and 0xFF; val b = rgb and 0xFF
+    val lum = 0.299 * r + 0.587 * g + 0.114 * b
+    return if (lum >= 50) 0xFF000000.toInt() or (rgb and 0xFFFFFF)
+    else 0xFF000000.toInt() or
+        (minOf(255, (r * 2.2).toInt() + 50) shl 16) or
+        (minOf(255, (g * 2.2).toInt() + 50) shl 8) or
+        minOf(255, (b * 2.2).toInt() + 50)
+}
+
 /** sRGB [0,1] → linéaire (la clearColor Filament est en espace linéaire). */
 private fun srgbToLinear(s: Float): Double {
     val v = s.toDouble()
@@ -218,7 +230,9 @@ fun Scene3DScreen(
     val buildMaterialCache = remember(materialLoader) { HashMap<Int, MaterialInstance>() }
     // Sous-couche du plan de repère DXF (lignes), placée au sol par sa transformée.
     val dxfRoot = rememberNode(engine)
-    val dxfMaterial = remember(materialLoader) { materialLoader.createUnlitColorInstance(DXF_LINE_COLOR) }
+    // Matériaux DXF 3D par couleur d'entité résolue (cache réutilisé entre
+    // reconstructions → pas de fuite de MaterialInstance ; ~qq dizaines de couleurs).
+    val dxfMatByColor = remember(materialLoader) { HashMap<Int, MaterialInstance>() }
     // Fond satellite géo-référencé posé au sol (quad texturé) — même image et
     // mêmes coins monde-mm que la vue plan, donc l'alignement est identique.
     val satRoot = rememberNode(engine)
@@ -600,13 +614,17 @@ fun Scene3DScreen(
             val ox = tf.offsetX; val oy = tf.offsetY; val hz = tf.heightZ.toFloat()
             val fy = (hz - cz) / 1000f      // hauteur Filament (sol), constante
             val hw = 0.03f                  // demi-largeur du trait (m) → ~6 cm
-            val verts = ArrayList<Geometry.Vertex>()
-            val idx = ArrayList<Int>()
             val up = Float3(0f, 1f, 0f)
+            // Sommets/index groupés PAR COULEUR d'entité → un maillage par couleur.
+            val vByColor = HashMap<Int, ArrayList<Geometry.Vertex>>()
+            val iByColor = HashMap<Int, ArrayList<Int>>()
+            var total = 0
             outer@ for (pl in rp.plan.polylines) {
                 if (pl.layer in hiddenLayers) continue@outer
                 val pts = pl.points; val n = pts.size / 2
                 if (n < 2) continue
+                val verts = vByColor.getOrPut(pl.color) { ArrayList() }
+                val idx = iByColor.getOrPut(pl.color) { ArrayList() }
                 // Sommets projetés en Filament (plan XZ), une fois par polyligne.
                 val fxz = FloatArray(n * 2)
                 for (k in 0 until n) {
@@ -635,17 +653,23 @@ fun Scene3DScreen(
                     idx.add(base); idx.add(base + 3); idx.add(base + 2)
                     idx.add(base); idx.add(base + 3); idx.add(base + 1)
                     idx.add(base); idx.add(base + 2); idx.add(base + 3)
+                    total += 4
                 }
-                if (verts.size >= MAX_DXF_VERTS) break@outer
+                if (total >= MAX_DXF_VERTS) break@outer
             }
-            verts to idx
+            vByColor to iByColor
         }
-        val (verts, idx) = prep
-        if (verts.size < 3 || idx.isEmpty()) return@LaunchedEffect
-        // Build moteur (thread principal) : 1 géométrie TRIANGLES, 1 nœud.
-        val geom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
-            .vertices(verts).primitivesIndices(listOf(idx)).build(engine)
-        dxfRoot.addChildNode(GeometryNode(engine, geom, listOf(dxfMaterial)))
+        val (vByColor, iByColor) = prep
+        if (vByColor.isEmpty()) return@LaunchedEffect
+        // Build moteur (thread principal) : une géométrie + un matériau par couleur.
+        for ((rgb, verts) in vByColor) {
+            val idx = iByColor[rgb] ?: continue
+            if (verts.size < 3 || idx.isEmpty()) continue
+            val geom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+                .vertices(verts).primitivesIndices(listOf(idx)).build(engine)
+            val mat = dxfMatByColor.getOrPut(rgb) { materialLoader.createUnlitColorInstance(dxf3DColorInt(rgb)) }
+            dxfRoot.addChildNode(GeometryNode(engine, geom, listOf(mat)))
+        }
     }
 
     // Fond satellite en 3D : un quad texturé posé au sol, aux MÊMES 4 coins

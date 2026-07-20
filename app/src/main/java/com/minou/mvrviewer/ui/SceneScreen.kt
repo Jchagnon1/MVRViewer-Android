@@ -340,6 +340,10 @@ fun SceneScreen(
             referencePlan = referencePlan,
             onSetReferencePlan = { rp ->
                 referencePlan = rp
+                // À l'import : masquer d'emblée les calques éteints/gelés du DXF.
+                if (rp != null && hiddenLayers.isEmpty() && rp.plan.defaultHiddenLayers.isNotEmpty()) {
+                    hiddenLayers = rp.plan.defaultHiddenLayers.toSet()
+                }
                 // Import / retrait par l'utilisateur → persiste la géométrie DXF.
                 scope.launch(Dispatchers.IO) {
                     if (rp != null) ProjectStore.saveReferencePlan(ctx, projectKey, rp, null)

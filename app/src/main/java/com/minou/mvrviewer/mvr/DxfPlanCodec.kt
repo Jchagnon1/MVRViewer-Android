@@ -16,7 +16,7 @@ import java.io.DataOutputStream
  * sans le fichier source. Magic "DXP2".
  */
 object DxfPlanCodec {
-    private const val MAGIC = "DXP2"
+    private const val MAGIC = "DXP3"   // écrit ; DXP2 (sans couleurs) reste lisible
 
     fun encode(plan: DxfPlan): ByteArray {
         val layers = ArrayList<String>()
@@ -33,6 +33,8 @@ object DxfPlanCodec {
             .put("maxX", plan.maxX.toDouble()).put("maxY", plan.maxY.toDouble())
             .put("layers", JSONArray(layers))
             .put("layerCounts", JSONObject(plan.layerCounts as Map<*, *>))
+            .put("layerColors", JSONObject(plan.layerColors as Map<*, *>))
+            .put("defaultHiddenLayers", JSONArray(plan.defaultHiddenLayers.toList()))
             .put("polylineCount", plan.polylines.size)
         val headerBytes = header.toString().toByteArray(Charsets.UTF_8)
 
@@ -44,6 +46,7 @@ object DxfPlanCodec {
         for (p in plan.polylines) {
             out.writeInt(layerIndex.getValue(p.layer))
             out.writeByte(if (p.closed) 1 else 0)
+            out.writeInt(p.color)
             out.writeInt(p.points.size / 2)
             for (f in p.points) out.writeFloat(f)
         }
@@ -55,7 +58,9 @@ object DxfPlanCodec {
     fun decode(bytes: ByteArray): DxfPlan? = runCatching {
         val ins = DataInputStream(ByteArrayInputStream(bytes))
         val magic = ByteArray(4).also { ins.readFully(it) }
-        if (String(magic) != MAGIC) return null
+        val mg = String(magic)
+        if (mg != "DXP3" && mg != "DXP2") return null
+        val hasColor = mg == "DXP3"
         val headerLen = ins.readInt()
         if (headerLen <= 0 || headerLen > bytes.size) return null
         val headerBytes = ByteArray(headerLen).also { ins.readFully(it) }
@@ -69,16 +74,20 @@ object DxfPlanCodec {
         repeat(polyCount) {
             val li = ins.readInt()
             val closed = ins.readByte().toInt() != 0
+            val color = if (hasColor) ins.readInt() else 0xFFFFFF
             val ptCount = ins.readInt()
             if (ptCount < 0 || ptCount > 50_000_000) return null
             val pts = FloatArray(ptCount * 2)
             for (i in pts.indices) pts[i] = ins.readFloat()
             val layer = layers.getOrElse(li) { "0" }
-            polylines.add(DxfPolyline(pts, closed, layer))
+            polylines.add(DxfPolyline(pts, closed, layer, color))
         }
         val layerCounts = HashMap<String, Int>()
-        val lc = h.optJSONObject("layerCounts")
-        if (lc != null) for (k in lc.keys()) layerCounts[k] = lc.getInt(k)
+        h.optJSONObject("layerCounts")?.let { o -> for (k in o.keys()) layerCounts[k] = o.getInt(k) }
+        val layerColors = HashMap<String, Int>()
+        h.optJSONObject("layerColors")?.let { o -> for (k in o.keys()) layerColors[k] = o.getInt(k) }
+        val defaultHidden = HashSet<String>()
+        h.optJSONArray("defaultHiddenLayers")?.let { a -> for (i in 0 until a.length()) defaultHidden.add(a.getString(i)) }
         DxfPlan(
             polylines = polylines,
             minX = h.getDouble("minX").toFloat(), minY = h.getDouble("minY").toFloat(),
@@ -86,7 +95,9 @@ object DxfPlanCodec {
             unitLabel = h.optString("unitLabel", "mm"),
             segmentCount = h.optInt("segmentCount", polylines.sumOf { it.points.size / 2 }),
             layerCounts = layerCounts,
-            truncatedSegments = h.optInt("truncatedSegments", 0)
+            truncatedSegments = h.optInt("truncatedSegments", 0),
+            layerColors = layerColors,
+            defaultHiddenLayers = defaultHidden
         )
     }.getOrNull()
 }

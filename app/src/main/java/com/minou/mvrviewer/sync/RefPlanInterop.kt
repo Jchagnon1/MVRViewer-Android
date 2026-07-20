@@ -55,20 +55,24 @@ object RefPlanInterop {
         val polylines = ArrayList<DxfPolyline>(polyCount)
         repeat(polyCount) {
             val li = buf.int
-            buf.int              // color (ignoré)
+            val color = buf.int and 0xFFFFFF     // couleur résolue iOS (0xRRGGBB)
             val flags = buf.get().toInt()
             buf.get()            // weightClass (ignoré)
             val ptCount = buf.int
             if (ptCount < 0 || ptCount.toLong() * 8 > (bytes.size - buf.position())) return null
             val pts = FloatArray(ptCount * 2)
             for (i in pts.indices) pts[i] = buf.float
-            polylines.add(DxfPolyline(pts, (flags and 1) != 0, names.getOrElse(li) { "0" }))
+            polylines.add(DxfPolyline(pts, (flags and 1) != 0, names.getOrElse(li) { "0" }, color))
         }
 
         val bmin = h.optJSONArray("boundsMin")
         val bmax = h.optJSONArray("boundsMax")
         val layerCounts = HashMap<String, Int>()
         h.optJSONObject("layerCounts")?.let { lc -> lc.keys().forEach { layerCounts[it] = lc.optInt(it) } }
+        val layerColors = HashMap<String, Int>()
+        h.optJSONObject("layerColors")?.let { o -> o.keys().forEach { layerColors[it] = o.optInt(it) and 0xFFFFFF } }
+        val defaultHidden = HashSet<String>()
+        h.optJSONArray("defaultHiddenLayers")?.let { a -> for (i in 0 until a.length()) defaultHidden.add(a.optString(i)) }
 
         DxfPlan(
             polylines = polylines,
@@ -79,7 +83,9 @@ object RefPlanInterop {
             unitLabel = h.optString("unitLabel", "mm"),
             segmentCount = h.optInt("segmentCount", polylines.sumOf { it.points.size / 2 }),
             layerCounts = layerCounts,
-            truncatedSegments = h.optInt("truncatedSegments", 0)
+            truncatedSegments = h.optInt("truncatedSegments", 0),
+            layerColors = layerColors,
+            defaultHiddenLayers = defaultHidden
         )
     }.getOrNull()
 
@@ -92,6 +98,7 @@ object RefPlanInterop {
         for (p in plan.polylines) idx(p.layer)
 
         val layerCounts = JSONObject().apply { plan.layerCounts.forEach { (k, v) -> put(k, v) } }
+        val layerColors = JSONObject().apply { plan.layerColors.forEach { (k, v) -> put(k, v and 0xFFFFFF) } }
         val header = JSONObject()
             .put("unitLabel", plan.unitLabel)
             .put("segmentCount", plan.segmentCount)
@@ -101,8 +108,8 @@ object RefPlanInterop {
             .put("boundsMax", JSONArray(listOf(plan.maxX.toDouble(), plan.maxY.toDouble())))
             .put("layerNames", JSONArray(layerNames))
             .put("layerCounts", layerCounts)
-            .put("layerColors", JSONObject())
-            .put("defaultHiddenLayers", JSONArray())
+            .put("layerColors", layerColors)
+            .put("defaultHiddenLayers", JSONArray(plan.defaultHiddenLayers.toList()))
             .put("polylineCount", plan.polylines.size)
             .put("fillCount", 0)
             .put("labelCount", 0)
@@ -114,7 +121,7 @@ object RefPlanInterop {
         out.write(headerBytes)
         for (p in plan.polylines) {
             writeU32LE(out, layerIndex.getValue(p.layer))
-            writeU32LE(out, 0xFFFFFF)              // couleur par défaut (iOS = contraste)
+            writeU32LE(out, p.color and 0xFFFFFF)  // couleur résolue (0xRRGGBB)
             out.write(if (p.closed) 1 else 0)      // flags (bit0=closed)
             out.write(1)                           // weightClass = normal
             writeU32LE(out, p.points.size / 2)     // ptCount (paires)

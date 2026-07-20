@@ -91,6 +91,10 @@ fun PlanScreen(
     hiddenLayers: Set<String> = emptySet(),
     onToggleLayer: (String) -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
+    onShowAccount: (() -> Unit)? = null,
+    onShareProject: (() -> Unit)? = null,
+    onShowHistory: (() -> Unit)? = null,
+    onJoinProject: (() -> Unit)? = null,
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
     modifier: Modifier = Modifier
@@ -670,6 +674,8 @@ fun PlanScreen(
             SceneOptionsMenu(
                 options = options, tint = inkColor,
                 onShow3D = onBack, onShowPatch = onShowPatch,
+                onShowAccount = onShowAccount, onShareProject = onShareProject,
+                onShowHistory = onShowHistory, onJoinProject = onJoinProject,
                 showLabelsToggle = true, showStructureToggle = true,
                 showLegendToggle = true,
                 background = options.background2D,

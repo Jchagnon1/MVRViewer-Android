@@ -1,15 +1,8 @@
 package com.minou.mvrviewer.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -313,7 +306,6 @@ fun SceneScreen(
     var showShare by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showJoin by remember { mutableStateOf(false) }
-    var syncMenu by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
     when (mode) {
@@ -330,6 +322,10 @@ fun SceneScreen(
             onShowPatch = { mode = SceneMode.PATCH },
             onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },
             onShowUniverse = { mode = SceneMode.UNIVERSE },
+            onShowAccount = sync?.let { { showAccount = true } },
+            onShareProject = sync?.let { { showShare = true } },
+            onShowHistory = sync?.let { { showHistory = true } },
+            onJoinProject = sync?.let { { showJoin = true } },
             onClose = onClose,
             modifier = modifier
         )
@@ -384,6 +380,10 @@ fun SceneScreen(
                 }
             },
             gdtfOverrides = gdtfOverrides,
+            onShowAccount = sync?.let { { showAccount = true } },
+            onShareProject = sync?.let { { showShare = true } },
+            onShowHistory = sync?.let { { showHistory = true } },
+            onJoinProject = sync?.let { { showJoin = true } },
             onBack = { mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },
             modifier = modifier
@@ -423,29 +423,10 @@ fun SceneScreen(
                     }
                 }
             }
-            // Pastille de statut + menu synchro (bas-gauche, hors des barres du haut).
-            Row(
-                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
+            // Pastille de statut seule (les actions compte/partage/historique/
+            // rejoindre vivent dans le menu ⋯, pas dans un bouton flottant).
+            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
                 SyncStatusBadge(sync)
-                Box {
-                    FilledTonalButton(
-                        onClick = { syncMenu = true },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) { Text("☁") }
-                    DropdownMenu(expanded = syncMenu, onDismissRequest = { syncMenu = false }) {
-                        DropdownMenuItem(text = { Text("Compte") },
-                            onClick = { syncMenu = false; showAccount = true })
-                        DropdownMenuItem(text = { Text("Partager ce projet") },
-                            onClick = { syncMenu = false; showShare = true })
-                        DropdownMenuItem(text = { Text("Historique des modifications") },
-                            onClick = { syncMenu = false; showHistory = true })
-                        DropdownMenuItem(text = { Text("Rejoindre un projet") },
-                            onClick = { syncMenu = false; showJoin = true })
-                    }
-                }
             }
 
             if (showAccount) AccountDialog(sync) { showAccount = false }

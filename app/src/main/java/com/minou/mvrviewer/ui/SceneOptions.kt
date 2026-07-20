@@ -9,8 +9,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
@@ -82,6 +86,11 @@ fun SceneOptionsMenu(
     onShowPatch: (() -> Unit)? = null,
     onShowUniverse: (() -> Unit)? = null,
     onShowGdtfShare: (() -> Unit)? = null,
+    // Synchro cloud : entrées de menu (au lieu d'un bouton flottant séparé).
+    onShowAccount: (() -> Unit)? = null,
+    onShareProject: (() -> Unit)? = null,
+    onShowHistory: (() -> Unit)? = null,
+    onJoinProject: (() -> Unit)? = null,
     showLabelsToggle: Boolean = false,
     showStructureToggle: Boolean = false,
     showLegendToggle: Boolean = false,
@@ -107,6 +116,17 @@ fun SceneOptionsMenu(
         onShowPatch?.let { nav("Liste de patch", Icons.AutoMirrored.Filled.List) { open = false; it() } }
         onShowUniverse?.let { nav("Univers DMX", Icons.Filled.GridView) { open = false; it() } }
         onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
+        // ---- Synchro cloud (compte / partage / historique / rejoindre) ----
+        if (onShowAccount != null || onShareProject != null || onShowHistory != null || onJoinProject != null) {
+            HorizontalDivider()
+            Text("Synchro", style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF888888),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+            onShowAccount?.let { nav("Compte", Icons.Filled.AccountCircle) { open = false; it() } }
+            onShareProject?.let { nav("Partager ce projet", Icons.Filled.Share) { open = false; it() } }
+            onShowHistory?.let { nav("Historique des modifications", Icons.Filled.History) { open = false; it() } }
+            onJoinProject?.let { nav("Rejoindre un projet", Icons.Filled.GroupAdd) { open = false; it() } }
+        }
         if (background != null && onPickBackground != null) {
             HorizontalDivider()
             Text("Couleur du fond", style = MaterialTheme.typography.labelSmall,

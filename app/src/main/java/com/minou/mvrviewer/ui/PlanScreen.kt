@@ -68,6 +68,7 @@ import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 
 /**
  * Vue plan 2D — projection de dessus (top), comme la vue plan iOS : monde
@@ -279,7 +280,29 @@ fun PlanScreen(
                         )
                     } else {
                         detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(0.05f, 200f)
+                            val w = canvas.x; val h = canvas.y
+                            val old = scale
+                            // Pinch AMPLIFIÉ : le facteur brut demandait beaucoup trop
+                            // de course de doigts sur un grand plan.
+                            val z = if (zoom > 0f) zoom.pow(ZOOM_SPEED) else 1f
+                            val new = (old * z).coerceIn(0.05f, 200f)
+                            val bs0 = baseScale(w, h) * old
+                            val bs1 = baseScale(w, h) * new
+                            if (w > 0f && h > 0f && bs0 > 0f && new != old) {
+                                // Le zoom garde un POINT D'ANCRAGE fixe à l'écran : le
+                                // projecteur sélectionné, sinon le centre de la fenêtre.
+                                // (Avant : ancré sur le centre du CONTENU, qui part hors
+                                // cadre dès qu'on déplace le plan → le zoom « fuyait ».)
+                                val sel = selected.firstOrNull()?.let { data.fixtures.getOrNull(it) }
+                                offset = if (sel != null) {
+                                    Offset(offset.x + (bs0 - bs1) * (sel.px - data.cx),
+                                           offset.y + (bs0 - bs1) * (sel.py - data.cy))
+                                } else {
+                                    // Centre fenêtre : l'ancrage se réduit à une homothétie.
+                                    Offset(offset.x * (bs1 / bs0), offset.y * (bs1 / bs0))
+                                }
+                            }
+                            scale = new
                             offset += pan
                             gestureTick++
                         }
@@ -931,6 +954,9 @@ private fun dxfDisplayColor(rgb: Int, bgDark: Boolean): Color {
         else -> Color(0xFF000000.toInt() or (rgb and 0xFFFFFF))
     }
 }
+
+/** Amplification du pinch (1 = brut). 2 = un pincement donne un zoom au carré. */
+private const val ZOOM_SPEED = 2.0f
 
 private val STRUCT_COLOR = Color(0xFF9AA0A6)
 private val DXF_COLOR = Color(0xB3384B66)         // bleu-gris (sous-couche, fond clair)

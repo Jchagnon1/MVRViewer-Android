@@ -38,7 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE }
+enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE, UNIVERSE }
 
 /**
  * Hôte d'un .mvr ouvert. Comme iOS, la **vue 3D est l'écran principal** ; la
@@ -307,6 +307,7 @@ fun SceneScreen(
             onShowPlan = { mode = SceneMode.PLAN },
             onShowPatch = { mode = SceneMode.PATCH },
             onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },
+            onShowUniverse = { mode = SceneMode.UNIVERSE },
             onClose = onClose,
             modifier = modifier
         )
@@ -365,6 +366,13 @@ fun SceneScreen(
             modifier = modifier
         )
         SceneMode.GDTF_SHARE -> GdtfShareScreen(
+            scene = scene,
+            mvrBytes = mvrBytes,
+            overrides = gdtfOverrides,
+            onBack = { mode = SceneMode.THREE_D },
+            modifier = modifier
+        )
+        SceneMode.UNIVERSE -> DmxUniverseScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             overrides = gdtfOverrides,

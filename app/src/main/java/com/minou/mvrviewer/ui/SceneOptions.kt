@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
@@ -79,6 +80,7 @@ fun SceneOptionsMenu(
     onShow3D: (() -> Unit)? = null,
     onShowPlan: (() -> Unit)? = null,
     onShowPatch: (() -> Unit)? = null,
+    onShowUniverse: (() -> Unit)? = null,
     onShowGdtfShare: (() -> Unit)? = null,
     showLabelsToggle: Boolean = false,
     showStructureToggle: Boolean = false,
@@ -103,6 +105,7 @@ fun SceneOptionsMenu(
         onShow3D?.let { nav("Vue 3D", Icons.Filled.ViewInAr) { open = false; it() } }
         onShowPlan?.let { nav("Vue plan", Icons.Filled.Map) { open = false; it() } }
         onShowPatch?.let { nav("Liste de patch", Icons.AutoMirrored.Filled.List) { open = false; it() } }
+        onShowUniverse?.let { nav("Univers DMX", Icons.Filled.GridView) { open = false; it() } }
         onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
         if (background != null && onPickBackground != null) {
             HorizontalDivider()

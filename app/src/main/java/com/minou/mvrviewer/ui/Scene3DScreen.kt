@@ -167,6 +167,7 @@ fun Scene3DScreen(
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
     onShowGdtfShare: () -> Unit,
+    onShowUniverse: () -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -888,7 +889,7 @@ fun Scene3DScreen(
                 SceneOptionsMenu(
                     options = options, tint = LocalContentColor.current,
                     onShowPlan = onShowPlan, onShowPatch = onShowPatch,
-                    onShowGdtfShare = onShowGdtfShare,
+                    onShowGdtfShare = onShowGdtfShare, onShowUniverse = onShowUniverse,
                     showSatelliteToggle = calibration?.isCalibrated == true,
                     background = options.background3D,
                     backgroundDefault = BackgroundColorStore.DEFAULT_3D,

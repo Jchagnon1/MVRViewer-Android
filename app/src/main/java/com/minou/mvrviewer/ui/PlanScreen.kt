@@ -346,6 +346,36 @@ fun PlanScreen(
                 val rr = Math.toRadians(tf.rotationDeg)
                 val cc = kotlin.math.cos(rr).toFloat(); val sn = kotlin.math.sin(rr).toFloat()
                 val ox = tf.offsetX.toFloat(); val oy = tf.offsetY.toFloat()
+                // ---- Zones remplies (HATCH/SOLID) : dessinées SOUS les traits,
+                // en semi-transparent pour ne pas masquer projecteurs et décor.
+                if (rp.plan.fills.isNotEmpty()) {
+                    val fillPaths = HashMap<Pair<Int, Boolean>, androidx.compose.ui.graphics.Path>()
+                    for (fl in rp.plan.fills) {
+                        if (fl.layer in hiddenLayers) continue
+                        val fp = fillPaths.getOrPut(fl.color to fl.solid) {
+                            androidx.compose.ui.graphics.Path().apply {
+                                fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+                            }
+                        }
+                        for (ring in fl.rings) {
+                            if (ring.size < 6) continue
+                            var k = 0
+                            var firstPt = true
+                            while (k < ring.size) {
+                                val lx = ring[k] * sfac; val ly = ring[k + 1] * sfac; k += 2
+                                val wx = ox + (lx * cc - ly * sn); val wy = oy + (lx * sn + ly * cc)
+                                val s = toScreen(wx, -wy, w, h)
+                                if (firstPt) { fp.moveTo(s.x, s.y); firstPt = false } else fp.lineTo(s.x, s.y)
+                            }
+                            fp.close()
+                        }
+                    }
+                    for ((key, fp) in fillPaths) {
+                        val (rgb, solid) = key
+                        drawPath(fp, dxfDisplayColor(rgb, bgDark).copy(alpha = if (solid) 0.40f else 0.20f))
+                    }
+                }
+
                 // Un Path par couleur d'entité résolue (ACI/true-color) → tracés
                 // colorés comme dans AutoCAD, avec adaptation au fond (contraste).
                 val pathByColor = HashMap<Int, androidx.compose.ui.graphics.Path>()

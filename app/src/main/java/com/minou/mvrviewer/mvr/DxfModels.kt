@@ -20,6 +20,18 @@ class DxfPolyline(
     val color: Int = 0xFFFFFF
 )
 
+/**
+ * Zone REMPLIE (HATCH / SOLID) : anneaux de contour (le 1er = extérieur, les
+ * suivants = trous), règle even-odd. Points à plat [x0,y0, …] en mm.
+ */
+class DxfFill(
+    val rings: List<FloatArray>,
+    val color: Int,
+    /** true = aplat (SOLID) ; false = motif hachuré (rendu en aplat translucide). */
+    val solid: Boolean,
+    val layer: String
+)
+
 class DxfPlan(
     val polylines: List<DxfPolyline>,
     val minX: Float, val minY: Float,
@@ -32,7 +44,9 @@ class DxfPlan(
     /** Couleur par calque (0xRRGGBB) — résolution BYLAYER. */
     val layerColors: Map<String, Int> = emptyMap(),
     /** Calques éteints/gelés à l'import → masqués par défaut. */
-    val defaultHiddenLayers: Set<String> = emptySet()
+    val defaultHiddenLayers: Set<String> = emptySet(),
+    /** Zones remplies (HATCH/SOLID), dessinées SOUS les traits. */
+    val fills: List<DxfFill> = emptyList()
 ) {
     val isEmpty: Boolean get() = polylines.isEmpty()
     val width: Float get() = maxX - minX

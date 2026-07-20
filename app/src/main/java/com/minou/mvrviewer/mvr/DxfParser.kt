@@ -191,6 +191,7 @@ object DxfParser {
         val layerCounts = HashMap<String, Int>()
         val layerColors = HashMap<String, Int>()   // calque → 0xRRGGBB (BYLAYER)
         val hiddenLayers = HashSet<String>()        // calques éteints/gelés
+        val fills = ArrayList<DxfFill>()            // zones remplies (HATCH/SOLID)
     }
 
     // ---- Machine à états (streaming) ----
@@ -348,7 +349,7 @@ object DxfParser {
 
         fun finish(): DxfPlan? {
             flushChunk(); finalizeBlock(); flushLayer()
-            if (out.polylines.isEmpty()) return null
+            if (out.polylines.isEmpty() && out.fills.isEmpty()) return null
             var mnX = Float.MAX_VALUE; var mnY = Float.MAX_VALUE
             var mxX = -Float.MAX_VALUE; var mxY = -Float.MAX_VALUE
             for (pl in out.polylines) {
@@ -359,10 +360,19 @@ object DxfParser {
                     if (y < mnY) mnY = y; if (y > mxY) mxY = y
                 }
             }
+            for (f in out.fills) for (ring in f.rings) {
+                var i = 0
+                while (i < ring.size) {
+                    val x = ring[i]; val y = ring[i + 1]; i += 2
+                    if (x < mnX) mnX = x; if (x > mxX) mxX = x
+                    if (y < mnY) mnY = y; if (y > mxY) mxY = y
+                }
+            }
             if (!mnX.isFinite() || !mxX.isFinite()) return null
             return DxfPlan(out.polylines, mnX, mnY, mxX, mxY, unitLabel,
                 out.kept, out.layerCounts, out.skipped,
-                layerColors = out.layerColors, defaultHiddenLayers = out.hiddenLayers)
+                layerColors = out.layerColors, defaultHiddenLayers = out.hiddenLayers,
+                fills = out.fills)
         }
 
         // ---- Émission des entités ----
@@ -528,6 +538,22 @@ object DxfParser {
                         }
                         addPolyline(pts, closed, layer, t, color)
                     }
+                    "HATCH" -> emitHatch(g, layer, t, color)
+                    "3DFACE", "SOLID", "TRACE" -> {
+                        val xs = ArrayList<Double>(); val ys = ArrayList<Double>()
+                        for (k in 0 until 4) {
+                            val x = dbl(g, 10 + k); val y = dbl(g, 20 + k)
+                            if (x != null && y != null) { xs.add(x); ys.add(y) }
+                        }
+                        if (xs.size >= 3) {
+                            // SOLID/TRACE : l'ordre DXF des sommets est 1,2,4,3.
+                            val order = if (type != "3DFACE" && xs.size == 4) intArrayOf(0, 1, 3, 2)
+                                        else IntArray(xs.size) { it }
+                            val flat = DoubleArray(order.size * 2)
+                            order.forEachIndexed { k, oi -> flat[k * 2] = xs[oi]; flat[k * 2 + 1] = ys[oi] }
+                            addPolyline(flat, true, layer, t, color)
+                        }
+                    }
                     "INSERT" -> {
                         val name = str(g, 2); val block = if (name != null) blocks[name] else null
                         if (block != null) {
@@ -566,6 +592,144 @@ object DxfParser {
             }
             out.polylines.add(DxfPolyline(flat, closed, layer, color))
             out.kept += segments
+        }
+
+        /** Zone remplie : anneaux transformés + plafond partagé avec les segments. */
+        private fun addFill(rings: List<DoubleArray>, solid: Boolean, layer: String, t: Affine, color: Int) {
+            val mapped = ArrayList<FloatArray>()
+            var segs = 0
+            for (ring in rings) {
+                val n = ring.size / 2
+                if (n < 3) continue
+                val flat = FloatArray(n * 2)
+                var ok = true
+                for (k in 0 until n) {
+                    val w = t.apply(ring[k * 2], ring[k * 2 + 1])
+                    val fx = w[0].toFloat(); val fy = w[1].toFloat()
+                    if (!fx.isFinite() || !fy.isFinite()) { ok = false; break }
+                    flat[k * 2] = fx; flat[k * 2 + 1] = fy
+                }
+                if (!ok) continue
+                mapped.add(flat); segs += n
+            }
+            if (mapped.isEmpty()) return
+            out.layerCounts[layer] = (out.layerCounts[layer] ?: 0) + segs
+            if (out.kept + segs > MAX_KEPT_SEGMENTS) { out.skipped += segs; return }
+            out.kept += segs
+            out.fills.add(DxfFill(mapped, color, solid, layer))
+        }
+
+        /**
+         * HATCH : zone remplie délimitée par des « boucles » de contour. Structure
+         * SÉQUENTIELLE (le sens des codes dépend de la position) : 70 = aplat (1) /
+         * motif (0), 91 = nb de boucles ; chaque boucle = 92 (type ; bit 2 =
+         * polyligne), puis SOIT une polyligne (72 bulge, 73 fermée, 93 nb de
+         * sommets, 10/20 + 42) SOIT une liste d'arêtes (93 = nb, chacune 72 = type :
+         * 1 ligne, 2 arc, 3 ellipse, 4 spline).
+         */
+        private fun emitHatch(g: List<Pair>, layer: String, t: Affine, color: Int) {
+            val solid = ((int(g, 70) ?: 0) and 1) == 1
+            val rings = ArrayList<DoubleArray>()
+            var i = 0
+            while (i < g.size && g[i].code != 91) i++
+            if (i >= g.size) return
+            val loopCount = g[i].int ?: return
+            if (loopCount <= 0) return
+            i++
+
+            fun take(code: Int): Double? {
+                if (i < g.size && g[i].code == code) { val v = g[i].double; i++; return v }
+                return null
+            }
+
+            repeat(loopCount) {
+                while (i < g.size && g[i].code != 92) i++
+                if (i >= g.size) return@repeat
+                val loopType = g[i].int ?: 0
+                i++
+                val ring = ArrayList<Double>()   // à plat x,y
+                if ((loopType and 2) != 0) {
+                    // Boucle POLYLIGNE : en-tête (72/73/93) puis sommets 10/20 (+42).
+                    while (i < g.size && (g[i].code == 72 || g[i].code == 73 || g[i].code == 93)) i++
+                    val xs = ArrayList<Double>(); val ys = ArrayList<Double>(); val bulges = ArrayList<Double>()
+                    var px: Double? = null
+                    var done = false
+                    while (!done && i < g.size) {
+                        when (g[i].code) {
+                            10 -> { px = g[i].double; i++ }
+                            20 -> {
+                                val x = px
+                                if (x != null) { xs.add(x); ys.add(g[i].double ?: 0.0); bulges.add(0.0); px = null }
+                                i++
+                            }
+                            42 -> { if (bulges.isNotEmpty()) bulges[bulges.size - 1] = g[i].double ?: 0.0; i++ }
+                            else -> done = true
+                        }
+                    }
+                    for (v in tessellateBulges(xs, ys, bulges, true)) ring.add(v)
+                } else {
+                    // Boucle par ARÊTES.
+                    while (i < g.size && g[i].code != 93 && g[i].code != 92) i++
+                    if (i >= g.size || g[i].code != 93) return@repeat
+                    val ecount = g[i].int ?: 0
+                    i++
+                    var edges = 0
+                    while (edges < ecount && i < g.size) {
+                        while (i < g.size && g[i].code != 72 && g[i].code != 92) i++
+                        if (i >= g.size || g[i].code != 72) break
+                        val et = g[i].int ?: 0
+                        i++
+                        when (et) {
+                            1 -> {
+                                val x1 = take(10); val y1 = take(20); val x2 = take(11); val y2 = take(21)
+                                if (x1 != null && y1 != null && x2 != null && y2 != null) {
+                                    if (ring.isEmpty()) { ring.add(x1); ring.add(y1) }
+                                    ring.add(x2); ring.add(y2)
+                                }
+                            }
+                            2 -> {
+                                val cx = take(10); val cy = take(20); val r = take(40)
+                                val a0 = take(50); val a1 = take(51)
+                                if (cx != null && cy != null && r != null && a0 != null && a1 != null) {
+                                    var ccw = true
+                                    if (i < g.size && g[i].code == 73) { ccw = (g[i].int ?: 1) != 0; i++ }
+                                    val pts = if (ccw) arcPoints(cx, cy, r, a0, a1)
+                                              else reverseFlat(arcPoints(cx, cy, r, a1, a0))
+                                    appendRing(ring, pts)
+                                }
+                            }
+                            3 -> {
+                                val cx = take(10); val cy = take(20); val mx = take(11); val my = take(21)
+                                val ratio = take(40); val a0 = take(50); val a1 = take(51)
+                                if (cx != null && cy != null && mx != null && my != null &&
+                                    ratio != null && a0 != null && a1 != null) {
+                                    var ccw = true
+                                    if (i < g.size && g[i].code == 73) { ccw = (g[i].int ?: 1) != 0; i++ }
+                                    // Angles en DEGRÉS ici (contrairement à l'entité ELLIPSE).
+                                    var pts = ellipsePoints(cx, cy, mx, my, ratio,
+                                        Math.toRadians(a0), Math.toRadians(a1))
+                                    if (!ccw) pts = reverseFlat(pts)
+                                    appendRing(ring, pts)
+                                }
+                            }
+                            4 -> {
+                                var px2: Double? = null
+                                while (i < g.size && g[i].code != 72 && g[i].code != 92 && g[i].code != 97) {
+                                    if (g[i].code == 10) px2 = g[i].double
+                                    else if (g[i].code == 20) {
+                                        val x = px2
+                                        if (x != null) { ring.add(x); ring.add(g[i].double ?: 0.0); px2 = null }
+                                    }
+                                    i++
+                                }
+                            }
+                        }
+                        edges++
+                    }
+                }
+                if (ring.size >= 6) rings.add(ring.toDoubleArray())
+            }
+            if (rings.isNotEmpty()) addFill(rings, solid, layer, t, color)
         }
     }
 
@@ -666,6 +830,20 @@ object DxfParser {
             if (w != 0.0 && dx[p].isFinite() && dy[p].isFinite()) { out.add(dx[p] / w); out.add(dy[p] / w) }
         }
         return if (out.size >= 4) out.toDoubleArray() else ctrlFlat()
+    }
+
+    /** Ajoute `pts` à un anneau, en sautant le 1er point si l'anneau n'est pas vide. */
+    private fun appendRing(ring: ArrayList<Double>, pts: DoubleArray) {
+        var k = if (ring.isEmpty()) 0 else 2
+        while (k < pts.size) { ring.add(pts[k]); k++ }
+    }
+
+    /** Inverse l'ordre des POINTS (paires x,y) d'un tableau à plat. */
+    private fun reverseFlat(p: DoubleArray): DoubleArray {
+        val n = p.size / 2
+        val o = DoubleArray(p.size)
+        for (k in 0 until n) { o[k * 2] = p[(n - 1 - k) * 2]; o[k * 2 + 1] = p[(n - 1 - k) * 2 + 1] }
+        return o
     }
 
     private fun circlePoints(cx: Double, cy: Double, r: Double): DoubleArray = arcPoints(cx, cy, r, 0.0, 360.0)

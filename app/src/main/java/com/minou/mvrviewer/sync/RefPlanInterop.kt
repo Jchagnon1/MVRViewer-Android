@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.sync
 
+import com.minou.mvrviewer.mvr.DxfFill
 import com.minou.mvrviewer.mvr.DxfPlan
 import com.minou.mvrviewer.mvr.DxfPolyline
 import org.json.JSONArray
@@ -65,6 +66,28 @@ object RefPlanInterop {
             polylines.add(DxfPolyline(pts, (flags and 1) != 0, names.getOrElse(li) { "0" }, color))
         }
 
+        // Zones remplies (viennent APRÈS les polylignes dans le format iOS).
+        val fillCount = h.optInt("fillCount", 0)
+        val fills = ArrayList<DxfFill>()
+        if (fillCount in 1..2_000_000) {
+            repeat(fillCount) {
+                val li = buf.int
+                val col = buf.int and 0xFFFFFF
+                val solid = buf.get().toInt() != 0
+                val ringCount = buf.int
+                require(ringCount in 0..1_000_000) { "ringCount" }
+                val rings = ArrayList<FloatArray>(minOf(ringCount, 1024))
+                repeat(ringCount) {
+                    val pc = buf.int
+                    require(pc in 0..5_000_000) { "ptCount" }
+                    val r = FloatArray(pc * 2)
+                    for (k in r.indices) r[k] = buf.float
+                    if (r.size >= 6) rings.add(r)
+                }
+                if (rings.isNotEmpty()) fills.add(DxfFill(rings, col, solid, names.getOrElse(li) { "0" }))
+            }
+        }
+
         val bmin = h.optJSONArray("boundsMin")
         val bmax = h.optJSONArray("boundsMax")
         val layerCounts = HashMap<String, Int>()
@@ -85,7 +108,8 @@ object RefPlanInterop {
             layerCounts = layerCounts,
             truncatedSegments = h.optInt("truncatedSegments", 0),
             layerColors = layerColors,
-            defaultHiddenLayers = defaultHidden
+            defaultHiddenLayers = defaultHidden,
+            fills = fills
         )
     }.getOrNull()
 
@@ -96,6 +120,7 @@ object RefPlanInterop {
         val layerIndex = HashMap<String, Int>()
         fun idx(name: String) = layerIndex.getOrPut(name) { layerNames.add(name); layerNames.size - 1 }
         for (p in plan.polylines) idx(p.layer)
+        for (f in plan.fills) idx(f.layer)
 
         val layerCounts = JSONObject().apply { plan.layerCounts.forEach { (k, v) -> put(k, v) } }
         val layerColors = JSONObject().apply { plan.layerColors.forEach { (k, v) -> put(k, v and 0xFFFFFF) } }
@@ -111,7 +136,7 @@ object RefPlanInterop {
             .put("layerColors", layerColors)
             .put("defaultHiddenLayers", JSONArray(plan.defaultHiddenLayers.toList()))
             .put("polylineCount", plan.polylines.size)
-            .put("fillCount", 0)
+            .put("fillCount", plan.fills.size)
             .put("labelCount", 0)
         val headerBytes = header.toString().toByteArray(Charsets.UTF_8)
 
@@ -126,6 +151,17 @@ object RefPlanInterop {
             out.write(1)                           // weightClass = normal
             writeU32LE(out, p.points.size / 2)     // ptCount (paires)
             for (f in p.points) writeF32LE(out, f)
+        }
+        // Zones remplies, dans l'ordre attendu par iOS (après les polylignes).
+        for (fl in plan.fills) {
+            writeU32LE(out, layerIndex.getValue(fl.layer))
+            writeU32LE(out, fl.color and 0xFFFFFF)
+            out.write(if (fl.solid) 1 else 0)
+            writeU32LE(out, fl.rings.size)
+            for (ring in fl.rings) {
+                writeU32LE(out, ring.size / 2)
+                for (v in ring) writeF32LE(out, v)
+            }
         }
         return out.toByteArray()
     }

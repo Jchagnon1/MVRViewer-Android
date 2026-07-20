@@ -727,9 +727,14 @@ fun PlanScreen(
             if (i < 0) return
             selected.clear(); selected.add(i)
             val f = data.fixtures[i]
-            val target = max(scale, 6f)
-            val bs = baseScale(canvas.x, canvas.y) * target
-            scale = target
+            // Niveau de zoom ABSOLU (≈ 40 px par mètre) plutôt qu'un multiple
+            // arbitraire : sur un grand show, « ×6 » laissait le projecteur
+            // minuscule. On ne dézoome jamais si l'on est déjà plus près.
+            val base = baseScale(canvas.x, canvas.y)
+            val wanted = if (base > 0f) (0.04f / base).coerceIn(1f, 200f) else 6f
+            val z = max(scale, wanted)
+            val bs = base * z
+            scale = z
             offset = Offset(-bs * (f.px - data.cx), -bs * (f.py - data.cy))
         }
         OutlinedTextField(

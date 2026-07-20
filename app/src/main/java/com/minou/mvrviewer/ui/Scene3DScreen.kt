@@ -774,7 +774,12 @@ fun Scene3DScreen(
 
     val camHome = Float3(0f, layout.radius * 0.7f, layout.radius * 1.9f)
     val cameraNode = rememberCameraNode(engine) { position = camHome }
-    val target = remember { Float3(0f, 0f, 0f) }
+    // PIVOT de l'orbite. Mutable : une recherche de projecteur y amène la caméra
+    // (et les presets de vue « Dessus / Face / Côté » s'appliquent alors autour
+    // du projecteur trouvé, ce qui est exactement l'usage terrain).
+    var target by remember(layout) {
+        mutableStateOf(Float3(0f, 0f, 0f), androidx.compose.runtime.neverEqualPolicy())
+    }
     // Point de vue courant (State) : le CHANGER re-crée le manipulateur (remember
     // keyé ci-dessous) → SceneView ré-attache le manipulateur au détecteur de
     // gestes et re-sème le viewport, donc la caméra SAUTE au preset ET l'orbite
@@ -847,7 +852,23 @@ fun Scene3DScreen(
             }
             if (rank < bestRank) { bestRank = rank; best = i }
         }
-        if (best >= 0) { selected.clear(); selected.add(best) }
+        if (best < 0) return
+        selected.clear(); selected.add(best)
+        // …et on Y VA : le pivot se pose sur le projecteur et la caméra se place
+        // à courte distance, en CONSERVANT la direction de vue courante (on ne
+        // désoriente pas l'utilisateur, on se rapproche seulement).
+        val p = layout.positions[best]
+        val cam = cameraNode.worldPosition
+        var vx = cam.x - target.x; var vy = cam.y - target.y; var vz = cam.z - target.z
+        val len = kotlin.math.sqrt(vx * vx + vy * vy + vz * vz)
+        if (!len.isFinite() || len < 1e-3f) {   // caméra sur le pivot : vue 3/4 par défaut
+            vx = 0f; vy = 0.45f; vz = 1f
+            val n = kotlin.math.sqrt(vy * vy + vz * vz); vy /= n; vz /= n
+        } else { vx /= len; vy /= len; vz /= len }
+        // Assez près pour lire le projecteur, assez loin pour garder du contexte.
+        val d = (layout.cube * 10f).coerceIn(1.5f, layout.radius * 0.5f)
+        target = p
+        camEye = Float3(p.x + vx * d, p.y + vy * d, p.z + vz * d)
     }
 
     // Projette la position monde (Filament) d'un projecteur en pixels écran de la
@@ -934,7 +955,10 @@ fun Scene3DScreen(
                         DropdownMenuItem(text = { Text("Côté") }, onClick = { set(r, 0f, 0f) })
                         DropdownMenuItem(text = { Text("Isométrique") }, onClick = { set(0.7f * r, 0.7f * r, 0.7f * r) })
                         DropdownMenuItem(text = { Text("Réinitialiser la vue") },
-                            onClick = { camEye = camHome; camMenu = false })
+                            // Remet AUSSI le pivot au centre du show : sinon, après
+                            // une recherche, on « réinitialisait » autour du
+                            // projecteur trouvé.
+                            onClick = { target = Float3(0f, 0f, 0f); camEye = camHome; camMenu = false })
                     }
                 }
                 SceneOptionsMenu(

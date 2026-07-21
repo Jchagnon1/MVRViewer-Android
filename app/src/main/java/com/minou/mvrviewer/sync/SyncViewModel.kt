@@ -263,6 +263,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     fun pushCalibration(anchors: List<GeoAnchor>) =
         push(SectionPayload.Calibration(LocalMapper.calibrationDTO(anchors)))
 
+    /** Câblage électrique (distributeurs + affectations + réglages). */
+    fun pushPowerCabling(dto: PowerCablingDTO) =
+        push(SectionPayload.PowerCabling(dto))
+
     // MARK: - Bibliothèque de puissances (base communautaire GLOBALE)
 
     /**

@@ -76,4 +76,8 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     // Tests unitaires JVM (calcul du zoom caméra, cf. DistanceZoomTest).
     testImplementation("junit:junit:4.13.2")
+    // org.json RÉEL sur le classpath de test : l'android.jar des tests unitaires
+    // ne fournit que des stubs qui lèvent « not mocked ». Sans cette vraie impl,
+    // les round-trips JSON (SectionCodec, PowerCablingCodec) ne peuvent pas tourner.
+    testImplementation("org.json:json:20240303")
 }

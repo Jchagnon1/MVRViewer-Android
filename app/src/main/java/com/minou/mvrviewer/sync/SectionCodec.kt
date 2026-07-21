@@ -36,6 +36,7 @@ object SectionCodec {
             is SectionPayload.LabelSides -> encodeLabelSides(payload.dto)
             is SectionPayload.FixtureOrientations -> encodeOrientations(payload.dto)
             is SectionPayload.GdtfMappings -> encodeGdtfMappings(payload.dto)
+            is SectionPayload.PowerCabling -> PowerCablingCodec.toJson(payload.dto)
         }
         val wrapped = JSONObject().put("_0", inner)
         return JSONObject().put(payload.kind.raw, wrapped).toString()
@@ -54,6 +55,7 @@ object SectionCodec {
             ProjectSectionKind.LABEL_SIDES -> SectionPayload.LabelSides(decodeLabelSides(inner))
             ProjectSectionKind.FIXTURE_ORIENTATIONS -> SectionPayload.FixtureOrientations(decodeOrientations(inner))
             ProjectSectionKind.GDTF_MAPPINGS -> SectionPayload.GdtfMappings(decodeGdtfMappings(inner))
+            ProjectSectionKind.POWER_CABLING -> SectionPayload.PowerCabling(PowerCablingCodec.fromJson(inner))
         }
     }
 

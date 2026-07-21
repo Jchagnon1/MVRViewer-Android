@@ -217,6 +217,22 @@ object ProjectStore {
         return out
     }
 
+    // ---- Câblage électrique (section « powerCabling », phase 2) ----
+    // Persisté DANS le manifeste sous forme du JSON du DTO (le même que la
+    // section de synchro, sans l'enveloppe) : rouvrir le .mvr retrouve les
+    // distributeurs, les affectations et les réglages, même hors ligne.
+
+    fun savePowerCabling(ctx: Context, key: String, json: String?) = synchronized(manifestLock) {
+        val m = readManifest(ctx, key)
+        if (json.isNullOrBlank()) m.remove("powerCabling")
+        else runCatching { m.put("powerCabling", JSONObject(json)) }
+        writeManifest(ctx, key, m)
+    }
+
+    /** JSON du DTO câblage persisté (null si jamais enregistré). */
+    fun loadPowerCabling(ctx: Context, key: String): String? =
+        readManifest(ctx, key).optJSONObject("powerCabling")?.toString()
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
     fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) = synchronized(manifestLock) {

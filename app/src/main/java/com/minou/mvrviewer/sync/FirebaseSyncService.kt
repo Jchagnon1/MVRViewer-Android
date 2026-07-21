@@ -217,6 +217,24 @@ class FirebaseSyncService(context: Context) : SyncService {
         return next.toInt()
     }
 
+    // MARK: Bibliothèque de puissances (collection racine `powerLibrary`)
+
+    override suspend fun fetchPowerEntry(spec: String): PowerEntry? {
+        if (spec.isBlank()) return null
+        requireUid() // base communautaire : lecture réservée aux authentifiés
+        val doc = db.collection("powerLibrary").document(powerLibraryDocId(spec)).get().await()
+        return SectionCodec.powerFromMap(doc.data)
+    }
+
+    override suspend fun putPowerEntry(spec: String, watts: Int, updatedBy: String): PowerEntry {
+        requireUid()
+        // Dernier écrivain gagne : on horodate au MOMENT de l'écriture (ms).
+        val e = PowerEntry(spec, watts, updatedBy, System.currentTimeMillis())
+        db.collection("powerLibrary").document(powerLibraryDocId(spec))
+            .set(SectionCodec.powerToMap(e)).await()
+        return e
+    }
+
     // MARK: Observation (Firestore snapshot listeners → Flow)
 
     override fun observe(projectId: String): Flow<RemoteEvent> = callbackFlow {

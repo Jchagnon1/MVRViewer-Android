@@ -263,6 +263,26 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     fun pushCalibration(anchors: List<GeoAnchor>) =
         push(SectionPayload.Calibration(LocalMapper.calibrationDTO(anchors)))
 
+    // MARK: - Bibliothèque de puissances (base communautaire GLOBALE)
+
+    /**
+     * Lit l'entrée cloud pour une spec (null si absente / non connecté / hors
+     * ligne). Ne LÈVE jamais : la résolution locale prend le relais.
+     */
+    suspend fun fetchPowerEntry(spec: String): PowerEntry? =
+        runCatching { service.fetchPowerEntry(spec) }.getOrNull()
+
+    /**
+     * Pousse une puissance saisie dans la biblio partagée (clé = spec) au nom de
+     * l'utilisateur courant. Fire-and-forget : la saisie est déjà enregistrée
+     * localement (cache), le cloud n'est qu'un bonus quand on est connecté.
+     */
+    fun putPowerEntry(spec: String, watts: Int) {
+        if (spec.isBlank()) return
+        val by = _auth.value.accountOrNull?.uid ?: ""
+        viewModelScope.launch { runCatching { service.putPowerEntry(spec, watts, by) } }
+    }
+
     // MARK: - Journal de modifications (audit)
 
     /** Auteur courant (compte connecté, sinon local hors-ligne). */

@@ -248,6 +248,30 @@ object SectionCodec {
         )
     }
 
+    // ---- Doc Firestore : PowerEntry ↔ Map (bibliothèque de puissances) -----
+    //
+    // Collection RACINE `powerLibrary`, un doc par type. Mêmes noms de champs
+    // que iOS. `updatedAt` est en MILLISECONDES (Number). Ne pas renommer d'un
+    // seul côté sous peine de deux bibliothèques disjointes.
+
+    fun powerToMap(e: PowerEntry): Map<String, Any?> = buildMap {
+        put("spec", e.spec)
+        put("watts", e.watts.toLong()) // Firestore stocke les entiers en Long
+        put("updatedBy", e.updatedBy)
+        put("updatedAt", e.updatedAtMillis)
+    }
+
+    fun powerFromMap(map: Map<String, Any?>?): PowerEntry? {
+        map ?: return null
+        val watts = (map["watts"] as? Number)?.toInt() ?: return null
+        return PowerEntry(
+            spec = map["spec"] as? String ?: "",
+            watts = watts,
+            updatedBy = map["updatedBy"] as? String ?: "",
+            updatedAtMillis = (map["updatedAt"] as? Number)?.toLong() ?: 0L
+        )
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     private fun mapToJson(m: Map<String, String>): JSONObject {

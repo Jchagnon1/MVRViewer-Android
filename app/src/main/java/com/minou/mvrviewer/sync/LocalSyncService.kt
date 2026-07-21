@@ -246,6 +246,27 @@ class LocalSyncService private constructor(appContext: Context) : SyncService {
         next
     }
 
+    // MARK: Bibliothèque de puissances (stub disque, hors projet)
+    //
+    // Miroir du `powerLibrary` cloud sous CloudSim/powerLibrary/<docId>.json.
+    // Volontairement LENIENT (pas de requireUser) : la biblio doit rester lisible
+    // et testable HORS LIGNE / sans compte, contrairement au vrai backend où la
+    // règle Firestore exige l'authentification.
+
+    private fun powerFile(docId: String) =
+        File(File(root, "powerLibrary").apply { mkdirs() }, "$docId.json")
+
+    override suspend fun fetchPowerEntry(spec: String): PowerEntry? = lock.withLock {
+        if (spec.isBlank()) return null
+        readObj(powerFile(powerLibraryDocId(spec)))?.let { SectionCodec.powerFromMap(jsonToMap(it)) }
+    }
+
+    override suspend fun putPowerEntry(spec: String, watts: Int, updatedBy: String): PowerEntry = lock.withLock {
+        val e = PowerEntry(spec, watts, updatedBy, System.currentTimeMillis())
+        writeText(powerFile(powerLibraryDocId(spec)), JSONObject(SectionCodec.powerToMap(e)).toString())
+        e
+    }
+
     // MARK: Observation (diffusion en process)
 
     override fun observe(projectId: String): Flow<RemoteEvent> =

@@ -45,6 +45,12 @@ interface SyncService {
     suspend fun appendAudit(projectId: String, entries: List<AuditEntry>)
     suspend fun fetchAudit(projectId: String): List<AuditEntry>
 
+    // — Bibliothèque de puissances (collection RACINE `powerLibrary`, GLOBALE) —
+    // Base communautaire : lecture/écriture réservées aux AUTHENTIFIÉS (règle
+    // Firestore côté iOS). Hors de tout projet — indexée par spec de type.
+    suspend fun fetchPowerEntry(spec: String): PowerEntry?
+    suspend fun putPowerEntry(spec: String, watts: Int, updatedBy: String): PowerEntry
+
     // — Observation temps réel —
     fun observe(projectId: String): Flow<RemoteEvent>
 

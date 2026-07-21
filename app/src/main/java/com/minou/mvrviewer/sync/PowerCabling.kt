@@ -76,8 +76,12 @@ data class Distributor(
 ) {
     val circuitCount: Int get() = circuitPhases.size
 
-    /** Phase (1|2|3) d'un circuit 1-based, ou 0 si l'index est hors bornes. */
-    fun phaseOf(circuit: Int): Int = circuitPhases.getOrNull(circuit - 1) ?: 0
+    /**
+     * Phase (1|2|3) d'un circuit 1-based. Un index hors bornes retombe sur la
+     * phase 1 (valeur VALIDE) plutôt que 0 (phase inexistante) — aligné iOS, pour
+     * qu'un circuit fantôme transitoire ne casse ni l'équilibrage ni l'affichage.
+     */
+    fun phaseOf(circuit: Int): Int = circuitPhases.getOrNull(circuit - 1) ?: 1
 
     /** Un circuit 1-based existe-t-il sur ce distributeur ? */
     fun hasCircuit(circuit: Int): Boolean = circuit in 1..circuitCount
@@ -109,13 +113,19 @@ data class PowerCablingDTO(
      * effacé laisserait une affectation fantôme faussant les charges.
      */
     fun sanitized(validFixtures: Set<String>): PowerCablingDTO {
+        // ENSEMBLE VIDE ⇒ ON NE PURGE PAS PAR PROJECTEUR (aligné iOS). Un set de
+        // projecteurs connus vide signifie « show pas encore chargé » (moment
+        // transitoire pré-chargement) : filtrer ici effacerait toutes les
+        // affectations à tort. On garde donc tout côté projecteur dans ce cas, et
+        // on ne valide que distributeur + circuit.
+        val checkFixtures = validFixtures.isNotEmpty()
         val byId = distributors.associateBy { it.id }
         // On parcourt en gardant la DERNIÈRE affectation par projecteur (un
         // LinkedHashMap réécrit la clé en place → l'ordre d'insertion initial est
         // conservé, la valeur est la plus récente).
         val kept = LinkedHashMap<String, CablingAssignment>()
         for (a in assignments) {
-            if (a.fixture !in validFixtures) continue
+            if (checkFixtures && a.fixture !in validFixtures) continue
             val d = byId[a.distributor] ?: continue
             if (!d.hasCircuit(a.circuit)) continue
             kept[a.fixture] = a

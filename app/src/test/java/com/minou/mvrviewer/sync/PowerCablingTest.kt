@@ -156,6 +156,39 @@ class PowerCablingTest {
         assertEquals(listOf(CablingAssignment("fx1", "d1", 4)), clean.assignments)
     }
 
+    @Test fun sanitizeKeepsEverythingWhenFixtureSetEmpty() {
+        // ENSEMBLE DE PROJECTEURS CONNUS VIDE = show pas encore chargé (moment
+        // transitoire) : on ne doit PAS purger par projecteur (aligné iOS), sinon
+        // toutes les affectations disparaîtraient à tort au pré-chargement. Seuls
+        // distributeur/circuit inexistants restent filtrés.
+        val d = soca("d1")
+        val dto = PowerCablingDTO(
+            distributors = listOf(d),
+            assignments = listOf(
+                CablingAssignment("fx1", "d1", 1),
+                CablingAssignment("fx2", "d1", 3),
+                CablingAssignment("fx3", "nope", 1) // distributeur inexistant → toujours rejeté
+            )
+        )
+        val clean = dto.sanitized(validFixtures = emptySet())
+        assertEquals(
+            listOf(
+                CablingAssignment("fx1", "d1", 1),
+                CablingAssignment("fx2", "d1", 3)
+            ),
+            clean.assignments
+        )
+    }
+
+    @Test fun phaseOfOutOfBoundsReturnsOne() {
+        // Un circuit hors bornes renvoie une phase VALIDE (1), pas 0 (aligné iOS).
+        val d = soca("d1") // 6 circuits
+        assertEquals(1, d.phaseOf(0))   // circuit 0 (invalide, 1-based)
+        assertEquals(1, d.phaseOf(7))   // au-delà du dernier circuit
+        assertEquals(1, d.phaseOf(-3))  // franchement négatif
+        assertEquals(3, d.phaseOf(6))   // borne valide inchangée (circuit 6 → L3)
+    }
+
     @Test fun sectionEnvelopeRoundTripsThroughCodec() {
         // L'enveloppe cross-platform {"powerCabling":{"_0":dto}} doit se relire.
         val dto = PowerCablingDTO(distributors = listOf(soca("d1")))

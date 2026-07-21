@@ -6,11 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -150,7 +148,12 @@ fun PlanScreen(
     //   2. un TAP sur une étiquette l'active (une seule à la fois, retour visuel
     //      net) ; elle seule peut alors être saisie ;
     //   3. un glissé qui démarre AILLEURS pane et désactive ;
-    //   4. un tap ailleurs, ou sur la même étiquette, désactive.
+    //   4. un tap ailleurs, ou sur la même étiquette, désactive ;
+    //   5. ARBITRAGE avec la sélection de projecteur : l'étiquette ne gagne le
+    //      tap que si le doigt est STRICTEMENT DANS sa pastille dessinée, sans
+    //      marge (cf. labelBoxAt) ; sinon le tap va au projecteur. Et un tap
+    //      d'étiquette ne modifie JAMAIS `selected` (l'ordre de sélection pilote
+    //      l'adressage DMX séquentiel).
     // C'est un état observable (et non un tableau muet) parce qu'il ne change
     // que deux fois par interaction — jamais à la fréquence du doigt — et qu'il
     // doit re-clé le pointerInput de saisie pour que celui-ci n'existe même pas
@@ -534,39 +537,31 @@ fun PlanScreen(
                             calibrating = false
                             return@detectTapGestures
                         }
-                        // ÉTIQUETTES (règles 2, 4 et 5 du modèle) : le tap est le
+                        // ÉTIQUETTES (règles 2 et 4 du modèle) : le tap est le
                         // SEUL geste qui active une étiquette, et il ne
                         // sélectionne alors PAS le projecteur — ce sont deux
                         // gestes distincts. Re-taper la même la désactive.
                         // Exclu du mode rectangle, où le tap sert à cocher /
                         // décocher des projecteurs dans la sélection multiple.
                         if (!rectMode) {
-                            // L'étiquette ACTIVE passe avant les autres étiquettes
-                            // (on doit toujours pouvoir la désactiver, même si une
-                            // voisine est plus proche), mais elle reste soumise au
-                            // MÊME arbitrage avec le symbole du projecteur : si le
-                            // doigt est plus près de la pastille du projecteur que
-                            // de la boîte, le tap file à la sélection (règle 5 —
-                            // une étiquette posée sur son symbole ne doit jamais
-                            // confisquer la sélection). La désactivation, elle, a
-                            // lieu de toute façon plus bas.
-                            val act = activeLabelKey
-                            if (act != null) {
-                                val box = labelHits.firstOrNull { it.key == act }
-                                val d = box?.let { distanceToBox(it, tap) }
-                                if (box != null && d != null && d <= labelSlackPx &&
-                                    hypot(tap.x - box.anchor.x, tap.y - box.anchor.y) > d) {
-                                    activeLabelKey = null
-                                    return@detectTapGestures
-                                }
-                            }
-                            val hitKey = labelKeyAt(labelHits, tap, labelSlackPx)
+                            // ARBITRAGE (cf. labelBoxAt) : l'étiquette ne gagne
+                            // que si le doigt est STRICTEMENT DANS sa pastille
+                            // dessinée, SANS marge de confort — quel que soit le
+                            // zoom, et sans comparer avec la distance au symbole
+                            // du projecteur. L'étiquette active est prioritaire
+                            // en cas de chevauchement (on doit toujours pouvoir
+                            // la désactiver).
+                            val hitKey = labelBoxAt(labelHits, tap, activeLabelKey)
                             if (hitKey != null) {
+                                // RÈGLE : ce tap ne touche JAMAIS à `selected`.
+                                // En multi-sélection l'ordre de sélection pilote
+                                // l'adressage DMX séquentiel — le corrompre en
+                                // manipulant une étiquette est inacceptable.
                                 activeLabelKey = if (activeLabelKey == hitKey) null else hitKey
                                 return@detectTapGestures
                             }
-                            // Tap ailleurs : on désactive, puis le tap suit son
-                            // cours normal (sélection de projecteur).
+                            // Tap hors de toute pastille : on désactive, puis le
+                            // tap suit son cours normal (sélection de projecteur).
                             if (activeLabelKey != null) activeLabelKey = null
                         }
                         var best = -1; var bestD = 40f * 40f
@@ -605,6 +600,13 @@ fun PlanScreen(
                         // ressort immédiatement et le geste redevient un pan
                         // ordinaire (qui désactivera l'étiquette, cf. le
                         // detectTransformGestures ci-dessus).
+                        //
+                        // C'est le SEUL endroit qui garde une marge de confort
+                        // (LABEL_TOUCH_SLACK = 6 dp) : l'étiquette est déjà
+                        // active, donc il n'y a plus aucune ambiguïté à arbitrer
+                        // — la marge ne sert qu'à ne pas rater la saisie d'une
+                        // pastille de quelques millimètres. Le TAP, lui, exige la
+                        // stricte appartenance à la pastille (cf. labelBoxAt).
                         val hit = labelHits.firstOrNull { it.key == key } ?: return@awaitEachGesture
                         if (distanceToBox(hit, down.position) > labelSlackPx) return@awaitEachGesture
                         var moved = false
@@ -625,15 +627,42 @@ fun PlanScreen(
                             gesturing = true
                             labelDragVersion++
                         }
-                        // On ne consomme qu'APRÈS le seuil de glissé : en deçà,
-                        // c'est un tap, et il doit rester au gestionnaire de tap
-                        // (c'est lui qui désactive l'étiquette).
-                        val start = awaitTouchSlopOrCancellation(down.id) { change, over ->
-                            change.consume(); shift(over); moved = true
-                        }
-                        if (start != null) {
-                            drag(down.id) { change ->
-                                change.consume(); shift(change.positionChange()); moved = true
+                        // DÉCALAGE PARASITE PENDANT UN PINCH — l'équivalent
+                        // Compose du défaut corrigé côté iOS. Un pinch commence
+                        // TOUJOURS par un seul doigt : si ce premier doigt s'est
+                        // posé sur l'étiquette active, le glissé s'armait au
+                        // franchissement du seuil (≈ 18 px) puis suivait ce doigt
+                        // pendant tout le zoom — l'étiquette partait de plusieurs
+                        // centimètres alors que l'utilisateur croyait seulement
+                        // zoomer. On surveille donc le nombre de doigts appuyés à
+                        // CHAQUE événement : dès qu'il y en a 2, on abandonne
+                        // (armé ou non) et le geste redevient un pinch ordinaire.
+                        //
+                        // (C'est aussi pourquoi on n'utilise plus
+                        // awaitTouchSlopOrCancellation + drag : ni l'un ni l'autre
+                        // n'offre de point d'observation du nombre de pointeurs.)
+                        val slop = viewConfiguration.touchSlop
+                        var armed = false
+                        var acc = Offset.Zero
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            if (ev.changes.count { it.pressed } > 1) break
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) break
+                            val d = ch.positionChange()
+                            if (!armed) {
+                                // On ne consomme qu'APRÈS le seuil de glissé : en
+                                // deçà c'est un tap, et il doit rester au
+                                // gestionnaire de tap (c'est lui qui désactive
+                                // l'étiquette). Le déplacement consommé par le
+                                // seuil n'est PAS appliqué : l'appliquer d'un coup
+                                // ferait sauter la pastille de ~18 px au démarrage.
+                                acc += d
+                                if (hypot(acc.x, acc.y) < slop) continue
+                                armed = true
+                                ch.consume()
+                            } else {
+                                ch.consume(); shift(d); moved = true
                             }
                         }
                         // Écriture disque au relâché seulement : un enregistrement
@@ -871,7 +900,7 @@ fun PlanScreen(
                         // Zone sensible : remplie SEULEMENT pour les étiquettes
                         // effectivement dessinées (cf. la garde ci-dessus), sinon
                         // une boîte invisible capterait un geste sans rien montrer.
-                        labelHits.add(LabelHit(f.key, boxTL.x, boxTL.y, bw, bh, s))
+                        labelHits.add(LabelHit(f.key, boxTL.x, boxTL.y, bw, bh))
                         val boxSize = androidx.compose.ui.geometry.Size(bw, bh)
                         val radius = androidx.compose.ui.geometry.CornerRadius(bh * 0.32f, bh * 0.32f)
                         drawRoundRect(
@@ -1575,12 +1604,13 @@ private fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
 }
 
 /**
- * Zone sensible d'une étiquette à l'écran (remplie par le dessin, cf. PASSE 2).
- * `anchor` = centre de la pastille du projecteur : c'est l'arbitre du conflit
- * entre « saisir l'étiquette » et « déplacer le plan / sélectionner ».
+ * Zone sensible d'une étiquette à l'écran (remplie par le dessin, cf. PASSE 2) :
+ * exactement la pastille DESSINÉE, aux mêmes coordonnées que le drawRoundRect.
+ * C'est cette identité boîte dessinée ↔ boîte testée qui rend l'arbitrage
+ * honnête (cf. labelBoxAt).
  */
 private class LabelHit(
-    val key: String, val x: Float, val y: Float, val w: Float, val h: Float, val anchor: Offset
+    val key: String, val x: Float, val y: Float, val w: Float, val h: Float
 )
 
 /** Distance du point au rectangle (0 s'il est dedans). */
@@ -1591,26 +1621,42 @@ private fun distanceToBox(hi: LabelHit, p: Offset): Float {
 }
 
 /**
- * Étiquette sous le doigt, ou null. Utilisé UNIQUEMENT par le tap (l'activation)
- * — le glissé, lui, ne teste que la boîte de l'étiquette déjà active.
+ * Étiquette sous le doigt, ou null. Utilisé UNIQUEMENT par le TAP (l'activation
+ * / la désactivation) — le glissé, lui, ne teste que la boîte de l'étiquette
+ * déjà active, avec une marge de confort (cf. LABEL_TOUCH_SLACK).
  *
- * Deux garde-fous : la zone d'accrochage est la boîte RÉELLE de l'étiquette avec
- * une marge courte, et le point doit être plus proche de cette boîte que de la
- * pastille du projecteur — sans quoi un tap destiné à SÉLECTIONNER le projecteur
- * activerait son étiquette (les deux se frôlent au zoom où les étiquettes
- * s'allument). Quand plusieurs boîtes sont éligibles on prend la PLUS PROCHE (la
- * première trouvée serait une étiquette voisine).
+ * ARBITRAGE ÉTIQUETTE ↔ PROJECTEUR — sur la GÉOMÉTRIE RÉELLE du doigt, et rien
+ * d'autre : l'étiquette ne gagne que si le point est STRICTEMENT DANS sa
+ * pastille dessinée, SANS marge de confort. Sinon le tap file à la recherche de
+ * projecteur, comportement inchangé.
+ *
+ * Pourquoi ni l'un ni l'autre des ordres « naturels » ne marche :
+ *  - tester les étiquettes D'ABORD avec une marge : au dézoom, les pastilles
+ *    (taille écran constante) recouvrent tout le plan et volaient la sélection ;
+ *  - tester les projecteurs D'ABORD : au zoom de travail la boîte de
+ *    l'étiquette est ENTIÈREMENT dans la cible tactile du projecteur (rayon 40 px
+ *    ici, cf. la recherche de fixture, contre une pastille collée au symbole) →
+ *    au-delà d'environ 0,265 px/mm plus AUCUNE étiquette n'était activable : la
+ *    fonctionnalité était morte sur les 3/4 de la plage de zoom.
+ *
+ * La pastille est ce que l'utilisateur VOIT et VISE : un tap 10 pt sous un
+ * projecteur au dézoom n'est pas dans la pastille (placée au-dessus du symbole
+ * par défaut) et sélectionne donc bien le projecteur ; au zoom la pastille est
+ * une cible large et précise, donc activable.
+ *
+ * `preferKey` (l'étiquette active) l'emporte quand elle contient le point : on
+ * doit toujours pouvoir la désactiver, même si une voisine la chevauche. Sinon
+ * on retient la DERNIÈRE boîte contenant le point, c'est-à-dire celle dessinée
+ * PAR-DESSUS les autres — donc celle que l'utilisateur voit.
  */
-private fun labelKeyAt(hits: List<LabelHit>, p: Offset, slack: Float): String? {
-    var best: String? = null
-    var bestD = Float.MAX_VALUE
+private fun labelBoxAt(hits: List<LabelHit>, p: Offset, preferKey: String?): String? {
+    var found: String? = null
     for (hi in hits) {
-        val d = distanceToBox(hi, p)
-        if (d > slack || d >= bestD) continue
-        if (kotlin.math.hypot(p.x - hi.anchor.x, p.y - hi.anchor.y) <= d) continue
-        bestD = d; best = hi.key
+        if (p.x < hi.x || p.x > hi.x + hi.w || p.y < hi.y || p.y > hi.y + hi.h) continue
+        if (hi.key == preferKey) return hi.key
+        found = hi.key
     }
-    return best
+    return found
 }
 
 /** Couleur `src` d'opacité `alpha` composée sur `dst` (source-over opaque). */

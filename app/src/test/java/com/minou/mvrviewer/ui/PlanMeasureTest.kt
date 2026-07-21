@@ -77,6 +77,29 @@ class PlanMeasureTest {
     }
 
     @Test
+    fun `un calque masque n'aimante plus le doigt`() {
+        // Deux traits, un par calque ; « MOBILIER » est éteint dans la vue.
+        val plan = DxfPlan(
+            polylines = listOf(
+                DxfPolyline(floatArrayOf(0f, 0f), false, "MURS"),
+                DxfPolyline(floatArrayOf(5000f, 0f), false, "MOBILIER")
+            ),
+            minX = 0f, minY = 0f, maxX = 5000f, maxY = 1f,
+            unitLabel = "mm", segmentCount = 2, layerCounts = emptyMap(), truncatedSegments = 0
+        )
+        // Sans masquage, le sommet du mobilier est bien un candidat.
+        assertNotNull(
+            snapDxfVertex(dxfSnapVertices(plan), ReferencePlanTransform(), 5010f, 0f, 100f)
+        )
+        // Calque masqué : plus aucun candidat là où il n'y a plus rien de visible.
+        val visible = dxfSnapVertices(plan, hiddenLayers = setOf("MOBILIER"))
+        assertEquals(2, visible.size)
+        assertNull(snapDxfVertex(visible, ReferencePlanTransform(), 5010f, 0f, 100f))
+        // …et le calque resté visible s'accroche toujours.
+        assertNotNull(snapDxfVertex(visible, ReferencePlanTransform(), 10f, 0f, 100f))
+    }
+
+    @Test
     fun `au dela du plafond les sommets sont sous-echantillonnes, pas tronques`() {
         // 100 sommets répartis de x=0 à x=9900, plafond à 10.
         val pts = FloatArray(200) { i -> if (i % 2 == 0) (i / 2) * 100f else 0f }

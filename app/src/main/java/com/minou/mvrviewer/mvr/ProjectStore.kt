@@ -51,8 +51,31 @@ object ProjectStore {
         runCatching { JSONObject(manifestFile(ctx, key).readText()) }.getOrDefault(JSONObject())
     }
 
+    /**
+     * Écriture ATOMIQUE (fichier temporaire puis renommage).
+     *
+     * POURQUOI : `writeText` tronque d'abord le fichier puis écrit. Tué au
+     * milieu (l'OS tue volontiers une appli passée en arrière-plan), il reste un
+     * manifeste incomplet — donc du JSON invalide, donc `readManifest` qui
+     * repart d'un objet vide : placement du plan DXF, calibration GPS, calques
+     * masqués, décalages d'étiquettes et mapping GDTF perdus D'UN COUP, sans le
+     * moindre message. Le risque a nettement grossi avec les décalages
+     * d'étiquettes, enregistrés à chaque relâché de doigt. Un renommage est
+     * atomique sur le même volume : soit l'ancien manifeste, soit le nouveau,
+     * jamais un fichier à moitié écrit.
+     */
     private fun writeManifest(ctx: Context, key: String, m: JSONObject) = synchronized(manifestLock) {
-        runCatching { manifestFile(ctx, key).writeText(m.toString()) }
+        val dst = manifestFile(ctx, key)
+        val tmp = File(dst.parentFile, "manifest.json.tmp")
+        runCatching {
+            tmp.writeText(m.toString())
+            if (!tmp.renameTo(dst)) {
+                // Renommage refusé (cas rare) : repli sur l'écriture directe,
+                // qui reste préférable à ne rien enregistrer du tout.
+                dst.writeText(m.toString())
+                tmp.delete()
+            }
+        }.onFailure { runCatching { tmp.delete() } }
         Unit
     }
 

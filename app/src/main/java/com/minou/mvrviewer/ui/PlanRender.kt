@@ -37,6 +37,20 @@ internal class PlanRenderSpec(
     val layerIndex: Map<String, Int>,
     /** Échelle de projection : pixels (ou points PDF) par millimètre monde. */
     val pxPerMm: Float,
+    /**
+     * Échelle servant aux DÉCISIONS DE DÉTAIL (étiquettes assez lisibles ?
+     * silhouette assez grande ?), quand elle diffère de l'échelle de projection.
+     *
+     * POURQUOI : une page A4 en points (≈ 780 × 500) est bien plus petite que
+     * l'écran en pixels (≈ 1080 × 2100), donc `pxPerMm` y est plusieurs fois
+     * plus faible à cadrage égal. Les seuils appliqués à `pxPerMm` répondaient
+     * donc « non » sur la page alors qu'ils répondaient « oui » à l'écran : le
+     * PDF sortait SANS étiquettes ni silhouettes, alors que l'utilisateur les
+     * voyait au moment où il a ajouté la vue. On décide donc avec l'échelle de
+     * l'ÉCRAN au moment de la capture, et on dessine avec celle de la page.
+     * null (écran) = les deux sont confondues.
+     */
+    val detailPxPerMm: Float? = null,
     /** Où atterrit le centre du modèle (data.cx, data.cy) dans le repère de dessin. */
     val centerPx: Offset,
     val planBg: Color,
@@ -55,7 +69,13 @@ internal class PlanRenderSpec(
     val fallbackDots: androidx.compose.ui.graphics.Path,
     val fixWire: PlanWireframe.FixtureWire?,
     val fixPaths: FixturePaths?,
-    val referencePlan: com.minou.mvrviewer.mvr.ReferencePlan?,
+    /**
+     * PLACEMENT du plan de repère au moment du dessin. C'est une COPIE côté PDF
+     * (et non l'objet vivant de `ReferencePlan`) : sa transformée est mutable et
+     * réglée aux curseurs, si bien qu'un placement modifié après coup — ou un
+     * simple « Visible » décoché — réécrivait toutes les pages déjà composées.
+     */
+    val refTransform: com.minou.mvrviewer.mvr.ReferencePlanTransform?,
     val dxfPaths: DxfPaths?,
     val satellite: com.minou.mvrviewer.mvr.SatelliteOverlay?,
     val showSatellite: Boolean,
@@ -99,6 +119,8 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     val h = size.height
     val bs = s.pxPerMm
     if (bs <= 0f) return
+    // Échelle de DÉCISION (cf. detailPxPerMm) : identique à `bs` à l'écran.
+    val det = s.detailPxPerMm?.takeIf { it > 0f } ?: bs
 
     // ---- Fond satellite géo-référencé, SOUS tout le reste ----
     // L'image porte ses 4 coins en monde MVR ; on la dessine comme un quad via la
@@ -124,10 +146,10 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     // ---- Plan de repère DXF importé (sous tout le reste) ----
     // Les tracés sont déjà construits (coordonnées locales du DXF) : ici on ne
     // fait qu'empiler placement du DXF + projection dans la matrice du Canvas.
-    val rp = s.referencePlan
+    val tfRef = s.refTransform
     val dxf = s.dxfPaths
-    if (rp != null && dxf != null && rp.transform.visible && (!s.lowDetail || dxf.light)) {
-        val tf = rp.transform
+    if (tfRef != null && dxf != null && tfRef.visible && (!s.lowDetail || dxf.light)) {
+        val tf = tfRef
         val sfac = tf.scale.toFloat()
         val ppu = bs * sfac              // pixels par unité locale du DXF
         withTransform({
@@ -182,14 +204,14 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     }
 
     // ---- Projecteurs, passe 1 : silhouettes fil de fer ----
-    val showLabels = s.showLabels && bs > 0.02f
+    val showLabels = s.showLabels && det > 0.02f
     val fw = s.fixWire
     val fp = s.fixPaths
     fun silhouetteVisible(spec: String?): Boolean {
         if (s.lowDetail || fw == null || fp == null || spec == null) return false
         val t = spec.trim()
         if (t !in fp.specs || fw.edgesBySpec[t] == null) return false
-        return (fw.radiusBySpec[t] ?: 0f) * bs > 7f
+        return (fw.radiusBySpec[t] ?: 0f) * det > 7f
     }
     if (!s.lowDetail && fp != null) {
         withTransform({

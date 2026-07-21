@@ -56,7 +56,20 @@ internal class PlanViewCapture(
     val labelShift: Map<String, Offset>,
     val selected: Set<Int>,
     /** Densité de l'écran au moment de la capture (ramène les décalages en points). */
-    val screenDensity: Float
+    val screenDensity: Float,
+    /**
+     * Échelle de l'ÉCRAN au moment de la capture (px/mm). La page a la sienne,
+     * bien plus faible ; c'est pourtant celle-ci qui doit décider si les
+     * étiquettes et les silhouettes s'affichent, sinon la page perd ce que
+     * l'utilisateur voyait (cf. PlanRenderSpec.detailPxPerMm).
+     */
+    val screenPxPerMm: Float,
+    /**
+     * COPIE du placement du plan de repère. Sa transformée est mutable et réglée
+     * en direct aux curseurs : sans copie, bouger le plan (ou décocher
+     * « Visible ») après avoir ajouté des vues réécrivait toutes les pages.
+     */
+    val refTransform: com.minou.mvrviewer.mvr.ReferencePlanTransform?
 )
 
 /**
@@ -69,7 +82,6 @@ internal class PlanExportSource(
     val wire: PlanWireframe.Built?,
     val fixWire: PlanWireframe.FixtureWire?,
     val dxfPaths: DxfPaths?,
-    val referencePlan: com.minou.mvrviewer.mvr.ReferencePlan?,
     val satellite: com.minou.mvrviewer.mvr.SatelliteOverlay?,
     /** Légende : calque → nombre de projecteurs, déjà triée. */
     val legend: List<Pair<String, Int>>,
@@ -136,8 +148,14 @@ internal fun buildPlanPdf(
     // Nom stable et lisible : c'est lui que verra le destinataire du partage.
     val safe = src.documentTitle.replace(Regex("[^A-Za-z0-9._-]+"), "_").take(48).trim('_')
     val out = File(dir, (if (safe.isEmpty()) "plan" else safe) + ".pdf")
-    java.io.FileOutputStream(out).use { doc.writeTo(it) }
-    doc.close()
+    // `close()` dans un finally : une page très chargée peut faire échouer
+    // l'écriture (disque plein, mémoire), et un PdfDocument non fermé retient
+    // ses bitmaps de page. L'appelant relance alors l'export sur un tas propre.
+    try {
+        java.io.FileOutputStream(out).use { doc.writeTo(it) }
+    } finally {
+        doc.close()
+    }
     return out
 }
 
@@ -185,6 +203,8 @@ private fun DrawScope.drawPdfPage(
                 data = src.data,
                 layerIndex = src.layerIndex,
                 pxPerMm = pxPerMm,
+                // Décisions de détail prises à l'échelle de l'ÉCRAN capturé.
+                detailPxPerMm = v.screenPxPerMm,
                 centerPx = centerPx,
                 planBg = v.background,
                 bgDark = v.bgDark,
@@ -202,7 +222,7 @@ private fun DrawScope.drawPdfPage(
                 fallbackDots = paths.fallback,
                 fixPaths = paths.fixtures,
                 fixWire = src.fixWire,
-                referencePlan = src.referencePlan,
+                refTransform = v.refTransform,
                 dxfPaths = src.dxfPaths,
                 satellite = src.satellite,
                 showSatellite = v.showSatellite,

@@ -64,11 +64,20 @@ internal const val MAX_SNAP_VERTICES = 200_000
  * tronquer : tronquer ne garderait que le début du fichier, donc un coin du
  * plan, et l'accrochage serait mort ailleurs. Le pas fait perdre des sommets,
  * jamais des régions.
+ *
+ * Les CALQUES MASQUÉS sont exclus : un plan d'architecte se lit en éteignant
+ * les calques dont on ne veut pas, et s'accrocher à un trait invisible donne
+ * une cote juste sur une géométrie que l'utilisateur ne voit pas — donc, de son
+ * point de vue, une cote fausse et inexplicable.
  */
-internal fun dxfSnapVertices(plan: DxfPlan, max: Int = MAX_SNAP_VERTICES): FloatArray {
+internal fun dxfSnapVertices(
+    plan: DxfPlan,
+    hiddenLayers: Set<String> = emptySet(),
+    max: Int = MAX_SNAP_VERTICES
+): FloatArray {
     var total = 0
-    for (pl in plan.polylines) total += pl.points.size / 2
-    for (fl in plan.fills) for (r in fl.rings) total += r.size / 2
+    for (pl in plan.polylines) if (pl.layer !in hiddenLayers) total += pl.points.size / 2
+    for (fl in plan.fills) if (fl.layer !in hiddenLayers) for (r in fl.rings) total += r.size / 2
     if (total == 0) return FloatArray(0)
     val stride = if (total > max) (total + max - 1) / max else 1
     val out = FloatArray(minOf(total, max) * 2)
@@ -84,8 +93,8 @@ internal fun dxfSnapVertices(plan: DxfPlan, max: Int = MAX_SNAP_VERTICES): Float
             i += 2
         }
     }
-    for (pl in plan.polylines) push(pl.points)
-    for (fl in plan.fills) for (r in fl.rings) push(r)
+    for (pl in plan.polylines) if (pl.layer !in hiddenLayers) push(pl.points)
+    for (fl in plan.fills) if (fl.layer !in hiddenLayers) for (r in fl.rings) push(r)
     return if (n == out.size) out else out.copyOf(n)
 }
 

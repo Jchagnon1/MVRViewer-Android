@@ -145,6 +145,12 @@ fun PlanScreen(
     // lambda de dessin → redessin seul, jamais de recomposition de PlanScreen à
     // la fréquence du doigt (régression déjà vue sur le pan/zoom).
     val labelShift = remember(scene) { HashMap<String, Offset>() }
+    // La relecture disque des décalages est ASYNCHRONE : tant qu'elle n'a pas
+    // abouti, `labelShift` est incomplet et l'enregistrer EFFACERAIT du disque
+    // tout ce qui n'a pas encore été relu (la sauvegarde réécrit la table
+    // entière). Ce drapeau — un tableau muet, pas un état observable — dit que
+    // la table fait autorité. Voir aussi la fusion sans écrasement plus bas.
+    val labelsLoaded = remember(scene) { booleanArrayOf(projectKey == null) }
     val labelHits = remember(scene) { ArrayList<LabelHit>() }
     // Disques des symboles de projecteurs RÉELLEMENT dessinés, même tampon muet,
     // même passe : ils portent l'exception d'arbitrage (cf. labelTapTarget). Sans
@@ -317,11 +323,14 @@ fun PlanScreen(
     // Sommets DXF candidats à l'accrochage, préparés hors thread principal et
     // plafonnés (cf. dxfSnapVertices) : un plan d'architecte en compte des
     // millions, on ne peut pas les balayer tous à chaque toucher.
-    val snapVerts by produceState<FloatArray?>(null, referencePlan?.plan, measureMode) {
+    // `hiddenLayers` fait partie des clés : un calque éteint ne doit plus
+    // aimanter le doigt (cf. dxfSnapVertices).
+    val snapVerts by produceState<FloatArray?>(null, referencePlan?.plan, measureMode, hiddenLayers) {
         val plan = referencePlan?.plan
+        val hidden = hiddenLayers
         value = if (plan == null || !measureMode) null
         else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            dxfSnapVertices(plan)
+            dxfSnapVertices(plan, hidden)
         }
     }
     var query by remember(scene) { mutableStateOf("") }
@@ -422,8 +431,13 @@ fun PlanScreen(
             val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 com.minou.mvrviewer.mvr.ProjectStore.loadLabelOffsets(ctxPlan, projectKey)
             }
+            // Un déplacement (ou une remise à zéro) a pu avoir lieu PENDANT la
+            // lecture : la table en mémoire est alors plus récente que le
+            // disque, on ne la contredit pas.
+            if (labelsLoaded[0]) return@LaunchedEffect
+            labelsLoaded[0] = true
             if (saved.isNotEmpty()) {
-                for ((k, v) in saved) labelShift[k] = Offset(v.first, v.second)
+                for ((k, v) in saved) if (k !in labelShift) labelShift[k] = Offset(v.first, v.second)
                 labelDragVersion++
             }
         }
@@ -475,7 +489,12 @@ fun PlanScreen(
             hiddenLayers = hiddenLayers.toSet(),
             labelShift = HashMap(labelShift),
             selected = selected.toSet(),
-            screenDensity = labelDensity.density
+            screenDensity = labelDensity.density,
+            screenPxPerMm = bs,
+            // COPIE : la transformée du plan de repère est mutable et réglée en
+            // direct aux curseurs. Sans copie, déplacer le plan (ou décocher
+            // « Visible ») après coup réécrivait les pages déjà composées.
+            refTransform = referencePlan?.transform?.copy()
         )
     }
 
@@ -802,7 +821,10 @@ fun PlanScreen(
                         // Elle part sur le fil du store (et non sur une coroutine
                         // du composable) car ce relâché est typiquement suivi d'un
                         // retour à la 3D, qui annulerait la coroutine en vol.
-                        if (moved && projectKey != null) {
+                        // Tant que la relecture n'a pas abouti, on ne réécrit
+                        // pas le fichier : il contient des décalages que la
+                        // table en mémoire n'a pas encore.
+                        if (moved && projectKey != null && labelsLoaded[0]) {
                             com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
                                 ctxPlan, projectKey, labelShift.mapValues { (_, o) -> o.x to o.y }
                             )
@@ -846,7 +868,7 @@ fun PlanScreen(
                     fallbackDots = fallbackDots,
                     fixWire = fixWire,
                     fixPaths = fixPaths,
-                    referencePlan = referencePlan,
+                    refTransform = referencePlan?.transform,
                     dxfPaths = dxfPaths,
                     satellite = satellite,
                     showSatellite = options.showSatellite,
@@ -1022,6 +1044,9 @@ fun PlanScreen(
                 // mémoire, sinon la réouverture les ferait revenir).
                 onResetLabelOffsets = {
                     labelShift.clear()
+                    // La table vidée fait désormais autorité : une relecture
+                    // encore en vol ne doit pas ressusciter les décalages.
+                    labelsLoaded[0] = true
                     activeLabelKey = null
                     labelDragVersion++
                     if (projectKey != null) {
@@ -1343,7 +1368,7 @@ fun PlanScreen(
                                 val src = PlanExportSource(
                                     data = data, layerIndex = layerIndex,
                                     wire = wire, fixWire = fixWire, dxfPaths = dxfPaths,
-                                    referencePlan = referencePlan, satellite = satellite,
+                                    satellite = satellite,
                                     legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
                                         .toList().sortedByDescending { it.second },
                                     documentTitle = "Plan"

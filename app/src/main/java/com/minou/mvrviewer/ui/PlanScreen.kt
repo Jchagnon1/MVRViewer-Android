@@ -620,16 +620,22 @@ fun PlanScreen(
                                         // montre plus que ça (cf. effectiveHidden).
                                         val add = HashSet(soloElements)
                                         data.fixtures.forEach { f ->
+                                            // Comme le tap solo : on saute ce qui est déjà
+                                            // masqué (le masquage l'emporte). Sinon un cadre
+                                            // sur une zone entièrement masquée peuplerait le
+                                            // solo d'éléments invisibles → plan vide.
+                                            if (f.key in hiddenElements) return@forEach
                                             val s = toScreen(f.px, f.py, canvas.x, canvas.y)
                                             if (s.x in l..r && s.y in t..bo) add.add(f.key)
                                         }
                                         data.structure.forEachIndexed { i, p ->
+                                            val k = data.structureKeys.getOrNull(i) ?: return@forEachIndexed
+                                            if (k in hiddenElements) return@forEachIndexed
                                             val s = toScreen(p.first, p.second, canvas.x, canvas.y)
-                                            if (s.x in l..r && s.y in t..bo) {
-                                                data.structureKeys.getOrNull(i)?.let { add.add(it) }
-                                            }
+                                            if (s.x in l..r && s.y in t..bo) add.add(k)
                                         }
                                         wire?.instances?.forEach { inst ->
+                                            if (inst.id in hiddenElements) return@forEach
                                             val s = toScreen(inst.cx, inst.cy, canvas.x, canvas.y)
                                             if (s.x in l..r && s.y in t..bo) add.add(inst.id)
                                         }
@@ -707,7 +713,11 @@ fun PlanScreen(
                             // côté.
                             var bestD = radius * radius
                             data.fixtures.forEach { f ->
-                                if (f.key in hiddenElements) return@forEach
+                                // Accroche seulement ce qui est RÉELLEMENT visible :
+                                // effectiveHidden (masqués ∪ complément du solo), pas
+                                // hiddenElements brut — sinon la mesure vise des
+                                // projecteurs soloés hors écran.
+                                if (f.key in effectiveHidden) return@forEach
                                 val dx = f.px - tpx; val dy = f.py - tpy
                                 val d = dx * dx + dy * dy
                                 if (d < bestD) {
@@ -859,7 +869,10 @@ fun PlanScreen(
                         }
                         var best = -1; var bestD = 40f * 40f
                         data.fixtures.forEachIndexed { i, f ->
-                            if (f.key in hiddenElements) return@forEachIndexed
+                            // Ne sélectionne que le visible : effectiveHidden (pas
+                            // hiddenElements brut) — sinon le tap sélectionne un
+                            // projecteur soloé hors écran après un aller-retour 3D↔plan.
+                            if (f.key in effectiveHidden) return@forEachIndexed
                             val s = toScreen(f.px, f.py, w, h)
                             val dx = s.x - tap.x; val dy = s.y - tap.y
                             val d = dx * dx + dy * dy
@@ -1234,7 +1247,10 @@ fun PlanScreen(
                     {
                         val origin = labelBlockFixtureKey(activeLabelKeys.first())
                         activeLabelKeys = labelKeysForFixtures(
-                            sameTypeSameLayer(data, origin).filter { it.key !in hiddenElements },
+                            // N'arme que le visible : effectiveHidden (pas hiddenElements
+                            // brut) — sinon le zoom « étiquettes du même type » embrasse
+                            // des projecteurs soloés hors écran.
+                            sameTypeSameLayer(data, origin).filter { it.key !in effectiveHidden },
                             options.labelFields, options.labelDetached
                         )
                     }

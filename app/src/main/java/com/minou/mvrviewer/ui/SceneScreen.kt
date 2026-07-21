@@ -90,6 +90,10 @@ fun SceneScreen(
     // Calques DXF masqués (visibilité par calque) — déclaré tôt car chargé dans la
     // restauration ci-dessous ; partagé plan/3D, persisté par projet, synchronisé.
     var hiddenLayers by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    // Éléments MVR masqués (identité d'INSTANCE, cf. mvrInstanceKey). Hissé ici
+    // pour survivre aux bascules 3D ↔ plan — PlanScreen est détruit à chaque
+    // aller-retour, un état local se perdrait à la première visite en 3D.
+    var hiddenElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
     var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
     fun hiddenSig(s: Set<String>) = s.sorted().joinToString("|")
     LaunchedEffect(projectKey) {
@@ -333,6 +337,8 @@ fun SceneScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             options = options,
+            hiddenElements = hiddenElements,
+            onSetHiddenElements = { hiddenElements = it },
             referencePlan = referencePlan,
             onSetReferencePlan = { rp ->
                 referencePlan = rp

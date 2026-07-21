@@ -109,7 +109,8 @@ class PatchOverrides {
     /** Hook de commit UTILISATEUR : (projecteur, ancien édit effectif, nouvel édit). */
     var onCommit: ((MvrSceneObject, PatchEdit, PatchEdit) -> Unit)? = null
 
-    fun key(o: MvrSceneObject) = o.uuid ?: "${o.name}|${o.layerName}"
+    /** Même identité que le masquage et le fil de fer (cf. mvrInstanceKey). */
+    fun key(o: MvrSceneObject) = mvrInstanceKey(o)
     fun effectiveId(o: MvrSceneObject) = edits[key(o)]?.fixtureId ?: o.fixtureId
     fun effectiveAddress(o: MvrSceneObject) = edits[key(o)]?.address ?: o.addresses.firstOrNull()
     fun effectiveMode(o: MvrSceneObject) = edits[key(o)]?.modeName ?: o.gdtfMode

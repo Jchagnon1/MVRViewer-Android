@@ -24,6 +24,14 @@ import kotlin.math.sqrt
  * de chaque instance est appliqué au dessin. Un pont répété 50× n'est extrait
  * qu'une fois.
  */
+/**
+ * Identité d'un objet MVR (projecteur OU décor), stable d'une ouverture à
+ * l'autre. UNE SEULE définition : le patch, le masquage et tout futur réglage
+ * par objet doivent viser exactement le même objet — iOS a déjà eu un bug réel
+ * de clés divergentes entre écrans.
+ */
+internal fun mvrInstanceKey(o: MvrSceneObject): String = o.uuid ?: "${o.name}|${o.layerName}"
+
 object PlanWireframe {
 
     private const val MAX_TYPES = 400          // comme iOS maxStructureEdges
@@ -34,6 +42,13 @@ object PlanWireframe {
     /** Instance de structure à dessiner : type + placement monde. */
     class Inst(
         val key: String,
+        /**
+         * Identité de CETTE instance (≠ `key`, qui est la clé de TYPE partagée
+         * par tous les clones). Indispensable au masquage : masquer par `key`
+         * ferait disparaître tous les ponts d'un même modèle, où qu'ils soient
+         * — c'était le bug constaté sur Vega côté iOS.
+         */
+        val id: String,
         val world: RMat4,        // object.transform (repère monde)
         val layer: String,
         val cx: Float,           // translation projetée (top) pour le cull
@@ -106,7 +121,7 @@ object PlanWireframe {
             val k = structureKey(o)
             val t = o.transform.translation
             if (!t[0].isFinite() || !t[1].isFinite()) continue
-            instances.add(Inst(k, dr(o.transform), o.layerName, t[0], -t[1]))
+            instances.add(Inst(k, mvrInstanceKey(o), dr(o.transform), o.layerName, t[0], -t[1]))
         }
         return Built(edgesByKey, radiusByKey, instances)
     }

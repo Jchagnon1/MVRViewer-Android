@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
@@ -93,6 +95,14 @@ fun PlanScreen(
     onTransformChanged: (com.minou.mvrviewer.mvr.ReferencePlanTransform) -> Unit = {},
     hiddenLayers: Set<String> = emptySet(),
     onToggleLayer: (String) -> Unit = {},
+    /**
+     * Éléments MVR masqués, par IDENTITÉ D'INSTANCE (cf. mvrInstanceKey) —
+     * jamais par type de géométrie : masquer un pont ne doit pas faire
+     * disparaître tous les ponts du même modèle ailleurs dans le show.
+     * Hissé dans SceneScreen pour survivre aux bascules 3D ↔ plan.
+     */
+    hiddenElements: Set<String> = emptySet(),
+    onSetHiddenElements: (Set<String>) -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
@@ -194,22 +204,26 @@ fun PlanScreen(
     // principal, en coordonnées plan (ou locales pour le DXF). Le dessin n'est
     // plus qu'une matrice appliquée au Canvas : plus aucun calcul par sommet à
     // 60 Hz. C'était la cause n°1 des saccades au pan/zoom.
-    val structPaths by produceState<StructPaths?>(null, wire) {
+    val structPaths by produceState<StructPaths?>(null, wire, hiddenElements) {
         val wf = wire
         value = if (wf == null || wf.isEmpty) null
         else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            buildStructurePaths(wf)
+            buildStructurePaths(wf, hiddenElements)
         }
     }
     // Structures sans fil de fer (géométrie .glb) → un point ; et le repli
     // « un point par objet » utilisé pendant les gestes.
-    val structDots = remember(wire) { dotsPath(structureDots(wire)) }
-    val fallbackDots = remember(data) { dotsPath(data.structure) }
-    val fixPaths by produceState<FixturePaths?>(null, fixWire, data) {
+    val structDots = remember(wire, hiddenElements) { dotsPath(structureDots(wire, hiddenElements)) }
+    val fallbackDots = remember(data, hiddenElements) {
+        dotsPath(data.structure.filterIndexed { i, _ ->
+            data.structureKeys.getOrNull(i)?.let { it !in hiddenElements } ?: true
+        })
+    }
+    val fixPaths by produceState<FixturePaths?>(null, fixWire, data, hiddenElements) {
         val fw = fixWire
         value = if (fw == null) null
         else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            buildFixturePaths(data, fw)
+            buildFixturePaths(data, fw, hiddenElements)
         }
     }
     // Le DXF est tracé dans SES coordonnées locales : placement (décalage /
@@ -228,6 +242,8 @@ fun PlanScreen(
     var canvas by remember { mutableStateOf(Offset.Zero) } // largeur/hauteur du Canvas
     val selected = remember(scene) { mutableStateListOf<Int>() } // indices dans data.fixtures
     var rectMode by remember { mutableStateOf(false) }
+    /** Mode « masquer des éléments » : le toucher (ou le cadre) retire. */
+    var maskMode by remember(scene) { mutableStateOf(false) }
     var rectStart by remember { mutableStateOf<Offset?>(null) }
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
     var query by remember(scene) { mutableStateOf("") }
@@ -318,7 +334,7 @@ fun PlanScreen(
             modifier = Modifier.fillMaxSize()
                 // En mode rectangle, le glissé trace le cadre de sélection ;
                 // sinon il déplace/zoome le plan (comme le mode dédié iOS).
-                .pointerInput(scene, rectMode) {
+                .pointerInput(scene, rectMode, maskMode, hiddenElements) {
                     if (rectMode) {
                         detectDragGestures(
                             onDragStart = { rectStart = it; rectEnd = it },
@@ -328,10 +344,32 @@ fun PlanScreen(
                                 if (a != null && b != null) {
                                     val l = min(a.x, b.x); val r = max(a.x, b.x)
                                     val t = min(a.y, b.y); val bo = max(a.y, b.y)
-                                    selected.clear()
-                                    data.fixtures.forEachIndexed { i, f ->
-                                        val s = toScreen(f.px, f.py, canvas.x, canvas.y)
-                                        if (s.x in l..r && s.y in t..bo) selected.add(i)
+                                    if (maskMode) {
+                                        // Le cadre MASQUE tout ce qu'il contient
+                                        // (projecteurs + décor) : geste de nettoyage.
+                                        val add = HashSet(hiddenElements)
+                                        data.fixtures.forEach { f ->
+                                            val s = toScreen(f.px, f.py, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) add.add(f.key)
+                                        }
+                                        data.structure.forEachIndexed { i, p ->
+                                            val s = toScreen(p.first, p.second, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) {
+                                                data.structureKeys.getOrNull(i)?.let { add.add(it) }
+                                            }
+                                        }
+                                        wire?.instances?.forEach { inst ->
+                                            val s = toScreen(inst.cx, inst.cy, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) add.add(inst.id)
+                                        }
+                                        onSetHiddenElements(add)
+                                    } else {
+                                        selected.clear()
+                                        data.fixtures.forEachIndexed { i, f ->
+                                            if (f.key in hiddenElements) return@forEachIndexed
+                                            val s = toScreen(f.px, f.py, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) selected.add(i)
+                                        }
                                     }
                                 }
                                 rectStart = null; rectEnd = null
@@ -371,9 +409,45 @@ fun PlanScreen(
                         }
                     }
                 }
-                .pointerInput(scene, rectMode, calibrating) {
+                .pointerInput(scene, rectMode, calibrating, maskMode, hiddenElements) {
                     detectTapGestures { tap ->
                         val w = canvas.x; val h = canvas.y
+                        // MODE MASQUAGE : le toucher retire l'élément visé —
+                        // celui-là SEUL (identité d'instance), projecteur ou
+                        // décor. Le projecteur l'emporte : il est petit et
+                        // presque toujours recouvert par une structure.
+                        if (maskMode) {
+                            var bestF = -1; var bestFD = 34f * 34f
+                            data.fixtures.forEachIndexed { i, f ->
+                                if (f.key in hiddenElements) return@forEachIndexed
+                                val s = toScreen(f.px, f.py, w, h)
+                                val dx = s.x - tap.x; val dy = s.y - tap.y
+                                val d = dx * dx + dy * dy
+                                if (d < bestFD) { bestFD = d; bestF = i }
+                            }
+                            if (bestF >= 0) {
+                                onSetHiddenElements(hiddenElements + data.fixtures[bestF].key)
+                                return@detectTapGestures
+                            }
+                            var bestKey: String? = null; var bestD = 44f * 44f
+                            wire?.instances?.forEach { inst ->
+                                if (inst.id in hiddenElements) return@forEach
+                                val s = toScreen(inst.cx, inst.cy, w, h)
+                                val dx = s.x - tap.x; val dy = s.y - tap.y
+                                val d = dx * dx + dy * dy
+                                if (d < bestD) { bestD = d; bestKey = inst.id }
+                            }
+                            data.structure.forEachIndexed { i, p ->
+                                val k = data.structureKeys.getOrNull(i) ?: return@forEachIndexed
+                                if (k in hiddenElements) return@forEachIndexed
+                                val s = toScreen(p.first, p.second, w, h)
+                                val dx = s.x - tap.x; val dy = s.y - tap.y
+                                val d = dx * dx + dy * dy
+                                if (d < bestD) { bestD = d; bestKey = k }
+                            }
+                            bestKey?.let { onSetHiddenElements(hiddenElements + it) }
+                            return@detectTapGestures
+                        }
                         // Calibrage « je suis ici » : le tap pose une ancre (point
                         // plan touché ↔ position GPS courante).
                         val g = gps
@@ -390,6 +464,7 @@ fun PlanScreen(
                         }
                         var best = -1; var bestD = 40f * 40f
                         data.fixtures.forEachIndexed { i, f ->
+                            if (f.key in hiddenElements) return@forEachIndexed
                             val s = toScreen(f.px, f.py, w, h)
                             val dx = s.x - tap.x; val dy = s.y - tap.y
                             val d = dx * dx + dy * dy
@@ -538,6 +613,7 @@ fun PlanScreen(
             // PASSE 2 : pastilles / anneaux de sélection / étiquettes, PAR-DESSUS
             // les silhouettes (lisibilité).
             data.fixtures.forEachIndexed { i, f ->
+                if (f.key in hiddenElements) return@forEachIndexed
                 val s = toScreen(f.px, f.py, w, h)
                 if (s.x !in -40f..w + 40f || s.y !in -40f..h + 40f) return@forEachIndexed
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
@@ -766,6 +842,19 @@ fun PlanScreen(
         ) {
             FilledIconToggleButton(checked = rectMode, onCheckedChange = { rectMode = it }) {
                 Icon(Icons.Filled.Crop, contentDescription = "Sélection rectangle")
+            }
+            // Masquer des éléments. Ré-appuyer SORT du mode (c'est le geste
+            // attendu) ; le cadre reste utilisable pour en masquer plusieurs.
+            FilledIconToggleButton(checked = maskMode, onCheckedChange = {
+                maskMode = it
+                if (it) selected.clear()
+            }) {
+                Icon(Icons.Filled.VisibilityOff, contentDescription = "Masquer des éléments")
+            }
+            if (hiddenElements.isNotEmpty()) {
+                FilledIconButton(onClick = { onSetHiddenElements(emptySet()) }) {
+                    Icon(Icons.Filled.Visibility, contentDescription = "Tout réafficher")
+                }
             }
             if (selected.isNotEmpty()) {
                 FilledIconButton(onClick = { selected.clear() }) {
@@ -1072,10 +1161,13 @@ private const val PATH_KEY_SEP = '\u0000'
  * (un tracé par calque). Avant, ces multiplications matricielles étaient
  * refaites pour chaque arête à CHAQUE frame.
  */
-private fun buildStructurePaths(wf: PlanWireframe.Built): StructPaths {
+private fun buildStructurePaths(
+    wf: PlanWireframe.Built, hidden: Set<String>
+): StructPaths {
     val out = HashMap<String, androidx.compose.ui.graphics.Path>()
     var count = 0
     for (inst in wf.instances) {
+        if (inst.id in hidden) continue
         val edges = wf.edgesByKey[inst.key] ?: continue
         val world = inst.world
         if (count > MAX_STRUCT_PATH_SEGMENTS) break   // garde-fou mémoire
@@ -1109,10 +1201,10 @@ private fun dotsPath(points: List<Pair<Float, Float>>): androidx.compose.ui.grap
     return p
 }
 
-private fun structureDots(wf: PlanWireframe.Built?): List<Pair<Float, Float>> =
+private fun structureDots(wf: PlanWireframe.Built?, hidden: Set<String>): List<Pair<Float, Float>> =
     if (wf == null || wf.isEmpty) emptyList()
     else wf.instances.mapNotNull {
-        if (wf.edgesByKey[it.key] == null) it.cx to it.cy else null
+        if (it.id !in hidden && wf.edgesByKey[it.key] == null) it.cx to it.cy else null
     }
 
 /** Silhouettes des projecteurs, prêtes à dessiner. */
@@ -1134,12 +1226,13 @@ private class FixturePaths(
  * tracées — les projecteurs concernés gardent leur pastille.
  */
 private fun buildFixturePaths(
-    data: PlanData, fw: PlanWireframe.FixtureWire
+    data: PlanData, fw: PlanWireframe.FixtureWire, hidden: Set<String>
 ): FixturePaths {
     val out = HashMap<String, androidx.compose.ui.graphics.Path>()
     val specs = HashSet<String>()
     var segments = 0
     for (f in data.fixtures) {
+        if (f.key in hidden) continue
         val spec = f.spec?.trim() ?: continue
         val edges = fw.edgesBySpec[spec] ?: continue
         // Budget dépassé : on n'ouvre plus de nouvelle spec, mais on finit
@@ -1214,6 +1307,8 @@ private fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
 }
 
 private class PlanFixture(
+    /** Identité stable de l'objet MVR — masquage, patch (cf. mvrInstanceKey). */
+    val key: String,
     val px: Float, val py: Float, val id: String?, val name: String,
     val spec: String?, val layer: String, val addr: String, val mode: String?,
     /** Transform MONDE (mm) de l'objet — oriente la silhouette wireframe. */
@@ -1232,6 +1327,7 @@ private fun drMat(m: FloatArray): dev.romainguy.kotlin.math.Mat4 =
 private class PlanData(
     val fixtures: List<PlanFixture>,
     val structure: List<Pair<Float, Float>>,
+    val structureKeys: List<String>,
     val cx: Float, val cy: Float, val spanX: Float, val spanY: Float
 )
 
@@ -1239,6 +1335,9 @@ private class PlanData(
 private fun planData(scene: MvrScene): PlanData {
     val fixtures = ArrayList<PlanFixture>()
     val structure = ArrayList<Pair<Float, Float>>()
+    // Identité (même index que `structure`) : le repli « un point par objet »
+    // doit lui aussi pouvoir être masqué élément par élément.
+    val structureKeys = ArrayList<String>()
     var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
     var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
     fun extend(x: Float, y: Float) {
@@ -1251,12 +1350,13 @@ private fun planData(scene: MvrScene): PlanData {
         val px = t[0]; val py = -t[1]
         if (o.isFixture) {
             fixtures.add(
-                PlanFixture(px, py, o.fixtureId, o.name, o.gdtfSpec, o.layerName,
+                PlanFixture(mvrInstanceKey(o), px, py, o.fixtureId, o.name, o.gdtfSpec, o.layerName,
                     o.addresses.joinToString(","), o.gdtfMode, drMat(o.transform.m))
             )
             extend(px, py)
         } else {
             structure.add(px to py)
+            structureKeys.add(mvrInstanceKey(o))
             // Le décor élargit aussi le cadrage, mais seulement s'il n'y a pas
             // de projecteurs (sinon un objet lointain écrase le rig).
         }
@@ -1266,5 +1366,5 @@ private fun planData(scene: MvrScene): PlanData {
     }
     if (minX > maxX) { minX = -1000f; maxX = 1000f; minY = -1000f; maxY = 1000f }
     val cx = (minX + maxX) / 2f; val cy = (minY + maxY) / 2f
-    return PlanData(fixtures, structure, cx, cy, max(maxX - minX, 1f), max(maxY - minY, 1f))
+    return PlanData(fixtures, structure, structureKeys, cx, cy, max(maxX - minX, 1f), max(maxY - minY, 1f))
 }

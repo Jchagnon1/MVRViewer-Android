@@ -643,7 +643,13 @@ fun PlanScreen(
                                     } else {
                                         selected.clear()
                                         data.fixtures.forEachIndexed { i, f ->
-                                            if (f.key in hiddenElements) return@forEachIndexed
+                                            // Ne sélectionne que le visible : effectiveHidden
+                                            // (pas hiddenElements brut), comme le tap-select
+                                            // voisin — sinon le cadre ajoute des projecteurs
+                                            // soloés hors écran après un aller-retour 3D↔plan
+                                            // (ancre de zoom, armement d'étiquettes et ordre
+                                            // d'adressage DMX pollués, sans anneau visible).
+                                            if (f.key in effectiveHidden) return@forEachIndexed
                                             val s = toScreen(f.px, f.py, canvas.x, canvas.y)
                                             if (s.x in l..r && s.y in t..bo) selected.add(i)
                                         }

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
@@ -168,6 +169,10 @@ fun PlanScreen(
     // servent, et `toPx()` a besoin d'une densité (indisponible dans le lambda
     // de tap, qui n'est pas un scope Density).
     val labelSlackPx = with(labelDensity) { LABEL_TOUCH_SLACK.toPx() }
+    // Rayon d'accrochage de l'outil de mesure, en dp (donc en millimètres
+    // d'écran réels, quelle que soit la densité) : au-delà, l'accrochage
+    // deviendrait une devinette.
+    val snapRadiusPx = with(labelDensity) { MEASURE_SNAP_RADIUS.toPx() }
     // (La désactivation automatique — étiquettes éteintes, mode cadre/masquage/
     // calibrage — est déclarée plus bas, après ces états : on ne peut pas les
     // lire avant leur déclaration.)
@@ -294,6 +299,25 @@ fun PlanScreen(
     var maskMode by remember(scene) { mutableStateOf(false) }
     var rectStart by remember { mutableStateOf<Offset?>(null) }
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
+
+    // ---- Mesure entre deux points ----
+    // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
+    // cote ne doit pas changer quand on déplace ou zoome le plan entre les deux
+    // touchers. Écrites au TAP uniquement — jamais pendant un glissé — donc
+    // aucun état observable n'est touché par événement tactile.
+    var measureMode by remember(scene) { mutableStateOf(false) }
+    var measureA by remember(scene) { mutableStateOf<MeasurePoint?>(null) }
+    var measureB by remember(scene) { mutableStateOf<MeasurePoint?>(null) }
+    // Sommets DXF candidats à l'accrochage, préparés hors thread principal et
+    // plafonnés (cf. dxfSnapVertices) : un plan d'architecte en compte des
+    // millions, on ne peut pas les balayer tous à chaque toucher.
+    val snapVerts by produceState<FloatArray?>(null, referencePlan?.plan, measureMode) {
+        val plan = referencePlan?.plan
+        value = if (plan == null || !measureMode) null
+        else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            dxfSnapVertices(plan)
+        }
+    }
     var query by remember(scene) { mutableStateOf("") }
 
     // Géolocalisation : position GPS en direct + calibration par ancres (la
@@ -326,7 +350,7 @@ fun PlanScreen(
     // Désactivation inconditionnelle : chacune de ces bascules change le contexte
     // au point qu'une étiquette « armée » n'a plus de sens (y compris le retour
     // au mode normal, où l'utilisateur ne s'attend plus à rien de sélectionné).
-    LaunchedEffect(options.showLabels, options.labelContent, rectMode, maskMode, calibrating) {
+    LaunchedEffect(options.showLabels, options.labelContent, rectMode, maskMode, calibrating, measureMode) {
         activeLabelKey = null
     }
 
@@ -496,9 +520,50 @@ fun PlanScreen(
                         }
                     }
                 }
-                .pointerInput(scene, rectMode, calibrating, maskMode, hiddenElements) {
+                .pointerInput(scene, rectMode, calibrating, maskMode, hiddenElements, measureMode, snapVerts, referencePlan) {
                     detectTapGestures { tap ->
                         val w = canvas.x; val h = canvas.y
+                        // MESURE : le 1er toucher pose le départ, le 2e l'arrivée,
+                        // le 3e recommence. Prioritaire sur tout le reste — dans
+                        // ce mode le toucher ne sélectionne ni ne masque rien.
+                        if (measureMode) {
+                            val bs = baseScale(w, h) * scale
+                            val (tpx, tpy) = toPlan(tap.x, tap.y, w, h)
+                            // Rayon d'accrochage exprimé à l'ÉCRAN (le doigt vise
+                            // en pixels), converti en mm plan : la projection est
+                            // une homothétie, donc un simple quotient.
+                            val radius = if (bs > 0f) snapRadiusPx / bs else 0f
+                            var pt: MeasurePoint? = null
+                            // Priorité au centre de projecteur : c'est l'usage
+                            // visé (« distance de centre à centre »), et il doit
+                            // gagner contre un sommet de plan qui traînerait à
+                            // côté.
+                            var bestD = radius * radius
+                            data.fixtures.forEach { f ->
+                                if (f.key in hiddenElements) return@forEach
+                                val dx = f.px - tpx; val dy = f.py - tpy
+                                val d = dx * dx + dy * dy
+                                if (d < bestD) {
+                                    bestD = d
+                                    pt = MeasurePoint(f.px, f.py, true, f.id ?: f.name)
+                                }
+                            }
+                            if (pt == null) {
+                                val rp = referencePlan
+                                val sv = snapVerts
+                                if (rp != null && sv != null && rp.transform.visible) {
+                                    pt = snapDxfVertex(sv, rp.transform, tpx, tpy, radius)
+                                }
+                            }
+                            // Aucun candidat proche : le point libre, tel quel.
+                            val p = pt ?: MeasurePoint(tpx, tpy, false)
+                            if (measureA == null || measureB != null) {
+                                measureA = p; measureB = null
+                            } else {
+                                measureB = p
+                            }
+                            return@detectTapGestures
+                        }
                         // MODE MASQUAGE : le toucher retire l'élément visé —
                         // celui-là SEUL (identité d'instance), projecteur ou
                         // décor. Le projecteur l'emporte : il est petit et
@@ -602,9 +667,9 @@ fun PlanScreen(
                 // reçoit l'événement le premier en passe principale, donc
                 // consommer ici annule proprement le pan/zoom
                 // (detectTransformGestures s'arrête sur un change consommé).
-                .pointerInput(scene, rectMode, maskMode, calibrating, projectKey, activeLabelKey) {
+                .pointerInput(scene, rectMode, maskMode, calibrating, measureMode, projectKey, activeLabelKey) {
                     val key = activeLabelKey ?: return@pointerInput
-                    if (rectMode || maskMode || calibrating) return@pointerInput
+                    if (rectMode || maskMode || calibrating || measureMode) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // Un SEUL test, contre la boîte de l'étiquette active :
@@ -1011,6 +1076,47 @@ fun PlanScreen(
                     style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
             }
 
+            // ---- Mesure entre deux points ----
+            // Dessinée en coordonnées ÉCRAN à partir des points PLAN : la ligne
+            // et sa cote suivent donc le pan/zoom sans que la valeur bouge.
+            run {
+                val ma = measureA
+                if (measureMode && ma != null) {
+                    val pa = toScreen(ma.px, ma.py, w, h)
+                    val mb = measureB
+                    val pb = mb?.let { toScreen(it.px, it.py, w, h) }
+                    if (pb != null) {
+                        // Trait doublé (blanc dessous) : lisible sur fond clair
+                        // comme sur un plan DXF dense.
+                        drawLine(Color.White.copy(alpha = 0.75f), pa, pb, strokeWidth = 5f)
+                        drawLine(MEASURE_COLOR, pa, pb, strokeWidth = 2.5f)
+                    }
+                    drawMeasureHandle(pa, ma.snapped)
+                    if (pb != null) drawMeasureHandle(pb, mb.snapped)
+                    // Cote au milieu du trait (ou à côté du 1er point tant qu'il
+                    // n'y a pas de second : l'utilisateur voit que c'est armé).
+                    val text = if (mb != null)
+                        formatPlanDistanceMm(measureDistanceMm(ma, mb))
+                    else "départ posé — touchez l'arrivée"
+                    val tl = measurer.measure(
+                        text,
+                        style = TextStyle(fontSize = 13.sp, color = Color.White)
+                    )
+                    val mid = if (pb != null) Offset((pa.x + pb.x) / 2f, (pa.y + pb.y) / 2f)
+                              else Offset(pa.x, pa.y - 26f)
+                    val tw = tl.size.width.toFloat(); val th = tl.size.height.toFloat()
+                    val tx = (mid.x - tw / 2f).coerceIn(4f, maxOf(4f, w - tw - 4f))
+                    val ty = (mid.y - th - 10f).coerceIn(4f, maxOf(4f, h - th - 4f))
+                    drawRoundRect(
+                        MEASURE_COLOR,
+                        topLeft = Offset(tx - 6f, ty - 3f),
+                        size = androidx.compose.ui.geometry.Size(tw + 12f, th + 6f),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+                    )
+                    drawText(tl, topLeft = Offset(tx, ty))
+                }
+            }
+
             // ---- Barre d'échelle (bas-gauche) : longueur « ronde » à l'échelle courante.
             run {
                 val ppm = baseScale(w, h) * scale // pixels par mm
@@ -1162,16 +1268,35 @@ fun PlanScreen(
             modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilledIconToggleButton(checked = rectMode, onCheckedChange = { rectMode = it }) {
+            // EXCLUSION MUTUELLE DES MODES : chacun s'approprie le toucher.
+            // Deux modes actifs à la fois donneraient un geste au comportement
+            // imprévisible (mesurer ET masquer d'un même tap).
+            FilledIconToggleButton(checked = rectMode, onCheckedChange = {
+                rectMode = it
+                if (it) measureMode = false
+            }) {
                 Icon(Icons.Filled.Crop, contentDescription = "Sélection rectangle")
             }
             // Masquer des éléments. Ré-appuyer SORT du mode (c'est le geste
             // attendu) ; le cadre reste utilisable pour en masquer plusieurs.
             FilledIconToggleButton(checked = maskMode, onCheckedChange = {
                 maskMode = it
-                if (it) selected.clear()
+                if (it) { selected.clear(); measureMode = false }
             }) {
                 Icon(Icons.Filled.VisibilityOff, contentDescription = "Masquer des éléments")
+            }
+            // Mesure entre deux points. Ré-appuyer SORT du mode et efface la
+            // cote (même geste que le masquage).
+            FilledIconToggleButton(checked = measureMode, onCheckedChange = {
+                measureMode = it
+                if (it) {
+                    rectMode = false; maskMode = false; calibrating = false
+                    measureA = null; measureB = null
+                } else {
+                    measureA = null; measureB = null
+                }
+            }) {
+                Icon(Icons.Filled.Straighten, contentDescription = "Mesurer une distance")
             }
             if (hiddenElements.isNotEmpty()) {
                 FilledIconButton(onClick = { onSetHiddenElements(emptySet()) }) {
@@ -1187,7 +1312,10 @@ fun PlanScreen(
                 Icon(Icons.Filled.MyLocation, contentDescription = "Ma position GPS")
             }
             if (showLocation) {
-                FilledIconToggleButton(checked = calibrating, onCheckedChange = { calibrating = it }) {
+                FilledIconToggleButton(checked = calibrating, onCheckedChange = {
+                    calibrating = it
+                    if (it) measureMode = false
+                }) {
                     Icon(Icons.Filled.Place, contentDescription = "Calibrer : je suis ici")
                 }
             }
@@ -1322,6 +1450,29 @@ fun PlanScreen(
                     if (gps == null) "En attente du GPS…"
                     else if (calibration.anchors.isEmpty()) "Touchez VOTRE position sur le plan (1er point)"
                     else "Touchez un 2e point (oriente + met à l'échelle)",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        // Aide de mesure : rappelle l'étape en cours ET la cote obtenue, en
+        // grand — la cote dessinée sur le trait peut se retrouver sous le doigt.
+        if (measureMode) {
+            val ma = measureA; val mb = measureB
+            Surface(
+                color = MEASURE_COLOR, contentColor = Color.White,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
+            ) {
+                Text(
+                    when {
+                        ma == null -> "Mesure : touchez le point de départ"
+                        mb == null -> "Touchez le point d'arrivée"
+                        else -> formatPlanDistanceMm(measureDistanceMm(ma, mb)) +
+                            (if (ma.snapped && mb.snapped) " · accroché" else "") +
+                            " — touchez pour une nouvelle mesure"
+                    },
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -1792,6 +1943,35 @@ private val LABEL_PAD_Y = 2.dp
 private val LABEL_STROKE = 0.7.dp
 /** Marge d'accrochage autour de la boîte — courte, cf. labelKeyAt. */
 private val LABEL_TOUCH_SLACK = 6.dp
+
+/** Rayon d'accrochage magnétique de l'outil de mesure (≈ 4 mm d'écran). */
+private val MEASURE_SNAP_RADIUS = 22.dp
+
+/** Magenta : aucune autre signalétique du plan ne l'utilise. */
+private val MEASURE_COLOR = Color(0xFFD500A0)
+
+/**
+ * Extrémité de mesure. Le marqueur DIFFÈRE selon l'accrochage : un disque plein
+ * cerclé quand le point est collé à un candidat réel (centre de projecteur,
+ * sommet du plan), une simple croix sinon. Sans cette distinction, on ne peut
+ * pas savoir si la cote porte sur un vrai point ou sur un doigt approximatif.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMeasureHandle(
+    p: Offset, snapped: Boolean
+) {
+    if (snapped) {
+        drawCircle(Color.White, radius = 8f, center = p)
+        drawCircle(MEASURE_COLOR, radius = 8f, center = p,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f))
+        drawCircle(MEASURE_COLOR, radius = 3.5f, center = p)
+    } else {
+        val r = 9f
+        drawLine(Color.White.copy(alpha = 0.85f), Offset(p.x - r, p.y), Offset(p.x + r, p.y), strokeWidth = 4.5f)
+        drawLine(Color.White.copy(alpha = 0.85f), Offset(p.x, p.y - r), Offset(p.x, p.y + r), strokeWidth = 4.5f)
+        drawLine(MEASURE_COLOR, Offset(p.x - r, p.y), Offset(p.x + r, p.y), strokeWidth = 2f)
+        drawLine(MEASURE_COLOR, Offset(p.x, p.y - r), Offset(p.x, p.y + r), strokeWidth = 2f)
+    }
+}
 /**
  * Contraste minimum encre ↔ voile de la pastille. 4.5:1 = seuil WCAG AA du texte
  * courant ; l'étiquette est petite, donc on ne descend pas au seuil « grand

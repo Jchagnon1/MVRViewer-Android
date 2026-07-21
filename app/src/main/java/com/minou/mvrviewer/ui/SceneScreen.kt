@@ -36,7 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE, UNIVERSE }
+enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE, UNIVERSE, CABLING }
 
 /**
  * Hôte d'un .mvr ouvert. Comme iOS, la **vue 3D est l'écran principal** ; la
@@ -83,6 +83,9 @@ fun SceneScreen(
     // par type. Semée du cache disque global, remplie par extraction GDTF +
     // fusion cloud (cf. LaunchedEffect plus bas).
     val power = remember { PowerLibraryState() }
+    // Câblage électrique (phase 2) : distributeurs + affectations + réglages.
+    // Réactif ; restauré du projet, poussé/appliqué comme le patch.
+    val cabling = remember { PowerCablingState() }
     // Plan de repère DXF importé — hissé ici pour survivre aux allers-retours
     // 3D ↔ plan (PlanScreen est recréé à chaque bascule).
     var referencePlan by remember { mutableStateOf<com.minou.mvrviewer.mvr.ReferencePlan?>(null) }
@@ -95,6 +98,8 @@ fun SceneScreen(
     // restaure le travail à l'ouverture (plan DXF placé, overrides GDTF,
     // calibration), et on ré-enregistre à chaque changement.
     val projectKey = remember(mvrBytes) { ProjectStore.keyFor(mvrBytes) }
+    // Projecteurs à identité stable = affectables au câblage (comme le patch).
+    val validFixtureUuids = remember(scene) { scene.fixtures.mapNotNull { it.uuid }.toSet() }
     var restored by remember(projectKey) { mutableStateOf(false) }
     // Calques DXF masqués (visibilité par calque) — déclaré tôt car chargé dans la
     // restauration ci-dessous ; partagé plan/3D, persisté par projet, synchronisé.
@@ -248,6 +253,17 @@ fun SceneScreen(
                     }
                 }
             }
+            // Câblage électrique distant : on SANITISE contre les projecteurs
+            // réellement présents (un projecteur disparu du show ne doit pas
+            // laisser d'affectation fantôme) puis on charge + persiste localement.
+            is SectionPayload.PowerCabling -> {
+                val clean = p.dto.sanitized(validFixtureUuids)
+                cabling.load(clean)
+                withContext(Dispatchers.IO) {
+                    ProjectStore.savePowerCabling(ctx, projectKey,
+                        com.minou.mvrviewer.sync.PowerCablingCodec.toJsonString(clean))
+                }
+            }
             else -> {} // layerColors/labelSides/orientations : reçus, non appliqués en v1
         }
     }
@@ -271,6 +287,7 @@ fun SceneScreen(
             s.pushCalibration(calibration.anchors)
         }
         if (overrides.edits.isNotEmpty()) s.pushPatch(scene, overrides.toPersistedList())
+        if (cabling.distributors.isNotEmpty() || cabling.assignments.isNotEmpty()) s.pushPowerCabling(cabling.toDTO())
     }
 
     // Rattache le projet cloud à l'ouverture ET à la connexion (réunion par empreinte).
@@ -285,6 +302,7 @@ fun SceneScreen(
             snap.manifest?.let { applySection(SectionPayload.Manifest(it)) }
             snap.calibration?.let { applySection(SectionPayload.Calibration(it)) }
             snap.patch?.let { applySection(SectionPayload.Patch(it)) }
+            snap.powerCabling?.let { applySection(SectionPayload.PowerCabling(it)) }
         }
     }
 
@@ -292,6 +310,26 @@ fun SceneScreen(
     LaunchedEffect(projectKey) {
         val persisted = withContext(Dispatchers.IO) { PatchStore.load(ctx, projectKey) }
         if (persisted.isNotEmpty()) overrides.applyPersisted(persisted)
+    }
+
+    // Restaure le CÂBLAGE persisté (distributeurs + affectations + réglages),
+    // sanitisé contre les projecteurs présents. Survit à la fermeture hors-ligne.
+    LaunchedEffect(projectKey) {
+        val json = withContext(Dispatchers.IO) { ProjectStore.loadPowerCabling(ctx, projectKey) } ?: return@LaunchedEffect
+        val dto = com.minou.mvrviewer.sync.PowerCablingCodec.fromJsonString(json) ?: return@LaunchedEffect
+        cabling.load(dto.sanitized(validFixtureUuids))
+    }
+
+    // Commit d'une modification UTILISATEUR du câblage → persistance locale + push
+    // cloud. Le chargement disque/distant NE déclenche PAS onChange (garde-fou LWW).
+    LaunchedEffect(sync, projectKey) {
+        cabling.onChange = { dto ->
+            scope.launch(Dispatchers.IO) {
+                ProjectStore.savePowerCabling(ctx, projectKey,
+                    com.minou.mvrviewer.sync.PowerCablingCodec.toJsonString(dto))
+            }
+            sync?.pushPowerCabling(dto)
+        }
     }
 
     // Commit d'une édition de patch UTILISATEUR → audit (qui/quoi/avant→après) +
@@ -515,6 +553,7 @@ fun SceneScreen(
             onShowPatch = { mode = SceneMode.PATCH },
             onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },
             onShowUniverse = { mode = SceneMode.UNIVERSE },
+            onShowCabling = { mode = SceneMode.CABLING },
             onShowAccount = sync?.let { { showAccount = true } },
             onShareProject = sync?.let { { showShare = true } },
             onShowHistory = sync?.let { { showHistory = true } },
@@ -591,6 +630,14 @@ fun SceneScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             overrides = gdtfOverrides,
+            onBack = { mode = SceneMode.THREE_D },
+            modifier = modifier
+        )
+        SceneMode.CABLING -> CablingScreen(
+            scene = scene,
+            overrides = overrides,
+            power = power,
+            cabling = cabling,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

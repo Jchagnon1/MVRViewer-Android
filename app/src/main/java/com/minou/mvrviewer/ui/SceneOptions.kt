@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.GroupAdd
@@ -105,6 +106,7 @@ fun SceneOptionsMenu(
     onShowPlan: (() -> Unit)? = null,
     onShowPatch: (() -> Unit)? = null,
     onShowUniverse: (() -> Unit)? = null,
+    onShowCabling: (() -> Unit)? = null,
     onShowGdtfShare: (() -> Unit)? = null,
     // Synchro cloud : entrées de menu (au lieu d'un bouton flottant séparé).
     onShowAccount: (() -> Unit)? = null,
@@ -154,6 +156,7 @@ fun SceneOptionsMenu(
         onShowPlan?.let { nav("Vue plan", Icons.Filled.Map) { open = false; it() } }
         onShowPatch?.let { nav("Liste de patch", Icons.AutoMirrored.Filled.List) { open = false; it() } }
         onShowUniverse?.let { nav("Univers DMX", Icons.Filled.GridView) { open = false; it() } }
+        onShowCabling?.let { nav("Câblage électrique", Icons.Filled.Bolt) { open = false; it() } }
         onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
         // ---- Synchro cloud (compte / partage / historique / rejoindre) ----
         if (onShowAccount != null || onShareProject != null || onShowHistory != null || onJoinProject != null) {

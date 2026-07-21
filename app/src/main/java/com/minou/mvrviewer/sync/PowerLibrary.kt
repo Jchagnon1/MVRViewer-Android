@@ -45,6 +45,87 @@ enum class PowerSource { LIBRARY, GDTF, NONE }
 /** Puissance effective résolue + sa provenance. `watts == null` ⇔ source NONE. */
 data class PowerResolution(val watts: Int?, val source: PowerSource)
 
+// ============================================================================
+// CONSENSUS PAR VOTES (phase 2) — remplace le LWW mono-valeur de la phase 1.
+// ============================================================================
+
+/**
+ * Un VOTE de puissance : la valeur donnée par UN utilisateur (doc Firestore
+ * `powerLibrary/{docId}/submissions/{uid}`). Personne n'écrase le vote d'un
+ * autre ; la valeur affichée est le CONSENSUS de tous les votes.
+ */
+data class PowerVote(val watts: Int, val updatedAtMillis: Long)
+
+/**
+ * Résultat du CONSENSUS : valeur retenue (médiane du cluster gagnant, arrondie),
+ * taille du cluster gagnant (= la CONFIANCE, « … · N votes ») et total des
+ * votes. `null` ⇔ aucun vote.
+ */
+data class PowerConsensus(val watts: Int, val winningClusterSize: Int, val totalVotes: Int)
+
+/**
+ * Deux votes tombent dans le MÊME cluster s'ils sont proches à ±10 % (relatif au
+ * plus grand) OU à ±20 W — on prend le seuil le PLUS PERMISSIF des deux (ce qui
+ * regroupe aussi bien les grosses machines, où 10 % > 20 W, que les petites, où
+ * 20 W > 10 %). Symétrique et déterministe.
+ */
+private fun powerVotesClose(a: Int, b: Int): Boolean {
+    val larger = maxOf(a, b)
+    val tolerance = maxOf(0.10 * larger, 20.0)
+    return kotlin.math.abs(a - b) <= tolerance
+}
+
+/** Médiane d'une liste TRIÉE croissante, arrondie à l'entier (arrondi au plus proche). */
+private fun powerMedianRounded(sortedCluster: List<Int>): Int {
+    val n = sortedCluster.size
+    val mid = n / 2
+    return if (n % 2 == 1) sortedCluster[mid]
+    else Math.round((sortedCluster[mid - 1] + sortedCluster[mid]) / 2.0).toInt()
+}
+
+/**
+ * ALGORITHME DE CONSENSUS — PUR, DÉTERMINISTE, PARTAGÉ iOS/Android.
+ *
+ * 1) 0 vote → `null`.
+ * 2) CLUSTERS : trier croissant ; ouvrir un cluster sur le 1er vote ; y ajouter
+ *    le vote suivant tant qu'il est proche du REPRÉSENTANT COURANT (le dernier
+ *    vote ajouté au cluster), sinon ouvrir un nouveau cluster.
+ * 3) Garder le PLUS GROS cluster ; à égalité de taille, la médiane la PLUS BASSE
+ *    (choix prudent : sous-estimer la puissance n'est jamais dangereux
+ *    électriquement). Valeur retenue = médiane du cluster gagnant, arrondie.
+ */
+fun powerConsensus(votes: List<Int>): PowerConsensus? {
+    if (votes.isEmpty()) return null
+    val sorted = votes.sorted()
+    val clusters = ArrayList<MutableList<Int>>()
+    var current = mutableListOf(sorted.first())
+    for (i in 1 until sorted.size) {
+        val v = sorted[i]
+        if (powerVotesClose(current.last(), v)) current.add(v)
+        else { clusters.add(current); current = mutableListOf(v) }
+    }
+    clusters.add(current)
+
+    var best = clusters.first()
+    var bestMedian = powerMedianRounded(best)
+    for (c in clusters.drop(1)) {
+        val m = powerMedianRounded(c)
+        // Plus gros gagne ; à taille égale, médiane la plus basse (prudent).
+        if (c.size > best.size || (c.size == best.size && m < bestMedian)) {
+            best = c; bestMedian = m
+        }
+    }
+    return PowerConsensus(bestMedian, best.size, votes.size)
+}
+
+/**
+ * Règle de RÉSOLUTION effective (phase 2) : consensus des votes[spec] (si ≥1),
+ * sinon puissance GDTF, sinon rien. La provenance reste [PowerSource.LIBRARY]
+ * dès qu'un consensus communautaire existe.
+ */
+fun resolvePowerFromVotes(votes: List<Int>, gdtfWatts: Int?): PowerResolution =
+    resolvePower(powerConsensus(votes)?.watts, gdtfWatts)
+
 /**
  * Règle de RÉSOLUTION du contrat (identique iOS) :
  *   watts_effectifs = bibliothèque[spec]  (saisie utilisateur, PRIORITAIRE —

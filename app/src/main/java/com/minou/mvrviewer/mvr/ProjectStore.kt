@@ -30,16 +30,35 @@ object ProjectStore {
     private fun manifestFile(ctx: Context, key: String) = File(dir(ctx, key), "manifest.json")
     private fun planFile(ctx: Context, key: String) = File(dir(ctx, key), "refplan.bin")
 
-    private fun readManifest(ctx: Context, key: String): JSONObject =
-        runCatching { JSONObject(manifestFile(ctx, key).readText()) }.getOrDefault(JSONObject())
+    /**
+     * Le manifeste est un SEUL fichier écrit par plusieurs producteurs
+     * indépendants (placement DXF, calibration GPS, drapeaux d'affichage,
+     * étiquettes déplacées), chacun en lire-modifier-écrire depuis son propre
+     * thread. Sans exclusion mutuelle, deux enregistrements simultanés partent
+     * du même contenu lu et le dernier écrase la section de l'autre. Le verrou
+     * couvre TOUT le cycle lire→modifier→écrire, pas seulement l'écriture.
+     */
+    private val manifestLock = Any()
 
-    private fun writeManifest(ctx: Context, key: String, m: JSONObject) {
+    /** Fil d'écriture propre au processus : une sauvegarde déclenchée juste avant
+     *  de quitter un écran doit aboutir même si le composable est détruit (une
+     *  coroutine liée au cycle de vie serait annulée en vol → décalage perdu). */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ProjectStore-writer").apply { isDaemon = true }
+    }
+
+    private fun readManifest(ctx: Context, key: String): JSONObject = synchronized(manifestLock) {
+        runCatching { JSONObject(manifestFile(ctx, key).readText()) }.getOrDefault(JSONObject())
+    }
+
+    private fun writeManifest(ctx: Context, key: String, m: JSONObject) = synchronized(manifestLock) {
         runCatching { manifestFile(ctx, key).writeText(m.toString()) }
+        Unit
     }
 
     // ---- Plan DXF de repère (géométrie + transform + nom) ----
 
-    fun saveReferencePlan(ctx: Context, key: String, rp: ReferencePlan, name: String?) {
+    fun saveReferencePlan(ctx: Context, key: String, rp: ReferencePlan, name: String?) = synchronized(manifestLock) {
         runCatching { planFile(ctx, key).writeBytes(DxfPlanCodec.encode(rp.plan)) }
         val m = readManifest(ctx, key)
         m.put("dxfName", name ?: JSONObject.NULL)
@@ -48,11 +67,12 @@ object ProjectStore {
     }
 
     /** Met à jour SEULEMENT le placement (glissé/rotation/échelle) — pas la géométrie. */
-    fun saveTransform(ctx: Context, key: String, t: ReferencePlanTransform) {
-        if (!planFile(ctx, key).exists()) return
-        val m = readManifest(ctx, key)
-        m.put("refTransform", transformJson(t))
-        writeManifest(ctx, key, m)
+    fun saveTransform(ctx: Context, key: String, t: ReferencePlanTransform) = synchronized(manifestLock) {
+        if (planFile(ctx, key).exists()) {
+            val m = readManifest(ctx, key)
+            m.put("refTransform", transformJson(t))
+            writeManifest(ctx, key, m)
+        }
     }
 
     fun loadReferencePlan(ctx: Context, key: String): ReferencePlan? {
@@ -64,7 +84,7 @@ object ProjectStore {
         return ReferencePlan(plan, t)
     }
 
-    fun removeReferencePlan(ctx: Context, key: String) {
+    fun removeReferencePlan(ctx: Context, key: String) = synchronized(manifestLock) {
         runCatching { planFile(ctx, key).delete() }
         val m = readManifest(ctx, key)
         m.remove("refTransform"); m.remove("dxfName")
@@ -86,14 +106,16 @@ object ProjectStore {
 
     // ---- Calibration GPS ----
 
-    fun saveCalibration(ctx: Context, key: String, anchors: List<GeoAnchor>) {
+    fun saveCalibration(ctx: Context, key: String, anchors: List<GeoAnchor>) = synchronized(manifestLock) {
         val m = readManifest(ctx, key)
-        if (anchors.isEmpty()) { m.remove("anchors"); writeManifest(ctx, key, m); return }
-        val arr = JSONArray()
-        for (a in anchors) arr.put(JSONObject()
-            .put("wx", a.worldX.toDouble()).put("wy", a.worldY.toDouble())
-            .put("lat", a.latitude).put("lon", a.longitude))
-        m.put("anchors", arr); writeManifest(ctx, key, m)
+        if (anchors.isEmpty()) { m.remove("anchors"); writeManifest(ctx, key, m) }
+        else {
+            val arr = JSONArray()
+            for (a in anchors) arr.put(JSONObject()
+                .put("wx", a.worldX.toDouble()).put("wy", a.worldY.toDouble())
+                .put("lat", a.latitude).put("lon", a.longitude))
+            m.put("anchors", arr); writeManifest(ctx, key, m)
+        }
     }
 
     fun loadCalibration(ctx: Context, key: String): List<GeoAnchor> {
@@ -106,7 +128,7 @@ object ProjectStore {
 
     // ---- Fond satellite (juste le drapeau on/off, comme iOS) ----
 
-    fun saveShowSatellite(ctx: Context, key: String, on: Boolean) {
+    fun saveShowSatellite(ctx: Context, key: String, on: Boolean) = synchronized(manifestLock) {
         val m = readManifest(ctx, key); m.put("showSatellite", on); writeManifest(ctx, key, m)
     }
 
@@ -115,7 +137,7 @@ object ProjectStore {
 
     // ---- Position GPS affichée (drapeau on/off, persistant par projet) ----
 
-    fun saveShowUserLocation(ctx: Context, key: String, on: Boolean) {
+    fun saveShowUserLocation(ctx: Context, key: String, on: Boolean) = synchronized(manifestLock) {
         val m = readManifest(ctx, key); m.put("showUserLocation", on); writeManifest(ctx, key, m)
     }
 
@@ -124,7 +146,7 @@ object ProjectStore {
 
     // ---- Calques DXF masqués (visibilité par calque du plan de repère) ----
 
-    fun saveRefPlanHiddenLayers(ctx: Context, key: String, layers: Set<String>) {
+    fun saveRefPlanHiddenLayers(ctx: Context, key: String, layers: Set<String>) = synchronized(manifestLock) {
         val m = readManifest(ctx, key)
         if (layers.isEmpty()) m.remove("refPlanHiddenLayers")
         else m.put("refPlanHiddenLayers", JSONArray(layers.toList()))
@@ -136,9 +158,45 @@ object ProjectStore {
         return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }.toSet()
     }
 
+    // ---- Décalage manuel des étiquettes en vue plan (par projecteur) ----
+    // Volontairement HORS synchro cloud : c'est un confort de lecture propre à
+    // l'appareil (et au zoom auquel on travaille), pas une donnée de show ;
+    // l'imposer aux autres postes déplacerait leurs étiquettes sans préavis.
+
+    /** Enregistrement DIFFÉRÉ sur le fil du processus : appelée au relâché du
+     *  doigt, souvent juste avant que l'utilisateur quitte la vue plan. */
+    fun saveLabelOffsetsAsync(ctx: Context, key: String, offsets: Map<String, Pair<Float, Float>>) {
+        val appCtx = ctx.applicationContext
+        val snapshot = HashMap(offsets)
+        writer.execute { saveLabelOffsets(appCtx, key, snapshot) }
+    }
+
+    fun saveLabelOffsets(ctx: Context, key: String, offsets: Map<String, Pair<Float, Float>>) = synchronized(manifestLock) {
+        val m = readManifest(ctx, key)
+        if (offsets.isEmpty()) { m.remove("labelOffsets"); writeManifest(ctx, key, m) }
+        else {
+            val o = JSONObject()
+            for ((k, v) in offsets) o.put(k, JSONArray().put(v.first.toDouble()).put(v.second.toDouble()))
+            m.put("labelOffsets", o); writeManifest(ctx, key, m)
+        }
+    }
+
+    fun loadLabelOffsets(ctx: Context, key: String): Map<String, Pair<Float, Float>> {
+        val o = readManifest(ctx, key).optJSONObject("labelOffsets") ?: return emptyMap()
+        val out = HashMap<String, Pair<Float, Float>>()
+        val it = o.keys()
+        while (it.hasNext()) {
+            val k = it.next()
+            val a = o.optJSONArray(k) ?: continue
+            if (a.length() < 2) continue
+            out[k] = a.optDouble(0, 0.0).toFloat() to a.optDouble(1, 0.0).toFloat()
+        }
+        return out
+    }
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
-    fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) {
+    fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) = synchronized(manifestLock) {
         val d = dir(ctx, key)
         runCatching { d.listFiles { f -> f.name.startsWith("ov_") }?.forEach { it.delete() } }
         val arr = JSONArray()

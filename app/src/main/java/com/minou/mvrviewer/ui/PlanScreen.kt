@@ -4,9 +4,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -63,6 +67,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.drawText
@@ -124,6 +129,22 @@ fun PlanScreen(
         labelDensity.density, labelDensity.fontScale
     ) { HashMap<String, androidx.compose.ui.text.TextLayoutResult>() }
 
+    // Décalage MANUEL d'une étiquette, propre à un projecteur (clé d'instance),
+    // en pixels écran : il s'ajoute au décalage global `options.labelOffset`.
+    // En pixels et non en mm monde parce que le geste corrige un CHEVAUCHEMENT
+    // à l'écran — la correction doit garder la même allure quel que soit le zoom.
+    //
+    // Ni la table ni la liste des zones sensibles ne sont des états observables :
+    // pendant le glissé on n'écrit QUE `labelDragVersion`, lu uniquement dans le
+    // lambda de dessin → redessin seul, jamais de recomposition de PlanScreen à
+    // la fréquence du doigt (régression déjà vue sur le pan/zoom).
+    val labelShift = remember(scene) { HashMap<String, Offset>() }
+    val labelHits = remember(scene) { ArrayList<LabelHit>() }
+    var labelDragVersion by remember(scene) { mutableIntStateOf(0) }
+    // Étiquette en cours de glissé : elle reste dessinée alors que tout le reste
+    // est passé en niveau de détail réduit — on doit voir ce qu'on déplace.
+    val labelDragKey = remember(scene) { arrayOfNulls<String>(1) }
+
     // Fil de fer VECTORIEL des structures (arêtes caractéristiques réelles de la
     // géométrie .3ds, comme iOS). Construit hors thread principal.
     // CACHÉ au niveau processus : sans ça, chaque aller-retour 3D↔plan relançait
@@ -160,7 +181,7 @@ fun PlanScreen(
     var gesturing by remember { mutableStateOf(false) }
     val gestureClock = remember { longArrayOf(0L) }
     LaunchedEffect(gesturing) {
-        if (!gesturing) return@LaunchedEffect
+        if (!gesturing) { labelDragKey[0] = null; return@LaunchedEffect }
         while (true) {
             val idle = android.os.SystemClock.uptimeMillis() - gestureClock[0]
             if (idle >= 180L) { gesturing = false; break }
@@ -301,6 +322,20 @@ fun PlanScreen(
         LaunchedEffect(showLocation) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 com.minou.mvrviewer.mvr.ProjectStore.saveShowUserLocation(ctxPlan, projectKey, showLocation)
+            }
+        }
+        // Étiquettes déplacées à la main : purement LOCAL (pas de synchro cloud,
+        // cf. ProjectStore.saveLabelOffsets). Seule la RELECTURE passe par une
+        // coroutine du composable ; l'écriture est confiée au fil du store
+        // (cf. saveLabelOffsetsAsync) car elle part au relâché du doigt, geste
+        // typiquement suivi d'un retour à la 3D qui annulerait la coroutine.
+        LaunchedEffect(Unit) {
+            val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.minou.mvrviewer.mvr.ProjectStore.loadLabelOffsets(ctxPlan, projectKey)
+            }
+            if (saved.isNotEmpty()) {
+                for ((k, v) in saved) labelShift[k] = Offset(v.first, v.second)
+                labelDragVersion++
             }
         }
     }
@@ -476,6 +511,51 @@ fun PlanScreen(
                         } else { selected.clear(); selected.add(best) }
                     }
                 }
+                // Déplacement d'une étiquette au doigt. DÉCLARÉ EN DERNIER à
+                // dessein : le dernier pointerInput reçoit l'événement le premier
+                // en passe principale, donc consommer ici annule proprement le
+                // pan/zoom (detectTransformGestures s'arrête sur un change
+                // consommé). On ne consomme qu'APRÈS le seuil de glissé, sinon on
+                // volerait les taps de sélection. Les modes spéciaux (cadre,
+                // masquage, calibrage) gardent la main sur le geste.
+                .pointerInput(scene, rectMode, maskMode, calibrating, projectKey) {
+                    if (rectMode || maskMode || calibrating) return@pointerInput
+                    val slack = LABEL_TOUCH_SLACK.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val key = labelKeyAt(labelHits, down.position, slack) ?: return@awaitEachGesture
+                        var moved = false
+                        fun shift(d: Offset) {
+                            labelShift[key] = (labelShift[key] ?: Offset.Zero) + d
+                            // Le glissé d'étiquette est un geste comme un autre :
+                            // on réarme l'horloge commune pour que le décor lourd
+                            // (DXF, fils de fer) reste en détail réduit au lieu
+                            // d'être reconstruit à la fréquence du doigt.
+                            gestureClock[0] = android.os.SystemClock.uptimeMillis()
+                            gesturing = true
+                            labelDragVersion++
+                        }
+                        val start = awaitTouchSlopOrCancellation(down.id) { change, over ->
+                            change.consume(); labelDragKey[0] = key; shift(over); moved = true
+                        }
+                        if (start != null) {
+                            drag(down.id) { change ->
+                                change.consume(); shift(change.positionChange()); moved = true
+                            }
+                        }
+                        // `labelDragKey` n'est PAS remis à null ici : le détail
+                        // réduit dure encore 180 ms après le relâché, et perdre
+                        // l'exception ferait clignoter l'étiquette qu'on vient de
+                        // poser. Il est remis à null à la fin du geste.
+                        // Écriture disque au relâché seulement : un enregistrement
+                        // par événement tactile ferait un accès fichier à 60 Hz.
+                        if (moved && projectKey != null) {
+                            com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
+                                ctxPlan, projectKey, labelShift.mapValues { (_, o) -> o.x to o.y }
+                            )
+                        }
+                    }
+                }
         ) {
             canvas = Offset(size.width, size.height)
             val w = size.width; val h = size.height
@@ -612,10 +692,29 @@ fun PlanScreen(
             }
             // PASSE 2 : pastilles / anneaux de sélection / étiquettes, PAR-DESSUS
             // les silhouettes (lisibilité).
+            // Les zones sensibles des étiquettes sont reconstruites ici, à la
+            // seule place où l'on connaît leur boîte réelle (texte mesuré) :
+            // le geste de déplacement s'y réfère au toucher suivant. Elles sont
+            // calculées MÊME pendant un geste, alors que les étiquettes ne sont
+            // pas dessinées : sinon aucune saisie n'est possible pendant les
+            // 180 ms de détail réduit qui suivent un pan, et l'essai se change
+            // en pan. La mesure du texte est mise en cache → coût négligeable.
+            labelDragVersion.let { }  // dépendance de redessin (table non observable)
+            labelHits.clear()
+            val labelPadX = LABEL_PAD_X.toPx()
+            val labelPadY = LABEL_PAD_Y.toPx()
+            val labelStroke = LABEL_STROKE.toPx()
             data.fixtures.forEachIndexed { i, f ->
                 if (f.key in hiddenElements) return@forEachIndexed
                 val s = toScreen(f.px, f.py, w, h)
-                if (s.x !in -40f..w + 40f || s.y !in -40f..h + 40f) return@forEachIndexed
+                // Le culling se fait sur la position du PROJECTEUR, mais une
+                // étiquette très déportée à la main peut rester à l'écran alors
+                // que sa pastille en est sortie : sans cet élargissement elle
+                // disparaîtrait et deviendrait impossible à récupérer.
+                val sh = labelShift[f.key] ?: Offset.Zero
+                val cullX = 40f + kotlin.math.abs(sh.x)
+                val cullY = 40f + kotlin.math.abs(sh.y)
+                if (s.x !in -cullX..w + cullX || s.y !in -cullY..h + cullY) return@forEachIndexed
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
                 if (silhouetteVisible(f.spec)) {
                     drawCircle(c, radius = 3f, center = s)
@@ -627,7 +726,7 @@ fun PlanScreen(
                     drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
                 }
-                if (showLabels && !gesturing) {
+                if (showLabels) {
                     val text = when (options.labelContent) {
                         LabelContent.ID -> f.id?.let { "#$it" }
                         LabelContent.DMX -> f.addr.ifEmpty { null }?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) }
@@ -641,10 +740,43 @@ fun PlanScreen(
                         // TextMeasurer ne fait que 8 entrées, donc chaque étiquette
                         // était re-composée À CHAQUE FRAME. Ici on mémorise le
                         // résultat par texte (vidé si la taille/l'encre change).
+                        // La couleur n'est PAS mise en page ici : elle varie par
+                        // calque, et la passer au dessin évite une entrée de cache
+                        // par couleur.
                         val tl = labelCache.getOrPut(text) {
                             measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = inkColor))
                         }
-                        drawText(tl, topLeft = Offset(s.x + off, s.y - fs * 0.7f))
+                        // Couleurs par calque actives → l'étiquette porte la même
+                        // couleur que sa pastille (on relie les deux d'un coup
+                        // d'œil) ; sinon on retombe sur l'encre du fond. La teinte
+                        // BRUTE du calque est illisible sur le voile (un jaune ou
+                        // un vert clair sur un voile blanc) : elle est corrigée
+                        // pour garantir un écart de luminosité avec ce voile.
+                        val labelInk = if (options.layerColors) labelInkColor(c, bgDark) else inkColor
+                        val tx = s.x + off + sh.x
+                        val ty = s.y - fs * 0.7f + sh.y
+                        // Pastille arrondie semi-transparente qui détache le texte
+                        // des tracés, plus un filet fin. Le voile prend le SENS du
+                        // fond, pas sa couleur : clair sur plan clair, sombre sur
+                        // plan sombre, pour rester une simple atténuation du décor.
+                        val bw = tl.size.width + labelPadX * 2f
+                        val bh = tl.size.height + labelPadY * 2f
+                        val boxTL = Offset(tx - labelPadX, ty - labelPadY)
+                        // Zone sensible remplie AVANT le test de dessin : le
+                        // glissé doit rester possible en détail réduit.
+                        labelHits.add(LabelHit(f.key, boxTL.x, boxTL.y, bw, bh, s))
+                        if (gesturing && f.key != labelDragKey[0]) return@forEachIndexed
+                        val boxSize = androidx.compose.ui.geometry.Size(bw, bh)
+                        val radius = androidx.compose.ui.geometry.CornerRadius(bh * 0.32f, bh * 0.32f)
+                        drawRoundRect(
+                            if (bgDark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.78f),
+                            topLeft = boxTL, size = boxSize, cornerRadius = radius
+                        )
+                        drawRoundRect(
+                            labelInk.copy(alpha = 0.85f), topLeft = boxTL, size = boxSize, cornerRadius = radius,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(labelStroke)
+                        )
+                        drawText(tl, color = labelInk, topLeft = Offset(tx, ty))
                     }
                 }
             }
@@ -1305,6 +1437,79 @@ private fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
     }
     return DxfPaths(strokes, fills, drawn)
 }
+
+/**
+ * Zone sensible d'une étiquette à l'écran (remplie par le dessin, cf. PASSE 2).
+ * `anchor` = centre de la pastille du projecteur : c'est l'arbitre du conflit
+ * entre « saisir l'étiquette » et « déplacer le plan / sélectionner ».
+ */
+private class LabelHit(
+    val key: String, val x: Float, val y: Float, val w: Float, val h: Float, val anchor: Offset
+)
+
+/** Distance du point au rectangle (0 s'il est dedans). */
+private fun distanceToBox(hi: LabelHit, p: Offset): Float {
+    val dx = max(hi.x - p.x, max(0f, p.x - (hi.x + hi.w)))
+    val dy = max(hi.y - p.y, max(0f, p.y - (hi.y + hi.h)))
+    return kotlin.math.hypot(dx, dy)
+}
+
+/**
+ * Étiquette sous le doigt, ou null.
+ *
+ * Deux garde-fous, sans lesquels le geste vole le pan et le pincement : la zone
+ * d'accrochage est la boîte RÉELLE de l'étiquette avec une marge courte, et le
+ * point doit être plus proche de cette boîte que de la pastille du projecteur —
+ * l'étiquette n'étant décalée que de quelques pixels, une tolérance large la
+ * ferait recouvrir le symbole lui-même. Quand plusieurs boîtes sont éligibles on
+ * prend la PLUS PROCHE (la première trouvée serait une étiquette voisine).
+ */
+private fun labelKeyAt(hits: List<LabelHit>, p: Offset, slack: Float): String? {
+    var best: String? = null
+    var bestD = Float.MAX_VALUE
+    for (hi in hits) {
+        val d = distanceToBox(hi, p)
+        if (d > slack || d >= bestD) continue
+        if (kotlin.math.hypot(p.x - hi.anchor.x, p.y - hi.anchor.y) <= d) continue
+        bestD = d; best = hi.key
+    }
+    return best
+}
+
+/**
+ * Encre d'une étiquette colorée par calque, corrigée pour le voile sur lequel
+ * elle est posée (clair sur fond clair, sombre sur fond sombre) : la palette de
+ * calques contient des teintes très claires (jaune, vert, cyan) qui, brutes sur
+ * un voile blanc, ne se lisent plus du tout. Même intention que dxfDisplayColor,
+ * mais avec un seuil ferme au lieu d'un simple garde-fou noir/blanc.
+ */
+private fun labelInkColor(c: Color, bgDark: Boolean): Color {
+    val r = c.red; val g = c.green; val b = c.blue
+    val lum = 0.299f * r + 0.587f * g + 0.114f * b
+    return when {
+        !bgDark && lum > LABEL_INK_MAX_LUM -> {
+            val k = LABEL_INK_MAX_LUM / lum
+            Color(r * k, g * k, b * k, c.alpha)
+        }
+        bgDark && lum < LABEL_INK_MIN_LUM -> {
+            // Mélange vers le blanc : la teinte se conserve mieux qu'une simple
+            // multiplication, qui ne peut pas éclaircir un canal nul.
+            val t = (LABEL_INK_MIN_LUM - lum) / (1f - lum)
+            Color(r + (1f - r) * t, g + (1f - g) * t, b + (1f - b) * t, c.alpha)
+        }
+        else -> c
+    }
+}
+
+// Géométrie des étiquettes en dp : en pixels bruts, marges et zone d'accrochage
+// variaient du simple au triple entre un écran mdpi et un écran xxhdpi.
+private val LABEL_PAD_X = 3.dp
+private val LABEL_PAD_Y = 2.dp
+private val LABEL_STROKE = 0.7.dp
+/** Marge d'accrochage autour de la boîte — courte, cf. labelKeyAt. */
+private val LABEL_TOUCH_SLACK = 6.dp
+private const val LABEL_INK_MAX_LUM = 0.38f
+private const val LABEL_INK_MIN_LUM = 0.60f
 
 private class PlanFixture(
     /** Identité stable de l'objet MVR — masquage, patch (cf. mvrInstanceKey). */

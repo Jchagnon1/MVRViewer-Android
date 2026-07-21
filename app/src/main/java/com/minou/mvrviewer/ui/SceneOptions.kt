@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.DropdownMenu
@@ -92,6 +93,13 @@ fun SceneOptionsMenu(
     onShowHistory: (() -> Unit)? = null,
     onJoinProject: (() -> Unit)? = null,
     showLabelsToggle: Boolean = false,
+    /**
+     * « Replacer les étiquettes » : remet à zéro les décalages posés au doigt.
+     * Indispensable comme filet de sécurité — une étiquette traînée très loin de
+     * son projecteur, ou posée pile sur son symbole, resterait sinon pénible à
+     * récupérer. `null` → entrée masquée (vues sans étiquettes déplaçables).
+     */
+    onResetLabelOffsets: (() -> Unit)? = null,
     showStructureToggle: Boolean = false,
     showLegendToggle: Boolean = false,
     // Bascule du fond satellite (dispo seulement une fois la calibration GPS
@@ -206,6 +214,9 @@ fun SceneOptionsMenu(
                         options.labelOffset >= 1.6f -> 0.5f
                         else -> 2f
                     }
+                }
+                onResetLabelOffsets?.let {
+                    nav("  Replacer les étiquettes", Icons.Filled.Refresh) { open = false; it() }
                 }
             }
         }

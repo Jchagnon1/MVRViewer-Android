@@ -141,9 +141,27 @@ fun PlanScreen(
     val labelShift = remember(scene) { HashMap<String, Offset>() }
     val labelHits = remember(scene) { ArrayList<LabelHit>() }
     var labelDragVersion by remember(scene) { mutableIntStateOf(0) }
-    // Étiquette en cours de glissé : elle reste dessinée alors que tout le reste
-    // est passé en niveau de détail réduit — on doit voir ce qu'on déplace.
-    val labelDragKey = remember(scene) { arrayOfNulls<String>(1) }
+
+    // MODÈLE D'INTERACTION DES ÉTIQUETTES — décidé après trois vagues de
+    // régressions dues à la détection « à la volée » pendant le glissé :
+    //   1. par défaut AUCUNE étiquette n'est active → un glissé pane/zoome le
+    //      plan, TOUJOURS, sans le moindre test d'accrochage ;
+    //   2. un TAP sur une étiquette l'active (une seule à la fois, retour visuel
+    //      net) ; elle seule peut alors être saisie ;
+    //   3. un glissé qui démarre AILLEURS pane et désactive ;
+    //   4. un tap ailleurs, ou sur la même étiquette, désactive.
+    // C'est un état observable (et non un tableau muet) parce qu'il ne change
+    // que deux fois par interaction — jamais à la fréquence du doigt — et qu'il
+    // doit re-clé le pointerInput de saisie pour que celui-ci n'existe même pas
+    // tant qu'aucune étiquette n'est active.
+    var activeLabelKey by remember(scene) { mutableStateOf<String?>(null) }
+    // Marge d'accrochage convertie une fois : le tap comme le glissé s'en
+    // servent, et `toPx()` a besoin d'une densité (indisponible dans le lambda
+    // de tap, qui n'est pas un scope Density).
+    val labelSlackPx = with(labelDensity) { LABEL_TOUCH_SLACK.toPx() }
+    // (La désactivation automatique — étiquettes éteintes, mode cadre/masquage/
+    // calibrage — est déclarée plus bas, après ces états : on ne peut pas les
+    // lire avant leur déclaration.)
 
     // Fil de fer VECTORIEL des structures (arêtes caractéristiques réelles de la
     // géométrie .3ds, comme iOS). Construit hors thread principal.
@@ -181,7 +199,7 @@ fun PlanScreen(
     var gesturing by remember { mutableStateOf(false) }
     val gestureClock = remember { longArrayOf(0L) }
     LaunchedEffect(gesturing) {
-        if (!gesturing) { labelDragKey[0] = null; return@LaunchedEffect }
+        if (!gesturing) return@LaunchedEffect
         while (true) {
             val idle = android.os.SystemClock.uptimeMillis() - gestureClock[0]
             if (idle >= 180L) { gesturing = false; break }
@@ -285,6 +303,17 @@ fun PlanScreen(
             }
         }
     }
+    // Désactivation de l'étiquette active dès que le contexte ne s'y prête plus :
+    // étiquettes éteintes, ou passage dans un mode qui s'approprie le geste
+    // (cadre, masquage, calibrage). Sans ça, une étiquette resterait mise en
+    // valeur alors que plus aucun glissé ne peut la déplacer. Passé par un effet
+    // plutôt qu'écrit en pleine composition (ce que Compose reproche à juste
+    // titre). La sortie de la vue plan est, elle, couverte par `remember` :
+    // PlanScreen quitte la composition et l'état disparaît avec lui.
+    LaunchedEffect(options.showLabels, rectMode, maskMode, calibrating) {
+        if (!options.showLabels || rectMode || maskMode || calibrating) activeLabelKey = null
+    }
+
     fun averagedLatLon(): Pair<Double, Double>? {
         if (recentFixes.isEmpty()) return null
         var wsum = 0.0; var lat = 0.0; var lon = 0.0
@@ -412,6 +441,13 @@ fun PlanScreen(
                         )
                     } else {
                         detectTransformGestures { _, pan, zoom, _ ->
+                            // Règle 3 du modèle : un glissé qui n'a PAS démarré
+                            // sur l'étiquette active arrive forcément ici (la
+                            // saisie d'étiquette consomme l'événement quand elle
+                            // s'en empare) → il pane le plan ET désactive.
+                            // Test de nullité d'abord : sans lui on écrirait un
+                            // état observable à chaque événement tactile.
+                            if (activeLabelKey != null) activeLabelKey = null
                             val w = canvas.x; val h = canvas.y
                             val old = scale
                             // Pinch AMPLIFIÉ : le facteur brut demandait beaucoup trop
@@ -497,6 +533,35 @@ fun PlanScreen(
                             calibrating = false
                             return@detectTapGestures
                         }
+                        // ÉTIQUETTES (règles 2, 4 et 5 du modèle) : le tap est le
+                        // SEUL geste qui active une étiquette, et il ne
+                        // sélectionne alors PAS le projecteur — ce sont deux
+                        // gestes distincts. Re-taper la même la désactive.
+                        // Exclu du mode rectangle, où le tap sert à cocher /
+                        // décocher des projecteurs dans la sélection multiple.
+                        if (!rectMode) {
+                            // L'étiquette ACTIVE l'emporte d'office quand elle est
+                            // touchée : c'est ce qui garantit qu'on peut toujours
+                            // la désactiver, même posée pile sur son symbole (où
+                            // l'arbitrage « plus près de l'étiquette que du
+                            // projecteur » de labelKeyAt la ferait perdre).
+                            val act = activeLabelKey
+                            if (act != null) {
+                                val box = labelHits.firstOrNull { it.key == act }
+                                if (box != null && distanceToBox(box, tap) <= labelSlackPx) {
+                                    activeLabelKey = null
+                                    return@detectTapGestures
+                                }
+                            }
+                            val hitKey = labelKeyAt(labelHits, tap, labelSlackPx)
+                            if (hitKey != null) {
+                                activeLabelKey = if (activeLabelKey == hitKey) null else hitKey
+                                return@detectTapGestures
+                            }
+                            // Tap ailleurs : on désactive, puis le tap suit son
+                            // cours normal (sélection de projecteur).
+                            if (activeLabelKey != null) activeLabelKey = null
+                        }
                         var best = -1; var bestD = 40f * 40f
                         data.fixtures.forEachIndexed { i, f ->
                             if (f.key in hiddenElements) return@forEachIndexed
@@ -511,22 +576,40 @@ fun PlanScreen(
                         } else { selected.clear(); selected.add(best) }
                     }
                 }
-                // Déplacement d'une étiquette au doigt. DÉCLARÉ EN DERNIER à
-                // dessein : le dernier pointerInput reçoit l'événement le premier
-                // en passe principale, donc consommer ici annule proprement le
-                // pan/zoom (detectTransformGestures s'arrête sur un change
-                // consommé). On ne consomme qu'APRÈS le seuil de glissé, sinon on
-                // volerait les taps de sélection. Les modes spéciaux (cadre,
-                // masquage, calibrage) gardent la main sur le geste.
-                .pointerInput(scene, rectMode, maskMode, calibrating, projectKey) {
+                // Déplacement de l'étiquette ACTIVE au doigt (règle 3 du modèle).
+                //
+                // Ce pointerInput N'EXISTE PAS tant qu'aucune étiquette n'est
+                // active : la clé `activeLabelKey` le recrée à l'activation et le
+                // détruit à la désactivation. C'est le point central de la
+                // correction — plus aucune mesure, plus aucun test de boîte
+                // pendant les gestes ordinaires, donc plus de pan volé ni de
+                // saccade. DÉCLARÉ EN DERNIER à dessein : le dernier pointerInput
+                // reçoit l'événement le premier en passe principale, donc
+                // consommer ici annule proprement le pan/zoom
+                // (detectTransformGestures s'arrête sur un change consommé).
+                .pointerInput(scene, rectMode, maskMode, calibrating, projectKey, activeLabelKey) {
+                    val key = activeLabelKey ?: return@pointerInput
                     if (rectMode || maskMode || calibrating) return@pointerInput
-                    val slack = LABEL_TOUCH_SLACK.toPx()
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        val key = labelKeyAt(labelHits, down.position, slack) ?: return@awaitEachGesture
+                        // Un SEUL test, contre la boîte de l'étiquette active :
+                        // pas de recherche du plus proche, pas d'arbitrage avec le
+                        // symbole du projecteur. Si le doigt se pose ailleurs, on
+                        // ressort immédiatement et le geste redevient un pan
+                        // ordinaire (qui désactivera l'étiquette, cf. le
+                        // detectTransformGestures ci-dessus).
+                        val hit = labelHits.firstOrNull { it.key == key } ?: return@awaitEachGesture
+                        if (distanceToBox(hit, down.position) > labelSlackPx) return@awaitEachGesture
                         var moved = false
+                        val limit = LABEL_OFFSET_LIMIT.toPx()
                         fun shift(d: Offset) {
-                            labelShift[key] = (labelShift[key] ?: Offset.Zero) + d
+                            // Amplitude BORNÉE : au-delà, l'étiquette n'a plus de
+                            // rapport lisible avec son projecteur, et elle sort du
+                            // champ élargi par le culling → elle disparaîtrait.
+                            val n = (labelShift[key] ?: Offset.Zero) + d
+                            labelShift[key] = Offset(
+                                n.x.coerceIn(-limit, limit), n.y.coerceIn(-limit, limit)
+                            )
                             // Le glissé d'étiquette est un geste comme un autre :
                             // on réarme l'horloge commune pour que le décor lourd
                             // (DXF, fils de fer) reste en détail réduit au lieu
@@ -535,20 +618,22 @@ fun PlanScreen(
                             gesturing = true
                             labelDragVersion++
                         }
+                        // On ne consomme qu'APRÈS le seuil de glissé : en deçà,
+                        // c'est un tap, et il doit rester au gestionnaire de tap
+                        // (c'est lui qui désactive l'étiquette).
                         val start = awaitTouchSlopOrCancellation(down.id) { change, over ->
-                            change.consume(); labelDragKey[0] = key; shift(over); moved = true
+                            change.consume(); shift(over); moved = true
                         }
                         if (start != null) {
                             drag(down.id) { change ->
                                 change.consume(); shift(change.positionChange()); moved = true
                             }
                         }
-                        // `labelDragKey` n'est PAS remis à null ici : le détail
-                        // réduit dure encore 180 ms après le relâché, et perdre
-                        // l'exception ferait clignoter l'étiquette qu'on vient de
-                        // poser. Il est remis à null à la fin du geste.
                         // Écriture disque au relâché seulement : un enregistrement
                         // par événement tactile ferait un accès fichier à 60 Hz.
+                        // Elle part sur le fil du store (et non sur une coroutine
+                        // du composable) car ce relâché est typiquement suivi d'un
+                        // retour à la 3D, qui annulerait la coroutine en vol.
                         if (moved && projectKey != null) {
                             com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
                                 ctxPlan, projectKey, labelShift.mapValues { (_, o) -> o.x to o.y }
@@ -692,28 +777,35 @@ fun PlanScreen(
             }
             // PASSE 2 : pastilles / anneaux de sélection / étiquettes, PAR-DESSUS
             // les silhouettes (lisibilité).
+            //
             // Les zones sensibles des étiquettes sont reconstruites ici, à la
-            // seule place où l'on connaît leur boîte réelle (texte mesuré) :
-            // le geste de déplacement s'y réfère au toucher suivant. Elles sont
-            // calculées MÊME pendant un geste, alors que les étiquettes ne sont
-            // pas dessinées : sinon aucune saisie n'est possible pendant les
-            // 180 ms de détail réduit qui suivent un pan, et l'essai se change
-            // en pan. La mesure du texte est mise en cache → coût négligeable.
+            // seule place où l'on connaît leur boîte réelle (texte mesuré) : le
+            // tap d'activation et le glissé de l'étiquette active s'y réfèrent au
+            // toucher suivant. Elles ne sont remplies QUE pour les étiquettes
+            // réellement dessinées — une zone sensible invisible capturerait un
+            // geste sans que rien ne l'explique à l'écran.
             labelDragVersion.let { }  // dépendance de redessin (table non observable)
             labelHits.clear()
+            val activeKey = activeLabelKey
             val labelPadX = LABEL_PAD_X.toPx()
             val labelPadY = LABEL_PAD_Y.toPx()
             val labelStroke = LABEL_STROKE.toPx()
+            // Couleur RÉELLE du voile de la pastille une fois composée sur le
+            // fond du plan : c'est elle, et non le fond nu, qui décide de la
+            // lisibilité de l'encre (cf. readableInk).
+            val labelVeil = if (bgDark) compositeOver(Color.Black, 0.45f, planBg)
+                            else compositeOver(Color.White, 0.78f, planBg)
             data.fixtures.forEachIndexed { i, f ->
                 if (f.key in hiddenElements) return@forEachIndexed
                 val s = toScreen(f.px, f.py, w, h)
                 // Le culling se fait sur la position du PROJECTEUR, mais une
-                // étiquette très déportée à la main peut rester à l'écran alors
-                // que sa pastille en est sortie : sans cet élargissement elle
-                // disparaîtrait et deviendrait impossible à récupérer.
+                // étiquette déportée à la main vit ailleurs : on élargit la
+                // fenêtre du décalage manuel (plus l'encombrement d'une pastille)
+                // sinon l'étiquette disparaît dès que son projecteur sort du
+                // cadre — et devient irrécupérable.
                 val sh = labelShift[f.key] ?: Offset.Zero
-                val cullX = 40f + kotlin.math.abs(sh.x)
-                val cullY = 40f + kotlin.math.abs(sh.y)
+                val cullX = 40f + kotlin.math.abs(sh.x) + LABEL_CULL_MARGIN
+                val cullY = 40f + kotlin.math.abs(sh.y) + LABEL_CULL_MARGIN
                 if (s.x !in -cullX..w + cullX || s.y !in -cullY..h + cullY) return@forEachIndexed
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
                 if (silhouetteVisible(f.spec)) {
@@ -726,7 +818,10 @@ fun PlanScreen(
                     drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
                 }
-                if (showLabels) {
+                // Pendant un geste (pan/zoom/glissé), les étiquettes sont
+                // éteintes pour la fluidité — SAUF celle qu'on est en train de
+                // déplacer, qu'il faut évidemment voir bouger.
+                if (showLabels && (!gesturing || f.key == activeKey)) {
                     val text = when (options.labelContent) {
                         LabelContent.ID -> f.id?.let { "#$it" }
                         LabelContent.DMX -> f.addr.ifEmpty { null }?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) }
@@ -748,11 +843,12 @@ fun PlanScreen(
                         }
                         // Couleurs par calque actives → l'étiquette porte la même
                         // couleur que sa pastille (on relie les deux d'un coup
-                        // d'œil) ; sinon on retombe sur l'encre du fond. La teinte
-                        // BRUTE du calque est illisible sur le voile (un jaune ou
-                        // un vert clair sur un voile blanc) : elle est corrigée
-                        // pour garantir un écart de luminosité avec ce voile.
-                        val labelInk = if (options.layerColors) labelInkColor(c, bgDark) else inkColor
+                        // d'œil) ; sinon on retombe sur l'encre du fond. Dans les
+                        // deux cas l'encre est ramenée à un CONTRASTE MINIMUM
+                        // avec le voile réellement composé : une teinte de calque
+                        // claire (jaune, cyan) sur pastille blanche était
+                        // illisible, et l'inverse arrive sur fond sombre.
+                        val labelInk = readableInk(if (options.layerColors) c else inkColor, labelVeil)
                         val tx = s.x + off + sh.x
                         val ty = s.y - fs * 0.7f + sh.y
                         // Pastille arrondie semi-transparente qui détache le texte
@@ -762,19 +858,36 @@ fun PlanScreen(
                         val bw = tl.size.width + labelPadX * 2f
                         val bh = tl.size.height + labelPadY * 2f
                         val boxTL = Offset(tx - labelPadX, ty - labelPadY)
-                        // Zone sensible remplie AVANT le test de dessin : le
-                        // glissé doit rester possible en détail réduit.
+                        // Zone sensible : remplie SEULEMENT pour les étiquettes
+                        // effectivement dessinées (cf. la garde ci-dessus), sinon
+                        // une boîte invisible capterait un geste sans rien montrer.
                         labelHits.add(LabelHit(f.key, boxTL.x, boxTL.y, bw, bh, s))
-                        if (gesturing && f.key != labelDragKey[0]) return@forEachIndexed
                         val boxSize = androidx.compose.ui.geometry.Size(bw, bh)
                         val radius = androidx.compose.ui.geometry.CornerRadius(bh * 0.32f, bh * 0.32f)
                         drawRoundRect(
                             if (bgDark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.78f),
                             topLeft = boxTL, size = boxSize, cornerRadius = radius
                         )
+                        val isActive = f.key == activeKey
+                        if (isActive) {
+                            // Retour visuel de l'étiquette ACTIVE : halo ambré
+                            // débordant + filet épaissi. Sans signe net, rien ne
+                            // dit à l'utilisateur que le prochain glissé va la
+                            // déplacer plutôt que paner le plan.
+                            drawRoundRect(
+                                Color(0x55FFC400),
+                                topLeft = Offset(boxTL.x - labelStroke * 3f, boxTL.y - labelStroke * 3f),
+                                size = androidx.compose.ui.geometry.Size(bw + labelStroke * 6f, bh + labelStroke * 6f),
+                                cornerRadius = radius,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(labelStroke * 5f)
+                            )
+                        }
                         drawRoundRect(
-                            labelInk.copy(alpha = 0.85f), topLeft = boxTL, size = boxSize, cornerRadius = radius,
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(labelStroke)
+                            if (isActive) Color(0xFFFFC400) else labelInk.copy(alpha = 0.85f),
+                            topLeft = boxTL, size = boxSize, cornerRadius = radius,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                if (isActive) labelStroke * 2.5f else labelStroke
+                            )
                         )
                         drawText(tl, color = labelInk, topLeft = Offset(tx, ty))
                     }
@@ -918,6 +1031,19 @@ fun PlanScreen(
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
                 showLabelsToggle = true, showStructureToggle = true,
                 showLegendToggle = true,
+                // Filet de sécurité : remise à zéro de TOUS les décalages posés
+                // au doigt (et effacement immédiat sur disque, pas seulement en
+                // mémoire, sinon la réouverture les ferait revenir).
+                onResetLabelOffsets = {
+                    labelShift.clear()
+                    activeLabelKey = null
+                    labelDragVersion++
+                    if (projectKey != null) {
+                        com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
+                            ctxPlan, projectKey, emptyMap()
+                        )
+                    }
+                },
                 background = options.background2D,
                 backgroundDefault = BackgroundColorStore.DEFAULT_2D,
                 backgroundPresets = BG_2D_PRESETS,
@@ -1455,14 +1581,15 @@ private fun distanceToBox(hi: LabelHit, p: Offset): Float {
 }
 
 /**
- * Étiquette sous le doigt, ou null.
+ * Étiquette sous le doigt, ou null. Utilisé UNIQUEMENT par le tap (l'activation)
+ * — le glissé, lui, ne teste que la boîte de l'étiquette déjà active.
  *
- * Deux garde-fous, sans lesquels le geste vole le pan et le pincement : la zone
- * d'accrochage est la boîte RÉELLE de l'étiquette avec une marge courte, et le
- * point doit être plus proche de cette boîte que de la pastille du projecteur —
- * l'étiquette n'étant décalée que de quelques pixels, une tolérance large la
- * ferait recouvrir le symbole lui-même. Quand plusieurs boîtes sont éligibles on
- * prend la PLUS PROCHE (la première trouvée serait une étiquette voisine).
+ * Deux garde-fous : la zone d'accrochage est la boîte RÉELLE de l'étiquette avec
+ * une marge courte, et le point doit être plus proche de cette boîte que de la
+ * pastille du projecteur — sans quoi un tap destiné à SÉLECTIONNER le projecteur
+ * activerait son étiquette (les deux se frôlent au zoom où les étiquettes
+ * s'allument). Quand plusieurs boîtes sont éligibles on prend la PLUS PROCHE (la
+ * première trouvée serait une étiquette voisine).
  */
 private fun labelKeyAt(hits: List<LabelHit>, p: Offset, slack: Float): String? {
     var best: String? = null
@@ -1476,29 +1603,54 @@ private fun labelKeyAt(hits: List<LabelHit>, p: Offset, slack: Float): String? {
     return best
 }
 
+/** Couleur `src` d'opacité `alpha` composée sur `dst` (source-over opaque). */
+private fun compositeOver(src: Color, alpha: Float, dst: Color): Color = Color(
+    src.red * alpha + dst.red * (1f - alpha),
+    src.green * alpha + dst.green * (1f - alpha),
+    src.blue * alpha + dst.blue * (1f - alpha)
+)
+
+/** Luminance relative WCAG (canal linéarisé). */
+private fun relativeLuminance(c: Color): Float {
+    fun lin(v: Float) = if (v <= 0.03928f) v / 12.92f
+                        else ((v + 0.055f) / 1.055f).toDouble().pow(2.4).toFloat()
+    return 0.2126f * lin(c.red) + 0.7152f * lin(c.green) + 0.0722f * lin(c.blue)
+}
+
+/** Rapport de contraste WCAG entre deux couleurs opaques (1 → 21). */
+private fun contrastRatio(a: Color, b: Color): Float {
+    val la = relativeLuminance(a); val lb = relativeLuminance(b)
+    val hi = max(la, lb); val lo = min(la, lb)
+    return (hi + 0.05f) / (lo + 0.05f)
+}
+
 /**
- * Encre d'une étiquette colorée par calque, corrigée pour le voile sur lequel
- * elle est posée (clair sur fond clair, sombre sur fond sombre) : la palette de
- * calques contient des teintes très claires (jaune, vert, cyan) qui, brutes sur
- * un voile blanc, ne se lisent plus du tout. Même intention que dxfDisplayColor,
- * mais avec un seuil ferme au lieu d'un simple garde-fou noir/blanc.
+ * Encre d'étiquette ramenée à un CONTRASTE MINIMUM avec le voile de la pastille.
+ *
+ * Le défaut corrigé : la palette de calques contient des teintes très claires
+ * (jaune, cyan, vert tendre) qui, brutes sur le voile blanc du fond par défaut,
+ * ne se lisent plus du tout — et symétriquement des teintes très sombres sur le
+ * voile noir d'un fond sombre. Un simple seuil de luminosité (ce qu'on faisait)
+ * ne garantit rien : c'est le RAPPORT de contraste avec le voile réel qui
+ * compte, et il doit être imposé DANS LES DEUX SENS. On mélange donc la teinte
+ * vers le noir ou vers le blanc — selon le côté où est le voile — juste assez
+ * pour atteindre le seuil : la teinte reste reconnaissable, ce qu'un repli
+ * brutal noir/blanc perdrait.
  */
-private fun labelInkColor(c: Color, bgDark: Boolean): Color {
-    val r = c.red; val g = c.green; val b = c.blue
-    val lum = 0.299f * r + 0.587f * g + 0.114f * b
-    return when {
-        !bgDark && lum > LABEL_INK_MAX_LUM -> {
-            val k = LABEL_INK_MAX_LUM / lum
-            Color(r * k, g * k, b * k, c.alpha)
-        }
-        bgDark && lum < LABEL_INK_MIN_LUM -> {
-            // Mélange vers le blanc : la teinte se conserve mieux qu'une simple
-            // multiplication, qui ne peut pas éclaircir un canal nul.
-            val t = (LABEL_INK_MIN_LUM - lum) / (1f - lum)
-            Color(r + (1f - r) * t, g + (1f - g) * t, b + (1f - b) * t, c.alpha)
-        }
-        else -> c
+private fun readableInk(tint: Color, veil: Color): Color {
+    if (contrastRatio(tint, veil) >= LABEL_MIN_CONTRAST) return tint
+    val target = if (relativeLuminance(veil) > 0.18f) Color.Black else Color.White
+    var t = 0.1f
+    while (t < 1f) {
+        val mixed = Color(
+            tint.red + (target.red - tint.red) * t,
+            tint.green + (target.green - tint.green) * t,
+            tint.blue + (target.blue - tint.blue) * t
+        )
+        if (contrastRatio(mixed, veil) >= LABEL_MIN_CONTRAST) return mixed
+        t += 0.1f
     }
+    return target
 }
 
 // Géométrie des étiquettes en dp : en pixels bruts, marges et zone d'accrochage
@@ -1508,8 +1660,23 @@ private val LABEL_PAD_Y = 2.dp
 private val LABEL_STROKE = 0.7.dp
 /** Marge d'accrochage autour de la boîte — courte, cf. labelKeyAt. */
 private val LABEL_TOUCH_SLACK = 6.dp
-private const val LABEL_INK_MAX_LUM = 0.38f
-private const val LABEL_INK_MIN_LUM = 0.60f
+/**
+ * Contraste minimum encre ↔ voile de la pastille. 4.5:1 = seuil WCAG AA du texte
+ * courant ; l'étiquette est petite, donc on ne descend pas au seuil « grand
+ * texte » (3:1).
+ */
+private const val LABEL_MIN_CONTRAST = 4.5f
+/**
+ * Marge de culling supplémentaire, en pixels : l'encombrement d'une pastille
+ * dont l'origine (le projecteur) est déjà au bord du cadre.
+ */
+private const val LABEL_CULL_MARGIN = 160f
+/**
+ * Amplitude maximale d'un décalage manuel. Au-delà, l'étiquette n'a plus de
+ * rapport lisible avec le projecteur qu'elle désigne, et elle sortirait de la
+ * fenêtre élargie par LABEL_CULL_MARGIN.
+ */
+private val LABEL_OFFSET_LIMIT = 240.dp
 
 private class PlanFixture(
     /** Identité stable de l'objet MVR — masquage, patch (cf. mvrInstanceKey). */

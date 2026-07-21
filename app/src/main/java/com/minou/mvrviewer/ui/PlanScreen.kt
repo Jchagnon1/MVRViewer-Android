@@ -139,6 +139,11 @@ fun PlanScreen(
     // la fréquence du doigt (régression déjà vue sur le pan/zoom).
     val labelShift = remember(scene) { HashMap<String, Offset>() }
     val labelHits = remember(scene) { ArrayList<LabelHit>() }
+    // Disques des symboles de projecteurs RÉELLEMENT dessinés, même tampon muet,
+    // même passe : ils portent l'exception d'arbitrage (cf. labelTapTarget). Sans
+    // eux, une pastille posée sur le centre d'un projecteur le rendait
+    // définitivement insélectionnable.
+    val symbolHits = remember(scene) { ArrayList<SymbolHit>() }
     var labelDragVersion by remember(scene) { mutableIntStateOf(0) }
 
     // MODÈLE D'INTERACTION DES ÉTIQUETTES — décidé après trois vagues de
@@ -314,8 +319,15 @@ fun PlanScreen(
     // plutôt qu'écrit en pleine composition (ce que Compose reproche à juste
     // titre). La sortie de la vue plan est, elle, couverte par `remember` :
     // PlanScreen quitte la composition et l'état disparaît avec lui.
-    LaunchedEffect(options.showLabels, rectMode, maskMode, calibrating) {
-        if (!options.showLabels || rectMode || maskMode || calibrating) activeLabelKey = null
+    // `labelContent` en fait partie : changer le contenu affiché peut vider le
+    // texte de l'étiquette active (un projecteur sans n° en mode ID) — elle
+    // n'est alors plus dessinée, donc plus déplaçable, et laisser l'état actif
+    // ne ferait qu'entretenir une mise en valeur fantôme.
+    // Désactivation inconditionnelle : chacune de ces bascules change le contexte
+    // au point qu'une étiquette « armée » n'a plus de sens (y compris le retour
+    // au mode normal, où l'utilisateur ne s'attend plus à rien de sélectionné).
+    LaunchedEffect(options.showLabels, options.labelContent, rectMode, maskMode, calibrating) {
+        activeLabelKey = null
     }
 
     fun averagedLatLon(): Pair<Double, Double>? {
@@ -544,14 +556,15 @@ fun PlanScreen(
                         // Exclu du mode rectangle, où le tap sert à cocher /
                         // décocher des projecteurs dans la sélection multiple.
                         if (!rectMode) {
-                            // ARBITRAGE (cf. labelBoxAt) : l'étiquette ne gagne
-                            // que si le doigt est STRICTEMENT DANS sa pastille
-                            // dessinée, SANS marge de confort — quel que soit le
-                            // zoom, et sans comparer avec la distance au symbole
-                            // du projecteur. L'étiquette active est prioritaire
-                            // en cas de chevauchement (on doit toujours pouvoir
-                            // la désactiver).
-                            val hitKey = labelBoxAt(labelHits, tap, activeLabelKey)
+                            // ARBITRAGE (cf. labelTapTarget) : l'étiquette ne
+                            // gagne que si le doigt est STRICTEMENT DANS une
+                            // pastille RÉELLEMENT DESSINÉE — le tampon rempli au
+                            // dessin fait seul autorité, plus rien n'est
+                            // recalculé ici. Seule exception : le disque du
+                            // symbole d'un projecteur, qui l'emporte pour que
+                            // celui-ci reste sélectionnable en son centre même
+                            // recouvert par une pastille.
+                            val hitKey = labelTapTarget(labelHits, symbolHits, tap, activeLabelKey)
                             if (hitKey != null) {
                                 // RÈGLE : ce tap ne touche JAMAIS à `selected`.
                                 // En multi-sélection l'ordre de sélection pilote
@@ -822,6 +835,7 @@ fun PlanScreen(
             // geste sans que rien ne l'explique à l'écran.
             labelDragVersion.let { }  // dépendance de redessin (table non observable)
             labelHits.clear()
+            symbolHits.clear()
             val activeKey = activeLabelKey
             val labelPadX = LABEL_PAD_X.toPx()
             val labelPadY = LABEL_PAD_Y.toPx()
@@ -847,19 +861,30 @@ fun PlanScreen(
                 val cullY = 40f + kotlin.math.abs(sh.y) + labelCullPx
                 if (s.x !in -cullX..w + cullX || s.y !in -cullY..h + cullY) return@forEachIndexed
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
-                if (silhouetteVisible(f.spec)) {
+                val symRadius = if (silhouetteVisible(f.spec)) {
                     drawCircle(c, radius = 3f, center = s)
+                    3f
                 } else {
                     drawCircle(c, radius = 7f, center = s)
                     drawCircle(Color.White, radius = 7f, center = s, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
+                    7f
                 }
+                // Le disque de garde reste celui du SYMBOLE (jamais la cible
+                // tactile de 40 px, qui engloberait les pastilles et tuerait la
+                // fonctionnalité aux zooms de travail). Plancher à 7 px : sous la
+                // silhouette GDTF le point n'est plus qu'un repère de 3 px, trop
+                // fin pour être visé au doigt.
+                symbolHits.add(SymbolHit(s.x, s.y, max(symRadius, 7f)))
                 if (i in selected) {
                     drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
                 }
                 // Pendant un geste (pan/zoom/glissé), les étiquettes sont
                 // éteintes pour la fluidité — SAUF celle qu'on est en train de
-                // déplacer, qu'il faut évidemment voir bouger.
+                // déplacer, qu'il faut évidemment voir bouger. Le tampon suit
+                // exactement cette garde : pendant le geste seule l'étiquette
+                // active y figure, donc elle seule reste saisissable, et c'est
+                // bien ce qu'on veut (les autres ne sont pas à l'écran).
                 if (showLabels && (!gesturing || f.key == activeKey)) {
                     val text = when (options.labelContent) {
                         LabelContent.ID -> f.id?.let { "#$it" }
@@ -1609,9 +1634,15 @@ private fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
  * C'est cette identité boîte dessinée ↔ boîte testée qui rend l'arbitrage
  * honnête (cf. labelBoxAt).
  */
-private class LabelHit(
+internal class LabelHit(
     val key: String, val x: Float, val y: Float, val w: Float, val h: Float
 )
+
+/**
+ * Disque du symbole d'un projecteur à l'écran, lui aussi rempli par le dessin :
+ * c'est la seule exception à « la pastille dessinée gagne » (cf. labelTapTarget).
+ */
+internal class SymbolHit(val x: Float, val y: Float, val r: Float)
 
 /** Distance du point au rectangle (0 s'il est dedans). */
 private fun distanceToBox(hi: LabelHit, p: Offset): Float {
@@ -1649,7 +1680,7 @@ private fun distanceToBox(hi: LabelHit, p: Offset): Float {
  * on retient la DERNIÈRE boîte contenant le point, c'est-à-dire celle dessinée
  * PAR-DESSUS les autres — donc celle que l'utilisateur voit.
  */
-private fun labelBoxAt(hits: List<LabelHit>, p: Offset, preferKey: String?): String? {
+internal fun labelBoxAt(hits: List<LabelHit>, p: Offset, preferKey: String?): String? {
     var found: String? = null
     for (hi in hits) {
         if (p.x < hi.x || p.x > hi.x + hi.w || p.y < hi.y || p.y > hi.y + hi.h) continue
@@ -1657,6 +1688,30 @@ private fun labelBoxAt(hits: List<LabelHit>, p: Offset, preferKey: String?): Str
         found = hi.key
     }
     return found
+}
+
+/**
+ * Arbitrage COMPLET du tap entre étiquettes et projecteurs, en un seul endroit
+ * pour qu'il n'y ait plus rien à faire diverger. Les deux tampons proviennent de
+ * la passe de dessin : le test tactile ne reconstruit AUCUNE géométrie, ce qui
+ * était la cause racine des rustines successives (préfiltre en pixels ignorant
+ * le rayon du symbole, culling non répliqué, conditions de dessin absentes du
+ * test). Conséquence recherchée : une étiquette non dessinée est intouchable par
+ * construction, une étiquette dessinée est toujours touchable.
+ *
+ * EXCEPTION : si le point tombe dans le disque du SYMBOLE d'un projecteur, le
+ * projecteur gagne (retour null). Sinon une pastille recouvrant son centre le
+ * rendait définitivement insélectionnable — et l'utilisateur n'a alors aucun
+ * moyen de deviner qu'il faut d'abord déplacer l'étiquette.
+ */
+internal fun labelTapTarget(
+    labels: List<LabelHit>, symbols: List<SymbolHit>, p: Offset, preferKey: String?
+): String? {
+    for (s in symbols) {
+        val dx = p.x - s.x; val dy = p.y - s.y
+        if (dx * dx + dy * dy <= s.r * s.r) return null
+    }
+    return labelBoxAt(labels, p, preferKey)
 }
 
 /** Couleur `src` d'opacité `alpha` composée sur `dst` (source-over opaque). */

@@ -1042,6 +1042,7 @@ fun PlanScreen(
                     labelDetached = options.labelDetached,
                     labelSize = options.labelSize,
                     labelOffset = options.labelOffset,
+                    hideLabelsWhenZoomedOut = options.hideLabelsWhenZoomedOut,
                     // CACHÉ EFFECTIF : fixtures, silhouettes, décor, étiquettes et
                     // légende partagent ce seul filtre → le solo agit partout d'un coup.
                     hiddenElements = effectiveHidden,

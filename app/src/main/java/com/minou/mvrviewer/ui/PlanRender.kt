@@ -65,6 +65,16 @@ internal class PlanRenderSpec(
     val labelDetached: Set<LabelContent>,
     val labelSize: Float,
     val labelOffset: Float,
+    /**
+     * Réglage explicite « masquer les étiquettes quand c'est trop dézoomé » —
+     * DÉSACTIVÉ par défaut. Par défaut, une étiquette dont l'affichage est activé
+     * reste visible quel que soit le zoom : le seuil de lisibilité (det > 0.02)
+     * ne la masque PLUS silencieusement. On ne le rebranche que si l'utilisateur
+     * le demande, pour un très gros show où des centaines de pastilles dézoomées
+     * feraient une bouillie. (L'allègement pendant les GESTES, lui, reste actif :
+     * cf. lowDetail — transitoire, ce n'est pas « disparaître au dézoom ».)
+     */
+    val hideLabelsWhenZoomedOut: Boolean = false,
     val hiddenElements: Set<String>,
     val hiddenLayers: Set<String>,
     val structPaths: StructPaths?,
@@ -214,12 +224,14 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     }
 
     // ---- Projecteurs, passe 1 : silhouettes fil de fer ----
-    // Le seuil de zoom éteint les étiquettes ORDINAIRES (sur un plan dézoomé,
-    // des centaines de pastilles se recouvrent et ne se lisent plus). Les
-    // étiquettes ARMÉES ou SÉLECTIONNÉES, elles, l'ignorent : on vient
-    // précisément de les désigner, les voir disparaître au premier dézoom rendait
-    // le placement au doigt impraticable (retour de test terrain).
-    val labelsZoomOk = s.showLabels && det > 0.02f
+    // Une étiquette affichée reste visible quel que soit le zoom : les
+    // étiquettes ne « disparaissent » PLUS au dézoom (retour de test terrain).
+    // Le seuil de lisibilité (det > 0.02) n'est appliqué QUE si l'utilisateur a
+    // explicitement coché « masquer les étiquettes quand c'est trop dézoomé »
+    // (défaut : décoché) — filet optionnel pour un très gros show. L'allègement
+    // pendant les GESTES reste distinct (lowDetail), tout comme les étiquettes
+    // ARMÉES / SÉLECTIONNÉES qui ignorent de toute façon ces deux gardes.
+    val labelsZoomOk = s.showLabels && (!s.hideLabelsWhenZoomedOut || det > 0.02f)
     val fw = s.fixWire
     val fp = s.fixPaths
     fun silhouetteVisible(spec: String?): Boolean {

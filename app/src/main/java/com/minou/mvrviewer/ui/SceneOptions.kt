@@ -77,6 +77,13 @@ class SceneOptions {
     var labelDetached by mutableStateOf(emptySet<LabelContent>())
     var labelSize by mutableFloatStateOf(1f)     // 0.7 (S) · 1.0 (M) · 1.4 (L)
     var labelOffset by mutableFloatStateOf(1f)    // écart étiquette ↔ projecteur
+    /**
+     * Option EXPLICITE « masquer les étiquettes quand c'est trop dézoomé »,
+     * DÉSACTIVÉE par défaut : par défaut, une étiquette affichée reste visible
+     * à tout niveau de zoom. On ne rebranche le seuil de lisibilité que si
+     * l'utilisateur le coche (filet pour un très gros show illisible dézoomé).
+     */
+    var hideLabelsWhenZoomedOut by mutableStateOf(false)
     // Fond satellite géo-référencé (sous le plan / en 3D) — nécessite la
     // calibration GPS. Persisté par projet ; opacité de session (défaut 0.55).
     var showSatellite by mutableStateOf(false)
@@ -264,6 +271,12 @@ fun SceneOptionsMenu(
                         options.labelOffset >= 1.6f -> 0.5f
                         else -> 2f
                     }
+                }
+                // Filet OPTIONNEL (décoché par défaut) : par défaut les étiquettes
+                // affichées restent visibles à tout zoom ; cochée, celle-ci rebranche
+                // le masquage sous un certain dézoom, utile sur un très gros show.
+                check("  Masquer si trop dézoomé", options.hideLabelsWhenZoomedOut) {
+                    options.hideLabelsWhenZoomedOut = !options.hideLabelsWhenZoomedOut
                 }
                 onResetLabelOffsets?.let {
                     nav("  Replacer les étiquettes", Icons.Filled.Refresh) { open = false; it() }

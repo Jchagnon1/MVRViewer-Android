@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.DmxAddress
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
+import com.minou.mvrviewer.sync.PowerSource
 
 /**
  * Liste de patch — projecteurs du .mvr avec recherche/filtre (ID, nom, GDTF,
@@ -55,6 +56,7 @@ fun PatchListScreen(
     scene: MvrScene,
     mvrBytes: ByteArray,
     overrides: PatchOverrides,
+    power: PowerLibraryState,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -158,13 +160,16 @@ fun PatchListScreen(
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(filtered) { f ->
-                FixtureRow(f, overrides, overrides.effectiveId(f)?.trim() in dupIds) { detail = f }
+                FixtureRow(f, overrides, power, overrides.effectiveId(f)?.trim() in dupIds) { detail = f }
             }
         }
     }
 
     detail?.let { f ->
-        FixtureDetailSheet(fixture = f, mvrBytes = mvrBytes, overrides = overrides, onDismiss = { detail = null })
+        FixtureDetailSheet(
+            fixture = f, mvrBytes = mvrBytes, overrides = overrides, power = power,
+            onDismiss = { detail = null }
+        )
     }
 }
 
@@ -201,7 +206,8 @@ private fun FacetChip(label: String, options: List<String>, selected: Set<String
 
 @Composable
 private fun FixtureRow(
-    f: MvrSceneObject, overrides: PatchOverrides, duplicateId: Boolean = false, onClick: () -> Unit
+    f: MvrSceneObject, overrides: PatchOverrides, power: PowerLibraryState,
+    duplicateId: Boolean = false, onClick: () -> Unit
 ) {
     val edited = overrides.isEdited(f)
     Column(
@@ -222,8 +228,12 @@ private fun FixtureRow(
         val spec = f.gdtfSpec ?: "—"
         val mode = overrides.effectiveMode(f) ?: "—"
         val addr = overrides.effectiveAddress(f)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "—"
+        // Puissance effective à côté du patch (outil de câblage). « ? » = à saisir ;
+        // « * » = valeur saisie (bibliothèque) plutôt que GDTF.
+        val res = power.effective(f.gdtfSpec)
+        val watt = res.watts?.let { "$it W" + if (res.source == PowerSource.LIBRARY) "*" else "" } ?: "? W"
         Text(
-            "$spec · $mode · DMX $addr",
+            "$spec · $mode · DMX $addr · $watt",
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

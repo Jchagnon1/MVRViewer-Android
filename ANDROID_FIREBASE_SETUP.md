@@ -71,3 +71,27 @@ le plugin appliqué, `FirebaseApp.getApps()` n'est plus vide → l'app bascule
 - **v1** : couleurs de calque / côtés d'étiquette / retournements / mappings GDTF
   sont *reçus* mais pas appliqués côté Android (pas d'éditeur dédié encore) — le
   patch, la calibration et le placement du plan sont, eux, entièrement partagés.
+
+## Bibliothèque de puissances (`powerLibrary`) — outil de câblage
+
+Collection Firestore **RACINE** `powerLibrary`, **GLOBALE** (hors projet) : un
+document par TYPE de projecteur, id = spec GDTF normalisée
+(`powerLibraryDocId` : minuscules, trim, `/ . # $ [ ]` → `_`). Champs partagés
+iOS/Android : `spec` (String d'origine), `watts` (Int, puissance max en W),
+`updatedBy` (uid ou ""), `updatedAt` (Number, epoch **millisecondes**). Fusion
+dernier écrivain gagne sur `updatedAt`.
+
+**Règle Firestore** (à ajouter côté iOS dans `firestore.rules` ; **rien à écrire
+côté Android**, mais la MÊME règle s'applique — c'est une base communautaire) :
+
+```
+match /powerLibrary/{docId} {
+  allow read, write: if request.auth != null; // authentifiés uniquement
+}
+```
+
+Sans compte / hors ligne, la résolution fonctionne quand même : un **cache
+disque global** (`powerLibrary.json`) mémorise les saisies et sert de repli ;
+le cloud n'est fusionné (LWW) que lorsqu'on est connecté. En backend LOCAL
+(sans `google-services.json`), le stub reproduit la collection sous
+`CloudSim/powerLibrary/` pour rester testable.

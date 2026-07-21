@@ -24,7 +24,10 @@ import com.minou.mvrviewer.sync.AuditCoding
 import com.minou.mvrviewer.sync.AuditEntry
 import com.minou.mvrviewer.sync.AuditFieldKey
 import com.minou.mvrviewer.sync.LocalMapper
+import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.sync.PatchStore
+import com.minou.mvrviewer.sync.PowerEntry
+import com.minou.mvrviewer.sync.PowerLibraryStore
 import com.minou.mvrviewer.sync.RefPlanInterop
 import com.minou.mvrviewer.sync.RemoteEvent
 import com.minou.mvrviewer.sync.SectionPayload
@@ -76,6 +79,10 @@ fun SceneScreen(
     }
     val overrides = remember { PatchOverrides() }
     val gdtfOverrides = remember { GdtfOverrides() }
+    // Bibliothèque de puissances (outil de câblage) : cache réactif de la conso
+    // par type. Semée du cache disque global, remplie par extraction GDTF +
+    // fusion cloud (cf. LaunchedEffect plus bas).
+    val power = remember { PowerLibraryState() }
     // Plan de repère DXF importé — hissé ici pour survivre aux allers-retours
     // 3D ↔ plan (PlanScreen est recréé à chaque bascule).
     var referencePlan by remember { mutableStateOf<com.minou.mvrviewer.mvr.ReferencePlan?>(null) }
@@ -324,6 +331,54 @@ fun SceneScreen(
         s.events.collect { ev -> if (ev is RemoteEvent.Section) applySection(ev.change.payload) }
     }
 
+    // ---- Bibliothèque de puissances : semis + extraction GDTF + fusion cloud ---
+    // 1) Semis du cache disque GLOBAL (hors projet, partagé par tous les projets).
+    LaunchedEffect(Unit) {
+        val cached = withContext(Dispatchers.IO) { PowerLibraryStore.load(ctx) }
+        cached.forEach { (id, e) -> power.seedLibrary(id, e.watts) }
+    }
+    // 2) Extraction des puissances GDTF de tous les types du show (repli). Dépend
+    //    des overrides GDTF : un modèle choisi à la main peut porter la conso que
+    //    le .gdtf embarqué n'avait pas.
+    LaunchedEffect(scene, gdtfOverrides.version) {
+        val specs = scene.allObjects.mapNotNull { it.gdtfSpec?.trim()?.ifEmpty { null } }.distinct()
+        withContext(Dispatchers.IO) {
+            for (spec in specs) {
+                if (power.gdtfWatts(spec) != null) continue
+                val bytes = gdtfOverrides.map[spec] ?: run {
+                    val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
+                    cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
+                } ?: continue
+                val w = runCatching { com.minou.mvrviewer.mvr.GdtfPower.maxWatts(bytes) }.getOrNull()
+                if (w != null) withContext(Dispatchers.Main) { power.setGdtf(spec, w) }
+            }
+        }
+    }
+    // 3) Fusion CLOUD : pour chaque type, on rapatrie l'entrée communautaire et on
+    //    la fusionne (LWW) dans le cache disque + l'état. No-op si non connecté.
+    LaunchedEffect(sync, scene, authState?.value) {
+        val s = sync ?: return@LaunchedEffect
+        if (authState?.value?.isSignedIn != true) return@LaunchedEffect
+        val specs = scene.allObjects.mapNotNull { it.gdtfSpec?.trim()?.ifEmpty { null } }.distinct()
+        for (spec in specs) {
+            val remote = s.fetchPowerEntry(spec) ?: continue
+            val merged = withContext(Dispatchers.IO) { PowerLibraryStore.upsert(ctx, remote) }
+            val id = com.minou.mvrviewer.sync.powerLibraryDocId(spec)
+            merged[id]?.let { power.seedLibrary(id, it.watts) }
+        }
+    }
+    // Commit d'une saisie UTILISATEUR de puissance → cache disque (LWW) + push
+    // cloud (clé = spec) au nom de l'utilisateur courant. Profite à tous.
+    LaunchedEffect(sync, projectKey) {
+        power.onCommit = { spec, _, watts ->
+            val by = sync?.currentAuthor?.first ?: ""
+            scope.launch(Dispatchers.IO) {
+                PowerLibraryStore.upsert(ctx, PowerEntry(spec, watts, by, System.currentTimeMillis()))
+            }
+            sync?.putPowerEntry(spec, watts)
+        }
+    }
+
     // Base de comparaison après restauration disque : sans elle, la première
     // modification serait journalisée comme partant de « rien », et son
     // annulation ramènerait à un état vide au lieu de l'état rouvert.
@@ -521,6 +576,7 @@ fun SceneScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             overrides = overrides,
+            power = power,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -34,8 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import com.minou.mvrviewer.mvr.DmxMode
 import com.minou.mvrviewer.mvr.GdtfModes
+import com.minou.mvrviewer.mvr.GdtfPower
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrSceneObject
+import com.minou.mvrviewer.sync.PowerSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -148,6 +151,7 @@ fun FixtureDetailSheet(
     fixture: MvrSceneObject,
     mvrBytes: ByteArray,
     overrides: PatchOverrides,
+    power: PowerLibraryState,
     onDismiss: () -> Unit
 ) {
     val modes by produceState(initialValue = emptyList<DmxMode>(), fixture) {
@@ -166,6 +170,29 @@ fun FixtureDetailSheet(
     }
     var modeName by remember(fixture) { mutableStateOf(overrides.effectiveMode(fixture)) }
     var modeMenu by remember { mutableStateOf(false) }
+
+    // Puissance extraite du GDTF pour CE type si elle n'est pas déjà en cache
+    // (repli robuste : SceneScreen remplit déjà toutes les specs à l'ouverture,
+    // mais la fiche reste correcte même ouverte avant la fin de l'extraction).
+    LaunchedEffect(fixture) {
+        val spec = fixture.gdtfSpec ?: return@LaunchedEffect
+        if (power.gdtfWatts(spec) != null) return@LaunchedEffect
+        val w = withContext(Dispatchers.IO) {
+            val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
+            val gd = cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
+                ?: return@withContext null
+            runCatching { GdtfPower.maxWatts(gd) }.getOrNull()
+        }
+        if (w != null) power.setGdtf(spec, w)
+    }
+    // Puissance effective (biblio prioritaire, sinon GDTF) + provenance.
+    val resolution = power.effective(fixture.gdtfSpec)
+    var wattsText by remember(fixture) { mutableStateOf(resolution.watts?.toString() ?: "") }
+    // Pré-remplissage QUAND la valeur arrive (extraction/cloud asynchrones) : on
+    // ne remplace pas une saisie en cours — seulement un champ resté vide.
+    LaunchedEffect(resolution.watts) {
+        if (wattsText.isBlank() && resolution.watts != null) wattsText = resolution.watts.toString()
+    }
 
     val selectedMode = modes.firstOrNull { it.name == modeName } ?: modes.firstOrNull()
 
@@ -260,14 +287,58 @@ fun FixtureDetailSheet(
                 }
             }
 
+            // ---- Consommation électrique (outil de câblage, phase 1) ----------
+            // Puissance MAX du type : lue du GDTF si présente, sinon saisie à la
+            // main. Une saisie est mémorisée dans la BIBLIOTHÈQUE PARTAGÉE (clé =
+            // spec) → jamais à ressaisir, pour tous les projets et utilisateurs.
+            if (fixture.gdtfSpec != null) {
+                val wattsInt = wattsText.trim().toIntOrNull()
+                val wattsOk = wattsText.isBlank() || (wattsInt != null && wattsInt > 0)
+                Text("Consommation", style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+                OutlinedTextField(
+                    value = wattsText,
+                    onValueChange = { new -> wattsText = new.filter { it.isDigit() } },
+                    label = { Text("Consommation max (W)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = !wattsOk,
+                    supportingText = {
+                        Text(
+                            when (resolution.source) {
+                                PowerSource.LIBRARY -> "Source : saisie (bibliothèque partagée)"
+                                PowerSource.GDTF -> "Source : GDTF (modifiable)"
+                                PowerSource.NONE -> "Aucune valeur GDTF — à saisir"
+                            },
+                            color = if (resolution.source == PowerSource.NONE)
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             // Adresse vide (= inchangée) ou complète et valide ; « 1. » est une
             // saisie en cours, on n'enregistre pas.
             val addrOk = addr.isBlank() || (!addr.endsWith(".") && isPlausibleDmxAddress(addr))
+            val wattsSaveOk = wattsText.isBlank() || (wattsText.trim().toIntOrNull()?.let { it > 0 } == true)
             Button(
-                enabled = addrOk,
-                onClick = { overrides.set(fixture, id, addr, modeName); onDismiss() },
+                enabled = addrOk && wattsSaveOk,
+                onClick = {
+                    overrides.set(fixture, id, addr, modeName)
+                    // Écrit la puissance dans la biblio partagée UNIQUEMENT si
+                    // l'utilisateur a changé la valeur effective (ne pas « promouvoir »
+                    // en saisie une valeur GDTF laissée telle quelle).
+                    val spec = fixture.gdtfSpec
+                    val parsed = wattsText.trim().toIntOrNull()
+                    if (spec != null && parsed != null && parsed > 0 && parsed != resolution.watts) {
+                        power.set(spec, parsed)
+                    }
+                    onDismiss()
+                },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-            ) { Text("Enregistrer le patch") }
+            ) { Text("Enregistrer") }
         }
     }
 }

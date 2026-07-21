@@ -15,6 +15,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -126,9 +131,35 @@ fun PatchListScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
+        // Deux projecteurs ne peuvent pas porter le même N° : sur un vrai
+        // plateau c'est une erreur de patch (le pupitre en piloterait deux, ou
+        // aucun). On la signale ici plutôt que de la découvrir en montage.
+        val dupIds = remember(fixtures, overrides.version) {
+            fixtures.mapNotNull { overrides.effectiveId(it)?.trim()?.ifBlank { null } }
+                .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        }
+        if (dupIds.isNotEmpty()) {
+            Surface(color = MaterialTheme.colorScheme.errorContainer) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Filled.Warning, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "N° en double : " + dupIds.sorted().joinToString(", ") { "#" + it },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(filtered) { f -> FixtureRow(f, overrides) { detail = f } }
+            items(filtered) { f ->
+                FixtureRow(f, overrides, overrides.effectiveId(f)?.trim() in dupIds) { detail = f }
+            }
         }
     }
 
@@ -169,13 +200,25 @@ private fun FacetChip(label: String, options: List<String>, selected: Set<String
 }
 
 @Composable
-private fun FixtureRow(f: MvrSceneObject, overrides: PatchOverrides, onClick: () -> Unit) {
+private fun FixtureRow(
+    f: MvrSceneObject, overrides: PatchOverrides, duplicateId: Boolean = false, onClick: () -> Unit
+) {
     val edited = overrides.isEdited(f)
     Column(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         val id = overrides.effectiveId(f)?.let { "#$it  " } ?: ""
-        Text("$id${f.name}" + if (edited) "  ✎" else "", style = MaterialTheme.typography.bodyLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (duplicateId) {
+                Icon(Icons.Filled.Warning, contentDescription = "N° en double",
+                    tint = MaterialTheme.colorScheme.error, modifier = Modifier.padding(end = 6.dp))
+            }
+            Text(
+                "$id${f.name}" + if (edited) "  ✎" else "",
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (duplicateId) MaterialTheme.colorScheme.error else Color.Unspecified
+            )
+        }
         val spec = f.gdtfSpec ?: "—"
         val mode = overrides.effectiveMode(f) ?: "—"
         val addr = overrides.effectiveAddress(f)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "—"

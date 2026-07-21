@@ -72,12 +72,39 @@ data class AuditEntry(
     val epoch: Double,
     val authorUid: String,
     val authorName: String,
-    val kind: String,     // "patch" | "plan" | "calibration" | …
+    val kind: String,     // "patch" | "plan" | "calibration" | "layers" | …
     val target: String,   // ex. « Projecteur N° 213 »
     val field: String,    // ex. « Adresse »
     val oldValue: String, // ex. « 1.147 » (— si vide)
-    val newValue: String  // ex. « 1.189 »
-)
+    val newValue: String, // ex. « 1.189 »
+    // ---- Coordonnées MACHINE de la modification (annulation) ----------------
+    // Les 5 champs ci-dessus ne sont que de l'AFFICHAGE : « Projecteur N° 213 »
+    // redevient ambigu dès qu'on repatche, et « 1.147 » est déjà formaté. Sans
+    // ces coordonnées, on ne peut pas rejouer la valeur d'origine. Optionnels :
+    // les entrées écrites avant cette version (et par une version plus ancienne
+    // de l'autre plateforme) restent lisibles — simplement non annulables.
+    // NOMS PARTAGÉS iOS/Android : ne pas renommer d'un seul côté.
+    val objectKey: String? = null, // identité de la cible (clé d'instance MVR / uuid) ; "" = le projet
+    val fieldKey: String? = null,  // champ visé : "fixtureId" | "address" | "mode" | AuditFieldKey.*
+    val oldRaw: String? = null,    // valeur AVANT, brute (non formatée) — c'est elle qu'on réapplique
+    val newRaw: String? = null     // valeur APRÈS, brute
+) {
+    /**
+     * Annulable seulement si l'entrée porte ses coordonnées machine. `oldRaw`
+     * peut valoir "" (champ vidé), d'où le test sur la nullité, pas le vide.
+     */
+    val isUndoable: Boolean get() = fieldKey != null && oldRaw != null
+}
+
+/** Clés machine de champ (partagées iOS/Android — valeurs sérialisées telles quelles). */
+object AuditFieldKey {
+    const val FIXTURE_ID = "fixtureId"
+    const val ADDRESS = "address"
+    const val MODE = "mode"
+    const val GEO_ANCHORS = "geoAnchors"
+    const val REF_PLAN_TRANSFORM = "refPlanTransform"
+    const val REF_PLAN_HIDDEN_LAYERS = "refPlanHiddenLayers"
+}
 
 /** Sections d'état synchronisées indépendamment (LWW par section). */
 enum class ProjectSectionKind(val raw: String) {

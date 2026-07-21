@@ -10,7 +10,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -240,7 +244,11 @@ fun JoinProjectDialog(sync: SyncViewModel, onDismiss: () -> Unit, onJoined: (Clo
 // MARK: - Historique des modifications (audit)
 
 @Composable
-fun HistoryDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
+fun HistoryDialog(
+    sync: SyncViewModel,
+    onUndo: ((AuditEntry) -> Unit)? = null,
+    onDismiss: () -> Unit
+) {
     val log by sync.auditLog.collectAsState()
     val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
 
@@ -254,7 +262,7 @@ fun HistoryDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
             } else {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     items(log) { e ->
-                        AuditRow(e, fmt.format(Date((e.epoch * 1000).toLong())))
+                        AuditRow(e, fmt.format(Date((e.epoch * 1000).toLong())), onUndo)
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }
                 }
@@ -265,15 +273,26 @@ fun HistoryDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun AuditRow(e: AuditEntry, whenStr: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Text("${e.target} · ${e.field}", style = MaterialTheme.typography.bodyMedium)
-        val old = e.oldValue.ifBlank { "—" }
-        Text("$old  →  ${e.newValue}",
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
-        Text("par ${e.authorName} · $whenStr",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun AuditRow(e: AuditEntry, whenStr: String, onUndo: ((AuditEntry) -> Unit)?) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("${e.target} · ${e.field}", style = MaterialTheme.typography.bodyMedium)
+            val old = e.oldValue.ifBlank { "—" }
+            Text("$old  →  ${e.newValue}",
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
+            Text("par ${e.authorName} · $whenStr",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        // Flèche « annuler » seulement si l'entrée porte ses coordonnées machine :
+        // une entrée ancienne n'a pas de quoi rejouer sa valeur d'origine, on ne
+        // lui affiche donc AUCUN affordance (plutôt qu'un bouton qui échouerait).
+        if (onUndo != null && e.isUndoable) {
+            IconButton(onClick = { onUndo(e) }) {
+                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Annuler cette modification")
+            }
+        }
     }
 }
 

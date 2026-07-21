@@ -20,7 +20,9 @@ import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.ProjectStore
 import com.minou.mvrviewer.mvr.ReferencePlan
 import com.minou.mvrviewer.mvr.ReferencePlanTransform
+import com.minou.mvrviewer.sync.AuditCoding
 import com.minou.mvrviewer.sync.AuditEntry
+import com.minou.mvrviewer.sync.AuditFieldKey
 import com.minou.mvrviewer.sync.LocalMapper
 import com.minou.mvrviewer.sync.PatchStore
 import com.minou.mvrviewer.sync.RefPlanInterop
@@ -95,7 +97,7 @@ fun SceneScreen(
     // aller-retour, un état local se perdrait à la première visite en 3D.
     var hiddenElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
     var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
-    fun hiddenSig(s: Set<String>) = s.sorted().joinToString("|")
+    fun hiddenSig(s: Set<String>) = AuditCoding.encodeLayers(s)
     LaunchedEffect(projectKey) {
         val rp = withContext(Dispatchers.IO) { ProjectStore.loadReferencePlan(ctx, projectKey) }
         val ov = withContext(Dispatchers.IO) { ProjectStore.loadOverrides(ctx, projectKey) }
@@ -149,8 +151,23 @@ fun SceneScreen(
     val authState = sync?.auth?.collectAsState()
     val curProject = sync?.currentProject?.collectAsState()
 
-    fun transformSig(t: ReferencePlanTransform) =
-        "${t.offsetX},${t.offsetY},${t.rotationDeg},${t.scale},${t.heightZ},${t.visible}"
+    fun transformSig(t: ReferencePlanTransform) = AuditCoding.encodeTransform(t)
+    fun calibSig() = AuditCoding.encodeAnchors(calibration.anchors)
+
+    // Fabrique une entrée d'audit AVEC ses coordonnées machine — sans elles,
+    // l'entrée est un simple texte que l'historique ne saurait pas rejouer.
+    fun auditEntry(
+        kind: String, target: String, field: String,
+        oldDisplay: String, newDisplay: String,
+        objectKey: String, fieldKey: String, oldRaw: String, newRaw: String
+    ): AuditEntry? {
+        val s = sync ?: return null
+        val (uid, name) = s.currentAuthor
+        return AuditEntry(
+            s.newAuditId(), s.nowEpoch(), uid, name, kind, target, field,
+            oldDisplay, newDisplay, objectKey, fieldKey, oldRaw, newRaw
+        )
+    }
 
     // Applique une section DISTANTE — partagé par l'instantané d'ouverture ET le
     // flux live (mirroir de applyRemote/applySnapshot iOS, champ par champ).
@@ -162,7 +179,7 @@ fun SceneScreen(
             }
             is SectionPayload.Calibration -> {
                 val anchors = LocalMapper.toAnchors(p.dto)
-                lastCalibSig = anchors.joinToString("|") { "${it.worldX},${it.worldY},${it.latitude},${it.longitude}" }
+                lastCalibSig = AuditCoding.encodeAnchors(anchors)
                 calibration.reset(); anchors.forEach { calibration.addAnchor(it) }
                 withContext(Dispatchers.IO) { ProjectStore.saveCalibration(ctx, projectKey, calibration.anchors) }
                 calibTick++
@@ -235,7 +252,7 @@ fun SceneScreen(
         lastSatellitePushed = options.showSatellite
         lastHiddenSig = hiddenSig(hiddenLayers)
         if (calibration.isCalibrated) {
-            lastCalibSig = calibration.anchors.joinToString("|") { "${it.worldX},${it.worldY},${it.latitude},${it.longitude}" }
+            lastCalibSig = calibSig()
             s.pushCalibration(calibration.anchors)
         }
         if (overrides.edits.isNotEmpty()) s.pushPatch(scene, overrides.toPersistedList())
@@ -270,19 +287,25 @@ fun SceneScreen(
         overrides.onCommit = { fixture, old, new ->
             scope.launch(Dispatchers.IO) { PatchStore.save(ctx, projectKey, overrides.toPersistedList()) }
             s.pushPatch(scene, overrides.toPersistedList())
-            val (uid, name) = s.currentAuthor
             val target = "Projecteur ${new.fixtureId ?: old.fixtureId ?: fixture.name}"
-            val audits = buildList {
-                if (old.fixtureId != new.fixtureId)
-                    add(AuditEntry(s.newAuditId(), s.nowEpoch(), uid, name, "patch", target,
-                        "Fixture ID", old.fixtureId ?: "", new.fixtureId ?: ""))
-                if (old.address != new.address)
-                    add(AuditEntry(s.newAuditId(), s.nowEpoch(), uid, name, "patch", target,
-                        "Adresse", formatAudAddress(old.address), formatAudAddress(new.address)))
-                if (old.modeName != new.modeName)
-                    add(AuditEntry(s.newAuditId(), s.nowEpoch(), uid, name, "patch", target,
-                        "Mode", old.modeName ?: "", new.modeName ?: ""))
-            }
+            // La clé d'INSTANCE est la seule identité stable du projecteur : le
+            // libellé « Projecteur N° 213 » redevient ambigu dès le repatch suivant.
+            val objKey = overrides.key(fixture)
+            val audits = listOfNotNull(
+                if (old.fixtureId != new.fixtureId) auditEntry(
+                    "patch", target, "Fixture ID", old.fixtureId ?: "", new.fixtureId ?: "",
+                    objKey, AuditFieldKey.FIXTURE_ID, old.fixtureId ?: "", new.fixtureId ?: ""
+                ) else null,
+                if (old.address != new.address) auditEntry(
+                    "patch", target, "Adresse",
+                    formatAudAddress(old.address), formatAudAddress(new.address),
+                    objKey, AuditFieldKey.ADDRESS, old.address ?: "", new.address ?: ""
+                ) else null,
+                if (old.modeName != new.modeName) auditEntry(
+                    "patch", target, "Mode", old.modeName ?: "", new.modeName ?: "",
+                    objKey, AuditFieldKey.MODE, old.modeName ?: "", new.modeName ?: ""
+                ) else null
+            )
             s.recordAudit(audits)
         }
     }
@@ -293,14 +316,29 @@ fun SceneScreen(
         s.events.collect { ev -> if (ev is RemoteEvent.Section) applySection(ev.change.payload) }
     }
 
-    // Push de la calibration quand elle change (utilisateur), sauf écho distant.
+    // Base de comparaison après restauration disque : sans elle, la première
+    // modification serait journalisée comme partant de « rien », et son
+    // annulation ramènerait à un état vide au lieu de l'état rouvert.
+    LaunchedEffect(restored) {
+        if (!restored) return@LaunchedEffect
+        if (lastCalibSig.isEmpty()) lastCalibSig = calibSig()
+        if (lastTransformSig.isEmpty()) referencePlan?.transform?.let { lastTransformSig = transformSig(it) }
+    }
+
+    // Journalise + pousse la calibration quand elle change (utilisateur), sauf
+    // écho distant. Le journal est tenu même hors ligne / projet non partagé.
     LaunchedEffect(calibTick) {
         val s = sync ?: return@LaunchedEffect
-        if (!restored || calibTick == 0 || !s.isCurrentProjectShared) return@LaunchedEffect
-        val sig = calibration.anchors.joinToString("|") { "${it.worldX},${it.worldY},${it.latitude},${it.longitude}" }
+        if (!restored || calibTick == 0) return@LaunchedEffect
+        val sig = calibSig()
         if (sig == lastCalibSig) return@LaunchedEffect
+        val before = lastCalibSig
         lastCalibSig = sig
-        s.pushCalibration(calibration.anchors)
+        auditEntry("calibration", "Calibration GPS", "Ancres",
+            AuditCoding.describeAnchors(before), AuditCoding.describeAnchors(sig),
+            "", AuditFieldKey.GEO_ANCHORS, before, sig
+        )?.let { s.recordAudit(listOf(it)) }
+        if (s.isCurrentProjectShared) s.pushCalibration(calibration.anchors)
     }
 
     // Push du manifeste quand le satellite change (utilisateur), sauf écho distant.
@@ -319,12 +357,78 @@ fun SceneScreen(
         if (!restored) return@LaunchedEffect
         withContext(Dispatchers.IO) { ProjectStore.saveRefPlanHiddenLayers(ctx, projectKey, hiddenLayers) }
         val s = sync ?: return@LaunchedEffect
-        if (!s.isCurrentProjectShared) return@LaunchedEffect
         val sig = hiddenSig(hiddenLayers)
         if (sig == lastHiddenSig) return@LaunchedEffect
+        val before = lastHiddenSig
         lastHiddenSig = sig
+        auditEntry("layers", "Plan de repère", "Calques masqués",
+            AuditCoding.describeLayers(before), AuditCoding.describeLayers(sig),
+            "", AuditFieldKey.REF_PLAN_HIDDEN_LAYERS, before, sig
+        )?.let { s.recordAudit(listOf(it)) }
+        if (!s.isCurrentProjectShared) return@LaunchedEffect
         s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), referencePlan?.transform,
             hiddenLayers.toList(), options.showSatellite, refPlanSha)
+    }
+
+    // Point de passage UNIQUE du placement du plan (glissé débouncé par PlanScreen,
+    // ou annulation depuis l'historique) : journalise puis pousse, une seule fois
+    // par valeur — l'anti-écho `lastTransformSig` évite de rejouer le distant.
+    fun commitTransform(t: ReferencePlanTransform) {
+        val s = sync ?: return
+        val sig = transformSig(t)
+        if (sig == lastTransformSig) return
+        val before = lastTransformSig
+        lastTransformSig = sig
+        // Pas de valeur de départ connue (plan jamais placé) : rien à annuler,
+        // on n'écrit donc pas d'entrée plutôt qu'une entrée trompeuse.
+        if (AuditCoding.decodeTransform(before) != null) {
+            auditEntry("plan", "Plan de repère", "Placement",
+                AuditCoding.describeTransform(before), AuditCoding.describeTransform(sig),
+                "", AuditFieldKey.REF_PLAN_TRANSFORM, before, sig
+            )?.let { s.recordAudit(listOf(it)) }
+        }
+        if (!s.isCurrentProjectShared) return
+        scope.launch {
+            s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), t,
+                hiddenLayers.toList(), options.showSatellite, refPlanSha)
+        }
+    }
+
+    // Annulation d'une entrée d'historique : on réapplique la valeur d'origine
+    // par le CHEMIN NORMAL (même code que l'édition utilisateur) — il persiste,
+    // pousse au cloud et journalise l'annulation comme une entrée de plus. Le
+    // journal reste ainsi strictement en ajout seul.
+    fun undoAudit(e: AuditEntry) {
+        val raw = e.oldRaw ?: return
+        when (e.fieldKey) {
+            AuditFieldKey.FIXTURE_ID, AuditFieldKey.ADDRESS, AuditFieldKey.MODE -> {
+                val key = e.objectKey ?: return
+                val f = scene.fixtures.firstOrNull { overrides.key(it) == key } ?: return
+                overrides.set(
+                    f,
+                    if (e.fieldKey == AuditFieldKey.FIXTURE_ID) raw else overrides.effectiveId(f),
+                    if (e.fieldKey == AuditFieldKey.ADDRESS) raw else overrides.effectiveAddress(f),
+                    if (e.fieldKey == AuditFieldKey.MODE) raw.ifBlank { null } else overrides.effectiveMode(f)
+                )
+            }
+            AuditFieldKey.GEO_ANCHORS -> {
+                val anchors = AuditCoding.decodeAnchors(raw)
+                calibration.reset(); anchors.forEach { calibration.addAnchor(it) }
+                scope.launch(Dispatchers.IO) {
+                    ProjectStore.saveCalibration(ctx, projectKey, calibration.anchors.toList())
+                }
+                calibTick++ // l'effet de calibration journalise et pousse
+            }
+            // L'effet sur hiddenLayers fait le reste (persistance, journal, push).
+            AuditFieldKey.REF_PLAN_HIDDEN_LAYERS -> hiddenLayers = AuditCoding.decodeLayers(raw)
+            AuditFieldKey.REF_PLAN_TRANSFORM -> {
+                val t = AuditCoding.decodeTransform(raw) ?: return
+                val rp = referencePlan ?: return
+                referencePlan = ReferencePlan(rp.plan, t)
+                scope.launch(Dispatchers.IO) { ProjectStore.saveTransform(ctx, projectKey, t) }
+                commitTransform(t)
+            }
+        }
     }
 
     // Dialogues de synchro.
@@ -392,21 +496,8 @@ fun SceneScreen(
                 hiddenLayers = if (layer in hiddenLayers) hiddenLayers - layer else hiddenLayers + layer
             },
             onCalibrationChanged = { calibTick++ },
-            onTransformChanged = { t ->
-                // Push live du placement, sauf s'il vient d'être APPLIQUÉ à distance.
-                sync?.let { s ->
-                    if (s.isCurrentProjectShared) {
-                        val sig = transformSig(t)
-                        if (sig != lastTransformSig) {
-                            lastTransformSig = sig
-                            scope.launch {
-                                s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), t,
-                                    hiddenLayers.toList(), options.showSatellite, refPlanSha)
-                            }
-                        }
-                    }
-                }
-            },
+            // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à distance.
+            onTransformChanged = { t -> commitTransform(t) },
             gdtfOverrides = gdtfOverrides,
             onShowAccount = sync?.let { { showAccount = true } },
             onShareProject = sync?.let { { showShare = true } },
@@ -460,7 +551,7 @@ fun SceneScreen(
             if (showAccount) AccountDialog(sync) { showAccount = false }
             if (showShare) ShareProjectDialog(sync, fileName, onDismiss = { showShare = false },
                 onPublished = { scope.launch { pushAllLocalState() } })
-            if (showHistory) HistoryDialog(sync) { showHistory = false }
+            if (showHistory) HistoryDialog(sync, onUndo = { e -> undoAudit(e) }) { showHistory = false }
             if (showJoin) JoinProjectDialog(sync, onDismiss = { showJoin = false }) { project ->
                 scope.launch {
                     runCatching { sync.downloadMvr(project) }.getOrNull()?.let {

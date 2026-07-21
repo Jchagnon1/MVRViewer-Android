@@ -215,11 +215,18 @@ object SectionCodec {
         )
     }
 
-    fun auditToMap(e: AuditEntry): Map<String, Any?> = mapOf(
-        "id" to e.id, "epoch" to e.epoch, "authorUid" to e.authorUid,
-        "authorName" to e.authorName, "kind" to e.kind, "target" to e.target,
-        "field" to e.field, "oldValue" to e.oldValue, "newValue" to e.newValue
-    )
+    // Les coordonnées machine sont OMISES si nulles : une entrée ancienne relue
+    // puis réécrite ne gagne pas de clés vides, et iOS (Optionals) produit la
+    // même forme de document.
+    fun auditToMap(e: AuditEntry): Map<String, Any?> = buildMap {
+        put("id", e.id); put("epoch", e.epoch); put("authorUid", e.authorUid)
+        put("authorName", e.authorName); put("kind", e.kind); put("target", e.target)
+        put("field", e.field); put("oldValue", e.oldValue); put("newValue", e.newValue)
+        e.objectKey?.let { put("objectKey", it) }
+        e.fieldKey?.let { put("fieldKey", it) }
+        e.oldRaw?.let { put("oldRaw", it) }
+        e.newRaw?.let { put("newRaw", it) }
+    }
 
     fun auditFromMap(map: Map<String, Any?>?): AuditEntry? {
         map ?: return null
@@ -233,7 +240,11 @@ object SectionCodec {
             target = map["target"] as? String ?: "",
             field = map["field"] as? String ?: "",
             oldValue = map["oldValue"] as? String ?: "",
-            newValue = map["newValue"] as? String ?: ""
+            newValue = map["newValue"] as? String ?: "",
+            objectKey = map["objectKey"] as? String,
+            fieldKey = map["fieldKey"] as? String,
+            oldRaw = map["oldRaw"] as? String,
+            newRaw = map["newRaw"] as? String
         )
     }
 

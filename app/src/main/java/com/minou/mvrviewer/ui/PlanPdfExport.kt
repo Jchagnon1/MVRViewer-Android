@@ -276,7 +276,17 @@ private fun DrawScope.drawPdfPage(
 private fun DrawScope.drawLegend(
     src: PlanExportSource, v: PlanViewCapture, measurer: TextMeasurer, at: Offset
 ) {
-    val rows = src.legend.take(12)
+    // Légende recomptée PAR PAGE depuis le CACHÉ EFFECTIF de la capture
+    // (v.hiddenElements = masquage + solo au moment de l'ajout de la vue) : la
+    // légende de la page reflète EXACTEMENT les projecteurs qui y sont dessinés —
+    // solo compris — au lieu du décompte global du show. Si le solo a tout filtré,
+    // il n'y a rien à légender : on sort.
+    val rows = src.data.fixtures.asSequence()
+        .filter { it.key !in v.hiddenElements }
+        .groupingBy { it.layer }.eachCount()
+        .toList().sortedByDescending { it.second }
+        .take(12)
+    if (rows.isEmpty()) return
     val entries = rows.map { (layer, n) ->
         layer to measurer.measure("$layer · $n", style = TextStyle(fontSize = 8.sp, color = Color(0xFF222222)))
     }

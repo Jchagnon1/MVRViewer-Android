@@ -27,6 +27,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.CenterFocusWeak
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
@@ -114,6 +116,18 @@ fun PlanScreen(
      */
     hiddenElements: Set<String> = emptySet(),
     onSetHiddenElements: (Set<String>) -> Unit = {},
+    /**
+     * Ensemble SOLO — l'INVERSE exact du masquage. Le masquage tient les éléments
+     * CACHÉS et le dessin les saute ; le solo tient les éléments À MONTRER SEULS
+     * et le dessin ne montre QUE ceux-là (fixtures ET décor), tout le reste
+     * disparaît. Même identité d'instance (mvrInstanceKey) que hiddenElements, si
+     * bien qu'un même tap ou un même cadre de sélection les alimente tous les deux.
+     * VIDE = aucun filtre solo (on montre tout) : un solo vide ne doit jamais
+     * donner un plan noir déroutant — le mode ne « prend » qu'une fois une
+     * sélection faite. Hissé dans SceneScreen pour survivre aux bascules 3D ↔ plan.
+     */
+    soloElements: Set<String> = emptySet(),
+    onSetSoloElements: (Set<String>) -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
@@ -275,26 +289,57 @@ fun PlanScreen(
     // principal, en coordonnées plan (ou locales pour le DXF). Le dessin n'est
     // plus qu'une matrice appliquée au Canvas : plus aucun calcul par sommet à
     // 60 Hz. C'était la cause n°1 des saccades au pan/zoom.
-    val structPaths by produceState<StructPaths?>(null, wire, hiddenElements) {
+    // Univers de TOUTES les clés d'éléments dessinables, exactement dans les mêmes
+    // espaces de clés que ceux testés par les filtres de dessin et alimentés par les
+    // collectes (tap/cadre) : clés de fixtures, ids d'instances de fil de fer, et
+    // clés de structures « point » (structureKeys). Sert à calculer le COMPLÉMENT
+    // du solo (tout SAUF le solo). Mémoïsé sur (data, wire) : rien à recalculer par
+    // frame. Une clé en trop ici est inoffensive (elle finirait dans le caché sans
+    // jamais être testée) ; une clé manquante, elle, ferait apparaître à tort un
+    // élément non-soloé — d'où l'union des TROIS sources.
+    val allElementKeys = remember(data, wire) {
+        val s = HashSet<String>(data.fixtures.size + data.structureKeys.size + 64)
+        data.fixtures.forEach { s.add(it.key) }
+        data.structureKeys.forEach { s.add(it) }
+        wire?.instances?.forEach { s.add(it.id) }
+        s
+    }
+    // CACHÉ EFFECTIF = fusion masquage + solo, ramenée au seul jeu de clés que
+    // consomment déjà TOUS les points de filtrage/cache du dessin (tracés, points,
+    // fixtures, étiquettes, légende, export PDF). En passant ce jeu partout où
+    // hiddenElements était consommé, on réutilise l'infrastructure du masquage SANS
+    // la modifier — aucun second mécanisme, une seule vérité pour l'écran ET le PDF.
+    //   • solo vide → CACHÉ EFFECTIF = masquage seul (on montre tout le reste) ;
+    //   • solo non vide → on ajoute au caché TOUT ce qui n'est PAS dans le solo.
+    // COMPOSITION avec le masquage (règle demandée) : le masquage est appliqué en
+    // UNION PAR-DESSUS le solo, donc un élément soloé MAIS masqué reste caché — le
+    // masquage (une décision) l'emporte sur le solo (un filtre d'affichage).
+    val effectiveHidden = remember(hiddenElements, soloElements, allElementKeys) {
+        if (soloElements.isEmpty()) hiddenElements
+        else HashSet(hiddenElements).apply {
+            allElementKeys.forEach { if (it !in soloElements) add(it) }
+        }
+    }
+    val structPaths by produceState<StructPaths?>(null, wire, effectiveHidden) {
         val wf = wire
         value = if (wf == null || wf.isEmpty) null
         else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            buildStructurePaths(wf, hiddenElements)
+            buildStructurePaths(wf, effectiveHidden)
         }
     }
     // Structures sans fil de fer (géométrie .glb) → un point ; et le repli
     // « un point par objet » utilisé pendant les gestes.
-    val structDots = remember(wire, hiddenElements) { dotsPath(structureDots(wire, hiddenElements)) }
-    val fallbackDots = remember(data, hiddenElements) {
+    val structDots = remember(wire, effectiveHidden) { dotsPath(structureDots(wire, effectiveHidden)) }
+    val fallbackDots = remember(data, effectiveHidden) {
         dotsPath(data.structure.filterIndexed { i, _ ->
-            data.structureKeys.getOrNull(i)?.let { it !in hiddenElements } ?: true
+            data.structureKeys.getOrNull(i)?.let { it !in effectiveHidden } ?: true
         })
     }
-    val fixPaths by produceState<FixturePaths?>(null, fixWire, data, hiddenElements) {
+    val fixPaths by produceState<FixturePaths?>(null, fixWire, data, effectiveHidden) {
         val fw = fixWire
         value = if (fw == null) null
         else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            buildFixturePaths(data, fw, hiddenElements)
+            buildFixturePaths(data, fw, effectiveHidden)
         }
     }
     // Le DXF est tracé dans SES coordonnées locales : placement (décalage /
@@ -315,6 +360,13 @@ fun PlanScreen(
     var rectMode by remember { mutableStateOf(false) }
     /** Mode « masquer des éléments » : le toucher (ou le cadre) retire. */
     var maskMode by remember(scene) { mutableStateOf(false) }
+    // Mode SOLO — miroir de maskMode : le toucher (ou le cadre) AJOUTE à l'ensemble
+    // solo au lieu d'y retirer. C'est un pur routage du geste : il n'est PAS ce qui
+    // déclenche le filtrage à l'écran. Le filtrage est piloté par soloElements (voir
+    // effectiveHidden) — ainsi le solo survit aux allers-retours 3D ↔ plan même si
+    // ce toggle local, lui, se réinitialise (exactement comme maskMode se
+    // réinitialise pendant que hiddenElements, hissé, persiste).
+    var soloMode by remember(scene) { mutableStateOf(false) }
     var rectStart by remember { mutableStateOf<Offset?>(null) }
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
 
@@ -388,7 +440,7 @@ fun PlanScreen(
     // au mode normal, où l'utilisateur ne s'attend plus à rien de sélectionné).
     LaunchedEffect(
         options.showLabels, options.labelFields, options.labelDetached,
-        rectMode, maskMode, calibrating, measureMode
+        rectMode, maskMode, soloMode, calibrating, measureMode
     ) {
         activeLabelKeys = emptySet()
     }
@@ -503,7 +555,9 @@ fun PlanScreen(
             bgDark = BackgroundColorStore.isDark(options.background2D),
             showSatellite = options.showSatellite,
             satelliteOpacity = options.satelliteOpacity,
-            hiddenElements = hiddenElements.toSet(),
+            // CACHÉ EFFECTIF (masquage + solo) : l'export doit refléter EXACTEMENT
+            // ce que l'utilisateur voit — solo compris — donc pas hiddenElements brut.
+            hiddenElements = effectiveHidden.toSet(),
             hiddenLayers = hiddenLayers.toSet(),
             labelShift = HashMap(labelShift),
             selected = selected.toSet(),
@@ -529,7 +583,7 @@ fun PlanScreen(
             modifier = Modifier.fillMaxSize()
                 // En mode rectangle, le glissé trace le cadre de sélection ;
                 // sinon il déplace/zoome le plan (comme le mode dédié iOS).
-                .pointerInput(scene, rectMode, maskMode, hiddenElements) {
+                .pointerInput(scene, rectMode, maskMode, soloMode, hiddenElements, soloElements) {
                     if (rectMode) {
                         detectDragGestures(
                             onDragStart = { rectStart = it; rectEnd = it },
@@ -558,6 +612,28 @@ fun PlanScreen(
                                             if (s.x in l..r && s.y in t..bo) add.add(inst.id)
                                         }
                                         onSetHiddenElements(add)
+                                    } else if (soloMode) {
+                                        // MIROIR du cadre de masquage : le cadre AJOUTE
+                                        // à l'ensemble solo tout ce qu'il contient
+                                        // (projecteurs + décor), au lieu de le retirer.
+                                        // Une fois l'ensemble non vide, le dessin ne
+                                        // montre plus que ça (cf. effectiveHidden).
+                                        val add = HashSet(soloElements)
+                                        data.fixtures.forEach { f ->
+                                            val s = toScreen(f.px, f.py, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) add.add(f.key)
+                                        }
+                                        data.structure.forEachIndexed { i, p ->
+                                            val s = toScreen(p.first, p.second, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) {
+                                                data.structureKeys.getOrNull(i)?.let { add.add(it) }
+                                            }
+                                        }
+                                        wire?.instances?.forEach { inst ->
+                                            val s = toScreen(inst.cx, inst.cy, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) add.add(inst.id)
+                                        }
+                                        onSetSoloElements(add)
                                     } else {
                                         selected.clear()
                                         data.fixtures.forEachIndexed { i, f ->
@@ -611,7 +687,7 @@ fun PlanScreen(
                         }
                     }
                 }
-                .pointerInput(scene, rectMode, calibrating, maskMode, hiddenElements, measureMode, snapVerts, referencePlan) {
+                .pointerInput(scene, rectMode, calibrating, maskMode, soloMode, hiddenElements, soloElements, measureMode, snapVerts, referencePlan) {
                     detectTapGestures { tap ->
                         val w = canvas.x; val h = canvas.y
                         // MESURE : le 1er toucher pose le départ, le 2e l'arrivée,
@@ -689,6 +765,44 @@ fun PlanScreen(
                                 if (d < bestD) { bestD = d; bestKey = k }
                             }
                             bestKey?.let { onSetHiddenElements(hiddenElements + it) }
+                            return@detectTapGestures
+                        }
+                        // MODE SOLO : miroir exact du masquage — le toucher AJOUTE
+                        // l'élément visé (celui-là SEUL) à l'ensemble solo au lieu de
+                        // le retirer. Mêmes rayons, même arbitrage (le projecteur, plus
+                        // petit et souvent recouvert, l'emporte sur le décor). On saute
+                        // ce qui est déjà masqué : le masquage l'emporte, l'ajouter au
+                        // solo n'y changerait rien.
+                        if (soloMode) {
+                            var bestF = -1; var bestFD = 34f * 34f
+                            data.fixtures.forEachIndexed { i, f ->
+                                if (f.key in hiddenElements) return@forEachIndexed
+                                val s = toScreen(f.px, f.py, w, h)
+                                val dx = s.x - tap.x; val dy = s.y - tap.y
+                                val d = dx * dx + dy * dy
+                                if (d < bestFD) { bestFD = d; bestF = i }
+                            }
+                            if (bestF >= 0) {
+                                onSetSoloElements(soloElements + data.fixtures[bestF].key)
+                                return@detectTapGestures
+                            }
+                            var bestKey: String? = null; var bestD = 44f * 44f
+                            wire?.instances?.forEach { inst ->
+                                if (inst.id in hiddenElements) return@forEach
+                                val s = toScreen(inst.cx, inst.cy, w, h)
+                                val dx = s.x - tap.x; val dy = s.y - tap.y
+                                val d = dx * dx + dy * dy
+                                if (d < bestD) { bestD = d; bestKey = inst.id }
+                            }
+                            data.structure.forEachIndexed { i, p ->
+                                val k = data.structureKeys.getOrNull(i) ?: return@forEachIndexed
+                                if (k in hiddenElements) return@forEachIndexed
+                                val s = toScreen(p.first, p.second, w, h)
+                                val dx = s.x - tap.x; val dy = s.y - tap.y
+                                val d = dx * dx + dy * dy
+                                if (d < bestD) { bestD = d; bestKey = k }
+                            }
+                            bestKey?.let { onSetSoloElements(soloElements + it) }
                             return@detectTapGestures
                         }
                         // Calibrage « je suis ici » : le tap pose une ancre (point
@@ -769,10 +883,12 @@ fun PlanScreen(
                 // reçoit l'événement le premier en passe principale, donc
                 // consommer ici annule proprement le pan/zoom
                 // (detectTransformGestures s'arrête sur un change consommé).
-                .pointerInput(scene, rectMode, maskMode, calibrating, measureMode, projectKey, activeLabelKeys) {
+                .pointerInput(scene, rectMode, maskMode, soloMode, calibrating, measureMode, projectKey, activeLabelKeys) {
                     val keys = activeLabelKeys
                     if (keys.isEmpty()) return@pointerInput
-                    if (rectMode || maskMode || calibrating || measureMode) return@pointerInput
+                    // soloMode s'approprie le geste (comme maskMode) : pas de saisie
+                    // d'étiquette pendant qu'on constitue l'ensemble solo.
+                    if (rectMode || maskMode || soloMode || calibrating || measureMode) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // Un SEUL test, contre les boîtes des étiquettes ARMÉES :
@@ -913,7 +1029,9 @@ fun PlanScreen(
                     labelDetached = options.labelDetached,
                     labelSize = options.labelSize,
                     labelOffset = options.labelOffset,
-                    hiddenElements = hiddenElements,
+                    // CACHÉ EFFECTIF : fixtures, silhouettes, décor, étiquettes et
+                    // légende partagent ce seul filtre → le solo agit partout d'un coup.
+                    hiddenElements = effectiveHidden,
                     hiddenLayers = hiddenLayers,
                     structPaths = structPaths,
                     structDots = structDots,
@@ -1053,8 +1171,14 @@ fun PlanScreen(
 
         // Légende : couleur de chaque calque de projecteurs + compte (comme iOS).
         if (options.showLegend) {
-            val legend = remember(scene) {
-                scene.fixtures.groupingBy { it.layerName }.eachCount()
+            // La légende ne compte QUE les projecteurs réellement affichés : filtrée
+            // par le CACHÉ EFFECTIF (masquage + solo), elle reflète exactement ce que
+            // l'utilisateur voit — et donc ce qu'il exporte. Un calque entièrement
+            // masqué ou hors-solo disparaît de la légende.
+            val legend = remember(data, effectiveHidden) {
+                data.fixtures.asSequence()
+                    .filter { it.key !in effectiveHidden }
+                    .groupingBy { it.layer }.eachCount()
                     .toList().sortedByDescending { it.second }
             }
             if (legend.isNotEmpty()) {
@@ -1195,16 +1319,32 @@ fun PlanScreen(
             // attendu) ; le cadre reste utilisable pour en masquer plusieurs.
             FilledIconToggleButton(checked = maskMode, onCheckedChange = {
                 maskMode = it
-                if (it) { selected.clear(); measureMode = false }
+                // Masquage et solo se contrediraient (cadre qui cache ET isole) :
+                // activer l'un éteint l'autre.
+                if (it) { selected.clear(); measureMode = false; soloMode = false }
             }) {
                 Icon(Icons.Filled.VisibilityOff, contentDescription = "Masquer des éléments")
+            }
+            // SOLO — MIROIR du masquage : n'affiche QUE la sélection (tap ou cadre),
+            // tout le reste disparaît. Ré-appuyer SORT du mode ET vide l'ensemble
+            // solo → réaffiche tout : le solo est une VUE, pas une modif du show,
+            // donc en sortir restaure l'affichage complet sans rien perdre. Tant que
+            // l'ensemble est vide, RIEN n'est filtré (on montre tout) : un solo vide
+            // ne doit jamais donner un plan noir déroutant — le mode ne « prend »
+            // qu'une fois une première sélection faite (cf. effectiveHidden).
+            FilledIconToggleButton(checked = soloMode, onCheckedChange = {
+                soloMode = it
+                if (it) { selected.clear(); measureMode = false; maskMode = false }
+                else onSetSoloElements(emptySet())
+            }) {
+                Icon(Icons.Filled.CenterFocusStrong, contentDescription = "Solo : n'afficher que la sélection")
             }
             // Mesure entre deux points. Ré-appuyer SORT du mode et efface la
             // cote (même geste que le masquage).
             FilledIconToggleButton(checked = measureMode, onCheckedChange = {
                 measureMode = it
                 if (it) {
-                    rectMode = false; maskMode = false; calibrating = false
+                    rectMode = false; maskMode = false; soloMode = false; calibrating = false
                     measureA = null; measureB = null
                 } else {
                     measureA = null; measureB = null
@@ -1215,6 +1355,14 @@ fun PlanScreen(
             if (hiddenElements.isNotEmpty()) {
                 FilledIconButton(onClick = { onSetHiddenElements(emptySet()) }) {
                     Icon(Icons.Filled.Visibility, contentDescription = "Tout réafficher")
+                }
+            }
+            // Vider le solo SANS quitter le mode (miroir de « Tout réafficher ») :
+            // on revient à « tout affiché », prêt à re-sélectionner. Visible dès que
+            // l'ensemble solo isole réellement quelque chose.
+            if (soloElements.isNotEmpty()) {
+                FilledIconButton(onClick = { onSetSoloElements(emptySet()) }) {
+                    Icon(Icons.Filled.CenterFocusWeak, contentDescription = "Vider le solo")
                 }
             }
             if (selected.isNotEmpty()) {

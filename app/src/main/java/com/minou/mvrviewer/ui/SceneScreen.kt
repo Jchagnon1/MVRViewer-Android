@@ -96,6 +96,14 @@ fun SceneScreen(
     // pour survivre aux bascules 3D ↔ plan — PlanScreen est détruit à chaque
     // aller-retour, un état local se perdrait à la première visite en 3D.
     var hiddenElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    // Ensemble SOLO (identité d'INSTANCE, comme hiddenElements) : quand il est
+    // non vide, la vue plan n'affiche QUE ces éléments — c'est l'inverse exact du
+    // masquage. Hissé ici pour la MÊME raison que hiddenElements : PlanScreen est
+    // détruit à chaque aller-retour 3D ↔ plan, un état local se perdrait dès la
+    // première visite en 3D. En revanche il n'est NI persisté NI synchronisé : le
+    // solo est un filtre d'affichage PERSONNEL (une « vue »), pas une modification
+    // du show — contrairement au masquage qui, lui, est une décision partagée.
+    var soloElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
     var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
     fun hiddenSig(s: Set<String>) = AuditCoding.encodeLayers(s)
     LaunchedEffect(projectKey) {
@@ -465,6 +473,8 @@ fun SceneScreen(
             options = options,
             hiddenElements = hiddenElements,
             onSetHiddenElements = { hiddenElements = it },
+            soloElements = soloElements,
+            onSetSoloElements = { soloElements = it },
             referencePlan = referencePlan,
             onSetReferencePlan = { rp ->
                 referencePlan = rp

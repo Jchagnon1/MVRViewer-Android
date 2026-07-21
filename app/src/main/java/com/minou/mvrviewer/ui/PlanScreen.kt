@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -540,15 +541,21 @@ fun PlanScreen(
                         // Exclu du mode rectangle, où le tap sert à cocher /
                         // décocher des projecteurs dans la sélection multiple.
                         if (!rectMode) {
-                            // L'étiquette ACTIVE l'emporte d'office quand elle est
-                            // touchée : c'est ce qui garantit qu'on peut toujours
-                            // la désactiver, même posée pile sur son symbole (où
-                            // l'arbitrage « plus près de l'étiquette que du
-                            // projecteur » de labelKeyAt la ferait perdre).
+                            // L'étiquette ACTIVE passe avant les autres étiquettes
+                            // (on doit toujours pouvoir la désactiver, même si une
+                            // voisine est plus proche), mais elle reste soumise au
+                            // MÊME arbitrage avec le symbole du projecteur : si le
+                            // doigt est plus près de la pastille du projecteur que
+                            // de la boîte, le tap file à la sélection (règle 5 —
+                            // une étiquette posée sur son symbole ne doit jamais
+                            // confisquer la sélection). La désactivation, elle, a
+                            // lieu de toute façon plus bas.
                             val act = activeLabelKey
                             if (act != null) {
                                 val box = labelHits.firstOrNull { it.key == act }
-                                if (box != null && distanceToBox(box, tap) <= labelSlackPx) {
+                                val d = box?.let { distanceToBox(it, tap) }
+                                if (box != null && d != null && d <= labelSlackPx &&
+                                    hypot(tap.x - box.anchor.x, tap.y - box.anchor.y) > d) {
                                     activeLabelKey = null
                                     return@detectTapGestures
                                 }
@@ -790,6 +797,9 @@ fun PlanScreen(
             val labelPadX = LABEL_PAD_X.toPx()
             val labelPadY = LABEL_PAD_Y.toPx()
             val labelStroke = LABEL_STROKE.toPx()
+            // Converti UNE fois hors de la boucle : `toPx()` par projecteur sur un
+            // gros show, à chaque frame, c'est du temps de dessin pour rien.
+            val labelCullPx = LABEL_CULL_MARGIN.toPx()
             // Couleur RÉELLE du voile de la pastille une fois composée sur le
             // fond du plan : c'est elle, et non le fond nu, qui décide de la
             // lisibilité de l'encre (cf. readableInk).
@@ -804,8 +814,8 @@ fun PlanScreen(
                 // sinon l'étiquette disparaît dès que son projecteur sort du
                 // cadre — et devient irrécupérable.
                 val sh = labelShift[f.key] ?: Offset.Zero
-                val cullX = 40f + kotlin.math.abs(sh.x) + LABEL_CULL_MARGIN
-                val cullY = 40f + kotlin.math.abs(sh.y) + LABEL_CULL_MARGIN
+                val cullX = 40f + kotlin.math.abs(sh.x) + labelCullPx
+                val cullY = 40f + kotlin.math.abs(sh.y) + labelCullPx
                 if (s.x !in -cullX..w + cullX || s.y !in -cullY..h + cullY) return@forEachIndexed
                 val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
                 if (silhouetteVisible(f.spec)) {
@@ -1618,7 +1628,7 @@ private fun relativeLuminance(c: Color): Float {
 }
 
 /** Rapport de contraste WCAG entre deux couleurs opaques (1 → 21). */
-private fun contrastRatio(a: Color, b: Color): Float {
+internal fun contrastRatio(a: Color, b: Color): Float {
     val la = relativeLuminance(a); val lb = relativeLuminance(b)
     val hi = max(la, lb); val lo = min(la, lb)
     return (hi + 0.05f) / (lo + 0.05f)
@@ -1632,25 +1642,46 @@ private fun contrastRatio(a: Color, b: Color): Float {
  * ne se lisent plus du tout — et symétriquement des teintes très sombres sur le
  * voile noir d'un fond sombre. Un simple seuil de luminosité (ce qu'on faisait)
  * ne garantit rien : c'est le RAPPORT de contraste avec le voile réel qui
- * compte, et il doit être imposé DANS LES DEUX SENS. On mélange donc la teinte
- * vers le noir ou vers le blanc — selon le côté où est le voile — juste assez
- * pour atteindre le seuil : la teinte reste reconnaissable, ce qu'un repli
- * brutal noir/blanc perdrait.
+ * compte, et il doit être imposé DANS LES DEUX SENS.
+ *
+ * D'où la méthode : on essaie les DEUX cibles (noir et blanc) et on garde la
+ * meilleure, au lieu de déduire la cible d'un seuil de luminosité du voile. Un
+ * seuil se trompe précisément là où ça compte — sur les voiles moyens (un fond
+ * de plan gris donne un voile à mi-chemin), où le côté « logique » peut très
+ * bien ne pas atteindre 4,5:1 alors que l'autre y arrive. On mélange par paliers
+ * et on s'arrête au PREMIER palier qui atteint le seuil : la teinte du calque
+ * reste reconnaissable, ce qu'un repli brutal en noir ou blanc perdrait. Si
+ * aucune des deux cibles n'atteint le seuil (voile gris moyen, cas physique où
+ * rien ne le peut), on garde le meilleur contraste obtenu.
  */
-private fun readableInk(tint: Color, veil: Color): Color {
-    if (contrastRatio(tint, veil) >= LABEL_MIN_CONTRAST) return tint
-    val target = if (relativeLuminance(veil) > 0.18f) Color.Black else Color.White
-    var t = 0.1f
-    while (t < 1f) {
-        val mixed = Color(
-            tint.red + (target.red - tint.red) * t,
-            tint.green + (target.green - tint.green) * t,
-            tint.blue + (target.blue - tint.blue) * t
-        )
-        if (contrastRatio(mixed, veil) >= LABEL_MIN_CONTRAST) return mixed
-        t += 0.1f
+internal fun readableInk(tint: Color, veil: Color): Color {
+    var best = tint
+    var bestRatio = contrastRatio(tint, veil)
+    if (bestRatio >= LABEL_MIN_CONTRAST) return tint
+    var bestMix = Float.MAX_VALUE   // quantité de mélange du meilleur candidat retenu
+    for (target in arrayOf(Color.Black, Color.White)) {
+        for (step in 1..10) {
+            val t = step / 10f
+            val mixed = Color(
+                tint.red + (target.red - tint.red) * t,
+                tint.green + (target.green - tint.green) * t,
+                tint.blue + (target.blue - tint.blue) * t
+            )
+            val r = contrastRatio(mixed, veil)
+            if (r >= LABEL_MIN_CONTRAST) {
+                // Atteint : ne concurrence que les autres candidats atteignant le
+                // seuil, et gagne s'il dénature moins la teinte.
+                if (bestRatio < LABEL_MIN_CONTRAST || t < bestMix) {
+                    best = mixed; bestRatio = r; bestMix = t
+                }
+                break   // inutile de pousser plus loin vers cette cible
+            }
+            // Pas atteint : ne sert que de repli, et seulement tant qu'aucun
+            // candidat n'a atteint le seuil.
+            if (bestRatio < LABEL_MIN_CONTRAST && r > bestRatio) { best = mixed; bestRatio = r }
+        }
     }
-    return target
+    return best
 }
 
 // Géométrie des étiquettes en dp : en pixels bruts, marges et zone d'accrochage
@@ -1667,10 +1698,12 @@ private val LABEL_TOUCH_SLACK = 6.dp
  */
 private const val LABEL_MIN_CONTRAST = 4.5f
 /**
- * Marge de culling supplémentaire, en pixels : l'encombrement d'une pastille
- * dont l'origine (le projecteur) est déjà au bord du cadre.
+ * Marge de culling supplémentaire : l'encombrement d'une pastille dont l'origine
+ * (le projecteur) est déjà au bord du cadre. En dp, comme le reste de la
+ * géométrie d'étiquette — en pixels bruts elle valait trois fois moins de
+ * millimètres réels sur un écran dense, et l'étiquette y disparaissait plus tôt.
  */
-private const val LABEL_CULL_MARGIN = 160f
+private val LABEL_CULL_MARGIN = 160.dp
 /**
  * Amplitude maximale d'un décalage manuel. Au-delà, l'étiquette n'a plus de
  * rapport lisible avec le projecteur qu'elle désigne, et elle sortirait de la

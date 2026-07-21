@@ -29,10 +29,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
@@ -56,6 +60,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
+import kotlinx.coroutines.launch
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -320,6 +326,20 @@ fun PlanScreen(
     }
     var query by remember(scene) { mutableStateOf("") }
 
+    // ---- Export PDF « en construction » ----
+    // L'utilisateur cadre, AJOUTE la vue au document, la nomme, recommence ; le
+    // PDF final est la compilation de ces vues. Les captures sont figées (copie
+    // des réglages) parce que `options` est partagé et mutable : sans copie,
+    // changer une bascule après coup réécrirait les pages déjà composées.
+    var exportMode by remember(scene) { mutableStateOf(false) }
+    val exportViews = remember(scene) { mutableStateListOf<PlanViewCapture>() }
+    var exportName by remember(scene) { mutableStateOf("") }
+    var exportBusy by remember(scene) { mutableStateOf(false) }
+    var exportFile by remember(scene) { mutableStateOf<java.io.File?>(null) }
+    var renamingIndex by remember(scene) { mutableStateOf<Int?>(null) }
+    var renamingText by remember(scene) { mutableStateOf("") }
+    val exportScope = rememberCoroutineScope()
+
     // Géolocalisation : position GPS en direct + calibration par ancres (la
     // calibration est HISSÉE dans SceneScreen → survit aux bascules + persistée).
     var showLocation by remember { mutableStateOf(false) }
@@ -423,6 +443,40 @@ fun PlanScreen(
     fun toPlan(sx: Float, sy: Float, w: Float, h: Float): Pair<Float, Float> {
         val bs = baseScale(w, h) * scale
         return (sx - w / 2f - offset.x) / bs + data.cx to (sy - h / 2f - offset.y) / bs + data.cy
+    }
+
+    /**
+     * Fige la vue COURANTE pour l'export. Le cadrage est enregistré en
+     * coordonnées monde (centre + demi-étendue) et non en pixels : la page PDF
+     * n'a ni la taille ni la densité de l'écran, mais elle doit montrer la même
+     * portion de plan.
+     */
+    fun captureCurrentView(name: String): PlanViewCapture? {
+        val w = canvas.x; val h = canvas.y
+        val bs = baseScale(w, h) * scale
+        if (w <= 0f || h <= 0f || bs <= 0f) return null
+        val (mx, my) = toPlan(w / 2f, h / 2f, w, h)
+        return PlanViewCapture(
+            name = name,
+            centerX = mx, centerY = my,
+            halfW = w / 2f / bs, halfH = h / 2f / bs,
+            layerColors = options.layerColors,
+            showStructure = options.showStructure,
+            showLabels = options.showLabels,
+            showLegend = options.showLegend,
+            labelContent = options.labelContent,
+            labelSize = options.labelSize,
+            labelOffset = options.labelOffset,
+            background = options.background2D,
+            bgDark = BackgroundColorStore.isDark(options.background2D),
+            showSatellite = options.showSatellite,
+            satelliteOpacity = options.satelliteOpacity,
+            hiddenElements = hiddenElements.toSet(),
+            hiddenLayers = hiddenLayers.toSet(),
+            labelShift = HashMap(labelShift),
+            selected = selected.toSet(),
+            screenDensity = labelDensity.density
+        )
     }
 
     // Fond de plan choisi + contraste : sur fond sombre, les tracés/étiquettes
@@ -758,270 +812,57 @@ fun PlanScreen(
         ) {
             canvas = Offset(size.width, size.height)
             val w = size.width; val h = size.height
-
-            // ---- Fond satellite géo-référencé, SOUS tout le reste ----
-            // L'image porte ses 4 coins en monde MVR ; on la dessine comme un
-            // quad via toScreen (même projection que le plan) → alignée sur les
-            // projecteurs. Transformée affine à partir de 3 coins (NW, NE, SW).
-            val sat = satellite
-            if (options.showSatellite && sat != null && !gesturing && sat.bitmap.width > 0) {
-                val nw = toScreen(sat.nwX, -sat.nwY, w, h)
-                val ne = toScreen(sat.neX, -sat.neY, w, h)
-                val sw = toScreen(sat.swX, -sat.swY, w, h)
-                val iw = sat.bitmap.width.toFloat(); val ih = sat.bitmap.height.toFloat()
-                val a = (ne.x - nw.x) / iw; val b = (ne.y - nw.y) / iw
-                val c = (sw.x - nw.x) / ih; val d = (sw.y - nw.y) / ih
-                val m = android.graphics.Matrix().apply {
-                    setValues(floatArrayOf(a, c, nw.x, b, d, nw.y, 0f, 0f, 1f))
-                }
-                val paint = android.graphics.Paint().apply {
-                    isAntiAlias = true; isFilterBitmap = true
-                    alpha = (options.satelliteOpacity.coerceIn(0f, 1f) * 255f).toInt()
-                }
-                drawIntoCanvas { it.nativeCanvas.drawBitmap(sat.bitmap, m, paint) }
-            }
-
-            // ---- Plan de repère DXF importé (sous tout le reste) ----
-            // Les tracés sont déjà construits (coordonnées locales du DXF) : ici
-            // on ne fait qu'empiler placement du DXF + projection plan→écran
-            // dans la matrice du Canvas. Rien n'est recalculé par sommet.
-            dxfVersion.let { }  // dépendance de redraw (transformée mutable)
-            val rp = referencePlan
-            val dxf = dxfPaths
             val bsPlan = baseScale(w, h) * scale
-            // Un plan léger reste affiché PENDANT le geste (plus de clignotement
-            // au pan/zoom) ; un plan lourd s'efface encore, pour tenir 60 fps.
-            if (rp != null && dxf != null && rp.transform.visible && bsPlan > 0f &&
-                (!gesturing || dxf.light)) {
-                val tf = rp.transform
-                val sfac = tf.scale.toFloat()
-                val ppu = bsPlan * sfac              // pixels par unité locale du DXF
-                withTransform({
-                    translate(w / 2f + offset.x, h / 2f + offset.y)
-                    scale(bsPlan, bsPlan, Offset.Zero)
-                    translate(-data.cx, -data.cy)
-                    // Repère plan = (x, −y) : la rotation du placement s'y lit
-                    // donc à l'envers, et le décalage Y aussi.
-                    translate(tf.offsetX.toFloat(), -tf.offsetY.toFloat())
-                    rotate(-tf.rotationDeg.toFloat(), Offset.Zero)
-                    scale(sfac, sfac, Offset.Zero)
-                }) {
-                    // Zones remplies (HATCH/SOLID) SOUS les traits, en
-                    // semi-transparent pour ne pas masquer projecteurs et décor.
-                    for ((key, fp) in dxf.fills) {
-                        val (layer, rgb, solid) = key
-                        if (layer in hiddenLayers) continue
-                        drawPath(fp, dxfDisplayColor(rgb, bgDark).copy(alpha = if (solid) 0.40f else 0.20f))
-                    }
-                    // Un tracé par couleur d'entité résolue (ACI/true-color) →
-                    // couleurs d'AutoCAD, adaptées au fond (contraste).
-                    if (ppu > 0f) {
-                        val sw = 0.7f / ppu   // épaisseur constante À L'ÉCRAN
-                        for ((key, path) in dxf.strokes) {
-                            val (layer, rgb) = key
-                            if (layer in hiddenLayers) continue
-                            drawPath(path, dxfDisplayColor(rgb, bgDark),
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
-                        }
-                    }
-                }
-            }
 
-            // Décor / structure : FIL DE FER VECTORIEL (arêtes caractéristiques
-            // réelles de la géométrie 3D). Pendant un geste, ou tant que le fil
-            // de fer se construit, on retombe sur un point par structure.
-            if (options.showStructure && bsPlan > 0f) {
-                val sp = structPaths
-                withTransform({
-                    translate(w / 2f + offset.x, h / 2f + offset.y)
-                    scale(bsPlan, bsPlan, Offset.Zero)
-                    translate(-data.cx, -data.cy)
-                }) {
-                    val wireOk = sp != null && (!gesturing || sp.light)
-                    if (wireOk) {
-                        val sw = 0.8f / bsPlan
-                        for ((layer, path) in sp.byLayer) {
-                            val col = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer)) else STRUCT_COLOR
-                            drawPath(path, col, style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
-                        }
-                    }
-                    // Structures sans fil de fer (ou repli pendant un geste) : un
-                    // point chacune, en UN SEUL tracé (Skia élague hors écran).
-                    val dots = if (wireOk) structDots else fallbackDots
-                    drawPath(dots, STRUCT_COLOR, style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = 3.2f / bsPlan, cap = androidx.compose.ui.graphics.StrokeCap.Round))
-                }
-            }
+            // Dépendances de REDESSIN portées par des états mutables NON
+            // observables : la transformée du plan DXF et la table des décalages
+            // d'étiquettes. Les lire ici suffit à re-déclencher le dessin.
+            dxfVersion.let { }
+            labelDragVersion.let { }
 
-            // Projecteurs : SILHOUETTE FIL DE FER réelle (modèle GDTF projeté,
-            // comme iOS) quand elle est lisible à ce zoom, sinon pastille.
-            // PASSE 1 : silhouettes (un stroke par calque), avec un cull qui
-            // tient compte du RAYON écran — sinon une silhouette zoomée
-            // disparaîtrait dès que l'origine du projecteur sort du cadre.
-            val showLabels = options.showLabels && bsPlan > 0.02f
-            val fw = fixWire
-            val bsNow = bsPlan
-            val fp = fixPaths
-            // Silhouette LISIBLE pour cette spec à ce zoom ? (sinon : pastille)
-            // On exige que le TRACÉ existe déjà (il est construit hors thread
-            // principal, et le budget mémoire peut écarter une spec) : sinon la
-            // pastille serait réduite à 3 px alors que rien n'est dessiné.
-            fun silhouetteVisible(spec: String?): Boolean {
-                if (gesturing || fw == null || fp == null || spec == null) return false
-                val s = spec.trim()
-                if (s !in fp.specs || fw.edgesBySpec[s] == null) return false
-                return (fw.radiusBySpec[s] ?: 0f) * bsNow > 7f
-            }
-            if (!gesturing && fp != null && bsPlan > 0f) {
-                withTransform({
-                    translate(w / 2f + offset.x, h / 2f + offset.y)
-                    scale(bsPlan, bsPlan, Offset.Zero)
-                    translate(-data.cx, -data.cy)
-                }) {
-                    val sw = 1.2f / bsPlan
-                    for ((key, path) in fp.byKey) {
-                        val sep = key.indexOf(PATH_KEY_SEP)
-                        if (sep < 0) continue
-                        val layer = key.substring(0, sep)
-                        if (!silhouetteVisible(key.substring(sep + 1))) continue
-                        val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer)) else Color(0xFF6E6E73)
-                        drawPath(path, c, style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
-                    }
-                }
-            }
-            // PASSE 2 : pastilles / anneaux de sélection / étiquettes, PAR-DESSUS
-            // les silhouettes (lisibilité).
-            //
-            // Les zones sensibles des étiquettes sont reconstruites ici, à la
-            // seule place où l'on connaît leur boîte réelle (texte mesuré) : le
-            // tap d'activation et le glissé de l'étiquette active s'y réfèrent au
-            // toucher suivant. Elles ne sont remplies QUE pour les étiquettes
-            // réellement dessinées — une zone sensible invisible capturerait un
-            // geste sans que rien ne l'explique à l'écran.
-            labelDragVersion.let { }  // dépendance de redessin (table non observable)
-            labelHits.clear()
-            symbolHits.clear()
-            val activeKey = activeLabelKey
-            val labelPadX = LABEL_PAD_X.toPx()
-            val labelPadY = LABEL_PAD_Y.toPx()
-            val labelStroke = LABEL_STROKE.toPx()
-            // Converti UNE fois hors de la boucle : `toPx()` par projecteur sur un
-            // gros show, à chaque frame, c'est du temps de dessin pour rien.
-            val labelCullPx = LABEL_CULL_MARGIN.toPx()
-            // Couleur RÉELLE du voile de la pastille une fois composée sur le
-            // fond du plan : c'est elle, et non le fond nu, qui décide de la
-            // lisibilité de l'encre (cf. readableInk).
-            val labelVeil = if (bgDark) compositeOver(Color.Black, 0.45f, planBg)
-                            else compositeOver(Color.White, 0.78f, planBg)
-            data.fixtures.forEachIndexed { i, f ->
-                if (f.key in hiddenElements) return@forEachIndexed
-                val s = toScreen(f.px, f.py, w, h)
-                // Le culling se fait sur la position du PROJECTEUR, mais une
-                // étiquette déportée à la main vit ailleurs : on élargit la
-                // fenêtre du décalage manuel (plus l'encombrement d'une pastille)
-                // sinon l'étiquette disparaît dès que son projecteur sort du
-                // cadre — et devient irrécupérable.
-                val sh = labelShift[f.key] ?: Offset.Zero
-                val cullX = 40f + kotlin.math.abs(sh.x) + labelCullPx
-                val cullY = 40f + kotlin.math.abs(sh.y) + labelCullPx
-                if (s.x !in -cullX..w + cullX || s.y !in -cullY..h + cullY) return@forEachIndexed
-                val c = if (options.layerColors) Color(LayerColors.colorInt(layerIndex, f.layer)) else Color(0xFF6E6E73)
-                val symRadius = if (silhouetteVisible(f.spec)) {
-                    drawCircle(c, radius = 3f, center = s)
-                    3f
-                } else {
-                    drawCircle(c, radius = 7f, center = s)
-                    drawCircle(Color.White, radius = 7f, center = s, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
-                    7f
-                }
-                // Le disque de garde reste celui du SYMBOLE (jamais la cible
-                // tactile de 40 px, qui engloberait les pastilles et tuerait la
-                // fonctionnalité aux zooms de travail). Plancher à 7 px : sous la
-                // silhouette GDTF le point n'est plus qu'un repère de 3 px, trop
-                // fin pour être visé au doigt.
-                symbolHits.add(SymbolHit(s.x, s.y, max(symRadius, 7f)))
-                if (i in selected) {
-                    drawCircle(Color(0xFFFFC400), radius = 13f, center = s,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
-                }
-                // Pendant un geste (pan/zoom/glissé), les étiquettes sont
-                // éteintes pour la fluidité — SAUF celle qu'on est en train de
-                // déplacer, qu'il faut évidemment voir bouger. Le tampon suit
-                // exactement cette garde : pendant le geste seule l'étiquette
-                // active y figure, donc elle seule reste saisissable, et c'est
-                // bien ce qu'on veut (les autres ne sont pas à l'écran).
-                if (showLabels && (!gesturing || f.key == activeKey)) {
-                    val text = when (options.labelContent) {
-                        LabelContent.ID -> f.id?.let { "#$it" }
-                        LabelContent.DMX -> f.addr.ifEmpty { null }?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) }
-                        LabelContent.MODE -> f.mode?.ifEmpty { null }
-                        LabelContent.NAME -> f.name
-                    }
-                    if (text != null) {
-                        val fs = (9f * options.labelSize)
-                        val off = 8f * options.labelOffset
-                        // Mesurer un texte est cher : le cache LRU par défaut du
-                        // TextMeasurer ne fait que 8 entrées, donc chaque étiquette
-                        // était re-composée À CHAQUE FRAME. Ici on mémorise le
-                        // résultat par texte (vidé si la taille/l'encre change).
-                        // La couleur n'est PAS mise en page ici : elle varie par
-                        // calque, et la passer au dessin évite une entrée de cache
-                        // par couleur.
-                        val tl = labelCache.getOrPut(text) {
-                            measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = inkColor))
-                        }
-                        // Couleurs par calque actives → l'étiquette porte la même
-                        // couleur que sa pastille (on relie les deux d'un coup
-                        // d'œil) ; sinon on retombe sur l'encre du fond. Dans les
-                        // deux cas l'encre est ramenée à un CONTRASTE MINIMUM
-                        // avec le voile réellement composé : une teinte de calque
-                        // claire (jaune, cyan) sur pastille blanche était
-                        // illisible, et l'inverse arrive sur fond sombre.
-                        val labelInk = readableInk(if (options.layerColors) c else inkColor, labelVeil)
-                        val tx = s.x + off + sh.x
-                        val ty = s.y - fs * 0.7f + sh.y
-                        // Pastille arrondie semi-transparente qui détache le texte
-                        // des tracés, plus un filet fin. Le voile prend le SENS du
-                        // fond, pas sa couleur : clair sur plan clair, sombre sur
-                        // plan sombre, pour rester une simple atténuation du décor.
-                        val bw = tl.size.width + labelPadX * 2f
-                        val bh = tl.size.height + labelPadY * 2f
-                        val boxTL = Offset(tx - labelPadX, ty - labelPadY)
-                        // Zone sensible : remplie SEULEMENT pour les étiquettes
-                        // effectivement dessinées (cf. la garde ci-dessus), sinon
-                        // une boîte invisible capterait un geste sans rien montrer.
-                        labelHits.add(LabelHit(f.key, boxTL.x, boxTL.y, bw, bh))
-                        val boxSize = androidx.compose.ui.geometry.Size(bw, bh)
-                        val radius = androidx.compose.ui.geometry.CornerRadius(bh * 0.32f, bh * 0.32f)
-                        drawRoundRect(
-                            if (bgDark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.78f),
-                            topLeft = boxTL, size = boxSize, cornerRadius = radius
-                        )
-                        val isActive = f.key == activeKey
-                        if (isActive) {
-                            // Retour visuel de l'étiquette ACTIVE : halo ambré
-                            // débordant + filet épaissi. Sans signe net, rien ne
-                            // dit à l'utilisateur que le prochain glissé va la
-                            // déplacer plutôt que paner le plan.
-                            drawRoundRect(
-                                Color(0x55FFC400),
-                                topLeft = Offset(boxTL.x - labelStroke * 3f, boxTL.y - labelStroke * 3f),
-                                size = androidx.compose.ui.geometry.Size(bw + labelStroke * 6f, bh + labelStroke * 6f),
-                                cornerRadius = radius,
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(labelStroke * 5f)
-                            )
-                        }
-                        drawRoundRect(
-                            if (isActive) Color(0xFFFFC400) else labelInk.copy(alpha = 0.85f),
-                            topLeft = boxTL, size = boxSize, cornerRadius = radius,
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                                if (isActive) labelStroke * 2.5f else labelStroke
-                            )
-                        )
-                        drawText(tl, color = labelInk, topLeft = Offset(tx, ty))
-                    }
-                }
-            }
+            // DESSIN COMMUN écran ↔ PDF. Tout ce qui compose le document (fond
+            // satellite, plan DXF, décor, silhouettes, pastilles, étiquettes,
+            // barre d'échelle) passe par cette seule fonction : l'export « en
+            // construction » ne peut donc pas diverger de ce que l'on voit.
+            drawPlanContent(
+                PlanRenderSpec(
+                    data = data,
+                    layerIndex = layerIndex,
+                    pxPerMm = bsPlan,
+                    centerPx = Offset(w / 2f + offset.x, h / 2f + offset.y),
+                    planBg = planBg,
+                    bgDark = bgDark,
+                    inkColor = inkColor,
+                    layerColors = options.layerColors,
+                    showStructure = options.showStructure,
+                    showLabels = options.showLabels,
+                    labelContent = options.labelContent,
+                    labelSize = options.labelSize,
+                    labelOffset = options.labelOffset,
+                    hiddenElements = hiddenElements,
+                    hiddenLayers = hiddenLayers,
+                    structPaths = structPaths,
+                    structDots = structDots,
+                    fallbackDots = fallbackDots,
+                    fixWire = fixWire,
+                    fixPaths = fixPaths,
+                    referencePlan = referencePlan,
+                    dxfPaths = dxfPaths,
+                    satellite = satellite,
+                    showSatellite = options.showSatellite,
+                    satelliteOpacity = options.satelliteOpacity,
+                    selected = selected.toSet(),
+                    labelShift = labelShift,
+                    labelShiftScale = 1f,
+                    activeLabelKey = activeLabelKey,
+                    measurer = measurer,
+                    labelCache = labelCache,
+                    lowDetail = gesturing,
+                    labelHits = labelHits,
+                    symbolHits = symbolHits,
+                    scaleBarAnchor = Offset(20f, h - 172f)
+                )
+            )
 
             // Position GPS de l'utilisateur (bleu), après calibrage.
             calibVersion.let { /* redraw à l'ajout d'ancre */ }
@@ -1117,31 +958,6 @@ fun PlanScreen(
                 }
             }
 
-            // ---- Barre d'échelle (bas-gauche) : longueur « ronde » à l'échelle courante.
-            run {
-                val ppm = baseScale(w, h) * scale // pixels par mm
-                if (ppm > 1e-6f) {
-                    val rawMm = 90f / ppm
-                    val mag = Math.pow(10.0, Math.floor(Math.log10(rawMm.toDouble()))).toFloat()
-                    val niceMm = when {
-                        rawMm / mag < 1.5f -> 1f * mag
-                        rawMm / mag < 3.5f -> 2f * mag
-                        rawMm / mag < 7.5f -> 5f * mag
-                        else -> 10f * mag
-                    }
-                    val barPx = niceMm * ppm
-                    val x0 = 20f; val y0 = h - 172f
-                    drawLine(inkColor, Offset(x0, y0), Offset(x0 + barPx, y0), strokeWidth = 2.5f)
-                    drawLine(inkColor, Offset(x0, y0 - 5f), Offset(x0, y0 + 5f), strokeWidth = 2.5f)
-                    drawLine(inkColor, Offset(x0 + barPx, y0 - 5f), Offset(x0 + barPx, y0 + 5f), strokeWidth = 2.5f)
-                    val label = if (niceMm >= 1000f) {
-                        val m = niceMm / 1000f
-                        (if (m % 1f == 0f) m.toInt().toString() else m.toString()) + " m"
-                    } else "${niceMm.toInt()} mm"
-                    val tl = measurer.measure(label, style = TextStyle(fontSize = 11.sp, color = inkColor))
-                    drawText(tl, topLeft = Offset(x0, y0 - 22f))
-                }
-            }
         }
 
         // Barre du haut : retour + stats. Le voile s'inverse sur fond sombre.
@@ -1325,6 +1141,10 @@ fun PlanScreen(
                     Icon(Icons.Filled.Public, contentDescription = "Fond satellite")
                 }
             }
+            // Export PDF « en construction » : ouvre le panneau de composition.
+            FilledIconToggleButton(checked = exportMode, onCheckedChange = { exportMode = it }) {
+                Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
+            }
             // Plan de repère DXF : importer, ou basculer le panneau de placement.
             FilledIconToggleButton(
                 checked = referencePlan != null && showDxfPanel,
@@ -1439,6 +1259,161 @@ fun PlanScreen(
                 }
             }
         }
+        // ---- Panneau d'export PDF « en construction » ----
+        // Volontairement à part des modes de toucher : composer le document ne
+        // s'approprie aucun geste, on continue de cadrer le plan librement entre
+        // deux ajouts de page.
+        if (exportMode) {
+            Surface(
+                color = Color.White, contentColor = Color(0xFF111111),
+                shape = RoundedCornerShape(12.dp), shadowElevation = 8.dp,
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .padding(bottom = 76.dp, end = 12.dp).width(268.dp)
+            ) {
+                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Export PDF", style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f))
+                        Text("${exportViews.size} vue(s)", style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF666666))
+                    }
+                    OutlinedTextField(
+                        value = exportName,
+                        onValueChange = { exportName = it },
+                        singleLine = true,
+                        label = { Text("Nom de la vue", style = MaterialTheme.typography.bodySmall) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                    )
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            val n = exportName.trim().ifEmpty { "Vue ${exportViews.size + 1}" }
+                            captureCurrentView(n)?.let {
+                                exportViews.add(it)
+                                exportName = ""
+                                // Le document change : le PDF déjà produit ne le
+                                // représente plus.
+                                exportFile = null
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                    ) { Text("Ajouter cette vue") }
+
+                    if (exportViews.isNotEmpty()) {
+                        androidx.compose.foundation.layout.Column(
+                            Modifier.heightIn(max = 170.dp).verticalScroll(rememberScrollState())
+                                .padding(top = 6.dp)
+                        ) {
+                            exportViews.forEachIndexed { i, v ->
+                                Row(verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()) {
+                                    Text("${i + 1}.", style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF888888))
+                                    Text(v.name, style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f).padding(start = 4.dp)
+                                            .clickable { renamingIndex = i; renamingText = v.name })
+                                    IconButton(
+                                        onClick = {
+                                            if (i > 0) { exportViews.add(i - 1, exportViews.removeAt(i)); exportFile = null }
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Monter") }
+                                    IconButton(
+                                        onClick = {
+                                            if (i < exportViews.size - 1) { exportViews.add(i + 1, exportViews.removeAt(i)); exportFile = null }
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Descendre") }
+                                    IconButton(
+                                        onClick = { exportViews.removeAt(i); exportFile = null },
+                                        modifier = Modifier.size(26.dp)
+                                    ) { Icon(Icons.Filled.Delete, contentDescription = "Supprimer", tint = Color(0xFFC62828)) }
+                                }
+                            }
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        androidx.compose.material3.Button(
+                            enabled = exportViews.isNotEmpty() && !exportBusy,
+                            onClick = {
+                                exportBusy = true
+                                val pages = exportViews.toList()
+                                val src = PlanExportSource(
+                                    data = data, layerIndex = layerIndex,
+                                    wire = wire, fixWire = fixWire, dxfPaths = dxfPaths,
+                                    referencePlan = referencePlan, satellite = satellite,
+                                    legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
+                                        .toList().sortedByDescending { it.second },
+                                    documentTitle = "Plan"
+                                )
+                                exportScope.launch {
+                                    val f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                        runCatching { buildPlanPdf(ctxPlan, src, pages) }.getOrNull()
+                                    }
+                                    exportFile = f
+                                    exportBusy = false
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (exportBusy) androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            else Text("Générer", style = MaterialTheme.typography.labelMedium)
+                        }
+                        val ready = exportFile
+                        androidx.compose.material3.OutlinedButton(
+                            enabled = ready != null,
+                            onClick = { ready?.let { sharePlanPdf(ctxPlan, it) } },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Envoyer", style = MaterialTheme.typography.labelMedium) }
+                        androidx.compose.material3.OutlinedButton(
+                            enabled = ready != null,
+                            onClick = { ready?.let { printPlanPdf(ctxPlan, it) } },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Imprimer", style = MaterialTheme.typography.labelMedium) }
+                    }
+                    if (exportFile != null) {
+                        Text("PDF prêt · ${exportViews.size} page(s)",
+                            style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                    }
+                }
+            }
+        }
+
+        // Renommage d'une vue déjà ajoutée.
+        renamingIndex?.let { idx ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { renamingIndex = null },
+                title = { Text("Renommer la vue") },
+                text = {
+                    OutlinedTextField(
+                        value = renamingText, onValueChange = { renamingText = it },
+                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        exportViews.getOrNull(idx)?.let { old ->
+                            // PlanViewCapture.name est mutable : renommer ne
+                            // recompose pas la page, seul le titre change.
+                            old.name = renamingText.trim().ifEmpty { old.name }
+                            // Retrait/réinsertion : la liste observable ne peut
+                            // pas voir un champ muté d'un élément déjà présent.
+                            exportViews.removeAt(idx)
+                            exportViews.add(idx, old)
+                            exportFile = null
+                        }
+                        renamingIndex = null
+                    }) { Text("Renommer") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { renamingIndex = null }) { Text("Annuler") }
+                }
+            )
+        }
+
         // Aide de calibrage.
         if (calibrating) {
             Surface(
@@ -1518,7 +1493,7 @@ fun PlanScreen(
 /** Couleur d'affichage d'une entité DXF (0xRRGGBB) adaptée au fond : sur fond
  *  sombre on éclaircit les couleurs quasi noires, sur fond clair on assombrit le
  *  blanc — comme l'adaptation de contraste iOS. */
-private fun dxfDisplayColor(rgb: Int, bgDark: Boolean): Color {
+internal fun dxfDisplayColor(rgb: Int, bgDark: Boolean): Color {
     val r = (rgb shr 16) and 0xFF; val g = (rgb shr 8) and 0xFF; val b = rgb and 0xFF
     val lum = 0.299 * r + 0.587 * g + 0.114 * b
     return when {
@@ -1534,7 +1509,7 @@ private fun dxfDisplayColor(rgb: Int, bgDark: Boolean): Color {
 /** Amplification du pinch (1 = brut). 2 = un pincement donne un zoom au carré. */
 private const val ZOOM_SPEED = 2.0f
 
-private val STRUCT_COLOR = Color(0xFF9AA0A6)
+internal val STRUCT_COLOR = Color(0xFF9AA0A6)
 private val DXF_COLOR = Color(0xB3384B66)         // bleu-gris (sous-couche, fond clair)
 private val DXF_COLOR_DARK_BG = Color(0xB39FC0E4) // bleu-gris clair (fond sombre)
 
@@ -1607,7 +1582,7 @@ private object PlanWireCache {
 }
 
 /** Tracés DXF pré-construits, en coordonnées LOCALES du DXF (y déjà inversé). */
-private class DxfPaths(
+internal class DxfPaths(
     /** (calque, couleur) → tracé : masquer un calque ne reconstruit RIEN. */
     val strokes: Map<Pair<String, Int>, androidx.compose.ui.graphics.Path>,
     /** (calque, couleur, plein) → zone remplie. */
@@ -1619,7 +1594,7 @@ private class DxfPaths(
 }
 
 /** Fil de fer des structures prêt à dessiner (coordonnées plan). */
-private class StructPaths(
+internal class StructPaths(
     val byLayer: Map<String, androidx.compose.ui.graphics.Path>,
     val edges: Int
 ) {
@@ -1627,14 +1602,14 @@ private class StructPaths(
 }
 
 /** Sépare calque et spec dans les clés de `buildFixturePaths`. */
-private const val PATH_KEY_SEP = '\u0000'
+internal const val PATH_KEY_SEP = '\u0000'
 
 /**
  * Arêtes des structures, transformées en coordonnées PLAN une fois pour toutes
  * (un tracé par calque). Avant, ces multiplications matricielles étaient
  * refaites pour chaque arête à CHAQUE frame.
  */
-private fun buildStructurePaths(
+internal fun buildStructurePaths(
     wf: PlanWireframe.Built, hidden: Set<String>
 ): StructPaths {
     val out = HashMap<String, androidx.compose.ui.graphics.Path>()
@@ -1668,20 +1643,20 @@ private fun buildStructurePaths(
  * appel natif par point — c'est ce que faisait déjà l'ancienne boucle de
  * `drawCircle`, mais sans profiter de l'élagage.)
  */
-private fun dotsPath(points: List<Pair<Float, Float>>): androidx.compose.ui.graphics.Path {
+internal fun dotsPath(points: List<Pair<Float, Float>>): androidx.compose.ui.graphics.Path {
     val p = androidx.compose.ui.graphics.Path()
     for ((x, y) in points) { p.moveTo(x, y); p.lineTo(x, y) }
     return p
 }
 
-private fun structureDots(wf: PlanWireframe.Built?, hidden: Set<String>): List<Pair<Float, Float>> =
+internal fun structureDots(wf: PlanWireframe.Built?, hidden: Set<String>): List<Pair<Float, Float>> =
     if (wf == null || wf.isEmpty) emptyList()
     else wf.instances.mapNotNull {
         if (it.id !in hidden && wf.edgesByKey[it.key] == null) it.cx to it.cy else null
     }
 
 /** Silhouettes des projecteurs, prêtes à dessiner. */
-private class FixturePaths(
+internal class FixturePaths(
     val byKey: Map<String, androidx.compose.ui.graphics.Path>,
     /** Specs réellement TRACÉES (le budget peut en écarter) → pastille sinon. */
     val specs: Set<String>,
@@ -1698,7 +1673,7 @@ private class FixturePaths(
  * historique d'OOM). Au-delà du budget, les specs restantes ne sont pas
  * tracées — les projecteurs concernés gardent leur pastille.
  */
-private fun buildFixturePaths(
+internal fun buildFixturePaths(
     data: PlanData, fw: PlanWireframe.FixtureWire, hidden: Set<String>
 ): FixturePaths {
     val out = HashMap<String, androidx.compose.ui.graphics.Path>()
@@ -1742,7 +1717,7 @@ private const val MAX_STRUCT_PATH_SEGMENTS = 800_000
  * (repère « plan »). Le placement (décalage / rotation / échelle) est appliqué
  * au dessin sous forme de matrice : le régler aux curseurs ne coûte plus rien.
  */
-private fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
+internal fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
     val fills = HashMap<Triple<String, Int, Boolean>, androidx.compose.ui.graphics.Path>()
     for (fl in plan.fills) {
         val fp = fills.getOrPut(Triple(fl.layer, fl.color, fl.solid)) {
@@ -1866,7 +1841,7 @@ internal fun labelTapTarget(
 }
 
 /** Couleur `src` d'opacité `alpha` composée sur `dst` (source-over opaque). */
-private fun compositeOver(src: Color, alpha: Float, dst: Color): Color = Color(
+internal fun compositeOver(src: Color, alpha: Float, dst: Color): Color = Color(
     src.red * alpha + dst.red * (1f - alpha),
     src.green * alpha + dst.green * (1f - alpha),
     src.blue * alpha + dst.blue * (1f - alpha)
@@ -1938,9 +1913,9 @@ internal fun readableInk(tint: Color, veil: Color): Color {
 
 // Géométrie des étiquettes en dp : en pixels bruts, marges et zone d'accrochage
 // variaient du simple au triple entre un écran mdpi et un écran xxhdpi.
-private val LABEL_PAD_X = 3.dp
-private val LABEL_PAD_Y = 2.dp
-private val LABEL_STROKE = 0.7.dp
+internal val LABEL_PAD_X = 3.dp
+internal val LABEL_PAD_Y = 2.dp
+internal val LABEL_STROKE = 0.7.dp
 /** Marge d'accrochage autour de la boîte — courte, cf. labelKeyAt. */
 private val LABEL_TOUCH_SLACK = 6.dp
 
@@ -1984,7 +1959,7 @@ private const val LABEL_MIN_CONTRAST = 4.5f
  * géométrie d'étiquette — en pixels bruts elle valait trois fois moins de
  * millimètres réels sur un écran dense, et l'étiquette y disparaissait plus tôt.
  */
-private val LABEL_CULL_MARGIN = 160.dp
+internal val LABEL_CULL_MARGIN = 160.dp
 /**
  * Amplitude maximale d'un décalage manuel. Au-delà, l'étiquette n'a plus de
  * rapport lisible avec le projecteur qu'elle désigne, et elle sortirait de la
@@ -1992,7 +1967,7 @@ private val LABEL_CULL_MARGIN = 160.dp
  */
 private val LABEL_OFFSET_LIMIT = 240.dp
 
-private class PlanFixture(
+internal class PlanFixture(
     /** Identité stable de l'objet MVR — masquage, patch (cf. mvrInstanceKey). */
     val key: String,
     val px: Float, val py: Float, val id: String?, val name: String,
@@ -2010,7 +1985,7 @@ private fun drMat(m: FloatArray): dev.romainguy.kotlin.math.Mat4 =
         dev.romainguy.kotlin.math.Float4(m[12], m[13], m[14], m[15])
     )
 
-private class PlanData(
+internal class PlanData(
     val fixtures: List<PlanFixture>,
     val structure: List<Pair<Float, Float>>,
     val structureKeys: List<String>,
@@ -2018,7 +1993,7 @@ private class PlanData(
 )
 
 /** Projette la scène en plan (top : x, −y en mm) — projecteurs + décor. */
-private fun planData(scene: MvrScene): PlanData {
+internal fun planData(scene: MvrScene): PlanData {
     val fixtures = ArrayList<PlanFixture>()
     val structure = ArrayList<Pair<Float, Float>>()
     // Identité (même index que `structure`) : le repli « un point par objet »

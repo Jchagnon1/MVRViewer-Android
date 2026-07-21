@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PhotoSizeSelectSmall
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -826,6 +827,15 @@ fun Scene3DScreen(
     // Bumpé quand la caméra bouge → force le re-calcul des projections écran des
     // surbrillances (les positions monde ne sont pas des états Compose).
     var projVersion by remember(scene) { mutableIntStateOf(0) }
+    // ---- Mesure entre deux projecteurs (3D) ----
+    // On ne mémorise que des INDICES de projecteur, pas des points : en 3D un
+    // toucher est un RAYON, pas un point — un « point libre » n'aurait pas de
+    // profondeur définie. La mesure 3D est donc, par construction, toujours
+    // accrochée à un centre réel. Les positions monde Filament sont en mètres
+    // (= (mm − centre) / 1000 à la construction du layout).
+    var measureMode by remember(scene) { mutableStateOf(false) }
+    var measureI by remember(scene) { mutableStateOf<Int?>(null) }
+    var measureJ by remember(scene) { mutableStateOf<Int?>(null) }
     // Position (fenêtre) du coin haut-gauche de la zone SceneView. Sert à
     // convertir les coordonnées ÉCRAN-ABSOLUES d'un MotionEvent (e.rawX/rawY, seul
     // repère fiable — e.x/e.y sont dans un repère décalé) vers le repère de la
@@ -899,6 +909,17 @@ fun Scene3DScreen(
             val o = projectFixture(i) ?: continue
             val d = kotlin.math.hypot(o.x - pos.x, o.y - pos.y)
             if (d < bestD) { bestD = d; best = i }
+        }
+        // MESURE : le toucher ne sert qu'à désigner les deux projecteurs, et
+        // toucher le vide n'efface rien (en 3D on tourne beaucoup autour de la
+        // scène entre les deux points ; perdre la mesure au moindre tap raté
+        // serait insupportable). Un 3e toucher démarre une nouvelle mesure.
+        if (measureMode) {
+            if (best < 0) return
+            if (measureI == null || measureJ != null) { measureI = best; measureJ = null }
+            else if (best != measureI) measureJ = best
+            projVersion++
+            return
         }
         if (best < 0) selected.clear()
         else if (!selected.remove(best)) selected.add(best)
@@ -1005,7 +1026,7 @@ fun Scene3DScreen(
                         (kotlin.math.abs(p.x - lod.lastX) + kotlin.math.abs(p.y - lod.lastY) + kotlin.math.abs(p.z - lod.lastZ)) > 0.02f
                     lod.lastX = p.x; lod.lastY = p.y; lod.lastZ = p.z
                     // La caméra a bougé → re-projeter les surbrillances de sélection.
-                    if (moved && selected.isNotEmpty()) projVersion++
+                    if (moved && (selected.isNotEmpty() || measureI != null)) projVersion++
                     if (lod.nodes.isNotEmpty() || lod.proxies.isNotEmpty()) {
                         if (moved) {
                             lod.idle = 0
@@ -1080,6 +1101,23 @@ fun Scene3DScreen(
                     val o = projectFixture(i) ?: return@forEach
                     drawCircle(Color(0xFFFFC400), radius = 26f, center = o, style = Stroke(width = 4f))
                 }
+                // Mesure : trait entre les deux projecteurs + anneaux distinctifs.
+                // (La cote chiffrée est dans le bandeau du bas : pas de mesure de
+                // texte à faire dans ce Canvas, qui est redessiné à chaque frame
+                // de mouvement caméra.)
+                val mi = measureI; val mj = measureJ
+                if (measureMode && mi != null) {
+                    val oa = projectFixture(mi)
+                    val ob = mj?.let { projectFixture(it) }
+                    if (oa != null && ob != null) {
+                        drawLine(Color.Black.copy(alpha = 0.5f), oa, ob, strokeWidth = 6f)
+                        drawLine(MEASURE_3D_COLOR, oa, ob, strokeWidth = 2.5f)
+                    }
+                    listOfNotNull(oa, ob).forEach { o ->
+                        drawCircle(MEASURE_3D_COLOR, radius = 18f, center = o, style = Stroke(width = 3.5f))
+                        drawCircle(MEASURE_3D_COLOR, radius = 4f, center = o)
+                    }
+                }
                 // Cadre en cours de tracé.
                 val a = rectStart; val b = rectEnd
                 if (rectMode && a != null && b != null) {
@@ -1121,8 +1159,22 @@ fun Scene3DScreen(
             ) {
                 FilledIconToggleButton(
                     checked = rectMode,
-                    onCheckedChange = { rectMode = it; if (!it) { rectStart = null; rectEnd = null } }
+                    onCheckedChange = {
+                        rectMode = it
+                        // Le cadre pose un overlay qui CAPTE le glissé : les deux
+                        // modes ne peuvent pas cohabiter.
+                        if (it) measureMode = false
+                        if (!it) { rectStart = null; rectEnd = null }
+                    }
                 ) { Icon(Icons.Filled.Crop, contentDescription = "Sélection rectangle") }
+                FilledIconToggleButton(
+                    checked = measureMode,
+                    onCheckedChange = {
+                        measureMode = it
+                        if (it) { rectMode = false; rectStart = null; rectEnd = null }
+                        measureI = null; measureJ = null
+                    }
+                ) { Icon(Icons.Filled.Straighten, contentDescription = "Mesurer une distance") }
                 if (selected.isNotEmpty()) {
                     FilledIconButton(onClick = { selected.clear() }) {
                         Icon(Icons.Filled.Close, contentDescription = "Effacer la sélection")
@@ -1145,8 +1197,39 @@ fun Scene3DScreen(
                 }
             }
 
+            // Cote de la mesure (bas-centre) : le chiffre est ici plutôt que sur
+            // le trait, pour ne pas mesurer du texte dans le Canvas redessiné à
+            // chaque frame de mouvement caméra.
+            if (measureMode) {
+                val mi = measureI; val mj = measureJ
+                val txt = if (mi != null && mj != null &&
+                    mi in layout.positions.indices && mj in layout.positions.indices) {
+                    val a = layout.positions[mi]; val b = layout.positions[mj]
+                    // Filament = mètres → millimètres, l'unité de la cote.
+                    val mm = kotlin.math.sqrt(
+                        ((b.x - a.x).toDouble() * (b.x - a.x) +
+                         (b.y - a.y).toDouble() * (b.y - a.y) +
+                         (b.z - a.z).toDouble() * (b.z - a.z))
+                    ) * 1000.0
+                    val na = scene.fixtures.getOrNull(mi)?.fixtureId ?: "?"
+                    val nb = scene.fixtures.getOrNull(mj)?.fixtureId ?: "?"
+                    "N° $na → N° $nb : ${formatPlanDistanceMm(mm)}"
+                } else if (mi != null) "Touchez le 2e projecteur"
+                else "Mesure : touchez un projecteur"
+                Surface(
+                    color = MEASURE_3D_COLOR, shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
+                ) {
+                    Text(
+                        txt, color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
             // Panneau d'info de sélection (bas-centre).
-            if (selected.isNotEmpty()) {
+            if (!measureMode && selected.isNotEmpty()) {
                 val label = if (selected.size == 1 && selected.first() in scene.fixtures.indices) {
                     val f = scene.fixtures[selected.first()]
                     "N° ${f.fixtureId ?: "?"} · ${f.name}"
@@ -1568,3 +1651,6 @@ private fun fixtureLayout(scene: MvrScene, center: Float3): FixtureLayout {
     if (r <= 0f || !r.isFinite()) r = 5f
     return FixtureLayout(positions, colors, valid, r, (r * 0.03f).coerceIn(0.1f, 1.5f))
 }
+
+/** Magenta de l'outil de mesure — même code couleur que la vue plan. */
+private val MEASURE_3D_COLOR = Color(0xFFD500A0)

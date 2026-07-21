@@ -152,6 +152,16 @@ fun CablingScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
         )
+        // Récapitulatif des réglages persistés (touchez l'engrenage pour changer).
+        val s = cabling.settings
+        Text(
+            "${s.voltage} V · circuit ${s.circuitLimitW} W · " +
+                (if (s.phaseLimitW > 0) "phase ${s.phaseLimitW} W" else "phase non limitée"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clickable { showSettings = true }
+                .padding(horizontal = 16.dp, vertical = 2.dp)
+        )
         HorizontalDivider()
 
         if (cabling.distributors.isEmpty()) {

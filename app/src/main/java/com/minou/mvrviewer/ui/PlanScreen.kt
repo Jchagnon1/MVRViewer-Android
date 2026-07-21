@@ -131,7 +131,8 @@ fun PlanScreen(
     // 8 entrées → sans ça, chaque étiquette est re-mise en page à chaque frame).
     val labelDensity = androidx.compose.ui.platform.LocalDensity.current
     val labelCache = remember(
-        scene, options.labelSize, options.background2D, options.labelContent,
+        scene, options.labelSize, options.background2D,
+        options.labelFields, options.labelDetached,
         labelDensity.density, labelDensity.fontScale
     ) { HashMap<String, androidx.compose.ui.text.TextLayoutResult>() }
 
@@ -163,8 +164,11 @@ fun PlanScreen(
     // régressions dues à la détection « à la volée » pendant le glissé :
     //   1. par défaut AUCUNE étiquette n'est active → un glissé pane/zoome le
     //      plan, TOUJOURS, sans le moindre test d'accrochage ;
-    //   2. un TAP sur une étiquette l'active (une seule à la fois, retour visuel
-    //      net) ; elle seule peut alors être saisie ;
+    //   2. un TAP sur une étiquette l'active (retour visuel net) ; seules les
+    //      étiquettes armées peuvent être saisies. Si le projecteur touché fait
+    //      partie d'une MULTI-SÉLECTION, le même bloc est armé sur TOUS les
+    //      projecteurs sélectionnés : un seul glissé les déplace alors du même
+    //      vecteur (demande terrain « bouger toutes les étiquettes d'un coup ») ;
     //   3. un glissé qui démarre AILLEURS pane et désactive ;
     //   4. un tap ailleurs, ou sur la même étiquette, désactive ;
     //   5. ARBITRAGE avec la sélection de projecteur : l'étiquette ne gagne le
@@ -176,7 +180,9 @@ fun PlanScreen(
     // que deux fois par interaction — jamais à la fréquence du doigt — et qu'il
     // doit re-clé le pointerInput de saisie pour que celui-ci n'existe même pas
     // tant qu'aucune étiquette n'est active.
-    var activeLabelKey by remember(scene) { mutableStateOf<String?>(null) }
+    // (Un ENSEMBLE de clés de bloc depuis la sélection groupée : le glissé les
+    // déplace toutes ensemble. Vide = aucune étiquette armée, cas par défaut.)
+    var activeLabelKeys by remember(scene) { mutableStateOf<Set<String>>(emptySet()) }
     // Marge d'accrochage convertie une fois : le tap comme le glissé s'en
     // servent, et `toPx()` a besoin d'une densité (indisponible dans le lambda
     // de tap, qui n'est pas un scope Density).
@@ -372,15 +378,19 @@ fun PlanScreen(
     // plutôt qu'écrit en pleine composition (ce que Compose reproche à juste
     // titre). La sortie de la vue plan est, elle, couverte par `remember` :
     // PlanScreen quitte la composition et l'état disparaît avec lui.
-    // `labelContent` en fait partie : changer le contenu affiché peut vider le
-    // texte de l'étiquette active (un projecteur sans n° en mode ID) — elle
-    // n'est alors plus dessinée, donc plus déplaçable, et laisser l'état actif
-    // ne ferait qu'entretenir une mise en valeur fantôme.
+    // Le contenu (`labelFields`) et le découpage en blocs (`labelDetached`) en
+    // font partie : changer l'un peut vider le texte d'un bloc armé, ou faire
+    // disparaître le bloc lui-même (un champ regroupé n'a plus de clé propre) :
+    // le bloc n'est alors plus dessiné, donc plus déplaçable, et laisser l'état
+    // actif ne ferait qu'entretenir une mise en valeur fantôme.
     // Désactivation inconditionnelle : chacune de ces bascules change le contexte
     // au point qu'une étiquette « armée » n'a plus de sens (y compris le retour
     // au mode normal, où l'utilisateur ne s'attend plus à rien de sélectionné).
-    LaunchedEffect(options.showLabels, options.labelContent, rectMode, maskMode, calibrating, measureMode) {
-        activeLabelKey = null
+    LaunchedEffect(
+        options.showLabels, options.labelFields, options.labelDetached,
+        rectMode, maskMode, calibrating, measureMode
+    ) {
+        activeLabelKeys = emptySet()
     }
 
     fun averagedLatLon(): Pair<Double, Double>? {
@@ -437,7 +447,14 @@ fun PlanScreen(
             if (labelsLoaded[0]) return@LaunchedEffect
             labelsLoaded[0] = true
             if (saved.isNotEmpty()) {
-                for ((k, v) in saved) if (k !in labelShift) labelShift[k] = Offset(v.first, v.second)
+                // Migration des clés d'AVANT les blocs (une étiquette = un
+                // projecteur) : sans elle, tous les décalages déjà posés au
+                // doigt deviendraient orphelins et les étiquettes reviendraient
+                // d'un coup à leur place d'origine à la réouverture du projet.
+                for ((k0, v) in saved) {
+                    val k = migrateLegacyLabelKey(k0)
+                    if (k !in labelShift) labelShift[k] = Offset(v.first, v.second)
+                }
                 labelDragVersion++
             }
         }
@@ -478,7 +495,8 @@ fun PlanScreen(
             showStructure = options.showStructure,
             showLabels = options.showLabels,
             showLegend = options.showLegend,
-            labelContent = options.labelContent,
+            labelFields = options.labelFields,
+            labelDetached = options.labelDetached,
             labelSize = options.labelSize,
             labelOffset = options.labelOffset,
             background = options.background2D,
@@ -560,7 +578,7 @@ fun PlanScreen(
                             // s'en empare) → il pane le plan ET désactive.
                             // Test de nullité d'abord : sans lui on écrirait un
                             // état observable à chaque événement tactile.
-                            if (activeLabelKey != null) activeLabelKey = null
+                            if (activeLabelKeys.isNotEmpty()) activeLabelKeys = emptySet()
                             val w = canvas.x; val h = canvas.y
                             val old = scale
                             // Pinch AMPLIFIÉ : le facteur brut demandait beaucoup trop
@@ -702,18 +720,28 @@ fun PlanScreen(
                             // symbole d'un projecteur, qui l'emporte pour que
                             // celui-ci reste sélectionnable en son centre même
                             // recouvert par une pastille.
-                            val hitKey = labelTapTarget(labelHits, symbolHits, tap, activeLabelKey)
+                            val hitKey = labelTapTarget(labelHits, symbolHits, tap, activeLabelKeys)
                             if (hitKey != null) {
                                 // RÈGLE : ce tap ne touche JAMAIS à `selected`.
                                 // En multi-sélection l'ordre de sélection pilote
                                 // l'adressage DMX séquentiel — le corrompre en
                                 // manipulant une étiquette est inacceptable.
-                                activeLabelKey = if (activeLabelKey == hitKey) null else hitKey
+                                activeLabelKeys = when {
+                                    // Re-taper un bloc armé désarme TOUT le groupe :
+                                    // c'est le geste d'annulation attendu, et il
+                                    // évite de laisser derrière soi des blocs armés
+                                    // invisibles hors du cadre.
+                                    hitKey in activeLabelKeys -> emptySet()
+                                    // Le projecteur touché fait partie d'une
+                                    // multi-sélection → on arme le MÊME bloc sur
+                                    // toute la sélection (entrée « d'un coup »).
+                                    else -> labelGroupForTap(data, selected, hitKey)
+                                }
                                 return@detectTapGestures
                             }
                             // Tap hors de toute pastille : on désactive, puis le
                             // tap suit son cours normal (sélection de projecteur).
-                            if (activeLabelKey != null) activeLabelKey = null
+                            if (activeLabelKeys.isNotEmpty()) activeLabelKeys = emptySet()
                         }
                         var best = -1; var bestD = 40f * 40f
                         data.fixtures.forEachIndexed { i, f ->
@@ -729,10 +757,11 @@ fun PlanScreen(
                         } else { selected.clear(); selected.add(best) }
                     }
                 }
-                // Déplacement de l'étiquette ACTIVE au doigt (règle 3 du modèle).
+                // Déplacement des étiquettes ARMÉES au doigt (règle 3 du modèle).
+                // Un glissé sur l'une d'elles les déplace TOUTES du même vecteur.
                 //
                 // Ce pointerInput N'EXISTE PAS tant qu'aucune étiquette n'est
-                // active : la clé `activeLabelKey` le recrée à l'activation et le
+                // active : la clé `activeLabelKeys` le recrée à l'activation et le
                 // détruit à la désactivation. C'est le point central de la
                 // correction — plus aucune mesure, plus aucun test de boîte
                 // pendant les gestes ordinaires, donc plus de pan volé ni de
@@ -740,12 +769,13 @@ fun PlanScreen(
                 // reçoit l'événement le premier en passe principale, donc
                 // consommer ici annule proprement le pan/zoom
                 // (detectTransformGestures s'arrête sur un change consommé).
-                .pointerInput(scene, rectMode, maskMode, calibrating, measureMode, projectKey, activeLabelKey) {
-                    val key = activeLabelKey ?: return@pointerInput
+                .pointerInput(scene, rectMode, maskMode, calibrating, measureMode, projectKey, activeLabelKeys) {
+                    val keys = activeLabelKeys
+                    if (keys.isEmpty()) return@pointerInput
                     if (rectMode || maskMode || calibrating || measureMode) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        // Un SEUL test, contre la boîte de l'étiquette active :
+                        // Un SEUL test, contre les boîtes des étiquettes ARMÉES :
                         // pas de recherche du plus proche, pas d'arbitrage avec le
                         // symbole du projecteur. Si le doigt se pose ailleurs, on
                         // ressort immédiatement et le geste redevient un pan
@@ -758,18 +788,28 @@ fun PlanScreen(
                         // — la marge ne sert qu'à ne pas rater la saisie d'une
                         // pastille de quelques millimètres. Le TAP, lui, exige la
                         // stricte appartenance à la pastille (cf. labelBoxAt).
-                        val hit = labelHits.firstOrNull { it.key == key } ?: return@awaitEachGesture
-                        if (distanceToBox(hit, down.position) > labelSlackPx) return@awaitEachGesture
+                        //
+                        // En groupe, il suffit que le doigt se pose sur L'UNE des
+                        // étiquettes armées : c'est bien elle que l'utilisateur
+                        // saisit, et les autres suivent.
+                        val grabbed = labelHits.any {
+                            it.key in keys && distanceToBox(it, down.position) <= labelSlackPx
+                        }
+                        if (!grabbed) return@awaitEachGesture
                         var moved = false
                         val limit = LABEL_OFFSET_LIMIT.toPx()
                         fun shift(d: Offset) {
                             // Amplitude BORNÉE : au-delà, l'étiquette n'a plus de
                             // rapport lisible avec son projecteur, et elle sort du
-                            // champ élargi par le culling → elle disparaîtrait.
-                            val n = (labelShift[key] ?: Offset.Zero) + d
-                            labelShift[key] = Offset(
-                                n.x.coerceIn(-limit, limit), n.y.coerceIn(-limit, limit)
-                            )
+                            // champ élargi par le culling → elle disparaîtrait. La
+                            // borne est calculée sur le groupe ENTIER : sinon
+                            // l'étiquette la plus contrainte s'arrêterait pendant
+                            // que les autres continuent, et l'alignement que
+                            // l'utilisateur venait de poser se déformerait.
+                            val dd = clampGroupDelta(d, keys, labelShift, limit)
+                            if (dd != Offset.Zero) {
+                                for (k in keys) labelShift[k] = (labelShift[k] ?: Offset.Zero) + dd
+                            }
                             // Le glissé d'étiquette est un geste comme un autre :
                             // on réarme l'horloge commune pour que le décor lourd
                             // (DXF, fils de fer) reste en détail réduit au lieu
@@ -795,39 +835,50 @@ fun PlanScreen(
                         val slop = viewConfiguration.touchSlop
                         var armed = false
                         var acc = Offset.Zero
-                        while (true) {
-                            val ev = awaitPointerEvent()
-                            if (ev.changes.count { it.pressed } > 1) break
-                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!ch.pressed) break
-                            val d = ch.positionChange()
-                            if (!armed) {
-                                // On ne consomme qu'APRÈS le seuil de glissé : en
-                                // deçà c'est un tap, et il doit rester au
-                                // gestionnaire de tap (c'est lui qui désactive
-                                // l'étiquette). Le déplacement consommé par le
-                                // seuil n'est PAS appliqué : l'appliquer d'un coup
-                                // ferait sauter la pastille de ~18 px au démarrage.
-                                acc += d
-                                if (hypot(acc.x, acc.y) < slop) continue
-                                armed = true
-                                ch.consume()
-                            } else {
-                                ch.consume(); shift(d); moved = true
+                        // ÉCRITURE GARANTIE MÊME SI LE GESTE EST INTERROMPU.
+                        // `try/finally` et non un simple enchaînement : ce
+                        // pointerInput est détruit dès que l'une de ses clés change
+                        // (retour à la 3D, changement de mode, arrivée d'une
+                        // synchro), ce qui ANNULE la coroutine en pleine boucle
+                        // d'événements. Sans le finally, tout le déplacement déjà
+                        // appliqué à l'écran n'était jamais écrit sur disque et
+                        // disparaissait à la réouverture du projet.
+                        try {
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                if (ev.changes.count { it.pressed } > 1) break
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!ch.pressed) break
+                                val d = ch.positionChange()
+                                if (!armed) {
+                                    // On ne consomme qu'APRÈS le seuil de glissé : en
+                                    // deçà c'est un tap, et il doit rester au
+                                    // gestionnaire de tap (c'est lui qui désactive
+                                    // l'étiquette). Le déplacement consommé par le
+                                    // seuil n'est PAS appliqué : l'appliquer d'un coup
+                                    // ferait sauter la pastille de ~18 px au démarrage.
+                                    acc += d
+                                    if (hypot(acc.x, acc.y) < slop) continue
+                                    armed = true
+                                    ch.consume()
+                                } else {
+                                    ch.consume(); shift(d); moved = true
+                                }
                             }
-                        }
-                        // Écriture disque au relâché seulement : un enregistrement
-                        // par événement tactile ferait un accès fichier à 60 Hz.
-                        // Elle part sur le fil du store (et non sur une coroutine
-                        // du composable) car ce relâché est typiquement suivi d'un
-                        // retour à la 3D, qui annulerait la coroutine en vol.
-                        // Tant que la relecture n'a pas abouti, on ne réécrit
-                        // pas le fichier : il contient des décalages que la
-                        // table en mémoire n'a pas encore.
-                        if (moved && projectKey != null && labelsLoaded[0]) {
-                            com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
-                                ctxPlan, projectKey, labelShift.mapValues { (_, o) -> o.x to o.y }
-                            )
+                        } finally {
+                            // Écriture disque au relâché seulement : un enregistrement
+                            // par événement tactile ferait un accès fichier à 60 Hz.
+                            // Elle part sur le fil du store (et non sur une coroutine
+                            // du composable) car ce relâché est typiquement suivi d'un
+                            // retour à la 3D, qui annulerait la coroutine en vol.
+                            // Tant que la relecture n'a pas abouti, on ne réécrit
+                            // pas le fichier : il contient des décalages que la
+                            // table en mémoire n'a pas encore.
+                            if (moved && projectKey != null && labelsLoaded[0]) {
+                                com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
+                                    ctxPlan, projectKey, labelShift.mapValues { (_, o) -> o.x to o.y }
+                                )
+                            }
                         }
                     }
                 }
@@ -858,7 +909,8 @@ fun PlanScreen(
                     layerColors = options.layerColors,
                     showStructure = options.showStructure,
                     showLabels = options.showLabels,
-                    labelContent = options.labelContent,
+                    labelFields = options.labelFields,
+                    labelDetached = options.labelDetached,
                     labelSize = options.labelSize,
                     labelOffset = options.labelOffset,
                     hiddenElements = hiddenElements,
@@ -876,7 +928,7 @@ fun PlanScreen(
                     selected = selected.toSet(),
                     labelShift = labelShift,
                     labelShiftScale = 1f,
-                    activeLabelKey = activeLabelKey,
+                    activeLabelKeys = activeLabelKeys,
                     measurer = measurer,
                     labelCache = labelCache,
                     lowDetail = gesturing,
@@ -1042,12 +1094,33 @@ fun PlanScreen(
                 // Filet de sécurité : remise à zéro de TOUS les décalages posés
                 // au doigt (et effacement immédiat sur disque, pas seulement en
                 // mémoire, sinon la réouverture les ferait revenir).
+                // Sélection GROUPÉE d'étiquettes : les projecteurs déjà
+                // sélectionnés (rectangle / multi-sélection), ou toute la famille
+                // « même type GDTF sur le même calque » que l'étiquette armée —
+                // c'est-à-dire, dans un plan réel, les projecteurs d'un pont.
+                onSelectLabelsOfSelection = if (selected.isEmpty() || !options.showLabels) null else {
+                    {
+                        activeLabelKeys = labelKeysForFixtures(
+                            selected.mapNotNull { data.fixtures.getOrNull(it) },
+                            options.labelFields, options.labelDetached
+                        )
+                    }
+                },
+                onSelectLabelsSameType = if (activeLabelKeys.isEmpty()) null else {
+                    {
+                        val origin = labelBlockFixtureKey(activeLabelKeys.first())
+                        activeLabelKeys = labelKeysForFixtures(
+                            sameTypeSameLayer(data, origin).filter { it.key !in hiddenElements },
+                            options.labelFields, options.labelDetached
+                        )
+                    }
+                },
                 onResetLabelOffsets = {
                     labelShift.clear()
                     // La table vidée fait désormais autorité : une relecture
                     // encore en vol ne doit pas ressusciter les décalages.
                     labelsLoaded[0] = true
-                    activeLabelKey = null
+                    activeLabelKeys = emptySet()
                     labelDragVersion++
                     if (projectKey != null) {
                         com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
@@ -1826,16 +1899,16 @@ private fun distanceToBox(hi: LabelHit, p: Offset): Float {
  * par défaut) et sélectionne donc bien le projecteur ; au zoom la pastille est
  * une cible large et précise, donc activable.
  *
- * `preferKey` (l'étiquette active) l'emporte quand elle contient le point : on
- * doit toujours pouvoir la désactiver, même si une voisine la chevauche. Sinon
+ * `preferKeys` (les étiquettes armées) l'emportent quand elles contiennent le
+ * point : on doit toujours pouvoir les désactiver, même chevauchées. Sinon
  * on retient la DERNIÈRE boîte contenant le point, c'est-à-dire celle dessinée
  * PAR-DESSUS les autres — donc celle que l'utilisateur voit.
  */
-internal fun labelBoxAt(hits: List<LabelHit>, p: Offset, preferKey: String?): String? {
+internal fun labelBoxAt(hits: List<LabelHit>, p: Offset, preferKeys: Set<String>): String? {
     var found: String? = null
     for (hi in hits) {
         if (p.x < hi.x || p.x > hi.x + hi.w || p.y < hi.y || p.y > hi.y + hi.h) continue
-        if (hi.key == preferKey) return hi.key
+        if (hi.key in preferKeys) return hi.key
         found = hi.key
     }
     return found
@@ -1856,13 +1929,13 @@ internal fun labelBoxAt(hits: List<LabelHit>, p: Offset, preferKey: String?): St
  * moyen de deviner qu'il faut d'abord déplacer l'étiquette.
  */
 internal fun labelTapTarget(
-    labels: List<LabelHit>, symbols: List<SymbolHit>, p: Offset, preferKey: String?
+    labels: List<LabelHit>, symbols: List<SymbolHit>, p: Offset, preferKeys: Set<String>
 ): String? {
     for (s in symbols) {
         val dx = p.x - s.x; val dy = p.y - s.y
         if (dx * dx + dy * dy <= s.r * s.r) return null
     }
-    return labelBoxAt(labels, p, preferKey)
+    return labelBoxAt(labels, p, preferKeys)
 }
 
 /** Couleur `src` d'opacité `alpha` composée sur `dst` (source-over opaque). */

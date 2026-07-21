@@ -21,19 +21,19 @@ class LabelTapTargetTest {
     @Test
     fun `une pastille dessinee est touchable`() {
         val hits = listOf(box("A", 100f, 100f))
-        assertEquals("A", labelTapTarget(hits, emptyList(), Offset(130f, 110f), null))
+        assertEquals("A", labelTapTarget(hits, emptyList(), Offset(130f, 110f), emptySet()))
     }
 
     @Test
     fun `hors de toute pastille le tap va au projecteur`() {
         val hits = listOf(box("A", 100f, 100f))
-        assertNull(labelTapTarget(hits, emptyList(), Offset(90f, 110f), null))
+        assertNull(labelTapTarget(hits, emptyList(), Offset(90f, 110f), emptySet()))
     }
 
     /** Une étiquette non dessinée n'entre pas dans le tampon : intouchable. */
     @Test
     fun `une etiquette non dessinee est intouchable`() {
-        assertNull(labelTapTarget(emptyList(), emptyList(), Offset(130f, 110f), null))
+        assertNull(labelTapTarget(emptyList(), emptyList(), Offset(130f, 110f), emptySet()))
     }
 
     /**
@@ -45,18 +45,18 @@ class LabelTapTargetTest {
     fun `le disque du symbole l emporte sur la pastille`() {
         val hits = listOf(box("A", 100f, 100f))
         val syms = listOf(SymbolHit(130f, 110f, 7f))
-        assertNull(labelTapTarget(hits, syms, Offset(132f, 112f), null))
+        assertNull(labelTapTarget(hits, syms, Offset(132f, 112f), emptySet()))
         // Juste en dehors du disque, l'étiquette reprend la main.
-        assertEquals("A", labelTapTarget(hits, syms, Offset(150f, 112f), null))
+        assertEquals("A", labelTapTarget(hits, syms, Offset(150f, 112f), emptySet()))
     }
 
     /** On doit toujours pouvoir DÉSACTIVER l'étiquette active, même chevauchée. */
     @Test
     fun `l etiquette active est prioritaire en cas de chevauchement`() {
         val hits = listOf(box("A", 100f, 100f), box("B", 110f, 105f))
-        assertEquals("A", labelTapTarget(hits, emptyList(), Offset(130f, 110f), "A"))
+        assertEquals("A", labelTapTarget(hits, emptyList(), Offset(130f, 110f), setOf("A")))
         // Sans préférence, c'est la DERNIÈRE dessinée (donc celle du dessus).
-        assertEquals("B", labelTapTarget(hits, emptyList(), Offset(130f, 110f), null))
+        assertEquals("B", labelTapTarget(hits, emptyList(), Offset(130f, 110f), emptySet()))
     }
 
     /** Le disque prime même sur l'étiquette active : le projecteur reste visable. */
@@ -64,6 +64,6 @@ class LabelTapTargetTest {
     fun `le disque l emporte aussi sur l etiquette active`() {
         val hits = listOf(box("A", 100f, 100f))
         val syms = listOf(SymbolHit(130f, 110f, 7f))
-        assertNull(labelTapTarget(hits, syms, Offset(130f, 110f), "A"))
+        assertNull(labelTapTarget(hits, syms, Offset(130f, 110f), setOf("A")))
     }
 }

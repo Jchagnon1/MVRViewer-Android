@@ -44,7 +44,9 @@ internal class PlanViewCapture(
     val showStructure: Boolean,
     val showLabels: Boolean,
     val showLegend: Boolean,
-    val labelContent: LabelContent,
+    /** Champs affichés et champs détachés au moment de la capture. */
+    val labelFields: Set<LabelContent>,
+    val labelDetached: Set<LabelContent>,
     val labelSize: Float,
     val labelOffset: Float,
     val background: Color,
@@ -212,7 +214,8 @@ private fun DrawScope.drawPdfPage(
                 layerColors = v.layerColors,
                 showStructure = v.showStructure,
                 showLabels = v.showLabels,
-                labelContent = v.labelContent,
+                labelFields = v.labelFields,
+                labelDetached = v.labelDetached,
                 labelSize = v.labelSize,
                 labelOffset = v.labelOffset,
                 hiddenElements = v.hiddenElements,
@@ -233,7 +236,7 @@ private fun DrawScope.drawPdfPage(
                 // points (densité 1) — sans cette conversion, une étiquette
                 // déplacée partirait trois fois trop loin sur un écran dense.
                 labelShiftScale = if (v.screenDensity > 0f) 1f / v.screenDensity else 1f,
-                activeLabelKey = null,
+                activeLabelKeys = emptySet(),
                 measurer = measurer,
                 labelCache = HashMap(),
                 lowDetail = false,

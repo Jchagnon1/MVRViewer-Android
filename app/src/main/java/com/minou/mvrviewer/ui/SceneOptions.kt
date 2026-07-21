@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.DropdownMenu
@@ -62,7 +63,18 @@ class SceneOptions {
     var showLabels by mutableStateOf(true)
     var showStructure by mutableStateOf(true)
     var showLegend by mutableStateOf(true)        // légende des calques (vue plan)
-    var labelContent by mutableStateOf(LabelContent.ID)
+    /**
+     * Champs AFFICHÉS dans l'étiquette. Plusieurs à la fois : le n° seul ne suffit
+     * pas au terrain (« n° + patch »). Ils sont mis en page une LIGNE PAR CHAMP —
+     * une étiquette large chevauche ses voisines, une étiquette haute non.
+     */
+    var labelFields by mutableStateOf(setOf(LabelContent.ID, LabelContent.DMX))
+    /**
+     * Champs DÉTACHÉS de la pastille commune : chacun devient un bloc autonome,
+     * avec son propre placement et son propre décalage déplaçable au doigt (le
+     * n° au-dessus de l'icône, le patch en dessous). Les autres restent groupés.
+     */
+    var labelDetached by mutableStateOf(emptySet<LabelContent>())
     var labelSize by mutableFloatStateOf(1f)     // 0.7 (S) · 1.0 (M) · 1.4 (L)
     var labelOffset by mutableFloatStateOf(1f)    // écart étiquette ↔ projecteur
     // Fond satellite géo-référencé (sous le plan / en 3D) — nécessite la
@@ -100,6 +112,18 @@ fun SceneOptionsMenu(
      * récupérer. `null` → entrée masquée (vues sans étiquettes déplaçables).
      */
     onResetLabelOffsets: (() -> Unit)? = null,
+    /**
+     * Arme les étiquettes de TOUS les projecteurs sélectionnés (rectangle ou
+     * multi-sélection) : un glissé sur l'une d'elles les déplace toutes. `null`
+     * quand la sélection ne s'y prête pas (vide).
+     */
+    onSelectLabelsOfSelection: (() -> Unit)? = null,
+    /**
+     * Même chose pour tous les projecteurs de MÊME TYPE GDTF sur le MÊME CALQUE
+     * que l'étiquette active (les projecteurs d'un pont, en pratique). `null`
+     * tant qu'aucune étiquette n'est active — le critère n'a alors pas d'origine.
+     */
+    onSelectLabelsSameType: (() -> Unit)? = null,
     showStructureToggle: Boolean = false,
     showLegendToggle: Boolean = false,
     // Bascule du fond satellite (dispo seulement une fois la calibration GPS
@@ -185,9 +209,35 @@ fun SceneOptionsMenu(
         if (showLabelsToggle) {
             check("Étiquettes", options.showLabels) { options.showLabels = !options.showLabels }
             if (options.showLabels) {
-                // Contenu de l'étiquette (radio).
+                // Contenu de l'étiquette : CASES À COCHER (plusieurs champs), et
+                // pour chaque champ retenu, le choix « groupé / détaché ». Un
+                // champ détaché devient une pastille autonome, déplaçable
+                // séparément — c'est ce qui permet le n° au-dessus de l'icône et
+                // le patch en dessous.
                 LabelContent.entries.forEach { c ->
-                    check("  ${c.label}", options.labelContent == c) { options.labelContent = c }
+                    val on = c in options.labelFields
+                    check("  ${c.label}", on) {
+                        options.labelFields =
+                            if (on) options.labelFields - c else options.labelFields + c
+                        // Un champ retiré ne doit pas laisser derrière lui un
+                        // « détaché » invisible qui ressusciterait au recochage.
+                        if (on) options.labelDetached = options.labelDetached - c
+                    }
+                    if (on) {
+                        val loose = c in options.labelDetached
+                        check("      ↳ bloc séparé", loose) {
+                            options.labelDetached =
+                                if (loose) options.labelDetached - c else options.labelDetached + c
+                        }
+                    }
+                }
+                // Sélection GROUPÉE d'étiquettes : plusieurs actives à la fois,
+                // qu'un seul glissé déplace toutes du même vecteur.
+                onSelectLabelsOfSelection?.let {
+                    nav("  Étiquettes de la sélection", Icons.Filled.SelectAll) { open = false; it() }
+                }
+                onSelectLabelsSameType?.let {
+                    nav("  Étiquettes du même type (ce calque)", Icons.Filled.SelectAll) { open = false; it() }
                 }
                 // Taille (cycle S · M · L).
                 val sizeName = when {

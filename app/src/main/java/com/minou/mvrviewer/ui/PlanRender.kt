@@ -59,7 +59,10 @@ internal class PlanRenderSpec(
     val layerColors: Boolean,
     val showStructure: Boolean,
     val showLabels: Boolean,
-    val labelContent: LabelContent,
+    /** Champs affichés (une ligne chacun dans la pastille commune). */
+    val labelFields: Set<LabelContent>,
+    /** Champs sortis de la pastille commune : un bloc autonome chacun. */
+    val labelDetached: Set<LabelContent>,
     val labelSize: Float,
     val labelOffset: Float,
     val hiddenElements: Set<String>,
@@ -81,7 +84,10 @@ internal class PlanRenderSpec(
     val showSatellite: Boolean,
     val satelliteOpacity: Float,
     val selected: Set<Int>,
-    /** Décalages manuels d'étiquettes, en pixels ÉCRAN (cf. labelShiftScale). */
+    /**
+     * Décalages manuels d'étiquettes, en pixels ÉCRAN (cf. labelShiftScale),
+     * indexés par CLÉ DE BLOC (cf. labelBlockKey) — un champ détaché a le sien.
+     */
     val labelShift: Map<String, Offset>,
     /**
      * Conversion des décalages d'étiquettes vers le repère de dessin courant :
@@ -89,7 +95,11 @@ internal class PlanRenderSpec(
      * densité. 1 à l'écran.
      */
     val labelShiftScale: Float,
-    val activeLabelKey: String?,
+    /**
+     * Blocs ARMÉS (clés de bloc). Plusieurs à la fois : la sélection groupée
+     * arme toute une famille d'étiquettes, qu'un seul glissé déplace ensemble.
+     */
+    val activeLabelKeys: Set<String>,
     val measurer: TextMeasurer,
     val labelCache: MutableMap<String, TextLayoutResult>,
     /** Geste en cours : décor allégé, étiquettes éteintes (jamais vrai en PDF). */
@@ -204,7 +214,12 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     }
 
     // ---- Projecteurs, passe 1 : silhouettes fil de fer ----
-    val showLabels = s.showLabels && det > 0.02f
+    // Le seuil de zoom éteint les étiquettes ORDINAIRES (sur un plan dézoomé,
+    // des centaines de pastilles se recouvrent et ne se lisent plus). Les
+    // étiquettes ARMÉES ou SÉLECTIONNÉES, elles, l'ignorent : on vient
+    // précisément de les désigner, les voir disparaître au premier dézoom rendait
+    // le placement au doigt impraticable (retour de test terrain).
+    val labelsZoomOk = s.showLabels && det > 0.02f
     val fw = s.fixWire
     val fp = s.fixPaths
     fun silhouetteVisible(spec: String?): Boolean {
@@ -234,7 +249,22 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     // ---- Passe 2 : pastilles, anneaux de sélection, étiquettes ----
     s.labelHits?.clear()
     s.symbolHits?.clear()
-    val activeKey = s.activeLabelKey
+    // Projecteurs portant au moins un bloc armé : calculé UNE fois (coût
+    // proportionnel au nombre de blocs armés, pas au nombre de projecteurs).
+    val activeFixtures: Set<String> =
+        if (s.activeLabelKeys.isEmpty()) emptySet()
+        else s.activeLabelKeys.mapTo(HashSet()) { labelBlockFixtureKey(it) }
+    // Décalage manuel maximal PAR PROJECTEUR, agrégé une seule fois : le culling
+    // en a besoin pour chaque projecteur, et balayer la table des décalages à
+    // l'intérieur de la boucle en ferait un produit (projecteurs × décalages).
+    val maxShiftByFixture = HashMap<String, Offset>(s.labelShift.size * 2)
+    for ((k, v) in s.labelShift) {
+        val fk = labelBlockFixtureKey(k)
+        val cur = maxShiftByFixture[fk]
+        maxShiftByFixture[fk] =
+            if (cur == null) Offset(abs(v.x), abs(v.y))
+            else Offset(max(cur.x, abs(v.x)), max(cur.y, abs(v.y)))
+    }
     val labelPadX = LABEL_PAD_X.toPx()
     val labelPadY = LABEL_PAD_Y.toPx()
     val labelStroke = LABEL_STROKE.toPx()
@@ -246,9 +276,12 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     s.data.fixtures.forEachIndexed { i, f ->
         if (f.key in s.hiddenElements) return@forEachIndexed
         val p = s.toDraw(f.px, f.py)
-        val sh = (s.labelShift[f.key] ?: Offset.Zero) * s.labelShiftScale
-        val cullX = 40f + abs(sh.x) + labelCullPx
-        val cullY = 40f + abs(sh.y) + labelCullPx
+        // Culling : le décalage manuel LE PLUS GRAND des blocs de ce projecteur
+        // (chacun a le sien) — sinon un bloc traîné loin disparaîtrait dès que
+        // son projecteur sort du cadre, alors qu'il est encore à l'écran.
+        val maxSh = maxShiftByFixture[f.key] ?: Offset.Zero
+        val cullX = 40f + abs(maxSh.x) * s.labelShiftScale + labelCullPx
+        val cullY = 40f + abs(maxSh.y) * s.labelShiftScale + labelCullPx
         if (p.x !in -cullX..w + cullX || p.y !in -cullY..h + cullY) return@forEachIndexed
         val c = if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, f.layer)) else Color(0xFF6E6E73)
         val symRadius = if (silhouetteVisible(f.spec)) {
@@ -263,36 +296,45 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
         if (i in s.selected) {
             drawCircle(Color(0xFFFFC400), radius = 13f, center = p, style = Stroke(3f))
         }
-        if (showLabels && (!s.lowDetail || f.key == activeKey)) {
-            val text = when (s.labelContent) {
-                LabelContent.ID -> f.id?.let { "#$it" }
-                LabelContent.DMX -> f.addr.ifEmpty { null }?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) }
-                LabelContent.MODE -> f.mode?.ifEmpty { null }
-                LabelContent.NAME -> f.name
-            }
-            if (text != null) {
-                val fs = (9f * s.labelSize)
-                val off = 8f * s.labelOffset
+        // Une étiquette DÉSIGNÉE (bloc armé, ou projecteur sélectionné) est
+        // toujours tracée : ni le seuil de zoom ni l'allègement de geste ne la
+        // font disparaître (cf. labelsZoomOk).
+        val forced = f.key in activeFixtures || i in s.selected
+        if (s.showLabels && (labelsZoomOk || forced) && (!s.lowDetail || forced)) {
+            val blocks = labelBlocks(f, s.labelFields, s.labelDetached)
+            val fs = (9f * s.labelSize)
+            val off = 8f * s.labelOffset
+            val labelInk = readableInk(if (s.layerColors) c else s.inkColor, labelVeil)
+            // Empilement des blocs DÉTACHÉS sous le symbole : le premier bloc
+            // garde la place historique (à droite, au-dessus du centre), les
+            // suivants descendent — d'où « le n° en haut, le patch en bas » sans
+            // le moindre réglage. L'utilisateur affine ensuite au doigt.
+            var stackY = p.y + off * 0.5f
+            blocks.forEachIndexed { bi, block ->
+                val bkey = labelBlockKey(f.key, block.id)
+                val sh = (s.labelShift[bkey] ?: Offset.Zero) * s.labelShiftScale
+                val text = block.text
                 // Mesurer un texte est cher et le cache par défaut du TextMeasurer
-                // ne fait que 8 entrées → on mémorise par texte. La couleur n'est
-                // PAS mise en page ici (elle varie par calque).
+                // ne fait que 8 entrées → on mémorise par texte (sauts de ligne
+                // compris). La couleur n'est PAS mise en page ici (elle varie par
+                // calque).
                 val tl = s.labelCache.getOrPut(text) {
                     s.measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = s.inkColor))
                 }
-                val labelInk = readableInk(if (s.layerColors) c else s.inkColor, labelVeil)
-                val tx = p.x + off + sh.x
-                val ty = p.y - fs * 0.7f + sh.y
                 val bw = tl.size.width + labelPadX * 2f
                 val bh = tl.size.height + labelPadY * 2f
+                val tx = p.x + off + sh.x
+                val ty = (if (bi == 0) p.y - fs * 0.7f else stackY) + sh.y
+                if (bi > 0) stackY += bh + labelPadY
                 val boxTL = Offset(tx - labelPadX, ty - labelPadY)
-                s.labelHits?.add(LabelHit(f.key, boxTL.x, boxTL.y, bw, bh))
+                s.labelHits?.add(LabelHit(bkey, boxTL.x, boxTL.y, bw, bh))
                 val boxSize = Size(bw, bh)
                 val radius = CornerRadius(bh * 0.32f, bh * 0.32f)
                 drawRoundRect(
                     if (s.bgDark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.78f),
                     topLeft = boxTL, size = boxSize, cornerRadius = radius
                 )
-                val isActive = f.key == activeKey
+                val isActive = bkey in s.activeLabelKeys
                 if (isActive) {
                     // Retour visuel de l'étiquette ACTIVE : halo ambré débordant.
                     drawRoundRect(

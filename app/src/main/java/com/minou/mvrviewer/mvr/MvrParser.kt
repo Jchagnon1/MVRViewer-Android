@@ -41,6 +41,28 @@ object MvrParser {
     }
 
     /**
+     * Comme extractEntry mais INSENSIBLE À LA CASSE sur le nom simple. Certaines
+     * archives .gdtf nomment leur descripteur « Description.xml », voire
+     * « DESCRIPTION.XML » : iOS lit déjà l'entrée sans tenir compte de la casse,
+     * donc on s'aligne pour extraire la même puissance GDTF des deux côtés.
+     */
+    fun extractEntryIgnoringCase(mvrBytes: ByteArray, name: String): ByteArray? {
+        val target = name.lowercase()
+        try {
+            ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (entry.name.substringAfterLast('/').lowercase() == target) {
+                        return zip.readBytes()
+                    }
+                    entry = zip.nextEntry
+                }
+            }
+        } catch (_: Exception) { /* ZIP illisible → entrée absente */ }
+        return null
+    }
+
+    /**
      * Extrait plusieurs entrées en UN SEUL parcours du ZIP (évite le O(n²) d'un
      * extractEntry par fichier sur un show à des milliers de géométries).
      * Les clés du résultat sont les noms DEMANDÉS (pas les chemins internes).

@@ -20,8 +20,9 @@ object GdtfPower {
 
     /** Puissance MAX déclarée (W, entier), ou null si le .gdtf n'en déclare aucune. */
     fun maxWatts(gdtfBytes: ByteArray): Int? {
-        val xml = MvrParser.extractEntry(gdtfBytes, "description.xml")
-            ?: MvrParser.extractEntry(gdtfBytes, "Description.xml")
+        // Insensible à la casse : parité avec iOS, qui lit l'entrée quelle que
+        // soit la casse de son nom (description.xml / Description.xml / …).
+        val xml = MvrParser.extractEntryIgnoringCase(gdtfBytes, "description.xml")
             ?: return null
 
         val parser = Xml.newPullParser()

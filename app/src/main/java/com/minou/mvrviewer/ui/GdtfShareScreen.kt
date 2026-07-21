@@ -63,10 +63,22 @@ import kotlinx.coroutines.withContext
 class GdtfOverrides {
     val map: SnapshotStateMap<String, ByteArray> = mutableStateMapOf()
     val manualSpecs = mutableStateListOf<String>()
+    /**
+     * Révision GDTF Share du modèle choisi, par spec. C'est CE qui se
+     * synchronise (iOS pousse une table « spec → rid ») : les octets, eux, ne
+     * traversent pas le cloud. Sans ça, un projet partagé s'ouvrait sans ses
+     * modèles GDTF chez l'autre membre.
+     */
+    val rids: SnapshotStateMap<String, Int> = mutableStateMapOf()
     var version by mutableIntStateOf(0)
-    fun set(spec: String, bytes: ByteArray) { map[spec] = bytes; version++ }
-    fun setManual(spec: String, bytes: ByteArray) {
+    fun set(spec: String, bytes: ByteArray, rid: Int? = null) {
         map[spec] = bytes
+        if (rid != null) rids[spec] = rid
+        version++
+    }
+    fun setManual(spec: String, bytes: ByteArray, rid: Int? = null) {
+        map[spec] = bytes
+        if (rid != null) rids[spec] = rid
         if (spec !in manualSpecs) manualSpecs.add(spec)
         version++
     }
@@ -125,7 +137,7 @@ fun GdtfShareScreen(
         GdtfSearchPane(
             spec = sp,
             onBack = { searchSpec = null },
-            onChosen = { data -> overrides.setManual(sp, data); searchSpec = null }
+            onChosen = { data, rid -> overrides.setManual(sp, data, rid); searchSpec = null }
         )
         return
     }
@@ -261,7 +273,7 @@ private fun statusLabel(spec: String, overrides: GdtfOverrides): String = when {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArray) -> Unit) {
+private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArray, Int) -> Unit) {
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<GdtfShareEntry>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -347,7 +359,7 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
                                 val data = prefetched[entry.rid]
                                     ?: runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
                                 downloadingRid = null
-                                if (data != null) onChosen(data) else error = "Téléchargement échoué."
+                                if (data != null) onChosen(data, entry.rid) else error = "Téléchargement échoué."
                             }
                         }
                         .padding(horizontal = 16.dp, vertical = 12.dp)

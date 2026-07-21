@@ -194,7 +194,29 @@ fun SceneScreen(
                     }
                 }
             }
-            else -> {} // layerColors/labelSides/orientations/gdtfMappings : reçus, non appliqués en v1
+            // Modèles GDTF choisis par un autre membre : le cloud transporte
+            // « spec → révision GDTF Share », pas les octets. On les télécharge
+            // donc ici — sans ça, un projet partagé s'ouvrait SANS ses modèles
+            // GDTF à la première ouverture.
+            is SectionPayload.GdtfMappings -> {
+                val wanted = p.dto.mappings.filterKeys { it !in gdtfOverrides.map }
+                if (wanted.isNotEmpty()) {
+                    for ((spec, rid) in wanted) {
+                        val data: ByteArray? = withContext(Dispatchers.IO) {
+                            runCatching { com.minou.mvrviewer.mvr.GdtfShareClient.download(rid) }.getOrNull()
+                        }
+                        if (data != null) gdtfOverrides.set(spec, data, rid)
+                    }
+                    // Persiste comme un choix local : la prochaine ouverture
+                    // n'aura pas besoin du réseau.
+                    withContext(Dispatchers.IO) {
+                        ProjectStore.saveOverrides(
+                            ctx, projectKey, gdtfOverrides.map.toMap(), gdtfOverrides.manualSpecs.toSet()
+                        )
+                    }
+                }
+            }
+            else -> {} // layerColors/labelSides/orientations : reçus, non appliqués en v1
         }
     }
 

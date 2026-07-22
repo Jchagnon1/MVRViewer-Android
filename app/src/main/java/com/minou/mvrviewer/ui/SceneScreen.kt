@@ -85,6 +85,9 @@ fun SceneScreen(
     // Câblage électrique (phase 2) : distributeurs + affectations + réglages.
     // Réactif ; restauré du projet, poussé/appliqué comme le patch.
     val cabling = remember { PowerCablingState() }
+    // Câblage DMX (phase 3) : lignes DMX simples/multipaires + affectations.
+    // Même cycle de vie que la Socapex : restauré, poussé/appliqué comme le patch.
+    val dmxCabling = remember { DmxCablingState() }
     // Plan de repère DXF importé — hissé ici pour survivre aux allers-retours
     // 3D ↔ plan (PlanScreen est recréé à chaque bascule).
     var referencePlan by remember { mutableStateOf<com.minou.mvrviewer.mvr.ReferencePlan?>(null) }
@@ -263,6 +266,17 @@ fun SceneScreen(
                         com.minou.mvrviewer.sync.PowerCablingCodec.toJsonString(clean))
                 }
             }
+            // Câblage DMX distant : même traitement que la Socapex — sanitisé
+            // contre les projecteurs présents (pas d'affectation fantôme), chargé
+            // puis persisté localement.
+            is SectionPayload.DmxCabling -> {
+                val clean = p.dto.sanitized(validFixtureUuids)
+                dmxCabling.load(clean)
+                withContext(Dispatchers.IO) {
+                    ProjectStore.saveDmxCabling(ctx, projectKey,
+                        com.minou.mvrviewer.sync.DmxCablingCodec.toJsonString(clean))
+                }
+            }
             else -> {} // layerColors/labelSides/orientations : reçus, non appliqués en v1
         }
     }
@@ -287,6 +301,7 @@ fun SceneScreen(
         }
         if (overrides.edits.isNotEmpty()) s.pushPatch(scene, overrides.toPersistedList())
         if (cabling.distributors.isNotEmpty() || cabling.assignments.isNotEmpty()) s.pushPowerCabling(cabling.toDTO())
+        if (dmxCabling.distributors.isNotEmpty() || dmxCabling.assignments.isNotEmpty()) s.pushDmxCabling(dmxCabling.toDTO())
     }
 
     // Rattache le projet cloud à l'ouverture ET à la connexion (réunion par empreinte).
@@ -302,6 +317,7 @@ fun SceneScreen(
             snap.calibration?.let { applySection(SectionPayload.Calibration(it)) }
             snap.patch?.let { applySection(SectionPayload.Patch(it)) }
             snap.powerCabling?.let { applySection(SectionPayload.PowerCabling(it)) }
+            snap.dmxCabling?.let { applySection(SectionPayload.DmxCabling(it)) }
         }
     }
 
@@ -319,6 +335,14 @@ fun SceneScreen(
         cabling.load(dto.sanitized(validFixtureUuids))
     }
 
+    // Restaure le CÂBLAGE DMX persisté (lignes + affectations), sanitisé contre
+    // les projecteurs présents. Survit à la fermeture hors-ligne (comme la Socapex).
+    LaunchedEffect(projectKey) {
+        val json = withContext(Dispatchers.IO) { ProjectStore.loadDmxCabling(ctx, projectKey) } ?: return@LaunchedEffect
+        val dto = com.minou.mvrviewer.sync.DmxCablingCodec.fromJsonString(json) ?: return@LaunchedEffect
+        dmxCabling.load(dto.sanitized(validFixtureUuids))
+    }
+
     // Commit d'une modification UTILISATEUR du câblage → persistance locale + push
     // cloud. Le chargement disque/distant NE déclenche PAS onChange (garde-fou LWW).
     LaunchedEffect(sync, projectKey) {
@@ -328,6 +352,18 @@ fun SceneScreen(
                     com.minou.mvrviewer.sync.PowerCablingCodec.toJsonString(dto))
             }
             sync?.pushPowerCabling(dto)
+        }
+    }
+
+    // Idem pour le câblage DMX : persistance locale + push cloud sur édition
+    // UTILISATEUR (le chargement disque/distant ne déclenche pas onChange).
+    LaunchedEffect(sync, projectKey) {
+        dmxCabling.onChange = { dto ->
+            scope.launch(Dispatchers.IO) {
+                ProjectStore.saveDmxCabling(ctx, projectKey,
+                    com.minou.mvrviewer.sync.DmxCablingCodec.toJsonString(dto))
+            }
+            sync?.pushDmxCabling(dto)
         }
     }
 

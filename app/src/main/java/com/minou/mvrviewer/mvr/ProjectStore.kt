@@ -233,6 +233,22 @@ object ProjectStore {
     fun loadPowerCabling(ctx: Context, key: String): String? =
         readManifest(ctx, key).optJSONObject("powerCabling")?.toString()
 
+    // ---- Câblage DMX (section « dmxCabling », phase 3) ----
+    // Même principe que le câblage électrique : le JSON du DTO (sans enveloppe)
+    // est rangé dans le manifeste ; rouvrir le .mvr retrouve les lignes DMX et
+    // leurs affectations, même hors ligne.
+
+    fun saveDmxCabling(ctx: Context, key: String, json: String?) = synchronized(manifestLock) {
+        val m = readManifest(ctx, key)
+        if (json.isNullOrBlank()) m.remove("dmxCabling")
+        else runCatching { m.put("dmxCabling", JSONObject(json)) }
+        writeManifest(ctx, key, m)
+    }
+
+    /** JSON du DTO câblage DMX persisté (null si jamais enregistré). */
+    fun loadDmxCabling(ctx: Context, key: String): String? =
+        readManifest(ctx, key).optJSONObject("dmxCabling")?.toString()
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
     fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) = synchronized(manifestLock) {

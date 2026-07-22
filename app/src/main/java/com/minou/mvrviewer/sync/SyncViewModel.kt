@@ -267,6 +267,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     fun pushPowerCabling(dto: PowerCablingDTO) =
         push(SectionPayload.PowerCabling(dto))
 
+    /** Câblage DMX (lignes simples/multipaires + affectations). */
+    fun pushDmxCabling(dto: DmxCablingDTO) =
+        push(SectionPayload.DmxCabling(dto))
+
     // MARK: - Bibliothèque de puissances (base communautaire GLOBALE)
 
     /**

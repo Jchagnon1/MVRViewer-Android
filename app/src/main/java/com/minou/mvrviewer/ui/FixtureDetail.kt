@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -287,32 +288,67 @@ fun FixtureDetailSheet(
                 }
             }
 
-            // ---- Consommation électrique (outil de câblage, phase 1) ----------
-            // Puissance MAX du type : lue du GDTF si présente, sinon saisie à la
-            // main. Une saisie est mémorisée dans la BIBLIOTHÈQUE PARTAGÉE (clé =
-            // spec) → jamais à ressaisir, pour tous les projets et utilisateurs.
+            // ---- Consommation électrique (consensus communautaire par votes) --
+            // La valeur affichée est le CONSENSUS des votes du type (biblio
+            // partagée), sinon le GDTF, sinon rien. « ✓ C'est bon » dépose MON
+            // vote égal à la valeur affichée sans la retaper ; saisir une autre
+            // valeur = mon vote à cette valeur. Personne n'écrase le vote d'un autre.
             if (fixture.gdtfSpec != null) {
                 val wattsInt = wattsText.trim().toIntOrNull()
                 val wattsOk = wattsText.isBlank() || (wattsInt != null && wattsInt > 0)
+                val votes = power.consensusVotes(fixture.gdtfSpec)
+                val effWatts = resolution.watts
                 Text("Consommation", style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+
+                // Consensus + confiance + bouton « ✓ C'est bon ».
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (effWatts != null) "$effWatts W" else "À saisir",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (effWatts != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            when (resolution.source) {
+                                PowerSource.LIBRARY -> {
+                                    val n = votes ?: 1
+                                    "consensus · $n vote${if (n > 1) "s" else ""}"
+                                }
+                                PowerSource.GDTF -> "d'après le GDTF · aucun vote"
+                                PowerSource.NONE -> "aucune valeur — votez la puissance max"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    // Confirmer la valeur affichée = déposer mon vote sans retaper.
+                    if (effWatts != null) {
+                        OutlinedButton(onClick = {
+                            fixture.gdtfSpec?.let { spec ->
+                                power.set(spec, effWatts)
+                                wattsText = effWatts.toString()
+                            }
+                        }) { Text("✓ C'est bon") }
+                    }
+                }
+
                 OutlinedTextField(
                     value = wattsText,
                     onValueChange = { new -> wattsText = new.filter { it.isDigit() } },
-                    label = { Text("Consommation max (W)") },
+                    label = { Text("Ma valeur (W)") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = !wattsOk,
                     supportingText = {
                         Text(
-                            when (resolution.source) {
-                                PowerSource.LIBRARY -> "Source : saisie (bibliothèque partagée)"
-                                PowerSource.GDTF -> "Source : GDTF (modifiable)"
-                                PowerSource.NONE -> "Aucune valeur GDTF — à saisir"
-                            },
-                            color = if (resolution.source == PowerSource.NONE)
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.primary
+                            "Votez une autre valeur si besoin ; le consensus se recalcule.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -327,9 +363,10 @@ fun FixtureDetailSheet(
                 enabled = addrOk && wattsSaveOk,
                 onClick = {
                     overrides.set(fixture, id, addr, modeName)
-                    // Écrit la puissance dans la biblio partagée UNIQUEMENT si
-                    // l'utilisateur a changé la valeur effective (ne pas « promouvoir »
-                    // en saisie une valeur GDTF laissée telle quelle).
+                    // Dépose MON vote UNIQUEMENT si l'utilisateur a saisi une
+                    // valeur différente du consensus affiché (sinon « ✓ C'est bon »
+                    // sert à confirmer sans ressaisir, et on ne vote pas une valeur
+                    // GDTF laissée telle quelle par inadvertance).
                     val spec = fixture.gdtfSpec
                     val parsed = wattsText.trim().toIntOrNull()
                     if (spec != null && parsed != null && parsed > 0 && parsed != resolution.watts) {

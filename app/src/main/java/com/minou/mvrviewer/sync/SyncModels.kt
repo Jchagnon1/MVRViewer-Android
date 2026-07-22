@@ -115,7 +115,8 @@ enum class ProjectSectionKind(val raw: String) {
     LABEL_SIDES("labelSides"),
     FIXTURE_ORIENTATIONS("fixtureOrientations"),
     GDTF_MAPPINGS("gdtfMappings"),
-    POWER_CABLING("powerCabling");
+    POWER_CABLING("powerCabling"),
+    DMX_CABLING("dmxCabling");
 
     companion object {
         fun from(raw: String): ProjectSectionKind? = entries.firstOrNull { it.raw == raw }
@@ -213,6 +214,9 @@ sealed class SectionPayload {
     data class PowerCabling(val dto: PowerCablingDTO) : SectionPayload() {
         override val kind get() = ProjectSectionKind.POWER_CABLING
     }
+    data class DmxCabling(val dto: DmxCablingDTO) : SectionPayload() {
+        override val kind get() = ProjectSectionKind.DMX_CABLING
+    }
 }
 
 /**
@@ -228,7 +232,8 @@ data class ProjectSnapshot(
     var labelSides: LabelSidesDTO? = null,
     var fixtureOrientations: FixtureOrientationsDTO? = null,
     var gdtfMappings: GDTFMappingsDTO? = null,
-    var powerCabling: PowerCablingDTO? = null
+    var powerCabling: PowerCablingDTO? = null,
+    var dmxCabling: DmxCablingDTO? = null
 ) {
     /** Applique un payload dans l'instantané (reconstruction section-par-section). */
     fun apply(p: SectionPayload) {
@@ -241,6 +246,7 @@ data class ProjectSnapshot(
             is SectionPayload.FixtureOrientations -> fixtureOrientations = p.dto
             is SectionPayload.GdtfMappings -> gdtfMappings = p.dto
             is SectionPayload.PowerCabling -> powerCabling = p.dto
+            is SectionPayload.DmxCabling -> dmxCabling = p.dto
         }
     }
 }

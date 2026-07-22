@@ -363,13 +363,17 @@ fun FixtureDetailSheet(
                 enabled = addrOk && wattsSaveOk,
                 onClick = {
                     overrides.set(fixture, id, addr, modeName)
-                    // Dépose MON vote UNIQUEMENT si l'utilisateur a saisi une
-                    // valeur différente du consensus affiché (sinon « ✓ C'est bon »
-                    // sert à confirmer sans ressaisir, et on ne vote pas une valeur
-                    // GDTF laissée telle quelle par inadvertance).
+                    // Dépose MON vote SAUF s'il est strictement redondant avec un
+                    // consensus DÉJÀ établi (même règle qu'iOS `shouldWriteWatts`).
+                    // Conséquence : retaper la valeur GDTF puis « Enregistrer »
+                    // DÉPOSE bien un vote (sinon la conso « n'est pas gardée ») ;
+                    // seule la ressaisie d'une valeur déjà issue du consensus est
+                    // ignorée, car « ✓ C'est bon » la confirme sans doublon.
                     val spec = fixture.gdtfSpec
                     val parsed = wattsText.trim().toIntOrNull()
-                    if (spec != null && parsed != null && parsed > 0 && parsed != resolution.watts) {
+                    val redundantWithConsensus =
+                        resolution.source == PowerSource.LIBRARY && parsed == resolution.watts
+                    if (spec != null && parsed != null && parsed > 0 && !redundantWithConsensus) {
                         power.set(spec, parsed)
                     }
                     onDismiss()

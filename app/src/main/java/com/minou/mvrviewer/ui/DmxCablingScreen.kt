@@ -62,37 +62,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.minou.mvrviewer.mvr.DmxAddress
-import com.minou.mvrviewer.mvr.DmxMode
-import com.minou.mvrviewer.mvr.GdtfModes
-import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.sync.DmxCablingCalc
 import com.minou.mvrviewer.sync.DmxDistributor
 import com.minou.mvrviewer.sync.DmxDistributorKind
 import com.minou.mvrviewer.sync.defaultDmxCores
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-/**
- * Un projecteur affectable au DMX + son empreinte (canaux du mode) et son univers
- * de patch — servant la liste, le sélecteur et le calcul d'empreinte cumulée.
- */
-private data class DmxCableFixture(
-    val uuid: String,
-    val label: String,      // « #12 · Mac Aura »
-    val spec: String?,
-    val mode: String?,
-    val channels: Int?,     // empreinte DMX (footprint du mode GDTF) — null = inconnue
-    val universe: Int?,     // univers de patch — null = non patché
-    val address: String?    // adresse formatée « u.a » (affichage)
-)
-
-/** Base légère (thread principal) avant résolution des empreintes GDTF hors-main. */
-private data class DmxBaseFx(
-    val uuid: String, val label: String, val spec: String?, val mode: String?,
-    val universe: Int?, val address: String?
-)
 
 /**
  * ONGLET CÂBLAGE DMX (phase 3) — même principe que la Socapex (phase 2) mais pour
@@ -112,42 +86,13 @@ fun DmxCablingPanel(
     dmx: DmxCablingState,
     modifier: Modifier = Modifier
 ) {
-    // Base légère résolue sur le thread principal (labels, mode effectif, patch) ;
-    // re-clé sur overrides.version pour refléter un repatch immédiatement.
-    val base = remember(scene, overrides.version) {
-        scene.fixtures.mapNotNull { f ->
-            val uuid = f.uuid ?: return@mapNotNull null
-            val id = overrides.effectiveId(f)?.trim()?.ifBlank { null }
-            val label = (id?.let { "#$it · " } ?: "") + f.name
-            val rawAddr = overrides.effectiveAddress(f)
-            val ua = rawAddr?.let { parseUniverseAddress(it) }
-            DmxBaseFx(uuid, label, f.gdtfSpec?.trim(), overrides.effectiveMode(f),
-                ua?.first, ua?.let { "${it.first}.${it.second}" })
-        }
-    }
-    // Résolution des empreintes GDTF HORS thread principal (parse des .gdtf), une
-    // fois par (spec) — comme la vue Univers DMX. Nul tant que non résolu → loader.
-    val resolved by produceState<List<DmxCableFixture>?>(null, base, mvrBytes, gdtfOverrides.version) {
-        value = withContext(Dispatchers.Default) {
-            val gmap = gdtfOverrides.map.toMap()
-            val modesBySpec = HashMap<String, List<DmxMode>>()
-            for (spec in base.mapNotNull { it.spec }.filter { it.isNotEmpty() }.toSet()) {
-                var data = gmap[spec]
-                if (data == null) {
-                    val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
-                    data = cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
-                }
-                if (data != null) modesBySpec[spec] = runCatching { GdtfModes.parse(data) }.getOrDefault(emptyList())
-            }
-            base.map { b ->
-                val modes = b.spec?.let { modesBySpec[it] }
-                val channels = if (!modes.isNullOrEmpty()) {
-                    val mode = modes.firstOrNull { it.name == b.mode } ?: modes.first()
-                    maxOf(1, mode.footprint)
-                } else null
-                DmxCableFixture(b.uuid, b.label, b.spec, b.mode, channels, b.universe, b.address)
-            }
-        }
+    // Résolution des empreintes GDTF HORS thread principal (parse des .gdtf) via la
+    // fonction suspend PARTAGÉE avec l'export PDF : une seule source de vérité pour
+    // l'empreinte, l'univers et l'adresse. Nul tant que non résolu → loader.
+    val resolved by produceState<List<DmxCableFixture>?>(
+        null, scene, overrides.version, mvrBytes, gdtfOverrides.version
+    ) {
+        value = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides)
     }
     val fixtures = resolved ?: emptyList()
     val channelsOf: (String) -> Int? = remember(fixtures) {
@@ -545,12 +490,3 @@ private fun AddMultiDialog(onConfirm: (Int) -> Unit, onDismiss: () -> Unit) {
     )
 }
 
-/** Adresse DMX brute → (univers, canal) via le formateur commun de l'app. */
-private fun parseUniverseAddress(raw: String): Pair<Int, Int>? {
-    val parts = DmxAddress.format(raw).split(".")
-    if (parts.size != 2) return null
-    val u = parts[0].toIntOrNull() ?: return null
-    val a = parts[1].toIntOrNull() ?: return null
-    if (u < 1 || a < 1) return null
-    return u to a
-}

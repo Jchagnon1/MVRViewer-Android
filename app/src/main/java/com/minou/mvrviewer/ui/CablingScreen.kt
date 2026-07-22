@@ -70,12 +70,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.sync.CablingSettings
 import com.minou.mvrviewer.sync.Distributor
 import com.minou.mvrviewer.sync.DistributorKind
 import com.minou.mvrviewer.sync.PowerCablingCalc
 import com.minou.mvrviewer.sync.PowerSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Un projecteur affectable + sa conso résolue (pour la liste et le sélecteur). */
 private data class CableFixture(
@@ -101,6 +108,12 @@ fun CablingScreen(
     power: PowerLibraryState,
     cabling: PowerCablingState,
     dmxCabling: DmxCablingState,
+    // Pour les pages « Plans repérés » de l'export PDF : mêmes données que la vue
+    // plan (plan de repère DXF, satellite, calques masqués). Vides = pages plan
+    // sans DXF/satellite (le PDF reste correct).
+    referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
+    satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
+    hiddenLayers: Set<String> = emptySet(),
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -131,6 +144,89 @@ fun CablingScreen(
     // votes remontent `power.version`, qui re-clé `fixtures`).
     var tab by remember { mutableIntStateOf(0) }
 
+    // ---- EXPORT PDF (phase 5) : dossier complet + 3 exports séparés ----------
+    val ctxCabling = LocalContext.current
+    val exportScope = rememberCoroutineScope()
+    var exportMenu by remember { mutableStateOf(false) }
+    var exportBusy by remember { mutableStateOf(false) }
+    // Lance la génération HORS thread principal puis partage le PDF. Les données
+    // sont figées sur le thread principal (DTO, cartes uuid→libellé/conso), puis
+    // les calculs/empreintes viennent EXCLUSIVEMENT des fonctions déjà à l'écran
+    // (PowerCablingCalc/DmxCablingCalc + resolveDmxFootprints partagé) → aucune
+    // duplication. Les pages plan réutilisent le moteur de page plan existant.
+    fun runExport(parts: Set<CablingPdfPart>, title: String) {
+        if (exportBusy) return
+        exportBusy = true
+        val fx = fixtures
+        val labelMap = fx.associate { it.uuid to it.label }
+        val specMap = fx.associate { it.uuid to it.spec }
+        val wattsMap = fx.associate { it.uuid to it.watts }
+        val cablingDto = cabling.toDTO()
+        val dmxDto = dmxCabling.toDTO()
+        val settings = cabling.settings
+        val needDmx = CablingPdfPart.DMX in parts
+        val needPlans = CablingPdfPart.PLANS in parts
+        val ovVersion = gdtfOverrides.version
+        val ovMap = gdtfOverrides.map.toMap()
+        val refPlan = referencePlan
+        val sat = satellite
+        val hidden = hiddenLayers
+        exportScope.launch {
+            val file = withContext(Dispatchers.Default) {
+                runCatching {
+                    val labelOf = { u: String -> labelMap[u] }
+                    val specOf = { u: String -> specMap[u] }
+                    val wattsOf2 = { u: String -> wattsMap[u] }
+                    var channelsOf: (String) -> Int? = { null }
+                    var universeOf: (String) -> Int? = { null }
+                    var addressOf: (String) -> String? = { null }
+                    var modeOf: (String) -> String? = { null }
+                    if (needDmx) {
+                        val resolved = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides)
+                        val chMap = resolved.associate { it.uuid to it.channels }
+                        val uniMap = resolved.associate { it.uuid to it.universe }
+                        val addrMap = resolved.associate { it.uuid to it.address }
+                        val modeMap = resolved.associate { it.uuid to it.mode }
+                        channelsOf = { chMap[it] }
+                        universeOf = { uniMap[it] }
+                        addressOf = { addrMap[it] }
+                        modeOf = { modeMap[it] }
+                    }
+                    var planSrc: PlanExportSource? = null
+                    var socaView: PlanViewCapture? = null
+                    var dmxView: PlanViewCapture? = null
+                    if (needPlans) {
+                        val data = planData(scene)
+                        val coloring = buildCablingColoring(data, cablingDto, dmxDto)
+                        planSrc = PlanExportSource(
+                            data = data,
+                            layerIndex = LayerColors.index(scene),
+                            wire = PlanWireCache.buildStructures(scene, mvrBytes),
+                            fixWire = PlanWireCache.buildFixtures(scene, mvrBytes, ovVersion, ovMap),
+                            dxfPaths = refPlan?.plan?.let { buildDxfPaths(it) },
+                            satellite = sat,
+                            legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
+                                .toList().sortedByDescending { it.second },
+                            documentTitle = "Câblage"
+                        )
+                        socaView = cablingPlanView("Repérage Socapex", data, PlanColorMode.SOCAPEX,
+                            coloring.socaColor, coloring.socaLegend, coloring.cablingText, sat, hidden, refPlan)
+                        dmxView = cablingPlanView("Repérage DMX", data, PlanColorMode.DMX_LINE,
+                            coloring.dmxColor, coloring.dmxLegend, coloring.cablingText, sat, hidden, refPlan)
+                    }
+                    buildCablingPdf(
+                        ctxCabling, parts, cablingDto, dmxDto, settings,
+                        wattsOf2, channelsOf, universeOf, addressOf, modeOf, labelOf, specOf,
+                        title, planSrc, socaView, dmxView
+                    )
+                }.getOrNull()
+            }
+            exportBusy = false
+            if (file != null) sharePlanPdf(ctxCabling, file)
+            else android.widget.Toast.makeText(ctxCabling, "Échec de l'export PDF", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Câblage", style = MaterialTheme.typography.titleMedium) },
@@ -142,6 +238,42 @@ fun CablingScreen(
             actions = {
                 if (tab == 0) IconButton(onClick = { showSettings = true }) {
                     Icon(Icons.Filled.Settings, contentDescription = "Réglages du câblage")
+                }
+                // Menu d'export PDF : dossier complet + 3 exports séparés.
+                Box {
+                    if (exportBusy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp).padding(end = 6.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        IconButton(onClick = { exportMenu = true }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Exporter le câblage en PDF")
+                        }
+                    }
+                    DropdownMenu(expanded = exportMenu, onDismissRequest = { exportMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Dossier câblage complet") },
+                            onClick = {
+                                exportMenu = false
+                                runExport(setOf(CablingPdfPart.ELEC, CablingPdfPart.DMX, CablingPdfPart.PLANS),
+                                    "Câblage complet")
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Distribution élec") },
+                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.ELEC), "Distribution électrique") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Câblage DMX") },
+                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.DMX), "Câblage DMX") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Plans repérés") },
+                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.PLANS), "Plans repérés") }
+                        )
+                    }
                 }
             }
         )

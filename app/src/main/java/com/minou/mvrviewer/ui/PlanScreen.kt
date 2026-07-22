@@ -169,25 +169,16 @@ fun PlanScreen(
     val socaLabelByFixture = remember(cabling.version) {
         val byId = cabling.distributors.associateBy { it.id }
         cabling.assignments.values.mapNotNull { a ->
-            // Spec canonique : (nom du distributeur, ou « Socapex » si vide/blanc)
-            // + « · C » + numéro de circuit 1-based. Séparateur = espace + U+00B7 + espace.
-            byId[a.distributor]?.let { d ->
-                val base = d.name.ifBlank { "Socapex" }
-                a.fixture to "$base · C${a.circuit}"
-            }
+            // Convention canonique centralisée (CablingLabels) : « nom · C<circuit> ».
+            byId[a.distributor]?.let { d -> a.fixture to CablingLabels.soca(d.name, a.circuit) }
         }.toMap()
     }
     val dmxLabelByFixture = remember(dmxCabling.version) {
         val byId = dmxCabling.distributors.associateBy { it.id }
         dmxCabling.assignments.values.mapNotNull { a ->
-            // Spec canonique : base = (nom, ou « DMX » si vide/blanc). Ligne simple
-            // (coreCount <= 1) → base seule ; multipaire (coreCount > 1) → base
-            // + « · D » + numéro de cœur 1-based. On GATE sur coreCount, PAS sur le
-            // kind : une multipaire réduite à 1 départ redevient une ligne simple.
-            byId[a.distributor]?.let { d ->
-                val base = d.name.ifBlank { "DMX" }
-                a.fixture to if (d.coreCount > 1) "$base · D${a.core}" else base
-            }
+            // Convention canonique centralisée (CablingLabels) : « nom · D<cœur> »
+            // (base seule si la ligne n'a qu'un départ, GATE sur coreCount).
+            byId[a.distributor]?.let { d -> a.fixture to CablingLabels.dmx(d.name, d.coreCount, a.core) }
         }.toMap()
     }
     // Résolveur d'étiquette SOCAPEX / DMX_LINE : pur (ferme sur les tables figées),
@@ -1952,7 +1943,7 @@ private val BG_2D_PRESETS = listOf(
  * On garde la dernière scène construite — comme le fait déjà la vue 3D pour sa
  * géométrie (Prepared3DCache).
  */
-private object PlanWireCache {
+internal object PlanWireCache {
     // Références FAIBLES/SOUPLES : sur un gros show ces tableaux d'arêtes pèsent
     // lourd, et l'app a un historique d'OOM. La scène n'est pas retenue (weak),
     // et le fil de fer est rendu au GC en cas de pression mémoire (soft) — on

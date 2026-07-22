@@ -686,6 +686,12 @@ fun SceneScreen(
             power = power,
             cabling = cabling,
             dmxCabling = dmxCabling,
+            // Pages « Plans repérés » de l'export PDF : mêmes données que la vue plan
+            // (plan de repère DXF, satellite géo-référencé, calques masqués), hissées
+            // ici pour survivre aux bascules 3D ↔ plan.
+            referencePlan = referencePlan,
+            satellite = satellite,
+            hiddenLayers = hiddenLayers,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

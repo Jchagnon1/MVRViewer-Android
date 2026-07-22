@@ -110,6 +110,24 @@ private const val MARGIN = 30f
 private const val HEADER_H = 44f
 private const val FOOTER_H = 22f
 
+// Dimensions du cadre de dessin d'une page plan PAYSAGE (en points), exposées
+// pour que d'autres exporteurs (câblage) réutilisent EXACTEMENT le même cadrage
+// « fit » et calculent le pxPerMm de la page sans le dupliquer.
+internal val PLAN_PAGE_CONTENT_W: Float = PAGE_W - 2f * MARGIN
+internal val PLAN_PAGE_CONTENT_H: Float = PAGE_H - 2f * MARGIN - HEADER_H - FOOTER_H
+
+/**
+ * pxPerMm (points/mm monde) qu'utilisera une page plan paysage pour un cadrage
+ * (halfW, halfH) en mm monde — même formule « fit » que [drawPdfPage]. Sert à
+ * régler `screenPxPerMm` d'une capture d'export afin que les décisions de détail
+ * (silhouettes / étiquettes) collent à l'échelle réelle de la page.
+ */
+internal fun planPagePxPerMm(halfW: Float, halfH: Float): Float =
+    minOf(
+        PLAN_PAGE_CONTENT_W / (2f * maxOf(halfW, 1e-3f)),
+        PLAN_PAGE_CONTENT_H / (2f * maxOf(halfH, 1e-3f))
+    )
+
 /**
  * Construit le document. Coûteux (reconstruction des tracés par jeu d'éléments
  * masqués) → à appeler hors thread principal.
@@ -119,20 +137,67 @@ internal fun buildPlanPdf(
     src: PlanExportSource,
     views: List<PlanViewCapture>
 ): File {
-    val measurer = TextMeasurer(
+    val measurer = pdfTextMeasurer(ctx)
+    val doc = android.graphics.pdf.PdfDocument()
+    renderPlanPagesInto(doc, src, views, measurer, pageOffset = 0, totalPages = views.size)
+    return writePdfToCache(ctx, doc, src.documentTitle, fallbackName = "plan")
+}
+
+/** TextMeasurer à densité 1 (points PDF), partagé par tous les exporteurs PDF. */
+internal fun pdfTextMeasurer(ctx: android.content.Context): TextMeasurer =
+    TextMeasurer(
         defaultFontFamilyResolver = createFontFamilyResolver(ctx),
         defaultDensity = Density(1f),
         defaultLayoutDirection = LayoutDirection.Ltr
     )
-    val doc = android.graphics.pdf.PdfDocument()
+
+/**
+ * Écrit un PdfDocument déjà rempli dans cacheDir/pdf sous un nom sanitisé, puis
+ * le ferme (finally). Factorisé pour que le plan ET le câblage partagent la même
+ * écriture. `close()` dans un finally : une page très chargée peut faire échouer
+ * l'écriture (disque plein, mémoire), et un PdfDocument non fermé retient ses
+ * bitmaps de page. L'appelant relance alors l'export sur un tas propre.
+ */
+internal fun writePdfToCache(
+    ctx: android.content.Context,
+    doc: android.graphics.pdf.PdfDocument,
+    title: String,
+    fallbackName: String = "document"
+): File {
+    val dir = File(ctx.cacheDir, "pdf").apply { mkdirs() }
+    val safe = title.replace(Regex("[^A-Za-z0-9._-]+"), "_").take(48).trim('_')
+    val out = File(dir, (if (safe.isEmpty()) fallbackName else safe) + ".pdf")
+    try {
+        java.io.FileOutputStream(out).use { doc.writeTo(it) }
+    } finally {
+        doc.close()
+    }
+    return out
+}
+
+/**
+ * Rend les pages plan PAYSAGE dans un PdfDocument DÉJÀ ouvert — extrait de
+ * [buildPlanPdf] pour qu'un document MIXTE (tableaux de câblage + plans repérés)
+ * réutilise le même moteur de page plan sans dupliquer le rendu. `pageOffset` =
+ * nombre de pages déjà présentes avant celles-ci ; `totalPages` = total du
+ * document entier (pour le pied « page N/total »).
+ */
+internal fun renderPlanPagesInto(
+    doc: android.graphics.pdf.PdfDocument,
+    src: PlanExportSource,
+    views: List<PlanViewCapture>,
+    measurer: TextMeasurer,
+    pageOffset: Int,
+    totalPages: Int
+) {
     // Les tracés dépendent du jeu d'éléments masqués (il est filtré à la
     // construction) : on les mutualise par jeu identique, cas courant où toutes
     // les vues partagent le même masquage.
     val pathCache = HashMap<Set<String>, PdfPagePaths>()
-
     views.forEachIndexed { index, v ->
+        val pageNo = pageOffset + index + 1
         val page = doc.startPage(
-            android.graphics.pdf.PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, index + 1).create()
+            android.graphics.pdf.PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, pageNo).create()
         )
         val paths = pathCache.getOrPut(v.hiddenElements) {
             val wf = src.wire
@@ -152,24 +217,10 @@ internal fun buildPlanPdf(
             androidx.compose.ui.graphics.Canvas(page.canvas),
             Size(PAGE_W.toFloat(), PAGE_H.toFloat())
         ) {
-            drawPdfPage(src, v, index + 1, views.size, measurer, paths)
+            drawPdfPage(src, v, pageNo, totalPages, measurer, paths)
         }
         doc.finishPage(page)
     }
-
-    val dir = File(ctx.cacheDir, "pdf").apply { mkdirs() }
-    // Nom stable et lisible : c'est lui que verra le destinataire du partage.
-    val safe = src.documentTitle.replace(Regex("[^A-Za-z0-9._-]+"), "_").take(48).trim('_')
-    val out = File(dir, (if (safe.isEmpty()) "plan" else safe) + ".pdf")
-    // `close()` dans un finally : une page très chargée peut faire échouer
-    // l'écriture (disque plein, mémoire), et un PdfDocument non fermé retient
-    // ses bitmaps de page. L'appelant relance alors l'export sur un tas propre.
-    try {
-        java.io.FileOutputStream(out).use { doc.writeTo(it) }
-    } finally {
-        doc.close()
-    }
-    return out
 }
 
 /** Tracés d'une page, mutualisés entre vues partageant le même masquage. */

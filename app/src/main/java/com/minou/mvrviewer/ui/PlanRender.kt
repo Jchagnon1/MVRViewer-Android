@@ -321,7 +321,7 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
         // projecteur (non affecté = gris neutre) ; sinon comportement historique
         // (calque si activé, sinon gris neutre). Seul site indexé par INSTANCE.
         val c = if (s.colorMode != PlanColorMode.LAYER)
-            s.cablingColor?.get(f.key) ?: NEUTRAL_FIXTURE_GRAY
+            s.cablingColor?.get(f.key) ?: CABLING_UNASSIGNED_GRAY   // non affecté = gris câblage dédié
         else if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, f.layer))
         else NEUTRAL_FIXTURE_GRAY
         val symRadius = if (silhouetteVisible(f.spec)) {

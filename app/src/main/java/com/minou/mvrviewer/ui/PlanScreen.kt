@@ -169,15 +169,24 @@ fun PlanScreen(
     val socaLabelByFixture = remember(cabling.version) {
         val byId = cabling.distributors.associateBy { it.id }
         cabling.assignments.values.mapNotNull { a ->
-            byId[a.distributor]?.let { d -> a.fixture to "${d.name} · C${a.circuit}" }
+            // Spec canonique : (nom du distributeur, ou « Socapex » si vide/blanc)
+            // + « · C » + numéro de circuit 1-based. Séparateur = espace + U+00B7 + espace.
+            byId[a.distributor]?.let { d ->
+                val base = d.name.ifBlank { "Socapex" }
+                a.fixture to "$base · C${a.circuit}"
+            }
         }.toMap()
     }
     val dmxLabelByFixture = remember(dmxCabling.version) {
         val byId = dmxCabling.distributors.associateBy { it.id }
         dmxCabling.assignments.values.mapNotNull { a ->
+            // Spec canonique : base = (nom, ou « DMX » si vide/blanc). Ligne simple
+            // (coreCount <= 1) → base seule ; multipaire (coreCount > 1) → base
+            // + « · D » + numéro de cœur 1-based. On GATE sur coreCount, PAS sur le
+            // kind : une multipaire réduite à 1 départ redevient une ligne simple.
             byId[a.distributor]?.let { d ->
-                a.fixture to if (d.kind == com.minou.mvrviewer.sync.DmxDistributorKind.MULTI)
-                    "${d.name} · Paire ${a.core}" else d.name
+                val base = d.name.ifBlank { "DMX" }
+                a.fixture to if (d.coreCount > 1) "$base · D${a.core}" else base
             }
         }.toMap()
     }
@@ -208,16 +217,28 @@ fun PlanScreen(
     }
     // Légende câblage : distributeurs RÉELLEMENT utilisés (au moins une affectation)
     // dans le mode courant, dans l'ordre du modèle. Vide hors mode câblage.
+    // Spec canonique — légende : UNIQUEMENT les distributeurs ayant au moins une
+    // affectation dans le mode courant, dans l'ordre du modèle. PUIS, si et seulement
+    // si au moins un projecteur PRÉSENT dans la scène est non affecté dans ce mode
+    // (absent de la table de couleur du mode = dessiné en gris non-câblé), on AJOUTE
+    // en fin une entrée « Non câblé » de teinte CABLING_UNASSIGNED_GRAY (0xFF737373).
     val cablingLegend: List<Pair<String, Color>> =
-        remember(cabling.version, dmxCabling.version, effectiveColorMode) {
+        remember(cabling.version, dmxCabling.version, effectiveColorMode,
+                 data, socaColorByFixture, dmxColorByFixture) {
             when (effectiveColorMode) {
                 PlanColorMode.SOCAPEX -> {
                     val used = cabling.assignments.values.mapTo(HashSet()) { it.distributor }
-                    cabling.distributors.filter { it.id in used }.map { it.name to Color(it.colorArgb) }
+                    val base = cabling.distributors.filter { it.id in used }
+                        .map { it.name to Color(it.colorArgb) }
+                    val anyUnassigned = data.fixtures.any { it.key !in socaColorByFixture }
+                    if (anyUnassigned) base + ("Non câblé" to CABLING_UNASSIGNED_GRAY) else base
                 }
                 PlanColorMode.DMX_LINE -> {
                     val used = dmxCabling.assignments.values.mapTo(HashSet()) { it.distributor }
-                    dmxCabling.distributors.filter { it.id in used }.map { it.name to Color(it.colorArgb) }
+                    val base = dmxCabling.distributors.filter { it.id in used }
+                        .map { it.name to Color(it.colorArgb) }
+                    val anyUnassigned = data.fixtures.any { it.key !in dmxColorByFixture }
+                    if (anyUnassigned) base + ("Non câblé" to CABLING_UNASSIGNED_GRAY) else base
                 }
                 PlanColorMode.LAYER -> emptyList()
             }
@@ -1896,11 +1917,18 @@ private const val ZOOM_SPEED = 2.0f
 
 internal val STRUCT_COLOR = Color(0xFF9AA0A6)
 /**
- * Gris neutre d'un projecteur SANS couleur : soit « couleurs par calque » décoché,
- * soit — en mode câblage (phase 4) — projecteur NON AFFECTÉ. Une seule définition
- * partagée écran/PDF (parité iOS `cablingUnassignedTint`, ~blanc 0.45).
+ * Gris neutre d'un projecteur SANS couleur de calque (« couleurs par calque »
+ * décoché). Usage HISTORIQUE, indépendant du câblage : ne pas le détourner pour
+ * le « non câblé » (spec canonique phase 4 → constante dédiée ci-dessous).
  */
 internal val NEUTRAL_FIXTURE_GRAY = Color(0xFF6E6E73)
+/**
+ * Teinte « NON CÂBLÉ » (spec canonique phase 4) — projecteur non affecté en mode
+ * câblage (Socapex / Ligne DMX). Valeur IDENTIQUE iOS/Android = 0xFF737373. Dédiée :
+ * distincte de [NEUTRAL_FIXTURE_GRAY] (« sans couleur de calque ») pour que faire
+ * évoluer l'une n'entraîne jamais l'autre. Partagée écran ↔ PDF ↔ légende.
+ */
+internal val CABLING_UNASSIGNED_GRAY = Color(0xFF737373)
 private val DXF_COLOR = Color(0xB3384B66)         // bleu-gris (sous-couche, fond clair)
 private val DXF_COLOR_DARK_BG = Color(0xB39FC0E4) // bleu-gris clair (fond sombre)
 

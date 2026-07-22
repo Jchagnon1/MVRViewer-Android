@@ -58,12 +58,23 @@ internal class LabelBlock(val id: String, val lines: List<String>) {
     val text: String get() = lines.joinToString("\n")
 }
 
-/** Texte d'un champ pour un projecteur, ou null s'il n'a rien à montrer. */
-internal fun labelFieldText(f: PlanFixture, c: LabelContent): String? = when (c) {
+/**
+ * Texte d'un champ pour un projecteur, ou null s'il n'a rien à montrer.
+ *
+ * SOCAPEX / DMX_LINE (phase 4 câblage) dépendent de l'état de câblage RUNTIME, hors
+ * PlanFixture : ils sont résolus par `cablingText` (fixture → texte), injecté depuis
+ * PlanScreen. `cablingText` null (contexte sans câblage) ou projecteur non affecté
+ * ⇒ null : le champ ne produit alors aucun bloc (pas de pastille vide).
+ */
+internal fun labelFieldText(
+    f: PlanFixture, c: LabelContent,
+    cablingText: ((PlanFixture, LabelContent) -> String?)? = null
+): String? = when (c) {
     LabelContent.ID -> f.id?.takeIf { it.isNotBlank() }?.let { "#$it" }
     LabelContent.DMX -> f.addr.ifEmpty { null }?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) }
     LabelContent.MODE -> f.mode?.takeIf { it.isNotBlank() }
     LabelContent.NAME -> f.name.takeIf { it.isNotBlank() }
+    LabelContent.SOCAPEX, LabelContent.DMX_LINE -> cablingText?.invoke(f, c)?.takeIf { it.isNotBlank() }
 }
 
 /**
@@ -76,7 +87,8 @@ internal fun labelFieldText(f: PlanFixture, c: LabelContent): String? = when (c)
  * fantôme.
  */
 internal fun labelBlocks(
-    f: PlanFixture, fields: Set<LabelContent>, detached: Set<LabelContent>
+    f: PlanFixture, fields: Set<LabelContent>, detached: Set<LabelContent>,
+    cablingText: ((PlanFixture, LabelContent) -> String?)? = null
 ): List<LabelBlock> {
     if (fields.isEmpty()) return emptyList()
     val out = ArrayList<LabelBlock>(3)
@@ -84,7 +96,7 @@ internal fun labelBlocks(
     val loose = ArrayList<LabelBlock>(2)
     for (c in LabelContent.entries) {
         if (c !in fields) continue
-        val t = labelFieldText(f, c) ?: continue
+        val t = labelFieldText(f, c, cablingText) ?: continue
         if (c in detached) loose.add(LabelBlock(c.name, listOf(t))) else grouped.add(t)
     }
     if (grouped.isNotEmpty()) out.add(LabelBlock(LABEL_GROUP_BLOCK, grouped))
@@ -120,11 +132,14 @@ internal fun labelGroupForTap(
 
 /** Tous les blocs (groupé + détachés) des projecteurs donnés. */
 internal fun labelKeysForFixtures(
-    fixtures: List<PlanFixture>, fields: Set<LabelContent>, detached: Set<LabelContent>
+    fixtures: List<PlanFixture>, fields: Set<LabelContent>, detached: Set<LabelContent>,
+    cablingText: ((PlanFixture, LabelContent) -> String?)? = null
 ): Set<String> {
     val keys = HashSet<String>(fixtures.size * 2)
     for (f in fixtures) {
-        for (b in labelBlocks(f, fields, detached)) keys.add(labelBlockKey(f.key, b.id))
+        // Même résolveur que le DESSIN : sans lui, un bloc SOCAPEX / DMX_LINE serait
+        // dessiné mais non armé (ou l'inverse) → la sélection groupée raterait.
+        for (b in labelBlocks(f, fields, detached, cablingText)) keys.add(labelBlockKey(f.key, b.id))
     }
     return keys
 }

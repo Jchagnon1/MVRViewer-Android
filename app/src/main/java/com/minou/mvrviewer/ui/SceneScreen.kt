@@ -644,6 +644,10 @@ fun SceneScreen(
             // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à distance.
             onTransformChanged = { t -> commitTransform(t) },
             gdtfOverrides = gdtfOverrides,
+            // Câblage (phase 4) : coloration du plan par distributeur + champs
+            // d'étiquette Socapex / Ligne DMX. Objets déjà hissés ici (L87/L90).
+            cabling = cabling,
+            dmxCabling = dmxCabling,
             onShowAccount = sync?.let { { showAccount = true } },
             onShareProject = sync?.let { { showShare = true } },
             onShowHistory = sync?.let { { showHistory = true } },

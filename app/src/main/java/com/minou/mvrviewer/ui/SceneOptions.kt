@@ -51,8 +51,32 @@ import androidx.compose.ui.unit.dp
  * par calque, étiquettes, décor). Équivalent des @State d'affichage de
  * ContentView iOS, hissés au niveau du show.
  */
-/** Contenu affiché dans l'étiquette d'un projecteur (comme iOS LabelField). */
-enum class LabelContent(val label: String) { ID("N°"), DMX("Adresse DMX"), MODE("Mode"), NAME("Nom") }
+/**
+ * Contenu affiché dans l'étiquette d'un projecteur (comme iOS LabelField).
+ *
+ * SOCAPEX et DMX_LINE (phase 4 câblage) dépendent de l'état de câblage RUNTIME
+ * (hors PlanFixture) : leur texte est résolu par un `cablingText` injecté dans
+ * `labelFieldText` / `labelBlocks`. Un projecteur non affecté n'affiche rien pour
+ * ces champs (résolveur → null). Ils apparaissent AUTOMATIQUEMENT dans le picker
+ * (boucle `LabelContent.entries`).
+ */
+enum class LabelContent(val label: String) {
+    ID("N°"), DMX("Adresse DMX"), MODE("Mode"), NAME("Nom"),
+    SOCAPEX("Socapex"), DMX_LINE("Ligne DMX")
+}
+
+/**
+ * Mode de coloration des projecteurs en vue PLAN UNIQUEMENT (phase 4 câblage).
+ *
+ * ⚠️ DISTINCT de `SceneOptions.layerColors`, qui est PARTAGÉ avec la 3D : le
+ * détourner colorerait aussi la 3D. LAYER = comportement historique (couleur par
+ * calque si `layerColors`, sinon gris neutre) ; SOCAPEX / DMX_LINE colorent chaque
+ * projecteur par la couleur de SON distributeur câblage. Non affecté = gris neutre.
+ * Libellés/ordre alignés iOS (CablingColorMode : off / soca / dmx).
+ */
+enum class PlanColorMode(val label: String) {
+    LAYER("Calque"), SOCAPEX("Socapex"), DMX_LINE("Ligne DMX")
+}
 
 class SceneOptions {
     var backgroundDark by mutableStateOf(true)
@@ -61,6 +85,11 @@ class SceneOptions {
     var background3D by mutableStateOf(BackgroundColorStore.DEFAULT_3D)
     var background2D by mutableStateOf(BackgroundColorStore.DEFAULT_2D)
     var layerColors by mutableStateOf(true)
+    /**
+     * Mode de coloration PLAN (calque / Socapex / ligne DMX) — état PLAN-ONLY,
+     * volontairement séparé de `layerColors` (partagé 3D). Voir [PlanColorMode].
+     */
+    var planColorMode by mutableStateOf(PlanColorMode.LAYER)
     var showLabels by mutableStateOf(true)
     var showStructure by mutableStateOf(true)
     var showLegend by mutableStateOf(true)        // légende des calques (vue plan)
@@ -135,6 +164,15 @@ fun SceneOptionsMenu(
     onSelectLabelsSameType: (() -> Unit)? = null,
     showStructureToggle: Boolean = false,
     showLegendToggle: Boolean = false,
+    /**
+     * Sélecteur de MODE DE COLORATION (phase 4 câblage) — vue plan uniquement.
+     * Affiché seulement s'il existe au moins un câblage colorable (`colorModeHasSoca`
+     * ou `colorModeHasDmx`) : sans câblage, il n'y aurait rien à colorer. Le nav
+     * cycle entre les modes RÉELLEMENT disponibles (Calque toujours présent).
+     */
+    showColorModeSelector: Boolean = false,
+    colorModeHasSoca: Boolean = false,
+    colorModeHasDmx: Boolean = false,
     // Bascule du fond satellite (dispo seulement une fois la calibration GPS
     // posée) : la vue 3D n'a pas de contrôle flottant (SurfaceView), donc elle
     // pilote le satellite depuis ce menu, opacité comprise.
@@ -214,6 +252,15 @@ fun SceneOptionsMenu(
         }
         HorizontalDivider()
         check("Couleurs par calque", options.layerColors) { options.layerColors = !options.layerColors }
+        // Mode de coloration CÂBLAGE (phase 4), vue plan uniquement : nav qui cycle
+        // entre les modes réellement disponibles (Calque toujours ; Socapex / Ligne
+        // DMX seulement si un câblage de ce type existe). Ne détourne PAS layerColors.
+        if (showColorModeSelector) {
+            nav("Coloration : ${options.planColorMode.label}", Icons.Filled.Colorize) {
+                options.planColorMode =
+                    nextPlanColorMode(options.planColorMode, colorModeHasSoca, colorModeHasDmx)
+            }
+        }
         if (showStructureToggle) check("Décor / structure", options.showStructure) { options.showStructure = !options.showStructure }
         if (showLegendToggle) check("Légende", options.showLegend) { options.showLegend = !options.showLegend }
         if (showLabelsToggle) {
@@ -297,6 +344,22 @@ fun SceneOptionsMenu(
             onDismiss = { showCustom = false }
         )
     }
+}
+
+/**
+ * Mode suivant dans le cycle de coloration, en ne proposant QUE les modes
+ * disponibles : Calque est toujours présent ; Socapex et Ligne DMX ne le sont que
+ * si un câblage de ce type existe. Un mode courant devenu indisponible (câblage
+ * supprimé) retombe naturellement sur le premier disponible.
+ */
+private fun nextPlanColorMode(cur: PlanColorMode, hasSoca: Boolean, hasDmx: Boolean): PlanColorMode {
+    val avail = buildList {
+        add(PlanColorMode.LAYER)
+        if (hasSoca) add(PlanColorMode.SOCAPEX)
+        if (hasDmx) add(PlanColorMode.DMX_LINE)
+    }
+    val i = avail.indexOf(cur)
+    return avail[((if (i < 0) 0 else i) + 1) % avail.size]
 }
 
 /** Égalité sur le RGB (ignore l'alpha) — les presets/fonds sont opaques. */

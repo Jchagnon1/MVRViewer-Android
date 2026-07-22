@@ -129,6 +129,13 @@ fun PlanScreen(
     soloElements: Set<String> = emptySet(),
     onSetSoloElements: (Set<String>) -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
+    /**
+     * États de câblage (phase 4) : servent la COLORATION du plan par distributeur
+     * et les champs d'étiquette SOCAPEX / DMX_LINE. Réactifs via `.version`. Vides
+     * par défaut (aucun câblage → mode Calque seul, sélecteur masqué).
+     */
+    cabling: PowerCablingState = remember { PowerCablingState() },
+    dmxCabling: DmxCablingState = remember { DmxCablingState() },
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
     onShowHistory: (() -> Unit)? = null,
@@ -140,6 +147,82 @@ fun PlanScreen(
     val ctxPlan = androidx.compose.ui.platform.LocalContext.current
     val layerIndex = remember(scene) { LayerColors.index(scene) }
     val data = remember(scene) { planData(scene) }
+
+    // ---- CÂBLAGE (phase 4) : coloration du plan + champs d'étiquette ----------
+    // Tables FIGÉES (immuables) fixtureKey(mvrUUID) → couleur / texte du
+    // distributeur, recalculées sur `.version`. Figées = réutilisables telles
+    // quelles pour l'écran (réactif : le read de `.version` en clé de remember
+    // redéclenche le dessin) ET pour le snapshot PDF (passé hors thread principal).
+    // Un projecteur non affecté est ABSENT des tables → gris neutre / champ vide.
+    val socaColorByFixture = remember(cabling.version) {
+        val byId = cabling.distributors.associateBy { it.id }
+        cabling.assignments.values.mapNotNull { a ->
+            byId[a.distributor]?.let { d -> a.fixture to Color(d.colorArgb) }
+        }.toMap()
+    }
+    val dmxColorByFixture = remember(dmxCabling.version) {
+        val byId = dmxCabling.distributors.associateBy { it.id }
+        dmxCabling.assignments.values.mapNotNull { a ->
+            byId[a.distributor]?.let { d -> a.fixture to Color(d.colorArgb) }
+        }.toMap()
+    }
+    val socaLabelByFixture = remember(cabling.version) {
+        val byId = cabling.distributors.associateBy { it.id }
+        cabling.assignments.values.mapNotNull { a ->
+            byId[a.distributor]?.let { d -> a.fixture to "${d.name} · C${a.circuit}" }
+        }.toMap()
+    }
+    val dmxLabelByFixture = remember(dmxCabling.version) {
+        val byId = dmxCabling.distributors.associateBy { it.id }
+        dmxCabling.assignments.values.mapNotNull { a ->
+            byId[a.distributor]?.let { d ->
+                a.fixture to if (d.kind == com.minou.mvrviewer.sync.DmxDistributorKind.MULTI)
+                    "${d.name} · Paire ${a.core}" else d.name
+            }
+        }.toMap()
+    }
+    // Résolveur d'étiquette SOCAPEX / DMX_LINE : pur (ferme sur les tables figées),
+    // donc sûr à passer au dessin ET au snapshot PDF (thread de fond).
+    val cablingText = remember(socaLabelByFixture, dmxLabelByFixture) {
+        { f: PlanFixture, c: LabelContent ->
+            when (c) {
+                LabelContent.SOCAPEX -> socaLabelByFixture[f.key]
+                LabelContent.DMX_LINE -> dmxLabelByFixture[f.key]
+                else -> null
+            }
+        }
+    }
+    val hasSocaColoring = socaColorByFixture.isNotEmpty()
+    val hasDmxColoring = dmxColorByFixture.isNotEmpty()
+    // Mode EFFECTIF : un mode dont le câblage a disparu (ou vide) retombe sur le
+    // calque — aligné iOS (appearanceFor → couleur de calque si la carte est vide).
+    val effectiveColorMode = when (options.planColorMode) {
+        PlanColorMode.SOCAPEX -> if (hasSocaColoring) PlanColorMode.SOCAPEX else PlanColorMode.LAYER
+        PlanColorMode.DMX_LINE -> if (hasDmxColoring) PlanColorMode.DMX_LINE else PlanColorMode.LAYER
+        PlanColorMode.LAYER -> PlanColorMode.LAYER
+    }
+    val cablingColorMap: Map<String, Color>? = when (effectiveColorMode) {
+        PlanColorMode.SOCAPEX -> socaColorByFixture
+        PlanColorMode.DMX_LINE -> dmxColorByFixture
+        PlanColorMode.LAYER -> null
+    }
+    // Légende câblage : distributeurs RÉELLEMENT utilisés (au moins une affectation)
+    // dans le mode courant, dans l'ordre du modèle. Vide hors mode câblage.
+    val cablingLegend: List<Pair<String, Color>> =
+        remember(cabling.version, dmxCabling.version, effectiveColorMode) {
+            when (effectiveColorMode) {
+                PlanColorMode.SOCAPEX -> {
+                    val used = cabling.assignments.values.mapTo(HashSet()) { it.distributor }
+                    cabling.distributors.filter { it.id in used }.map { it.name to Color(it.colorArgb) }
+                }
+                PlanColorMode.DMX_LINE -> {
+                    val used = dmxCabling.assignments.values.mapTo(HashSet()) { it.distributor }
+                    dmxCabling.distributors.filter { it.id in used }.map { it.name to Color(it.colorArgb) }
+                }
+                PlanColorMode.LAYER -> emptyList()
+            }
+        }
+
     val measurer = rememberTextMeasurer()
     // Étiquettes déjà mesurées (le cache interne du TextMeasurer ne retient que
     // 8 entrées → sans ça, chaque étiquette est re-mise en page à chaque frame).
@@ -544,6 +627,12 @@ fun PlanScreen(
             centerX = mx, centerY = my,
             halfW = w / 2f / bs, halfH = h / 2f / bs,
             layerColors = options.layerColors,
+            // CÂBLAGE (phase 4) : on fige le mode EFFECTIF + les tables figées (déjà
+            // immuables) → le PDF reflète la coloration/étiquettes/légende de l'écran.
+            colorMode = effectiveColorMode,
+            cablingColor = cablingColorMap,
+            cablingLegend = cablingLegend,
+            cablingText = cablingText,
             showStructure = options.showStructure,
             showLabels = options.showLabels,
             showLegend = options.showLegend,
@@ -1042,6 +1131,9 @@ fun PlanScreen(
                     bgDark = bgDark,
                     inkColor = inkColor,
                     layerColors = options.layerColors,
+                    colorMode = effectiveColorMode,
+                    cablingColor = cablingColorMap,
+                    cablingText = cablingText,
                     showStructure = options.showStructure,
                     showLabels = options.showLabels,
                     labelFields = options.labelFields,
@@ -1201,27 +1293,46 @@ fun PlanScreen(
                     .groupingBy { it.layer }.eachCount()
                     .toList().sortedByDescending { it.second }
             }
-            if (legend.isNotEmpty()) {
+            // En mode CÂBLAGE, la légende passe de « couleur → calque » à
+            // « couleur → distributeur » (uniquement ceux réellement utilisés).
+            val cablingMode = effectiveColorMode != PlanColorMode.LAYER
+            val show = if (cablingMode) cablingLegend.isNotEmpty() else legend.isNotEmpty()
+            if (show) {
                 Surface(
                     color = Color.White.copy(alpha = 0.92f), contentColor = Color(0xFF222222),
                     shape = RoundedCornerShape(10.dp), shadowElevation = 3.dp,
                     modifier = Modifier.align(Alignment.TopStart).padding(top = 100.dp, start = 8.dp)
                 ) {
                     androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                        legend.take(10).forEach { (layer, n) ->
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                                androidx.compose.foundation.layout.Box(
-                                    Modifier.width(10.dp).height(10.dp).background(
-                                        if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer))
-                                        else Color(0xFF6E6E73),   // cohérent avec les pastilles
-                                        androidx.compose.foundation.shape.CircleShape
-                                    )
-                                ) {}
-                                Text("  $layer · $n", style = MaterialTheme.typography.labelSmall)
+                        if (cablingMode) {
+                            cablingLegend.take(12).forEach { (name, col) ->
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                                    androidx.compose.foundation.layout.Box(
+                                        Modifier.width(10.dp).height(10.dp).background(
+                                            col, androidx.compose.foundation.shape.CircleShape)
+                                    ) {}
+                                    Text("  $name", style = MaterialTheme.typography.labelSmall)
+                                }
                             }
-                        }
-                        if (legend.size > 10) {
-                            Text("  +${legend.size - 10} autre(s) calque(s)", style = MaterialTheme.typography.labelSmall)
+                            if (cablingLegend.size > 12) {
+                                Text("  +${cablingLegend.size - 12} autre(s)", style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else {
+                            legend.take(10).forEach { (layer, n) ->
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                                    androidx.compose.foundation.layout.Box(
+                                        Modifier.width(10.dp).height(10.dp).background(
+                                            if (options.layerColors) Color(LayerColors.colorInt(layerIndex, layer))
+                                            else NEUTRAL_FIXTURE_GRAY,   // cohérent avec les pastilles
+                                            androidx.compose.foundation.shape.CircleShape
+                                        )
+                                    ) {}
+                                    Text("  $layer · $n", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            if (legend.size > 10) {
+                                Text("  +${legend.size - 10} autre(s) calque(s)", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
@@ -1235,6 +1346,11 @@ fun PlanScreen(
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
                 showLabelsToggle = true, showStructureToggle = true,
                 showLegendToggle = true,
+                // Coloration câblage (phase 4) : proposée seulement s'il existe un
+                // câblage colorable ; le nav cycle entre les modes disponibles.
+                showColorModeSelector = hasSocaColoring || hasDmxColoring,
+                colorModeHasSoca = hasSocaColoring,
+                colorModeHasDmx = hasDmxColoring,
                 // Filet de sécurité : remise à zéro de TOUS les décalages posés
                 // au doigt (et effacement immédiat sur disque, pas seulement en
                 // mémoire, sinon la réouverture les ferait revenir).
@@ -1246,7 +1362,7 @@ fun PlanScreen(
                     {
                         activeLabelKeys = labelKeysForFixtures(
                             selected.mapNotNull { data.fixtures.getOrNull(it) },
-                            options.labelFields, options.labelDetached
+                            options.labelFields, options.labelDetached, cablingText
                         )
                     }
                 },
@@ -1258,7 +1374,7 @@ fun PlanScreen(
                             // brut) — sinon le zoom « étiquettes du même type » embrasse
                             // des projecteurs soloés hors écran.
                             sameTypeSameLayer(data, origin).filter { it.key !in effectiveHidden },
-                            options.labelFields, options.labelDetached
+                            options.labelFields, options.labelDetached, cablingText
                         )
                     }
                 },
@@ -1779,6 +1895,12 @@ internal fun dxfDisplayColor(rgb: Int, bgDark: Boolean): Color {
 private const val ZOOM_SPEED = 2.0f
 
 internal val STRUCT_COLOR = Color(0xFF9AA0A6)
+/**
+ * Gris neutre d'un projecteur SANS couleur : soit « couleurs par calque » décoché,
+ * soit — en mode câblage (phase 4) — projecteur NON AFFECTÉ. Une seule définition
+ * partagée écran/PDF (parité iOS `cablingUnassignedTint`, ~blanc 0.45).
+ */
+internal val NEUTRAL_FIXTURE_GRAY = Color(0xFF6E6E73)
 private val DXF_COLOR = Color(0xB3384B66)         // bleu-gris (sous-couche, fond clair)
 private val DXF_COLOR_DARK_BG = Color(0xB39FC0E4) // bleu-gris clair (fond sombre)
 

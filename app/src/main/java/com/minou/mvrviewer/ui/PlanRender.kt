@@ -57,6 +57,24 @@ internal class PlanRenderSpec(
     val bgDark: Boolean,
     val inkColor: Color,
     val layerColors: Boolean,
+    /**
+     * MODE DE COLORATION des projecteurs (phase 4 câblage). LAYER = comportement
+     * historique (couleur par calque si `layerColors`, sinon gris neutre). SOCAPEX /
+     * DMX_LINE colorent par distributeur câblage via [cablingColor].
+     */
+    val colorMode: PlanColorMode = PlanColorMode.LAYER,
+    /**
+     * fixtureKey (mvrUUID) → couleur de son distributeur, en mode câblage. Un
+     * projecteur ABSENT de la table est NON AFFECTÉ → gris neutre. null = pas de
+     * table (mode LAYER). Ne colore QUE la pastille (passe 2) : la silhouette
+     * (passe 1) est indexée par TYPE, non colorable par instance → gris neutre.
+     */
+    val cablingColor: Map<String, Color>? = null,
+    /**
+     * Résout le texte des champs d'étiquette SOCAPEX / DMX_LINE (état câblage
+     * runtime). null hors câblage → ces champs ne produisent aucun bloc.
+     */
+    val cablingText: ((PlanFixture, LabelContent) -> String?)? = null,
     val showStructure: Boolean,
     val showLabels: Boolean,
     /** Champs affichés (une ligne chacun dans la pastille commune). */
@@ -252,7 +270,11 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
                 if (sep < 0) continue
                 val layer = key.substring(0, sep)
                 if (!silhouetteVisible(key.substring(sep + 1))) continue
-                val c = if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, layer)) else Color(0xFF6E6E73)
+                // Passe indexée par TYPE (dessinée une fois pour tous les clones) :
+                // en mode câblage (par INSTANCE), on ne peut pas la colorer par
+                // projecteur → gris neutre. La pastille (passe 2) porte la couleur.
+                val c = if (s.colorMode == PlanColorMode.LAYER && s.layerColors)
+                    Color(LayerColors.colorInt(s.layerIndex, layer)) else NEUTRAL_FIXTURE_GRAY
                 drawPath(path, c, style = Stroke(sw))
             }
         }
@@ -295,7 +317,13 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
         val cullX = 40f + abs(maxSh.x) * s.labelShiftScale + labelCullPx
         val cullY = 40f + abs(maxSh.y) * s.labelShiftScale + labelCullPx
         if (p.x !in -cullX..w + cullX || p.y !in -cullY..h + cullY) return@forEachIndexed
-        val c = if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, f.layer)) else Color(0xFF6E6E73)
+        // Couleur de la PASTILLE : en mode câblage, la couleur du distributeur de ce
+        // projecteur (non affecté = gris neutre) ; sinon comportement historique
+        // (calque si activé, sinon gris neutre). Seul site indexé par INSTANCE.
+        val c = if (s.colorMode != PlanColorMode.LAYER)
+            s.cablingColor?.get(f.key) ?: NEUTRAL_FIXTURE_GRAY
+        else if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, f.layer))
+        else NEUTRAL_FIXTURE_GRAY
         val symRadius = if (silhouetteVisible(f.spec)) {
             drawCircle(c, radius = 3f, center = p)
             3f
@@ -313,10 +341,13 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
         // font disparaître (cf. labelsZoomOk).
         val forced = f.key in activeFixtures || i in s.selected
         if (s.showLabels && (labelsZoomOk || forced) && (!s.lowDetail || forced)) {
-            val blocks = labelBlocks(f, s.labelFields, s.labelDetached)
+            val blocks = labelBlocks(f, s.labelFields, s.labelDetached, s.cablingText)
             val fs = (9f * s.labelSize)
             val off = 8f * s.labelOffset
-            val labelInk = readableInk(if (s.layerColors) c else s.inkColor, labelVeil)
+            // Encre dérivée de la même teinte que la pastille : en câblage `c` porte
+            // la couleur du distributeur (ou gris neutre), sinon la couleur de calque.
+            val tinted = s.colorMode != PlanColorMode.LAYER || s.layerColors
+            val labelInk = readableInk(if (tinted) c else s.inkColor, labelVeil)
             // Empilement des blocs DÉTACHÉS sous le symbole : le premier bloc
             // garde la place historique (à droite, au-dessus du centre), les
             // suivants descendent — d'où « le n° en haut, le patch en bas » sans

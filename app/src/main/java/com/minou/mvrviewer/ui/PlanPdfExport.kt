@@ -41,6 +41,17 @@ internal class PlanViewCapture(
     /** Demi-étendue visible, en mm monde. */
     val halfW: Float, val halfH: Float,
     val layerColors: Boolean,
+    /**
+     * Coloration CÂBLAGE (phase 4) figée pour le PDF. `colorMode` = mode EFFECTIF
+     * (déjà retombé sur LAYER si le câblage a disparu) ; `cablingColor` = table
+     * immuable fixtureKey → couleur ; `cablingLegend` = distributeurs utilisés ;
+     * `cablingText` = résolveur pur (ferme sur des tables figées → sûr hors thread
+     * principal, où buildPlanPdf s'exécute).
+     */
+    val colorMode: PlanColorMode = PlanColorMode.LAYER,
+    val cablingColor: Map<String, Color>? = null,
+    val cablingLegend: List<Pair<String, Color>> = emptyList(),
+    val cablingText: ((PlanFixture, LabelContent) -> String?)? = null,
     val showStructure: Boolean,
     val showLabels: Boolean,
     val showLegend: Boolean,
@@ -212,6 +223,9 @@ private fun DrawScope.drawPdfPage(
                 bgDark = v.bgDark,
                 inkColor = ink,
                 layerColors = v.layerColors,
+                colorMode = v.colorMode,
+                cablingColor = v.cablingColor,
+                cablingText = v.cablingText,
                 showStructure = v.showStructure,
                 showLabels = v.showLabels,
                 labelFields = v.labelFields,
@@ -243,9 +257,15 @@ private fun DrawScope.drawPdfPage(
                 scaleBarAnchor = Offset(left + 14f, bottom - 16f)
             )
         )
-        // Légende par-dessus le plan, comme à l'écran.
-        if (v.showLegend && src.legend.isNotEmpty()) {
-            drawLegend(src, v, measurer, Offset(left + 10f, top + 10f))
+        // Légende par-dessus le plan, comme à l'écran. En mode câblage, elle liste
+        // les distributeurs (couleur → nom) au lieu des calques.
+        if (v.showLegend) {
+            if (v.colorMode != PlanColorMode.LAYER) {
+                if (v.cablingLegend.isNotEmpty())
+                    drawCablingLegend(v, measurer, Offset(left + 10f, top + 10f))
+            } else if (src.legend.isNotEmpty()) {
+                drawLegend(src, v, measurer, Offset(left + 10f, top + 10f))
+            }
         }
     }
     drawRect(Color(0xFF888888), topLeft = Offset(left, top), size = Size(cw, ch), style = Stroke(0.8f))
@@ -299,6 +319,30 @@ private fun DrawScope.drawLegend(
         val y = at.y + 5f + i * lineH
         val c = if (v.layerColors) Color(LayerColors.colorInt(src.layerIndex, layer)) else Color(0xFF6E6E73)
         drawCircle(c, radius = 3f, center = Offset(at.x + 9f, y + 4.5f))
+        drawText(tl, topLeft = Offset(at.x + 17f, y))
+    }
+}
+
+/**
+ * Légende de CÂBLAGE (phase 4) : couleur → nom de distributeur, comme à l'écran.
+ * Même mise en forme que [drawLegend], sans compte (un distributeur = une ligne).
+ */
+private fun DrawScope.drawCablingLegend(
+    v: PlanViewCapture, measurer: TextMeasurer, at: Offset
+) {
+    val rows = v.cablingLegend.take(14)
+    if (rows.isEmpty()) return
+    val entries = rows.map { (name, col) ->
+        col to measurer.measure(name, style = TextStyle(fontSize = 8.sp, color = Color(0xFF222222)))
+    }
+    val lineH = 11f
+    val boxW = (entries.maxOf { it.second.size.width } + 30f)
+    val boxH = entries.size * lineH + 10f
+    drawRect(Color.White.copy(alpha = 0.92f), topLeft = at, size = Size(boxW, boxH))
+    drawRect(Color(0xFFBBBBBB), topLeft = at, size = Size(boxW, boxH), style = Stroke(0.6f))
+    entries.forEachIndexed { i, (col, tl) ->
+        val y = at.y + 5f + i * lineH
+        drawCircle(col, radius = 3f, center = Offset(at.x + 9f, y + 4.5f))
         drawText(tl, topLeft = Offset(at.x + 17f, y))
     }
 }

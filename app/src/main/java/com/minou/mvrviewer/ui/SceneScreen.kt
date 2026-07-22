@@ -605,6 +605,10 @@ fun SceneScreen(
             hiddenLayers = hiddenLayers,
             calibration = calibration,
             satellite = satellite,
+            // Câblage : uniquement pour le texte des étiquettes Socapex / Ligne DMX
+            // en 3D (mêmes tables que la vue plan).
+            cabling = cabling,
+            dmxCabling = dmxCabling,
             onShowPlan = { mode = SceneMode.PLAN },
             onShowPatch = { mode = SceneMode.PATCH },
             onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },

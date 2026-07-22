@@ -56,7 +56,18 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.android.filament.Engine
 import com.google.android.filament.MaterialInstance
 import com.google.android.filament.RenderableManager
@@ -112,6 +123,16 @@ private const val LOD_SMALL_MM = 3000f
 // sombre) + plafond de sommets (le vrai DXF V&B fait des millions de segments).
 private const val DXF_LINE_COLOR = 0xFF6FB7E8.toInt()
 private const val MAX_DXF_VERTS = 500_000
+
+// Étiquettes 3D : bornes pour rester fluide sur un gros show pendant la nav.
+//  - MAX_LABELS_3D      : nombre d'étiquettes RÉELLEMENT dessinées par frame.
+//  - MAX_LABEL_PROJECTIONS : plafond de projections monde→écran tentées par frame
+//    (worldToScreenPoint est le coût dominant ; ce plafond borne le pire cas d'un
+//    show à des milliers de projecteurs quand peu sont dans le cadre).
+//  - LABEL_CULL_PX      : marge de viewport (px) au-delà de laquelle on ne dessine pas.
+private const val MAX_LABELS_3D = 200
+private const val MAX_LABEL_PROJECTIONS = 4000
+private const val LABEL_CULL_PX = 220f
 
 // Presets de couleur de fond de la vue 3D (nom, ARGB) — mêmes choix qu'iOS.
 private val BG_3D_PRESETS = listOf(
@@ -178,6 +199,11 @@ fun Scene3DScreen(
     hiddenLayers: Set<String> = emptySet(),
     calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
+    // Câblage (phase 4/5) : sert UNIQUEMENT au texte des étiquettes 3D pour les
+    // champs Socapex / Ligne DMX (mêmes tables que la vue plan). Hors ces deux
+    // champs, la 3D n'utilise pas le câblage.
+    cabling: PowerCablingState = remember { PowerCablingState() },
+    dmxCabling: DmxCablingState = remember { DmxCablingState() },
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
     onShowGdtfShare: () -> Unit,
@@ -214,6 +240,11 @@ fun Scene3DScreen(
 
     val center = remember(scene) { sceneCenterMm(scene) }
     val layout = remember(scene, center) { fixtureLayout(scene, center) }
+    // scene.fixtures est un GETTER CALCULÉ (allObjects.filter{…}) : chaque accès
+    // refiltre toute la liste. On le fige UNE fois (sinon le lire dans la boucle de
+    // dessin des étiquettes, à chaque frame de mouvement caméra, serait O(n²)).
+    // Aligné 1:1 avec layout.positions quand la scène a des projecteurs.
+    val sceneFixtures = remember(scene) { scene.fixtures }
 
     // Matériau gris uniforme quand « couleurs par calque » est désactivé.
     val grayMaterial = remember(materialLoader) { materialLoader.createColorInstance(GRAY) }
@@ -828,6 +859,54 @@ fun Scene3DScreen(
     // Bumpé quand la caméra bouge → force le re-calcul des projections écran des
     // surbrillances (les positions monde ne sont pas des états Compose).
     var projVersion by remember(scene) { mutableIntStateOf(0) }
+
+    // ---- ÉTIQUETTES DE PROJECTEURS EN 3D (parité vue plan) ------------------
+    // Contenu = les MÊMES champs que le plan (options.labelFields), assemblés avec
+    // le résolveur d'étiquette PARTAGÉ (labelFieldText) — ID / DMX / MODE / NAME et,
+    // pour Socapex / Ligne DMX, le texte issu du câblage (mêmes tables que le plan,
+    // via CablingLabels). On pré-calcule UNE liste de lignes par projecteur, refaite
+    // seulement quand les champs choisis ou le câblage changent (pas à chaque frame).
+    val textMeasurer = rememberTextMeasurer()
+    val labelLinesByFixture: List<List<String>> =
+        remember(sceneFixtures, options.labelFields, cabling.version, dmxCabling.version) {
+            val fields = options.labelFields
+            if (fields.isEmpty()) List(sceneFixtures.size) { emptyList() }
+            else {
+                // Tables câblage figées fixtureKey → texte (mêmes règles que PlanScreen).
+                val socaById = cabling.distributors.associateBy { it.id }
+                val dmxById = dmxCabling.distributors.associateBy { it.id }
+                val socaLabel = cabling.assignments.values.mapNotNull { a ->
+                    socaById[a.distributor]?.let { d -> a.fixture to CablingLabels.soca(d.name, a.circuit) }
+                }.toMap()
+                val dmxLabel = dmxCabling.assignments.values.mapNotNull { a ->
+                    dmxById[a.distributor]?.let { d -> a.fixture to CablingLabels.dmx(d.name, d.coreCount, a.core) }
+                }.toMap()
+                val cablingText: (PlanFixture, LabelContent) -> String? = { f, c ->
+                    when (c) {
+                        LabelContent.SOCAPEX -> socaLabel[f.key]
+                        LabelContent.DMX_LINE -> dmxLabel[f.key]
+                        else -> null
+                    }
+                }
+                val idMat = Mat4()   // transform inutile pour le texte (seul le monde compte)
+                sceneFixtures.map { o ->
+                    val pf = PlanFixture(
+                        mvrInstanceKey(o), 0f, 0f, o.fixtureId, o.name, o.gdtfSpec,
+                        o.layerName, o.addresses.joinToString(","), o.gdtfMode, idMat
+                    )
+                    val lines = ArrayList<String>(fields.size)
+                    // Ordre de l'énumération (comme labelBlocks) → 1re ligne = N°.
+                    for (c in LabelContent.entries) {
+                        if (c !in fields) continue
+                        labelFieldText(pf, c, cablingText)?.let { lines.add(it) }
+                    }
+                    lines
+                }
+            }
+        }
+    // Y a-t-il au moins une étiquette à montrer ? (évite un scan O(n) dans onFrame.)
+    val hasAnyLabel = remember(labelLinesByFixture) { labelLinesByFixture.any { it.isNotEmpty() } }
+
     // ---- Mesure entre deux projecteurs (3D) ----
     // On ne mémorise que des INDICES de projecteur, pas des points : en 3D un
     // toucher est un RAYON, pas un point — un « point libre » n'aurait pas de
@@ -990,6 +1069,9 @@ fun Scene3DScreen(
                     onShowCabling = onShowCabling,
                     onShowAccount = onShowAccount, onShareProject = onShareProject,
                     onShowHistory = onShowHistory, onJoinProject = onJoinProject,
+                    // Étiquettes de projecteurs aussi en 3D : même bascule + mêmes
+                    // champs/taille que le plan (SceneOptions partagé).
+                    showLabelsToggle = true,
                     showSatelliteToggle = calibration?.isCalibrated == true,
                     background = options.background3D,
                     backgroundDefault = BackgroundColorStore.DEFAULT_3D,
@@ -1027,8 +1109,10 @@ fun Scene3DScreen(
                     val moved = lod.lastX.isNaN() ||
                         (kotlin.math.abs(p.x - lod.lastX) + kotlin.math.abs(p.y - lod.lastY) + kotlin.math.abs(p.z - lod.lastZ)) > 0.02f
                     lod.lastX = p.x; lod.lastY = p.y; lod.lastZ = p.z
-                    // La caméra a bougé → re-projeter les surbrillances de sélection.
-                    if (moved && (selected.isNotEmpty() || measureI != null)) projVersion++
+                    // La caméra a bougé → re-projeter les surbrillances de sélection
+                    // ET les étiquettes de projecteurs (elles suivent la caméra).
+                    if (moved && (selected.isNotEmpty() || measureI != null ||
+                            (options.showLabels && hasAnyLabel))) projVersion++
                     if (lod.nodes.isNotEmpty() || lod.proxies.isNotEmpty()) {
                         if (moved) {
                             lod.idle = 0
@@ -1095,6 +1179,37 @@ fun Scene3DScreen(
                         )
                     }
                 )
+            }
+            // Étiquettes de projecteurs : dessinées dans un Canvas (comme les
+            // surbrillances), donc elles NE captent PAS le tap et NE bloquent PAS
+            // les gestes caméra. Redessinées via projVersion (bumpé pendant que la
+            // caméra bouge) → elles suivent les projecteurs. BORNÉES : cullées au
+            // viewport, un plafond de projections tentées et un plafond dessiné,
+            // pour ne pas ramer sur un gros show pendant la navigation.
+            if (options.showLabels && hasAnyLabel) {
+                Canvas(Modifier.fillMaxSize()) {
+                    projVersion // dépendance de redraw quand la caméra bouge
+                    val vw = size.width; val vh = size.height
+                    var drawn = 0
+                    var projected = 0
+                    val n = minOf(labelLinesByFixture.size, sceneFixtures.size)
+                    var i = 0
+                    while (i < n && drawn < MAX_LABELS_3D && projected < MAX_LABEL_PROJECTIONS) {
+                        val lines = labelLinesByFixture[i]
+                        if (lines.isEmpty()) { i++; continue }
+                        // Calque masqué (repère DXF/MVR) → pas d'étiquette.
+                        if (sceneFixtures[i].layerName in hiddenLayers) { i++; continue }
+                        projected++
+                        val p = projectFixture(i)
+                        if (p != null &&
+                            p.x >= -LABEL_CULL_PX && p.x <= vw + LABEL_CULL_PX &&
+                            p.y >= -LABEL_CULL_PX && p.y <= vh + LABEL_CULL_PX) {
+                            drawFixtureLabel(textMeasurer, lines, p, options.labelSize)
+                            drawn++
+                        }
+                        i++
+                    }
+                }
             }
             Canvas(Modifier.fillMaxSize()) {
                 projVersion // dépendance de redraw quand la caméra bouge
@@ -1668,3 +1783,42 @@ private fun fixtureLayout(scene: MvrScene, center: Float3): FixtureLayout {
 
 /** Magenta de l'outil de mesure — même code couleur que la vue plan. */
 private val MEASURE_3D_COLOR = Color(0xFFD500A0)
+
+/**
+ * Dessine l'étiquette d'un projecteur dans le Canvas d'overlay, ANCRÉE au-dessus
+ * du point écran `anchor` (la projection du projecteur). Style proche de la 3D
+ * iOS : petit cadre à fond sombre semi-opaque, texte blanc lisible sur tout fond,
+ * 1re ligne (le N°) en gras et légèrement plus grande. Un fin trait relie le cadre
+ * au projecteur. `sizeScale` = options.labelSize (0.7 / 1.0 / 1.4).
+ */
+private fun DrawScope.drawFixtureLabel(
+    measurer: TextMeasurer,
+    lines: List<String>,
+    anchor: Offset,
+    sizeScale: Float
+) {
+    if (lines.isEmpty()) return
+    val fontPx = 12f * sizeScale
+    val ann = buildAnnotatedString {
+        lines.forEachIndexed { idx, line ->
+            if (idx > 0) append("\n")
+            if (idx == 0) withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = (fontPx * 1.1f).sp)) {
+                append(line)
+            } else append(line)
+        }
+    }
+    val layout = measurer.measure(ann, style = TextStyle(color = Color.White, fontSize = fontPx.sp))
+    val w = layout.size.width.toFloat(); val h = layout.size.height.toFloat()
+    val padX = 6f * sizeScale; val padY = 3f * sizeScale
+    val boxW = w + padX * 2f; val boxH = h + padY * 2f
+    val gap = 12f * sizeScale
+    val left = anchor.x - boxW / 2f
+    val top = anchor.y - gap - boxH
+    val radius = CornerRadius(5f * sizeScale, 5f * sizeScale)
+    // Trait de rappel du cadre vers le projecteur.
+    drawLine(Color(0x99FFFFFF), Offset(anchor.x, top + boxH), anchor, strokeWidth = 1.5f)
+    drawRoundRect(Color(0xCC000000), topLeft = Offset(left, top), size = Size(boxW, boxH), cornerRadius = radius)
+    drawRoundRect(Color(0x66FFFFFF), topLeft = Offset(left, top), size = Size(boxW, boxH),
+        cornerRadius = radius, style = Stroke(width = 1f))
+    drawText(layout, topLeft = Offset(left + padX, top + padY))
+}

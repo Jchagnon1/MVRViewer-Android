@@ -78,6 +78,14 @@ fun SceneScreen(
     LaunchedEffect(options.background2D) {
         kotlinx.coroutines.delay(400); BackgroundColorStore.setPlan2D(ctx, options.background2D)
     }
+    // N11 — dispositions des barres d'outils ancrables (vue 3D / vue plan). Semées
+    // depuis le store GLOBAL persisté (par appareil, hors projet/cloud), ré-écrites
+    // à chaque changement. Pas de debounce : les changements de disposition sont
+    // rares (contrairement aux couleurs, émises à chaque frame de glissé).
+    var layout3D by remember { mutableStateOf(ToolbarLayoutStore.load3D(ctx)) }
+    var layoutPlan by remember { mutableStateOf(ToolbarLayoutStore.loadPlan(ctx)) }
+    LaunchedEffect(layout3D) { withContext(Dispatchers.IO) { ToolbarLayoutStore.save3D(ctx, layout3D) } }
+    LaunchedEffect(layoutPlan) { withContext(Dispatchers.IO) { ToolbarLayoutStore.savePlan(ctx, layoutPlan) } }
     val overrides = remember { PatchOverrides() }
     // N12 — fiche d'édition patch ouverte par APPUI LONG sur un projecteur (en 3D
     // OU en plan). Hissée ici : la MÊME FixtureDetailSheet que la liste de patch,
@@ -634,6 +642,9 @@ fun SceneScreen(
             onSetSoloElements = { soloElements = it },
             // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
             onEditFixture = { editFixture = it },
+            // N11 — disposition des barres d'outils 3D (persistée globalement).
+            toolbarLayout = layout3D,
+            onLayoutChange = { layout3D = it },
             onClose = onClose,
             modifier = modifier
         )
@@ -696,6 +707,9 @@ fun SceneScreen(
             onShowPatch = { mode = SceneMode.PATCH },
             // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
             onEditFixture = { editFixture = it },
+            // N11 — disposition des barres d'outils plan (persistée globalement).
+            toolbarLayout = layoutPlan,
+            onLayoutChange = { layoutPlan = it },
             modifier = modifier
         )
         SceneMode.PATCH -> PatchListScreen(

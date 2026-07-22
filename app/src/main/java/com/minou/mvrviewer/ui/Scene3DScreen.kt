@@ -3,10 +3,8 @@ package com.minou.mvrviewer.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -18,7 +16,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectSmall
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Straighten
@@ -26,8 +26,6 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -254,6 +252,11 @@ fun Scene3DScreen(
     // (mêmes champs que la liste de patch). Le TAP simple garde son comportement
     // (sélection). Ne se déclenche qu'en interaction normale (pas rectangle/mesure).
     onEditFixture: (MvrSceneObject) -> Unit = {},
+    // N11 — disposition des barres d'outils ancrables (vue 3D). Nommé `toolbarLayout`
+    // pour ne pas masquer le `val layout` (FixtureLayout) local plus bas. Défaut =
+    // barre bas-gauche actuelle → aucun changement pour qui ne personnalise pas.
+    toolbarLayout: ToolbarLayout = ToolbarLayout.default3D,
+    onLayoutChange: (ToolbarLayout) -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1138,6 +1141,58 @@ fun Scene3DScreen(
         }
     }
 
+    // N11 — panneau « Personnaliser la barre d'outils… » (mode édition).
+    var showCustomize by remember { mutableStateOf(false) }
+    // N11 — DESCRIPTION UNIFIÉE des outils de la vue 3D : UNE seule liste consommée
+    // à la fois par les 4 barres ancrables (AnchoredToolbars) ET par la section
+    // « Outils » du menu (toMenuTools) — supprime l'ancienne duplication barre/menu.
+    // Les 6 premiers reproduisent l'ancienne barre bas-gauche (mêmes actions, mêmes
+    // exclusions, mêmes conditions de visibilité) ; les extras (étiquettes, couleurs
+    // par calque) sont PLAÇABLES dans une barre mais restent hors du menu « Outils »
+    // (inMenu=false) car ils ont déjà leur bascule dédiée dans le menu.
+    val tools3D: List<ToolSpec> = buildList {
+        add(ToolSpec(ToolId.RECT, "Sélection rectangle", Icons.Filled.Crop,
+            available = true, checked = rectMode, onInvoke = {
+                rectMode = !rectMode
+                if (rectMode) measureMode = false
+                if (!rectMode) { rectStart = null; rectEnd = null }
+            }))
+        add(ToolSpec(ToolId.MEASURE, "Mesurer une distance", Icons.Filled.Straighten,
+            available = true, checked = measureMode, onInvoke = {
+                measureMode = !measureMode
+                if (measureMode) { rectMode = false; rectStart = null; rectEnd = null }
+                measureI = null; measureJ = null
+            }))
+        add(ToolSpec(ToolId.SOLO, "Solo (sélection seule)", Icons.Filled.CenterFocusStrong,
+            available = selected.isNotEmpty() || soloElements.isNotEmpty(),
+            checked = soloElements.isNotEmpty(), onInvoke = {
+                if (soloElements.isEmpty()) {
+                    val keys = selected.mapNotNull { fixtureKeys.getOrNull(it) }.toSet()
+                    if (keys.isNotEmpty()) onSetSoloElements(keys)
+                } else onSetSoloElements(emptySet())
+            }))
+        add(ToolSpec(ToolId.CLEAR_SEL, "Effacer la sélection", Icons.Filled.Close,
+            available = selected.isNotEmpty(), checked = null, onInvoke = { selected.clear() }))
+        add(ToolSpec(ToolId.GPS, "Ma position (3D)", Icons.Filled.MyLocation,
+            available = calibration?.isCalibrated == true, checked = showLocation,
+            onInvoke = { showLocation = !showLocation }))
+        add(ToolSpec(ToolId.GPS_MARKER_SIZE, "Taille du marqueur", Icons.Filled.PhotoSizeSelectSmall,
+            available = calibration?.isCalibrated == true && showLocation, checked = null, onInvoke = {
+                options.gpsMarkerScale = when {
+                    options.gpsMarkerScale <= 0.7f -> 1f
+                    options.gpsMarkerScale >= 1.5f -> 0.6f
+                    else -> 1.6f
+                }
+            }))
+        // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
+        add(ToolSpec(ToolId.LABELS, "Étiquettes", Icons.Filled.Label,
+            available = true, checked = options.showLabels,
+            onInvoke = { options.showLabels = !options.showLabels }, inMenu = false))
+        add(ToolSpec(ToolId.LAYER_COLORS, "Couleurs par calque", Icons.Filled.Palette,
+            available = true, checked = options.layerColors,
+            onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
+    }
+
     // Barre du haut dans une vraie TopAppBar (au-dessus de la SceneView). NB :
     // contrairement à ce qu'on croyait, des contrôles Compose flottants PAR-DESSUS
     // la SceneView SONT bien visibles ET cliquables, et un overlay pointerInput
@@ -1190,46 +1245,11 @@ fun Scene3DScreen(
                     onShowCabling = onShowCabling,
                     onShowAccount = onShowAccount, onShareProject = onShareProject,
                     onShowHistory = onShowHistory, onJoinProject = onJoinProject,
-                    // Outils de la vue 3D exposés DANS le menu (N10) : mêmes actions
-                    // que la barre flottante bas-gauche, mêmes bascules d'exclusion.
-                    tools = buildList {
-                        add(MenuTool.Toggle("Sélection rectangle", Icons.Filled.Crop, rectMode) {
-                            rectMode = !rectMode
-                            if (rectMode) measureMode = false
-                            if (!rectMode) { rectStart = null; rectEnd = null }
-                        })
-                        add(MenuTool.Toggle("Mesurer une distance", Icons.Filled.Straighten, measureMode) {
-                            measureMode = !measureMode
-                            if (measureMode) { rectMode = false; rectStart = null; rectEnd = null }
-                            measureI = null; measureJ = null
-                        })
-                        if (selected.isNotEmpty() || soloElements.isNotEmpty()) {
-                            add(MenuTool.Toggle("Solo (sélection seule)", Icons.Filled.CenterFocusStrong,
-                                soloElements.isNotEmpty()) {
-                                if (soloElements.isEmpty()) {
-                                    val keys = selected.mapNotNull { fixtureKeys.getOrNull(it) }.toSet()
-                                    if (keys.isNotEmpty()) onSetSoloElements(keys)
-                                } else onSetSoloElements(emptySet())
-                            })
-                        }
-                        if (selected.isNotEmpty()) {
-                            add(MenuTool.Action("Effacer la sélection", Icons.Filled.Close) { selected.clear() })
-                        }
-                        if (calibration?.isCalibrated == true) {
-                            add(MenuTool.Toggle("Ma position (3D)", Icons.Filled.MyLocation, showLocation) {
-                                showLocation = !showLocation
-                            })
-                            if (showLocation) {
-                                add(MenuTool.Action("Taille du marqueur", Icons.Filled.PhotoSizeSelectSmall) {
-                                    options.gpsMarkerScale = when {
-                                        options.gpsMarkerScale <= 0.7f -> 1f
-                                        options.gpsMarkerScale >= 1.5f -> 0.6f
-                                        else -> 1.6f
-                                    }
-                                })
-                            }
-                        }
-                    },
+                    // Outils de la vue 3D exposés DANS le menu (N10) : dérivés de la
+                    // MÊME description unifiée que les barres (tools3D) → plus de
+                    // duplication. Mêmes actions, mêmes bascules, mêmes conditions.
+                    tools = tools3D.toMenuTools(),
+                    onCustomizeToolbar = { showCustomize = true },
                     // Étiquettes de projecteurs aussi en 3D : même bascule + mêmes
                     // champs/taille que le plan (SceneOptions partagé).
                     showLabelsToggle = true,
@@ -1465,68 +1485,11 @@ fun Scene3DScreen(
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).width(180.dp)
             )
 
-            // Barre d'outils flottante (bas-gauche) : bascule du mode rectangle +
-            // effacer la sélection + position GPS (si calibré). Même emplacement que la vue plan.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
-            ) {
-                FilledIconToggleButton(
-                    checked = rectMode,
-                    onCheckedChange = {
-                        rectMode = it
-                        // Le cadre pose un overlay qui CAPTE le glissé : les deux
-                        // modes ne peuvent pas cohabiter.
-                        if (it) measureMode = false
-                        if (!it) { rectStart = null; rectEnd = null }
-                    }
-                ) { Icon(Icons.Filled.Crop, contentDescription = "Sélection rectangle") }
-                FilledIconToggleButton(
-                    checked = measureMode,
-                    onCheckedChange = {
-                        measureMode = it
-                        if (it) { rectMode = false; rectStart = null; rectEnd = null }
-                        measureI = null; measureJ = null
-                    }
-                ) { Icon(Icons.Filled.Straighten, contentDescription = "Mesurer une distance") }
-                // Solo : n'afficher QUE les projecteurs sélectionnés (le reste
-                // masqué), en 3D ET en plan (soloElements partagé, hissé dans
-                // SceneScreen). Visible dès qu'il y a une sélection ou qu'un solo est
-                // déjà actif — activer isole la sélection courante, désactiver rétablit
-                // tout (le solo est une VUE, pas une modification du show).
-                if (selected.isNotEmpty() || soloElements.isNotEmpty()) {
-                    FilledIconToggleButton(
-                        checked = soloElements.isNotEmpty(),
-                        onCheckedChange = { on ->
-                            if (on) {
-                                val keys = selected.mapNotNull { fixtureKeys.getOrNull(it) }.toSet()
-                                if (keys.isNotEmpty()) onSetSoloElements(keys)
-                            } else onSetSoloElements(emptySet())
-                        }
-                    ) { Icon(Icons.Filled.CenterFocusStrong, contentDescription = "Solo : n'afficher que la sélection") }
-                }
-                if (selected.isNotEmpty()) {
-                    FilledIconButton(onClick = { selected.clear() }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Effacer la sélection")
-                    }
-                }
-                // « Ma position » en 3D : dispo une fois la scène calibrée (comme le satellite).
-                if (calibration?.isCalibrated == true) {
-                    FilledIconToggleButton(checked = showLocation, onCheckedChange = { showLocation = it }) {
-                        Icon(Icons.Filled.MyLocation, contentDescription = "Ma position (3D)")
-                    }
-                    if (showLocation) {
-                        FilledIconButton(onClick = {
-                            options.gpsMarkerScale = when {
-                                options.gpsMarkerScale <= 0.7f -> 1f
-                                options.gpsMarkerScale >= 1.5f -> 0.6f
-                                else -> 1.6f
-                            }
-                        }) { Icon(Icons.Filled.PhotoSizeSelectSmall, contentDescription = "Taille du marqueur") }
-                    }
-                }
-            }
+            // N11 — barres d'outils ANCRABLES (remplace l'ancienne barre flottante
+            // bas-gauche). AnchoredToolbars rend les 4 bords d'après `layout` en
+            // filtrant tools3D au disponible : par défaut, exactement la barre
+            // bas-gauche d'avant. Une barre vide n'est pas rendue.
+            AnchoredToolbars(layout = toolbarLayout, specs = tools3D)
 
             // Cote de la mesure (bas-centre) : le chiffre est ici plutôt que sur
             // le trait, pour ne pas mesurer du texte dans le Canvas redessiné à
@@ -1594,6 +1557,20 @@ fun Scene3DScreen(
                     runCatching { satRoot.clearChildNodes() }
                 }
             }
+        }
+
+        // N11 — panneau « Personnaliser la barre d'outils » (vue 3D). Agit sur la
+        // disposition de CETTE vue uniquement ; onLayoutChange remonte à SceneScreen
+        // qui persiste globalement (par appareil).
+        if (showCustomize) {
+            ToolbarCustomizeSheet(
+                title = "Barre d'outils · Vue 3D",
+                layout = toolbarLayout,
+                catalog = tools3D.toCatalog(),
+                default = ToolbarLayout.default3D,
+                onLayout = onLayoutChange,
+                onDismiss = { showCustomize = false }
+            )
         }
     }
 }

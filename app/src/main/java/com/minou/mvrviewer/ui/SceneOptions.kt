@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.DropdownMenu
@@ -164,6 +165,12 @@ fun SceneOptionsMenu(
      * « Outils » rendue en tête si non vide. Voir [MenuTool].
      */
     tools: List<MenuTool> = emptyList(),
+    /**
+     * N11 — point d'entrée du MODE PERSONNALISER (« Personnaliser la barre
+     * d'outils… ») rendu en fin de section « Outils ». null → entrée masquée
+     * (vues sans barres personnalisables).
+     */
+    onCustomizeToolbar: (() -> Unit)? = null,
     // Synchro cloud : entrées de menu (au lieu d'un bouton flottant séparé).
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
@@ -226,7 +233,7 @@ fun SceneOptionsMenu(
         // ---- Outils de la vue (N10) : mêmes actions que la barre flottante,
         // accessibles ici. Les bascules gardent le menu ouvert ; les actions le
         // referment. Rendus dans l'ordre fourni par l'écran.
-        if (tools.isNotEmpty()) {
+        if (tools.isNotEmpty() || onCustomizeToolbar != null) {
             HorizontalDivider()
             Text("Outils", style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
@@ -236,6 +243,11 @@ fun SceneOptionsMenu(
                     is MenuTool.Toggle -> toolToggle(t.label, t.icon, t.checked) { t.onToggle() }
                     is MenuTool.Action -> nav(t.label, t.icon) { open = false; t.onClick() }
                 }
+            }
+            // N11 — accès au panneau de personnalisation des barres (les outils
+            // ci-dessus restent TOUJOURS ici, qu'ils soient dans une barre ou non).
+            onCustomizeToolbar?.let {
+                nav("Personnaliser la barre d'outils…", Icons.Filled.Tune) { open = false; it() }
             }
         }
         // ---- Synchro cloud (compte / partage / historique / rejoindre) ----

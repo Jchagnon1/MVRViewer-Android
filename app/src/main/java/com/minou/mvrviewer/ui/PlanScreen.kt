@@ -27,15 +27,19 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Architecture
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.CenterFocusWeak
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -43,8 +47,6 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Straighten
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -154,6 +156,11 @@ fun PlanScreen(
     // (sélection). Ne se déclenche qu'en interaction normale (pas rectangle/
     // affectation/masquage/solo/mesure/calibrage).
     onEditFixture: (MvrSceneObject) -> Unit = {},
+    // N11 — disposition des barres d'outils ancrables (vue plan). Nommé
+    // `toolbarLayout` (cohérence avec Scene3DScreen). Défaut = barre bas-gauche
+    // actuelle → aucun changement pour qui ne personnalise pas.
+    toolbarLayout: ToolbarLayout = ToolbarLayout.defaultPlan,
+    onLayoutChange: (ToolbarLayout) -> Unit = {},
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
     modifier: Modifier = Modifier
@@ -734,6 +741,81 @@ fun PlanScreen(
     val bgDark = BackgroundColorStore.isDark(planBg)
     val inkColor = if (bgDark) Color(0xFFECECEC) else Color(0xFF222222)
     val dxfColor = if (bgDark) DXF_COLOR_DARK_BG else DXF_COLOR
+
+    // N11 — panneau « Personnaliser la barre d'outils… » (mode édition).
+    var showCustomize by remember { mutableStateOf(false) }
+    // N11 — DESCRIPTION UNIFIÉE des outils de la vue plan : UNE liste consommée à la
+    // fois par les 4 barres ancrables (AnchoredToolbars) ET la section « Outils » du
+    // menu (toMenuTools) — supprime la duplication barre/menu. Les 12 premiers
+    // reproduisent l'ancienne barre bas-gauche (mêmes actions, mêmes exclusions
+    // mutuelles, mêmes conditions). SATELLITE reste hors du menu « Outils »
+    // (inMenu=false) car il a déjà sa bascule dédiée (avec opacité) ; idem pour les
+    // extras plaçables (étiquettes/couleurs/structure/légende).
+    val toolsPlan: List<ToolSpec> = buildList {
+        add(ToolSpec(ToolId.RECT, "Sélection rectangle", Icons.Filled.Crop,
+            available = true, checked = rectMode, onInvoke = {
+                rectMode = !rectMode; if (rectMode) measureMode = false
+            }))
+        add(ToolSpec(ToolId.MASK, "Masquer des éléments", Icons.Filled.VisibilityOff,
+            available = true, checked = maskMode, onInvoke = {
+                maskMode = !maskMode
+                if (maskMode) { selected.clear(); measureMode = false; soloMode = false }
+            }))
+        add(ToolSpec(ToolId.SOLO, "Solo (sélection seule)", Icons.Filled.CenterFocusStrong,
+            available = true, checked = soloMode, onInvoke = {
+                soloMode = !soloMode
+                if (soloMode) { selected.clear(); measureMode = false; maskMode = false }
+                else onSetSoloElements(emptySet())
+            }))
+        add(ToolSpec(ToolId.MEASURE, "Mesurer une distance", Icons.Filled.Straighten,
+            available = true, checked = measureMode, onInvoke = {
+                measureMode = !measureMode
+                if (measureMode) {
+                    rectMode = false; maskMode = false; soloMode = false; calibrating = false
+                    measureA = null; measureB = null
+                } else { measureA = null; measureB = null }
+            }))
+        add(ToolSpec(ToolId.SHOW_ALL, "Tout réafficher", Icons.Filled.Visibility,
+            available = hiddenElements.isNotEmpty(), checked = null,
+            onInvoke = { onSetHiddenElements(emptySet()) }))
+        add(ToolSpec(ToolId.CLEAR_SOLO, "Vider le solo", Icons.Filled.CenterFocusWeak,
+            available = soloElements.isNotEmpty(), checked = null,
+            onInvoke = { onSetSoloElements(emptySet()) }))
+        add(ToolSpec(ToolId.CLEAR_SEL, "Effacer la sélection", Icons.Filled.Clear,
+            available = selected.isNotEmpty(), checked = null, onInvoke = { selected.clear() }))
+        add(ToolSpec(ToolId.GPS, "Ma position GPS", Icons.Filled.MyLocation,
+            available = true, checked = showLocation, onInvoke = {
+                showLocation = !showLocation; if (!showLocation) calibrating = false
+            }))
+        add(ToolSpec(ToolId.CALIBRATE, "Calibrer : je suis ici", Icons.Filled.Place,
+            available = showLocation, checked = calibrating, onInvoke = {
+                calibrating = !calibrating; if (calibrating) measureMode = false
+            }))
+        add(ToolSpec(ToolId.SATELLITE, "Fond satellite", Icons.Filled.Public,
+            available = calibration.isCalibrated, checked = options.showSatellite,
+            onInvoke = { options.showSatellite = !options.showSatellite }, inMenu = false))
+        add(ToolSpec(ToolId.EXPORT_PDF, "Export PDF", Icons.Filled.PictureAsPdf,
+            available = true, checked = exportMode, onInvoke = { exportMode = !exportMode }))
+        add(ToolSpec(ToolId.DXF, "Plan DXF", Icons.Filled.Layers,
+            available = true, checked = referencePlan != null && showDxfPanel, busy = importing,
+            onInvoke = {
+                if (referencePlan == null) importLauncher.launch(arrayOf("*/*"))
+                else showDxfPanel = !showDxfPanel
+            }))
+        // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
+        add(ToolSpec(ToolId.LABELS, "Étiquettes", Icons.Filled.Label,
+            available = true, checked = options.showLabels,
+            onInvoke = { options.showLabels = !options.showLabels }, inMenu = false))
+        add(ToolSpec(ToolId.LAYER_COLORS, "Couleurs par calque", Icons.Filled.Palette,
+            available = true, checked = options.layerColors,
+            onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
+        add(ToolSpec(ToolId.STRUCTURE, "Décor / structure", Icons.Filled.Architecture,
+            available = true, checked = options.showStructure,
+            onInvoke = { options.showStructure = !options.showStructure }, inMenu = false))
+        add(ToolSpec(ToolId.LEGEND, "Légende", Icons.Filled.FormatListBulleted,
+            available = true, checked = options.showLegend,
+            onInvoke = { options.showLegend = !options.showLegend }, inMenu = false))
+    }
 
     Box(modifier = modifier.fillMaxSize().background(planBg)) {
         Canvas(
@@ -1519,51 +1601,11 @@ fun PlanScreen(
                 onShow3D = onBack, onShowPatch = onShowPatch,
                 onShowAccount = onShowAccount, onShareProject = onShareProject,
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
-                // Outils de la vue plan exposés DANS le menu (N10) : mêmes actions
-                // que la barre flottante bas-gauche, mêmes exclusions mutuelles.
-                tools = buildList {
-                    add(MenuTool.Toggle("Sélection rectangle", Icons.Filled.Crop, rectMode) {
-                        rectMode = !rectMode; if (rectMode) measureMode = false
-                    })
-                    add(MenuTool.Toggle("Masquer des éléments", Icons.Filled.VisibilityOff, maskMode) {
-                        maskMode = !maskMode
-                        if (maskMode) { selected.clear(); measureMode = false; soloMode = false }
-                    })
-                    add(MenuTool.Toggle("Solo (sélection seule)", Icons.Filled.CenterFocusStrong, soloMode) {
-                        soloMode = !soloMode
-                        if (soloMode) { selected.clear(); measureMode = false; maskMode = false }
-                        else onSetSoloElements(emptySet())
-                    })
-                    add(MenuTool.Toggle("Mesurer une distance", Icons.Filled.Straighten, measureMode) {
-                        measureMode = !measureMode
-                        if (measureMode) {
-                            rectMode = false; maskMode = false; soloMode = false; calibrating = false
-                            measureA = null; measureB = null
-                        } else { measureA = null; measureB = null }
-                    })
-                    if (hiddenElements.isNotEmpty()) {
-                        add(MenuTool.Action("Tout réafficher", Icons.Filled.Visibility) { onSetHiddenElements(emptySet()) })
-                    }
-                    if (soloElements.isNotEmpty()) {
-                        add(MenuTool.Action("Vider le solo", Icons.Filled.CenterFocusWeak) { onSetSoloElements(emptySet()) })
-                    }
-                    if (selected.isNotEmpty()) {
-                        add(MenuTool.Action("Effacer la sélection", Icons.Filled.Clear) { selected.clear() })
-                    }
-                    add(MenuTool.Toggle("Ma position GPS", Icons.Filled.MyLocation, showLocation) {
-                        showLocation = !showLocation; if (!showLocation) calibrating = false
-                    })
-                    if (showLocation) {
-                        add(MenuTool.Toggle("Calibrer : je suis ici", Icons.Filled.Place, calibrating) {
-                            calibrating = !calibrating; if (calibrating) measureMode = false
-                        })
-                    }
-                    add(MenuTool.Toggle("Export PDF", Icons.Filled.PictureAsPdf, exportMode) { exportMode = !exportMode })
-                    add(MenuTool.Toggle("Plan DXF", Icons.Filled.Layers, referencePlan != null && showDxfPanel) {
-                        if (referencePlan == null) importLauncher.launch(arrayOf("*/*"))
-                        else showDxfPanel = !showDxfPanel
-                    })
-                },
+                // Outils de la vue plan exposés DANS le menu (N10) : dérivés de la
+                // MÊME description unifiée que les barres (toolsPlan) → plus de
+                // duplication. Mêmes actions, mêmes bascules, mêmes conditions.
+                tools = toolsPlan.toMenuTools(),
+                onCustomizeToolbar = { showCustomize = true },
                 showLabelsToggle = true, showStructureToggle = true,
                 showLegendToggle = true,
                 // Fond satellite AUSSI dans le menu (avec son curseur d'opacité) —
@@ -1687,108 +1729,12 @@ fun PlanScreen(
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
         )
 
-        // Barre d'outils (bas gauche) : rectangle, position GPS, calibrage.
-        Row(
-            modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // EXCLUSION MUTUELLE DES MODES : chacun s'approprie le toucher.
-            // Deux modes actifs à la fois donneraient un geste au comportement
-            // imprévisible (mesurer ET masquer d'un même tap).
-            FilledIconToggleButton(checked = rectMode, onCheckedChange = {
-                rectMode = it
-                if (it) measureMode = false
-            }) {
-                Icon(Icons.Filled.Crop, contentDescription = "Sélection rectangle")
-            }
-            // Masquer des éléments. Ré-appuyer SORT du mode (c'est le geste
-            // attendu) ; le cadre reste utilisable pour en masquer plusieurs.
-            FilledIconToggleButton(checked = maskMode, onCheckedChange = {
-                maskMode = it
-                // Masquage et solo se contrediraient (cadre qui cache ET isole) :
-                // activer l'un éteint l'autre.
-                if (it) { selected.clear(); measureMode = false; soloMode = false }
-            }) {
-                Icon(Icons.Filled.VisibilityOff, contentDescription = "Masquer des éléments")
-            }
-            // SOLO — MIROIR du masquage : n'affiche QUE la sélection (tap ou cadre),
-            // tout le reste disparaît. Ré-appuyer SORT du mode ET vide l'ensemble
-            // solo → réaffiche tout : le solo est une VUE, pas une modif du show,
-            // donc en sortir restaure l'affichage complet sans rien perdre. Tant que
-            // l'ensemble est vide, RIEN n'est filtré (on montre tout) : un solo vide
-            // ne doit jamais donner un plan noir déroutant — le mode ne « prend »
-            // qu'une fois une première sélection faite (cf. effectiveHidden).
-            FilledIconToggleButton(checked = soloMode, onCheckedChange = {
-                soloMode = it
-                if (it) { selected.clear(); measureMode = false; maskMode = false }
-                else onSetSoloElements(emptySet())
-            }) {
-                Icon(Icons.Filled.CenterFocusStrong, contentDescription = "Solo : n'afficher que la sélection")
-            }
-            // Mesure entre deux points. Ré-appuyer SORT du mode et efface la
-            // cote (même geste que le masquage).
-            FilledIconToggleButton(checked = measureMode, onCheckedChange = {
-                measureMode = it
-                if (it) {
-                    rectMode = false; maskMode = false; soloMode = false; calibrating = false
-                    measureA = null; measureB = null
-                } else {
-                    measureA = null; measureB = null
-                }
-            }) {
-                Icon(Icons.Filled.Straighten, contentDescription = "Mesurer une distance")
-            }
-            if (hiddenElements.isNotEmpty()) {
-                FilledIconButton(onClick = { onSetHiddenElements(emptySet()) }) {
-                    Icon(Icons.Filled.Visibility, contentDescription = "Tout réafficher")
-                }
-            }
-            // Vider le solo SANS quitter le mode (miroir de « Tout réafficher ») :
-            // on revient à « tout affiché », prêt à re-sélectionner. Visible dès que
-            // l'ensemble solo isole réellement quelque chose.
-            if (soloElements.isNotEmpty()) {
-                FilledIconButton(onClick = { onSetSoloElements(emptySet()) }) {
-                    Icon(Icons.Filled.CenterFocusWeak, contentDescription = "Vider le solo")
-                }
-            }
-            if (selected.isNotEmpty()) {
-                FilledIconButton(onClick = { selected.clear() }) {
-                    Icon(Icons.Filled.Clear, contentDescription = "Effacer la sélection")
-                }
-            }
-            FilledIconToggleButton(checked = showLocation, onCheckedChange = { showLocation = it; if (!it) calibrating = false }) {
-                Icon(Icons.Filled.MyLocation, contentDescription = "Ma position GPS")
-            }
-            if (showLocation) {
-                FilledIconToggleButton(checked = calibrating, onCheckedChange = {
-                    calibrating = it
-                    if (it) measureMode = false
-                }) {
-                    Icon(Icons.Filled.Place, contentDescription = "Calibrer : je suis ici")
-                }
-            }
-            // Fond satellite : dispo seulement une fois calibré (géo-référence).
-            if (calibration.isCalibrated) {
-                FilledIconToggleButton(checked = options.showSatellite, onCheckedChange = { options.showSatellite = it }) {
-                    Icon(Icons.Filled.Public, contentDescription = "Fond satellite")
-                }
-            }
-            // Export PDF « en construction » : ouvre le panneau de composition.
-            FilledIconToggleButton(checked = exportMode, onCheckedChange = { exportMode = it }) {
-                Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
-            }
-            // Plan de repère DXF : importer, ou basculer le panneau de placement.
-            FilledIconToggleButton(
-                checked = referencePlan != null && showDxfPanel,
-                onCheckedChange = {
-                    if (referencePlan == null) importLauncher.launch(arrayOf("*/*"))
-                    else showDxfPanel = !showDxfPanel
-                }
-            ) {
-                if (importing) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.width(20.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Filled.Layers, contentDescription = "Plan DXF")
-            }
-        }
+        // N11 — barres d'outils ANCRABLES (remplace l'ancienne barre flottante
+        // bas-gauche). AnchoredToolbars rend les 4 bords d'après `layout` en filtrant
+        // toolsPlan au disponible : par défaut, exactement la barre bas-gauche
+        // d'avant (rectangle, masquer, solo, mesure, réafficher, GPS, calibrer,
+        // satellite, PDF, DXF…). Une barre vide n'est pas rendue.
+        AnchoredToolbars(layout = toolbarLayout, specs = toolsPlan)
 
         // Opacité du fond satellite : curseur flottant (impossible dans un menu).
         if (options.showSatellite && satellite != null) {
@@ -2118,6 +2064,20 @@ fun PlanScreen(
                     style = MaterialTheme.typography.titleSmall
                 )
             }
+        }
+
+        // N11 — panneau « Personnaliser la barre d'outils » (vue plan). Agit sur la
+        // disposition de CETTE vue uniquement ; onLayoutChange remonte à SceneScreen
+        // qui persiste globalement (par appareil).
+        if (showCustomize) {
+            ToolbarCustomizeSheet(
+                title = "Barre d'outils · Vue plan",
+                layout = toolbarLayout,
+                catalog = toolsPlan.toCatalog(),
+                default = ToolbarLayout.defaultPlan,
+                onLayout = onLayoutChange,
+                onDismiss = { showCustomize = false }
+            )
         }
     }
 }

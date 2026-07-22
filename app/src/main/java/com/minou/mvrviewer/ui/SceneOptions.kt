@@ -78,6 +78,28 @@ enum class PlanColorMode(val label: String) {
     LAYER("Calque"), SOCAPEX("Socapex"), DMX_LINE("Ligne DMX")
 }
 
+/**
+ * Outil de la barre flottante EXPOSÉ dans le menu déroulant (regroupement d'accès
+ * — N10). Chaque écran décrit ses outils courants (sélection rectangle, mesure,
+ * solo, position GPS, satellite, export, plan DXF…) et le menu les rend sous une
+ * section « Outils ». Les boutons flottants restent en place : le menu est un
+ * point d'accès ALTERNATIF, pas un remplacement (rien n'est cassé).
+ */
+sealed interface MenuTool {
+    val label: String
+    val icon: ImageVector
+    /** Bascule ON/OFF : le menu RESTE ouvert (on peut en enchaîner plusieurs). */
+    data class Toggle(
+        override val label: String, override val icon: ImageVector,
+        val checked: Boolean, val onToggle: () -> Unit
+    ) : MenuTool
+    /** Action ponctuelle : referme le menu au clic. */
+    data class Action(
+        override val label: String, override val icon: ImageVector,
+        val onClick: () -> Unit
+    ) : MenuTool
+}
+
 class SceneOptions {
     var backgroundDark by mutableStateOf(true)
     // Couleur de fond choisie par l'utilisateur, par vue (défauts noir / blanc,
@@ -137,6 +159,11 @@ fun SceneOptionsMenu(
     onShowUniverse: (() -> Unit)? = null,
     onShowCabling: (() -> Unit)? = null,
     onShowGdtfShare: (() -> Unit)? = null,
+    /**
+     * Outils de la vue (barre flottante) exposés AUSSI dans le menu — N10. Section
+     * « Outils » rendue en tête si non vide. Voir [MenuTool].
+     */
+    tools: List<MenuTool> = emptyList(),
     // Synchro cloud : entrées de menu (au lieu d'un bouton flottant séparé).
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
@@ -196,6 +223,21 @@ fun SceneOptionsMenu(
         onShowUniverse?.let { nav("Univers DMX", Icons.Filled.GridView) { open = false; it() } }
         onShowCabling?.let { nav("Câblage électrique", Icons.Filled.Bolt) { open = false; it() } }
         onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
+        // ---- Outils de la vue (N10) : mêmes actions que la barre flottante,
+        // accessibles ici. Les bascules gardent le menu ouvert ; les actions le
+        // referment. Rendus dans l'ordre fourni par l'écran.
+        if (tools.isNotEmpty()) {
+            HorizontalDivider()
+            Text("Outils", style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF888888),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+            tools.forEach { t ->
+                when (t) {
+                    is MenuTool.Toggle -> toolToggle(t.label, t.icon, t.checked) { t.onToggle() }
+                    is MenuTool.Action -> nav(t.label, t.icon) { open = false; t.onClick() }
+                }
+            }
+        }
         // ---- Synchro cloud (compte / partage / historique / rejoindre) ----
         if (onShowAccount != null || onShareProject != null || onShowHistory != null || onJoinProject != null) {
             HorizontalDivider()
@@ -381,6 +423,18 @@ private fun nav(label: String, icon: ImageVector, onClick: () -> Unit) {
 private fun check(label: String, on: Boolean, onClick: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label) },
+        trailingIcon = { if (on) Icon(Icons.Filled.Check, contentDescription = null) },
+        onClick = onClick
+    )
+}
+
+/** Bascule d'outil : icône à gauche (comme les entrées de navigation) + coche à
+ *  droite quand elle est active. Ne referme PAS le menu. */
+@Composable
+private fun toolToggle(label: String, icon: ImageVector, on: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = { Icon(icon, contentDescription = null) },
         trailingIcon = { if (on) Icon(Icons.Filled.Check, contentDescription = null) },
         onClick = onClick
     )

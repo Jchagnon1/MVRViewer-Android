@@ -981,25 +981,44 @@ fun Scene3DScreen(
     fun doSearch3D() {
         val q = query.trim(); if (q.isEmpty()) return
         val fx = scene.fixtures
-        var best = -1; var bestRank = Int.MAX_VALUE
-        fx.forEachIndexed { i, f ->
-            if (i !in layout.positions.indices || !layout.valid[i]) return@forEachIndexed
-            val id = f.fixtureId
-            val rank = when {
-                id != null && id.equals(q, true) -> 0
-                id != null && id.startsWith(q, true) -> 1
-                id != null && id.contains(q, true) -> 2
-                f.name.contains(q, true) -> 3
-                else -> Int.MAX_VALUE
+        fun usable(i: Int) = i in layout.positions.indices && layout.valid[i]
+        // Un même N° est souvent porté par PLUSIEURS projecteurs (multicellules,
+        // doublons de patch) : on prend TOUT le groupe de N° exact et on le
+        // sélectionne en entier. À défaut de N° exact (saisie partielle), on
+        // retombe sur le meilleur classement (préfixe > contenu > nom).
+        val exact = fx.indices.filter { usable(it) && fx[it].fixtureId.equals(q, true) }
+        val matches: List<Int> = if (exact.isNotEmpty()) exact else {
+            var best = -1; var bestRank = Int.MAX_VALUE
+            fx.forEachIndexed { i, f ->
+                if (!usable(i)) return@forEachIndexed
+                val id = f.fixtureId
+                val rank = when {
+                    id != null && id.startsWith(q, true) -> 1
+                    id != null && id.contains(q, true) -> 2
+                    f.name.contains(q, true) -> 3
+                    else -> Int.MAX_VALUE
+                }
+                if (rank < bestRank) { bestRank = rank; best = i }
             }
-            if (rank < bestRank) { bestRank = rank; best = i }
+            if (best >= 0) listOf(best) else emptyList()
         }
-        if (best < 0) return
-        selected.clear(); selected.add(best)
-        // …et on Y VA : le pivot se pose sur le projecteur et la caméra se place
-        // à courte distance, en CONSERVANT la direction de vue courante (on ne
-        // désoriente pas l'utilisateur, on se rapproche seulement).
-        val p = layout.positions[best]
+        if (matches.isEmpty()) return
+        selected.clear(); selected.addAll(matches)
+        // …et on Y VA : le pivot se pose sur le centroïde du groupe et la caméra
+        // se place en CONSERVANT la direction de vue courante (on ne désoriente
+        // pas l'utilisateur, on recadre seulement). La surbrillance + le cube de
+        // sélection matérialisent chaque projecteur trouvé.
+        val ps = matches.map { layout.positions[it] }
+        val cx = ps.map { it.x }.average().toFloat()
+        val cy = ps.map { it.y }.average().toFloat()
+        val cz = ps.map { it.z }.average().toFloat()
+        val ctr = Float3(cx, cy, cz)
+        // Rayon du groupe = distance max au centroïde (0 pour un seul projecteur).
+        var groupR = 0f
+        for (p in ps) {
+            val d0 = kotlin.math.sqrt((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy) + (p.z - cz) * (p.z - cz))
+            if (d0 > groupR) groupR = d0
+        }
         val cam = cameraNode.worldPosition
         var vx = cam.x - target.x; var vy = cam.y - target.y; var vz = cam.z - target.z
         val len = kotlin.math.sqrt(vx * vx + vy * vy + vz * vz)
@@ -1007,10 +1026,12 @@ fun Scene3DScreen(
             vx = 0f; vy = 0.45f; vz = 1f
             val n = kotlin.math.sqrt(vy * vy + vz * vz); vy /= n; vz /= n
         } else { vx /= len; vy /= len; vz /= len }
-        // Assez près pour lire le projecteur, assez loin pour garder du contexte.
-        val d = (layout.cube * 10f).coerceIn(1.5f, layout.radius * 0.5f)
-        target = p
-        camEye = Float3(p.x + vx * d, p.y + vy * d, p.z + vz * d)
+        // Assez près pour lire un projecteur seul, assez loin pour tenir tout le
+        // groupe (terme ∝ rayon), sans jamais sortir de la scène.
+        val near = (layout.cube * 10f).coerceIn(1.5f, layout.radius * 0.5f)
+        val d = (near + groupR * 2.2f).coerceAtMost((layout.radius * 3f).coerceAtLeast(near))
+        target = ctr
+        camEye = Float3(ctr.x + vx * d, ctr.y + vy * d, ctr.z + vz * d)
     }
 
     // Projette la position monde (Filament) d'un projecteur en pixels écran de la
@@ -1135,6 +1156,46 @@ fun Scene3DScreen(
                     onShowCabling = onShowCabling,
                     onShowAccount = onShowAccount, onShareProject = onShareProject,
                     onShowHistory = onShowHistory, onJoinProject = onJoinProject,
+                    // Outils de la vue 3D exposés DANS le menu (N10) : mêmes actions
+                    // que la barre flottante bas-gauche, mêmes bascules d'exclusion.
+                    tools = buildList {
+                        add(MenuTool.Toggle("Sélection rectangle", Icons.Filled.Crop, rectMode) {
+                            rectMode = !rectMode
+                            if (rectMode) measureMode = false
+                            if (!rectMode) { rectStart = null; rectEnd = null }
+                        })
+                        add(MenuTool.Toggle("Mesurer une distance", Icons.Filled.Straighten, measureMode) {
+                            measureMode = !measureMode
+                            if (measureMode) { rectMode = false; rectStart = null; rectEnd = null }
+                            measureI = null; measureJ = null
+                        })
+                        if (selected.isNotEmpty() || soloElements.isNotEmpty()) {
+                            add(MenuTool.Toggle("Solo (sélection seule)", Icons.Filled.CenterFocusStrong,
+                                soloElements.isNotEmpty()) {
+                                if (soloElements.isEmpty()) {
+                                    val keys = selected.mapNotNull { fixtureKeys.getOrNull(it) }.toSet()
+                                    if (keys.isNotEmpty()) onSetSoloElements(keys)
+                                } else onSetSoloElements(emptySet())
+                            })
+                        }
+                        if (selected.isNotEmpty()) {
+                            add(MenuTool.Action("Effacer la sélection", Icons.Filled.Close) { selected.clear() })
+                        }
+                        if (calibration?.isCalibrated == true) {
+                            add(MenuTool.Toggle("Ma position (3D)", Icons.Filled.MyLocation, showLocation) {
+                                showLocation = !showLocation
+                            })
+                            if (showLocation) {
+                                add(MenuTool.Action("Taille du marqueur", Icons.Filled.PhotoSizeSelectSmall) {
+                                    options.gpsMarkerScale = when {
+                                        options.gpsMarkerScale <= 0.7f -> 1f
+                                        options.gpsMarkerScale >= 1.5f -> 0.6f
+                                        else -> 1.6f
+                                    }
+                                })
+                            }
+                        }
+                    },
                     // Étiquettes de projecteurs aussi en 3D : même bascule + mêmes
                     // champs/taille que le plan (SceneOptions partagé).
                     showLabelsToggle = true,

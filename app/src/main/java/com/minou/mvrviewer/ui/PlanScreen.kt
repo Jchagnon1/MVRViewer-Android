@@ -1356,8 +1356,57 @@ fun PlanScreen(
                 onShow3D = onBack, onShowPatch = onShowPatch,
                 onShowAccount = onShowAccount, onShareProject = onShareProject,
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
+                // Outils de la vue plan exposés DANS le menu (N10) : mêmes actions
+                // que la barre flottante bas-gauche, mêmes exclusions mutuelles.
+                tools = buildList {
+                    add(MenuTool.Toggle("Sélection rectangle", Icons.Filled.Crop, rectMode) {
+                        rectMode = !rectMode; if (rectMode) measureMode = false
+                    })
+                    add(MenuTool.Toggle("Masquer des éléments", Icons.Filled.VisibilityOff, maskMode) {
+                        maskMode = !maskMode
+                        if (maskMode) { selected.clear(); measureMode = false; soloMode = false }
+                    })
+                    add(MenuTool.Toggle("Solo (sélection seule)", Icons.Filled.CenterFocusStrong, soloMode) {
+                        soloMode = !soloMode
+                        if (soloMode) { selected.clear(); measureMode = false; maskMode = false }
+                        else onSetSoloElements(emptySet())
+                    })
+                    add(MenuTool.Toggle("Mesurer une distance", Icons.Filled.Straighten, measureMode) {
+                        measureMode = !measureMode
+                        if (measureMode) {
+                            rectMode = false; maskMode = false; soloMode = false; calibrating = false
+                            measureA = null; measureB = null
+                        } else { measureA = null; measureB = null }
+                    })
+                    if (hiddenElements.isNotEmpty()) {
+                        add(MenuTool.Action("Tout réafficher", Icons.Filled.Visibility) { onSetHiddenElements(emptySet()) })
+                    }
+                    if (soloElements.isNotEmpty()) {
+                        add(MenuTool.Action("Vider le solo", Icons.Filled.CenterFocusWeak) { onSetSoloElements(emptySet()) })
+                    }
+                    if (selected.isNotEmpty()) {
+                        add(MenuTool.Action("Effacer la sélection", Icons.Filled.Clear) { selected.clear() })
+                    }
+                    add(MenuTool.Toggle("Ma position GPS", Icons.Filled.MyLocation, showLocation) {
+                        showLocation = !showLocation; if (!showLocation) calibrating = false
+                    })
+                    if (showLocation) {
+                        add(MenuTool.Toggle("Calibrer : je suis ici", Icons.Filled.Place, calibrating) {
+                            calibrating = !calibrating; if (calibrating) measureMode = false
+                        })
+                    }
+                    add(MenuTool.Toggle("Export PDF", Icons.Filled.PictureAsPdf, exportMode) { exportMode = !exportMode })
+                    add(MenuTool.Toggle("Plan DXF", Icons.Filled.Layers, referencePlan != null && showDxfPanel) {
+                        if (referencePlan == null) importLauncher.launch(arrayOf("*/*"))
+                        else showDxfPanel = !showDxfPanel
+                    })
+                },
                 showLabelsToggle = true, showStructureToggle = true,
                 showLegendToggle = true,
+                // Fond satellite AUSSI dans le menu (avec son curseur d'opacité) —
+                // il n'était accessible que par le bouton flottant. Dispo une fois
+                // la calibration GPS posée (géo-référence), comme le bouton.
+                showSatelliteToggle = calibration.isCalibrated,
                 // Coloration câblage (phase 4) : proposée seulement s'il existe un
                 // câblage colorable ; le nav cycle entre les modes disponibles.
                 showColorModeSelector = hasSocaColoring || hasDmxColoring,
@@ -1410,25 +1459,48 @@ fun PlanScreen(
             )
         }
 
-        // Recherche d'un projecteur par Fixture ID : centre + sélectionne (comme
-        // le bouton loupe iOS — usage terrain « où est le #152 »).
+        // Recherche par Fixture ID : SÉLECTIONNE le(s) projecteur(s) et CADRE
+        // dessus (comme le bouton loupe iOS — usage terrain « où est le #152 »).
+        // Un même N° est souvent porté par PLUSIEURS projecteurs (multicellules,
+        // doublons de patch) : on prend TOUT le groupe de N° exact, on le
+        // sélectionne en entier (la surbrillance + le cadre de sélection le
+        // montrent) et on cadre sur sa boîte englobante. À défaut de N° exact, on
+        // retombe sur une correspondance partielle (N° puis nom).
         fun doSearch() {
             val q = query.trim()
             if (q.isEmpty()) return
-            val i = data.fixtures.indexOfFirst { it.id == q }
-                .let { if (it >= 0) it else data.fixtures.indexOfFirst { f -> f.id?.contains(q, true) == true } }
-            if (i < 0) return
-            selected.clear(); selected.add(i)
-            val f = data.fixtures[i]
-            // Niveau de zoom ABSOLU (≈ 40 px par mètre) plutôt qu'un multiple
-            // arbitraire : sur un grand show, « ×6 » laissait le projecteur
-            // minuscule. On ne dézoome jamais si l'on est déjà plus près.
+            val exact = data.fixtures.indices.filter { data.fixtures[it].id.equals(q, true) }
+            val matches = when {
+                exact.isNotEmpty() -> exact
+                else -> data.fixtures.indices
+                    .filter { data.fixtures[it].id?.contains(q, true) == true }
+                    .ifEmpty { data.fixtures.indices.filter { data.fixtures[it].name.contains(q, true) } }
+            }
+            if (matches.isEmpty()) return
+            selected.clear(); selected.addAll(matches)
+            // Cadre = boîte englobante du groupe (coordonnées plan, mm), centrée.
+            val fx = matches.map { data.fixtures[it] }
+            val minX = fx.minOf { it.px }; val maxX = fx.maxOf { it.px }
+            val minY = fx.minOf { it.py }; val maxY = fx.maxOf { it.py }
+            val cX = (minX + maxX) / 2f; val cY = (minY + maxY) / 2f
+            val spanX = maxX - minX; val spanY = maxY - minY
             val base = baseScale(canvas.x, canvas.y)
-            val wanted = if (base > 0f) (0.04f / base).coerceIn(1f, 200f) else 6f
-            val z = max(scale, wanted)
+            // Zoom voulu : un projecteur (ou groupe ponctuel) → niveau ABSOLU
+            // lisible (≈ 40 px/m) ; un groupe étendu → juste ce qu'il faut pour
+            // que sa boîte tienne dans ~60 % du canvas (marge autour). Borné.
+            val wanted = if (base <= 0f) 6f else if (spanX < 1f && spanY < 1f) {
+                (0.04f / base).coerceIn(1f, 200f)
+            } else {
+                val fitX = if (spanX > 0f && canvas.x > 0f) (canvas.x * 0.6f) / (base * spanX) else Float.MAX_VALUE
+                val fitY = if (spanY > 0f && canvas.y > 0f) (canvas.y * 0.6f) / (base * spanY) else Float.MAX_VALUE
+                minOf(fitX, fitY).coerceIn(1f, 200f)
+            }
+            // Un seul projecteur : ne jamais dézoomer si l'on est déjà plus près.
+            // Un groupe : on impose le cadrage (voir tout le groupe prime).
+            val z = if (matches.size == 1) max(scale, wanted) else wanted
             val bs = base * z
             scale = z
-            offset = Offset(-bs * (f.px - data.cx), -bs * (f.py - data.cy))
+            offset = Offset(-bs * (cX - data.cx), -bs * (cY - data.cy))
         }
         OutlinedTextField(
             value = query,

@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.MvrScene
+import com.minou.mvrviewer.mvr.MvrSceneObject
 import com.minou.mvrviewer.mvr.ProjectStore
 import com.minou.mvrviewer.mvr.ReferencePlan
 import com.minou.mvrviewer.mvr.ReferencePlanTransform
@@ -78,6 +79,11 @@ fun SceneScreen(
         kotlinx.coroutines.delay(400); BackgroundColorStore.setPlan2D(ctx, options.background2D)
     }
     val overrides = remember { PatchOverrides() }
+    // N12 — fiche d'édition patch ouverte par APPUI LONG sur un projecteur (en 3D
+    // OU en plan). Hissée ici : la MÊME FixtureDetailSheet que la liste de patch,
+    // et `overrides`/`power` (dont elle dépend) vivent déjà à ce niveau. Non nulle
+    // = la fiche est présentée par-dessus la vue courante.
+    var editFixture by remember { mutableStateOf<MvrSceneObject?>(null) }
     val gdtfOverrides = remember { GdtfOverrides() }
     // Bibliothèque de puissances (outil de câblage) : cache réactif de la conso
     // par type. Semée du cache disque global, remplie par extraction GDTF +
@@ -626,6 +632,8 @@ fun SceneScreen(
             // Solo partagé avec la vue plan (survit aux bascules 3D ↔ plan).
             soloElements = soloElements,
             onSetSoloElements = { soloElements = it },
+            // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
+            onEditFixture = { editFixture = it },
             onClose = onClose,
             modifier = modifier
         )
@@ -686,6 +694,8 @@ fun SceneScreen(
             // sinon rouvrir le plan le retrouverait armé sans bandeau attendu.
             onBack = { assignTarget = null; mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },
+            // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
+            onEditFixture = { editFixture = it },
             modifier = modifier
         )
         SceneMode.PATCH -> PatchListScreen(
@@ -761,6 +771,18 @@ fun SceneScreen(
                     }
                 }
             }
+        }
+
+        // N12 — FICHE D'ÉDITION PATCH ouverte par appui long (3D ou plan). La MÊME
+        // FixtureDetailSheet que la liste de patch (édite Fixture ID / adresse DMX /
+        // mode / conso). Rendue au niveau de la scène → s'affiche par-dessus quelle
+        // que soit la vue active, et les édits passent par `overrides` (audit +
+        // persistance + push cloud via overrides.onCommit, comme depuis la liste).
+        editFixture?.let { f ->
+            FixtureDetailSheet(
+                fixture = f, mvrBytes = mvrBytes, overrides = overrides, power = power,
+                onDismiss = { editFixture = null }
+            )
         }
     } // Box
 }

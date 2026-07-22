@@ -149,6 +149,11 @@ fun PlanScreen(
     onShareProject: (() -> Unit)? = null,
     onShowHistory: (() -> Unit)? = null,
     onJoinProject: (() -> Unit)? = null,
+    // N12 — APPUI LONG sur un projecteur → ouvre la fiche d'édition de la patch
+    // (mêmes champs que la liste de patch). Le TAP simple garde son comportement
+    // (sélection). Ne se déclenche qu'en interaction normale (pas rectangle/
+    // affectation/masquage/solo/mesure/calibrage).
+    onEditFixture: (MvrSceneObject) -> Unit = {},
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
     modifier: Modifier = Modifier
@@ -156,6 +161,10 @@ fun PlanScreen(
     val ctxPlan = androidx.compose.ui.platform.LocalContext.current
     val layerIndex = remember(scene) { LayerColors.index(scene) }
     val data = remember(scene) { planData(scene) }
+    // N12 — appui long → fiche d'édition patch : la PlanFixture ne porte qu'une clé
+    // d'instance (mvrInstanceKey) ; on retrouve l'objet MVR réel par cette clé
+    // (même identité que le masquage/patch partout ailleurs).
+    val fixtureByKey = remember(scene) { scene.fixtures.associateBy { mvrInstanceKey(it) } }
 
     // ---- CÂBLAGE (phase 4) : coloration du plan + champs d'étiquette ----------
     // Tables FIGÉES (immuables) fixtureKey(mvrUUID) → couleur / texte du
@@ -866,7 +875,29 @@ fun PlanScreen(
                     }
                 }
                 .pointerInput(scene, rectMode, assignMode, calibrating, maskMode, soloMode, hiddenElements, soloElements, measureMode, snapVerts, referencePlan, assignTarget) {
-                    detectTapGestures { tap ->
+                    detectTapGestures(
+                    // N12 — APPUI LONG : sélectionne le projecteur visé PUIS ouvre la
+                    // fiche d'édition patch. Uniquement en interaction NORMALE — les
+                    // modes qui s'approprient déjà le geste (rectangle/affectation/
+                    // masquage/solo/mesure/calibrage) l'ignorent, comme le TAP.
+                    onLongPress = onLongPress@{ pos ->
+                        if (rectMode || assignMode || maskMode || soloMode || measureMode || calibrating) return@onLongPress
+                        val lw = canvas.x; val lh = canvas.y
+                        var lbest = -1; var lbestD = 44f * 44f
+                        data.fixtures.forEachIndexed { i, f ->
+                            // Ne vise que le visible (effectiveHidden), comme le tap-select.
+                            if (f.key in effectiveHidden) return@forEachIndexed
+                            val s = toScreen(f.px, f.py, lw, lh)
+                            val dx = s.x - pos.x; val dy = s.y - pos.y
+                            val d = dx * dx + dy * dy
+                            if (d < lbestD) { lbestD = d; lbest = i }
+                        }
+                        if (lbest < 0) return@onLongPress
+                        // Sélection unique (comme le tap), puis fiche d'édition patch.
+                        selected.clear(); selected.add(lbest)
+                        fixtureByKey[data.fixtures[lbest].key]?.let { onEditFixture(it) }
+                    },
+                    onTap = { tap ->
                         val w = canvas.x; val h = canvas.y
                         // MODE AFFECTATION (E2) : PRIORITAIRE. Le toucher affecte/retire
                         // le projecteur visé (toggle) à la cible courante — il ne
@@ -1072,6 +1103,7 @@ fun PlanScreen(
                             if (!selected.remove(best)) selected.add(best)
                         } else { selected.clear(); selected.add(best) }
                     }
+                    )
                 }
                 // Déplacement des étiquettes ARMÉES au doigt (règle 3 du modèle).
                 // Un glissé sur l'une d'elles les déplace TOUTES du même vecteur.

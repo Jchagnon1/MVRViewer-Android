@@ -46,6 +46,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +79,7 @@ import com.minou.mvrviewer.mvr.GdtfLoader
 import com.minou.mvrviewer.mvr.MvrGeometryRef
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
+import com.minou.mvrviewer.mvr.MvrSceneObject
 import com.minou.mvrviewer.mvr.ThreeDSParser
 import dev.romainguy.kotlin.math.Float2
 import dev.romainguy.kotlin.math.Float3
@@ -248,6 +250,10 @@ fun Scene3DScreen(
     // la vue plan → le solo survit aux bascules 3D ↔ plan.
     soloElements: Set<String> = emptySet(),
     onSetSoloElements: (Set<String>) -> Unit = {},
+    // N12 — APPUI LONG sur un projecteur → ouvre la fiche d'édition de la patch
+    // (mêmes champs que la liste de patch). Le TAP simple garde son comportement
+    // (sélection). Ne se déclenche qu'en interaction normale (pas rectangle/mesure).
+    onEditFixture: (MvrSceneObject) -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1070,6 +1076,29 @@ fun Scene3DScreen(
     // élément qui n'est PAS un projecteur → désélectionne TOUT. On travaille dans
     // le repère de l'overlay Compose (mêmes coordonnées que worldToScreenPoint —
     // le geste natif de SceneView, lui, décalait de la hauteur de la barre du haut).
+    // N12 — lambda d'édition tenue À JOUR (le tapListener est remember(scene) et
+    // capturerait sinon la première instance). Lire `.value` au moment de l'appui
+    // long donne toujours le dernier `onEditFixture`.
+    val currentOnEdit = rememberUpdatedState(onEditFixture)
+    // APPUI LONG : sélectionne le projecteur le plus proche (comme le tap) PUIS
+    // ouvre la fiche d'édition patch. Ne fait rien dans les modes qui s'approprient
+    // déjà le geste (rectangle, mesure) ni si aucun projecteur n'est visé.
+    fun handleLongPress(pos: Offset) {
+        if (rectMode || measureMode) return
+        var best = -1; var bestD = 55f
+        for (i in layout.positions.indices) {
+            val o = projectFixture(i) ?: continue
+            val d = kotlin.math.hypot(o.x - pos.x, o.y - pos.y)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        if (best < 0) return
+        val obj = sceneFixtures.getOrNull(best) ?: return
+        // Sélection unique (comme le tap qui ne cible qu'un projecteur), puis fiche.
+        selected.clear(); selected.add(best)
+        projVersion++
+        currentOnEdit.value(obj)
+    }
+
     fun handleTap(pos: Offset) {
         var best = -1; var bestD = 55f
         for (i in layout.positions.indices) {
@@ -1100,6 +1129,11 @@ fun Scene3DScreen(
         object : io.github.sceneview.gesture.GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(e: android.view.MotionEvent, node: io.github.sceneview.node.Node?) {
                 handleTap(Offset(e.rawX - scenePos.x, e.rawY - scenePos.y))
+            }
+            // N12 : appui long → sélection + fiche d'édition patch (mêmes coordonnées
+            // que le tap : repère de la SceneView).
+            override fun onLongPress(e: android.view.MotionEvent, node: io.github.sceneview.node.Node?) {
+                handleLongPress(Offset(e.rawX - scenePos.x, e.rawY - scenePos.y))
             }
         }
     }

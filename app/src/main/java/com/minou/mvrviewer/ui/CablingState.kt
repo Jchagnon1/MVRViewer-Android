@@ -121,6 +121,20 @@ class PowerCablingState {
     fun applySettings(s: CablingSettings) { settings = s; commit() }
 }
 
+/**
+ * CIBLE d'affectation « en sélectionnant sur le plan » (E2). Depuis l'écran
+ * Câblage, une action « Sélectionner sur le plan » sur un CIRCUIT Socapex ou un
+ * DÉPART DMX bascule la vue plan en MODE AFFECTATION visant cette cible : taper
+ * (ou encadrer) un projecteur l'affecte/le retire.
+ *
+ * `index` = circuit 1-based (SOCA) ou cœur/départ 1-based (DMX). Le couple
+ * (distributorId, index) suffit à router vers `PowerCablingState.assign` ou
+ * `DmxCablingState.assign`.
+ */
+data class CablingAssignTarget(val kind: Kind, val distributorId: String, val index: Int) {
+    enum class Kind { SOCA, DMX }
+}
+
 /** Palette ARGB des distributeurs (repérage visuel), indexée par ordre d'ajout. */
 object CablingPalette {
     private val COLORS = intArrayOf(

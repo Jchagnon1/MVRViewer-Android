@@ -153,7 +153,9 @@ internal fun cablingPlanView(
     cablingText: (PlanFixture, LabelContent) -> String?,
     satellite: SatelliteOverlay?,
     hiddenLayers: Set<String>,
-    referencePlan: ReferencePlan?
+    referencePlan: ReferencePlan?,
+    // ANNEAU de la 2e dimension (E3) : DMX en page Socapex, Socapex en page DMX.
+    cablingRingColor: Map<String, Color> = emptyMap()
 ): PlanViewCapture {
     val halfW = data.spanX / 2f * 1.05f
     val halfH = data.spanY / 2f * 1.05f
@@ -164,6 +166,7 @@ internal fun cablingPlanView(
         layerColors = true,
         colorMode = colorMode,
         cablingColor = cablingColor,
+        cablingRingColor = cablingRingColor,
         cablingLegend = cablingLegend,
         cablingText = cablingText,
         showStructure = true,

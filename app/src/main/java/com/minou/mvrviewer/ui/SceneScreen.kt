@@ -119,6 +119,10 @@ fun SceneScreen(
     // solo est un filtre d'affichage PERSONNEL (une « vue »), pas une modification
     // du show — contrairement au masquage qui, lui, est une décision partagée.
     var soloElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    // CIBLE D'AFFECTATION « sur le plan » (E2) : hissée ici car PlanScreen est recréé à
+    // chaque bascule CABLING ↔ PLAN — un état local ne survivrait pas au passage par le
+    // câblage. Non nulle = la vue plan est en mode affectation vers ce circuit / départ.
+    var assignTarget by remember(projectKey) { mutableStateOf<CablingAssignTarget?>(null) }
     var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
     fun hiddenSig(s: Set<String>) = AuditCoding.encodeLayers(s)
     LaunchedEffect(projectKey) {
@@ -589,7 +593,8 @@ fun SceneScreen(
     //   3. Un dialogue de synchro ouvert → le fermer d'abord (priorité maximale).
     // L'Accueil (HomeScreen) n'a AUCUN handler : seul lui laisse l'OS réduire l'appli.
     BackHandler(enabled = mode == SceneMode.THREE_D) { onClose() }
-    BackHandler(enabled = mode != SceneMode.THREE_D) { mode = SceneMode.THREE_D }
+    // Retour matériel depuis une sous-vue → 3D, et sortie du mode affectation (E2).
+    BackHandler(enabled = mode != SceneMode.THREE_D) { assignTarget = null; mode = SceneMode.THREE_D }
     BackHandler(enabled = showAccount || showShare || showHistory || showJoin) {
         showAccount = false; showShare = false; showHistory = false; showJoin = false
     }
@@ -670,11 +675,16 @@ fun SceneScreen(
             // d'étiquette Socapex / Ligne DMX. Objets déjà hissés ici (L87/L90).
             cabling = cabling,
             dmxCabling = dmxCabling,
+            // AFFECTATION SUR LE PLAN (E2) : cible hissée + « Terminé » (revient au câblage).
+            assignTarget = assignTarget,
+            onAssignDone = { assignTarget = null; mode = SceneMode.CABLING },
             onShowAccount = sync?.let { { showAccount = true } },
             onShareProject = sync?.let { { showShare = true } },
             onShowHistory = sync?.let { { showHistory = true } },
             onJoinProject = sync?.let { { showJoin = true } },
-            onBack = { mode = SceneMode.THREE_D },
+            // Retour à la 3D = aussi une sortie du mode affectation (échappatoire) :
+            // sinon rouvrir le plan le retrouverait armé sans bandeau attendu.
+            onBack = { assignTarget = null; mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },
             modifier = modifier
         )
@@ -714,6 +724,9 @@ fun SceneScreen(
             referencePlan = referencePlan,
             satellite = satellite,
             hiddenLayers = hiddenLayers,
+            // AFFECTATION SUR LE PLAN (E2) : un « Sélectionner sur le plan » sur un
+            // circuit / départ bascule en vue plan MODE AFFECTATION vers cette cible.
+            onSelectOnPlan = { t -> assignTarget = t; mode = SceneMode.PLAN },
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

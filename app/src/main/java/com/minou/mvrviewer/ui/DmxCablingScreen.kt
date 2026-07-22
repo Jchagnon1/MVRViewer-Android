@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
@@ -84,6 +85,9 @@ fun DmxCablingPanel(
     overrides: PatchOverrides,
     gdtfOverrides: GdtfOverrides,
     dmx: DmxCablingState,
+    // AFFECTATION SUR LE PLAN (E2) : bascule la vue plan en mode affectation vers le
+    // départ DMX choisi. Voir CablingScreen / PlanScreen.
+    onSelectOnPlan: (CablingAssignTarget) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Résolution des empreintes GDTF HORS thread principal (parse des .gdtf) via la
@@ -157,6 +161,7 @@ fun DmxCablingPanel(
                         dist = d, dmx = dmx, channelsOf = channelsOf, universeOf = universeOf,
                         fixtureLabel = fixtureLabel,
                         onAssign = { core -> picker = d.id to core },
+                        onSelectOnPlan = onSelectOnPlan,
                         onEdit = { editDist = d.id },
                         onDelete = { dmx.removeDistributor(d.id) }
                     )
@@ -202,6 +207,7 @@ private fun DmxDistributorCard(
     universeOf: (String) -> Int?,
     fixtureLabel: Map<String, String>,
     onAssign: (Int) -> Unit,
+    onSelectOnPlan: (CablingAssignTarget) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -240,7 +246,7 @@ private fun DmxDistributorCard(
             }
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
             for (core in 1..dist.coreCount) {
-                DmxCoreRow(dist, core, dmx, channelsOf, universeOf, fixtureLabel, color, onAssign)
+                DmxCoreRow(dist, core, dmx, channelsOf, universeOf, fixtureLabel, color, onAssign, onSelectOnPlan)
             }
         }
     }
@@ -257,7 +263,8 @@ private fun DmxCoreRow(
     universeOf: (String) -> Int?,
     fixtureLabel: Map<String, String>,
     color: Color,
-    onAssign: (Int) -> Unit
+    onAssign: (Int) -> Unit,
+    onSelectOnPlan: (CablingAssignTarget) -> Unit
 ) {
     val load = DmxCablingCalc.coreLoad(dist, core, dmx.assignments.values.toList(), channelsOf, universeOf)
     // Libellé du départ : « Départ k » pour une multipaire, « Ligne » pour une simple.
@@ -280,6 +287,13 @@ private fun DmxCoreRow(
             )
             IconButton(onClick = { onAssign(core) }) {
                 Icon(Icons.Filled.Add, contentDescription = "Affecter des projecteurs")
+            }
+            // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
+            // affectation vers CE départ. Conserve l'affectation par la liste (bouton +).
+            IconButton(onClick = {
+                onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.DMX, dist.id, core))
+            }) {
+                Icon(Icons.Filled.Map, contentDescription = "Sélectionner sur le plan")
             }
         }
         // Alertes DISCRÈTES (sans blocage) : dépassement de 512, univers mélangés.

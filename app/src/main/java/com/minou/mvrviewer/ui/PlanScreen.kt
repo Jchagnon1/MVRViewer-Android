@@ -136,6 +136,15 @@ fun PlanScreen(
      */
     cabling: PowerCablingState = remember { PowerCablingState() },
     dmxCabling: DmxCablingState = remember { DmxCablingState() },
+    /**
+     * CIBLE D'AFFECTATION « sur le plan » (E2) : non nulle → la vue plan est en MODE
+     * AFFECTATION vers ce circuit / départ. Taper (ou encadrer) un projecteur
+     * l'affecte/le retire. Hissée dans SceneScreen (PlanScreen est recréé à chaque
+     * bascule CABLING ↔ PLAN, l'état doit survivre). [onAssignDone] = « Terminé »
+     * (quitte le mode, revient au câblage).
+     */
+    assignTarget: CablingAssignTarget? = null,
+    onAssignDone: () -> Unit = {},
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
     onShowHistory: (() -> Unit)? = null,
@@ -204,6 +213,14 @@ fun PlanScreen(
     val cablingColorMap: Map<String, Color>? = when (effectiveColorMode) {
         PlanColorMode.SOCAPEX -> socaColorByFixture
         PlanColorMode.DMX_LINE -> dmxColorByFixture
+        PlanColorMode.LAYER -> null
+    }
+    // ANNEAU 2e DIMENSION (E3) : l'AUTRE table de couleur que le remplissage —
+    // Socapex → anneau DMX, DMX → anneau Socapex. Projecteur absent de la table
+    // (non affecté dans l'autre dimension) → pas d'anneau ; aucun en mode Calque.
+    val cablingRingColorMap: Map<String, Color>? = when (effectiveColorMode) {
+        PlanColorMode.SOCAPEX -> dmxColorByFixture
+        PlanColorMode.DMX_LINE -> socaColorByFixture
         PlanColorMode.LAYER -> null
     }
     // Légende câblage : distributeurs RÉELLEMENT utilisés (au moins une affectation)
@@ -465,6 +482,12 @@ fun PlanScreen(
     var rectStart by remember { mutableStateOf<Offset?>(null) }
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
 
+    // MODE AFFECTATION (E2) : dérivé de la cible hissée. Comme rectMode/maskMode, il
+    // s'approprie le geste (tap + rectangle) mais N'EFFACE PAS la sélection ni les
+    // autres modes — c'est un mode entrant depuis l'écran Câblage, avec son bandeau
+    // et son bouton « Terminé ». Le tap/rectangle AFFECTE au lieu de sélectionner.
+    val assignMode = assignTarget != null
+
     // ---- Mesure entre deux points ----
     // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
     // cote ne doit pas changer quand on déplace ou zoome le plan entre les deux
@@ -535,7 +558,7 @@ fun PlanScreen(
     // au mode normal, où l'utilisateur ne s'attend plus à rien de sélectionné).
     LaunchedEffect(
         options.showLabels, options.labelFields, options.labelDetached,
-        rectMode, maskMode, soloMode, calibrating, measureMode
+        rectMode, maskMode, soloMode, calibrating, measureMode, assignMode
     ) {
         activeLabelKeys = emptySet()
     }
@@ -623,6 +646,29 @@ fun PlanScreen(
         return (sx - w / 2f - offset.x) / bs + data.cx to (sy - h / 2f - offset.y) / bs + data.cy
     }
 
+    // AFFECTATION EN MODE PLAN (E2) — TOGGLE d'un projecteur (clé = mvrUUID) vers la
+    // cible courante. SOCA : si le projecteur est DÉJÀ sur ce circuit → on le retire ;
+    // sinon on l'affecte (ce qui le DÉPLACE au besoin depuis un autre circuit). DMX :
+    // symétrique via `dmxCabling`. La coloration réactive (lecture de `.version`) donne
+    // le retour visuel immédiat. On NE touche PAS à `selected` (indépendant du câblage).
+    fun toggleAssign(fx: String) {
+        val t = assignTarget ?: return
+        when (t.kind) {
+            CablingAssignTarget.Kind.SOCA -> {
+                val cur = cabling.assignmentOf(fx)
+                if (cur != null && cur.distributor == t.distributorId && cur.circuit == t.index)
+                    cabling.unassign(fx)
+                else cabling.assign(setOf(fx), t.distributorId, t.index)
+            }
+            CablingAssignTarget.Kind.DMX -> {
+                val cur = dmxCabling.assignmentOf(fx)
+                if (cur != null && cur.distributor == t.distributorId && cur.core == t.index)
+                    dmxCabling.unassign(fx)
+                else dmxCabling.assign(setOf(fx), t.distributorId, t.index)
+            }
+        }
+    }
+
     /**
      * Fige la vue COURANTE pour l'export. Le cadrage est enregistré en
      * coordonnées monde (centre + demi-étendue) et non en pixels : la page PDF
@@ -643,6 +689,7 @@ fun PlanScreen(
             // immuables) → le PDF reflète la coloration/étiquettes/légende de l'écran.
             colorMode = effectiveColorMode,
             cablingColor = cablingColorMap,
+            cablingRingColor = cablingRingColorMap,
             cablingLegend = cablingLegend,
             cablingText = cablingText,
             showStructure = options.showStructure,
@@ -682,10 +729,10 @@ fun PlanScreen(
     Box(modifier = modifier.fillMaxSize().background(planBg)) {
         Canvas(
             modifier = Modifier.fillMaxSize()
-                // En mode rectangle, le glissé trace le cadre de sélection ;
-                // sinon il déplace/zoome le plan (comme le mode dédié iOS).
-                .pointerInput(scene, rectMode, maskMode, soloMode, hiddenElements, soloElements) {
-                    if (rectMode) {
+                // En mode rectangle (ou affectation E2), le glissé trace le cadre de
+                // sélection ; sinon il déplace/zoome le plan (comme le mode dédié iOS).
+                .pointerInput(scene, rectMode, assignMode, maskMode, soloMode, hiddenElements, soloElements, assignTarget) {
+                    if (rectMode || assignMode) {
                         detectDragGestures(
                             onDragStart = { rectStart = it; rectEnd = it },
                             onDrag = { change, _ -> rectEnd = change.position },
@@ -694,7 +741,25 @@ fun PlanScreen(
                                 if (a != null && b != null) {
                                     val l = min(a.x, b.x); val r = max(a.x, b.x)
                                     val t = min(a.y, b.y); val bo = max(a.y, b.y)
-                                    if (maskMode) {
+                                    val tgt = assignTarget
+                                    if (assignMode && tgt != null) {
+                                        // MODE AFFECTATION (E2) : le cadre AFFECTE (add) en
+                                        // un lot tous les projecteurs VISIBLES qu'il contient
+                                        // à la cible (circuit / départ). Filtré effectiveHidden
+                                        // comme la sélection voisine. Ne touche pas au décor.
+                                        val enclos = ArrayList<String>()
+                                        data.fixtures.forEach { f ->
+                                            if (f.key in effectiveHidden) return@forEach
+                                            val s = toScreen(f.px, f.py, canvas.x, canvas.y)
+                                            if (s.x in l..r && s.y in t..bo) enclos.add(f.key)
+                                        }
+                                        if (enclos.isNotEmpty()) when (tgt.kind) {
+                                            CablingAssignTarget.Kind.SOCA ->
+                                                cabling.assign(enclos, tgt.distributorId, tgt.index)
+                                            CablingAssignTarget.Kind.DMX ->
+                                                dmxCabling.assign(enclos, tgt.distributorId, tgt.index)
+                                        }
+                                    } else if (maskMode) {
                                         // Le cadre MASQUE tout ce qu'il contient
                                         // (projecteurs + décor) : geste de nettoyage.
                                         val add = HashSet(hiddenElements)
@@ -800,9 +865,26 @@ fun PlanScreen(
                         }
                     }
                 }
-                .pointerInput(scene, rectMode, calibrating, maskMode, soloMode, hiddenElements, soloElements, measureMode, snapVerts, referencePlan) {
+                .pointerInput(scene, rectMode, assignMode, calibrating, maskMode, soloMode, hiddenElements, soloElements, measureMode, snapVerts, referencePlan, assignTarget) {
                     detectTapGestures { tap ->
                         val w = canvas.x; val h = canvas.y
+                        // MODE AFFECTATION (E2) : PRIORITAIRE. Le toucher affecte/retire
+                        // le projecteur visé (toggle) à la cible courante — il ne
+                        // sélectionne pas. Hit-test 34px comme le masquage, filtré
+                        // effectiveHidden (ne vise que le visible). Retour visuel
+                        // immédiat via la coloration réactive (.version).
+                        if (assignMode) {
+                            var bestF = -1; var bestFD = 34f * 34f
+                            data.fixtures.forEachIndexed { i, f ->
+                                if (f.key in effectiveHidden) return@forEachIndexed
+                                val s = toScreen(f.px, f.py, w, h)
+                                val dx = s.x - tap.x; val dy = s.y - tap.y
+                                val d = dx * dx + dy * dy
+                                if (d < bestFD) { bestFD = d; bestF = i }
+                            }
+                            if (bestF >= 0) toggleAssign(data.fixtures[bestF].key)
+                            return@detectTapGestures
+                        }
                         // MESURE : le 1er toucher pose le départ, le 2e l'arrivée,
                         // le 3e recommence. Prioritaire sur tout le reste — dans
                         // ce mode le toucher ne sélectionne ni ne masque rien.
@@ -1003,12 +1085,13 @@ fun PlanScreen(
                 // reçoit l'événement le premier en passe principale, donc
                 // consommer ici annule proprement le pan/zoom
                 // (detectTransformGestures s'arrête sur un change consommé).
-                .pointerInput(scene, rectMode, maskMode, soloMode, calibrating, measureMode, projectKey, activeLabelKeys) {
+                .pointerInput(scene, rectMode, assignMode, maskMode, soloMode, calibrating, measureMode, projectKey, activeLabelKeys) {
                     val keys = activeLabelKeys
                     if (keys.isEmpty()) return@pointerInput
-                    // soloMode s'approprie le geste (comme maskMode) : pas de saisie
-                    // d'étiquette pendant qu'on constitue l'ensemble solo.
-                    if (rectMode || maskMode || soloMode || calibrating || measureMode) return@pointerInput
+                    // soloMode / affectation s'approprient le geste (comme maskMode) :
+                    // pas de saisie d'étiquette pendant qu'on constitue le solo ou qu'on
+                    // affecte sur le plan.
+                    if (rectMode || assignMode || maskMode || soloMode || calibrating || measureMode) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // Un SEUL test, contre les boîtes des étiquettes ARMÉES :
@@ -1145,6 +1228,7 @@ fun PlanScreen(
                     layerColors = options.layerColors,
                     colorMode = effectiveColorMode,
                     cablingColor = cablingColorMap,
+                    cablingRingColor = cablingRingColorMap,
                     cablingText = cablingText,
                     showStructure = options.showStructure,
                     showLabels = options.showLabels,
@@ -1223,9 +1307,9 @@ fun PlanScreen(
                 }
             }
 
-            // Cadre de sélection en cours.
+            // Cadre de sélection en cours (rectangle OU affectation E2).
             val a = rectStart; val b = rectEnd
-            if (rectMode && a != null && b != null) {
+            if ((rectMode || assignMode) && a != null && b != null) {
                 val tl = Offset(min(a.x, b.x), min(a.y, b.y))
                 val sz = androidx.compose.ui.geometry.Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y))
                 drawRect(Color(0x33FFC400), topLeft = tl, size = sz)
@@ -1291,6 +1375,49 @@ fun PlanScreen(
         }
         IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Vue 3D", tint = inkColor)
+        }
+
+        // BANDEAU D'AFFECTATION (E2) : en haut, la cible visée + un bouton « Terminé ».
+        // Le libellé est RÉACTIF (relit cabling/dmxCabling.distributors → un renommage
+        // de distributeur se reflète aussitôt). « Terminé » quitte le mode et revient
+        // au câblage (onAssignDone, hissé dans SceneScreen).
+        val at = assignTarget
+        if (assignMode && at != null) {
+            val targetLabel = when (at.kind) {
+                CablingAssignTarget.Kind.SOCA -> {
+                    val name = cabling.distributors.firstOrNull { it.id == at.distributorId }?.name ?: "Socapex"
+                    CablingLabels.soca(name, at.index)
+                }
+                CablingAssignTarget.Kind.DMX -> {
+                    val d = dmxCabling.distributors.firstOrNull { it.id == at.distributorId }
+                    CablingLabels.dmx(d?.name ?: "DMX", d?.coreCount ?: 1, at.index)
+                }
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = RoundedCornerShape(10.dp),
+                shadowElevation = 4.dp,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 2.dp, bottom = 2.dp)
+                ) {
+                    Text(
+                        "Affectation → $targetLabel",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+                    androidx.compose.material3.TextButton(
+                        onClick = onAssignDone,
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) { Text("Terminé") }
+                }
+            }
         }
 
         // Légende : couleur de chaque calque de projecteurs + compte (comme iOS).

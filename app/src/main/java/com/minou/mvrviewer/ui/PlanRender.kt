@@ -74,6 +74,14 @@ internal class PlanRenderSpec(
      */
     val cablingColor: Map<String, Color>? = null,
     /**
+     * ANNEAU de la 2e DIMENSION de câblage (E3). En mode SOCAPEX, la pastille
+     * (remplissage) porte la couleur Socapex et cet anneau porte la couleur de la
+     * LIGNE DMX ; en mode DMX_LINE, c'est l'inverse. Projecteur ABSENT de la table
+     * (non affecté dans l'AUTRE dimension) → PAS d'anneau. null / mode LAYER = aucun
+     * anneau. Vit en passe 2 (par INSTANCE) comme la pastille.
+     */
+    val cablingRingColor: Map<String, Color>? = null,
+    /**
      * Résout le texte des champs d'étiquette SOCAPEX / DMX_LINE (état câblage
      * runtime). null hors câblage → ces champs ne produisent aucun bloc.
      */
@@ -444,6 +452,21 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
             7f
         }
         s.symbolHits?.add(SymbolHit(p.x, p.y, max(symRadius, 7f)))
+        // ANNEAU de 2e DIMENSION câblage (E3) : couleur de l'AUTRE dimension du
+        // projecteur (DMX en mode Socapex, Socapex en mode DMX). Non affecté dans
+        // cette dimension (absent de la table) → pas d'anneau ; aucun en mode LAYER.
+        // Rayon entre la pastille (≤ 7) et l'anneau de sélection (13) → les trois
+        // restent distincts. Fin liseré de contraste dessous pour rester lisible sur
+        // tout fond, puis l'anneau coloré par-dessus.
+        if (s.colorMode != PlanColorMode.LAYER) {
+            val ring = s.cablingRingColor?.get(f.key)
+            if (ring != null) {
+                val rr = max(symRadius, 7f) + 3.5f
+                drawCircle(if (s.bgDark) Color.White else Color(0xFF111111),
+                    radius = rr, center = p, style = Stroke(4.5f))
+                drawCircle(ring, radius = rr, center = p, style = Stroke(3f))
+            }
+        }
         if (i in s.selected) {
             drawCircle(Color(0xFFFFC400), radius = 13f, center = p, style = Stroke(3f))
         }

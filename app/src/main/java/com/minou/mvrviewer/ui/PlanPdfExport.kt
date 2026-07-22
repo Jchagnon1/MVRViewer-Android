@@ -50,6 +50,8 @@ internal class PlanViewCapture(
      */
     val colorMode: PlanColorMode = PlanColorMode.LAYER,
     val cablingColor: Map<String, Color>? = null,
+    /** ANNEAU de la 2e dimension câblage (E3), figé pour le PDF. Voir PlanRenderSpec. */
+    val cablingRingColor: Map<String, Color>? = null,
     val cablingLegend: List<Pair<String, Color>> = emptyList(),
     val cablingText: ((PlanFixture, LabelContent) -> String?)? = null,
     val showStructure: Boolean,
@@ -276,6 +278,7 @@ private fun DrawScope.drawPdfPage(
                 layerColors = v.layerColors,
                 colorMode = v.colorMode,
                 cablingColor = v.cablingColor,
+                cablingRingColor = v.cablingRingColor,
                 cablingText = v.cablingText,
                 showStructure = v.showStructure,
                 showLabels = v.showLabels,

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
@@ -114,6 +115,10 @@ fun CablingScreen(
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
     hiddenLayers: Set<String> = emptySet(),
+    // AFFECTATION SUR LE PLAN (E2) : appelé quand l'utilisateur choisit
+    // « Sélectionner sur le plan » sur un circuit / départ. SceneScreen bascule alors
+    // en vue plan MODE AFFECTATION vers cette cible.
+    onSelectOnPlan: (CablingAssignTarget) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -209,10 +214,14 @@ fun CablingScreen(
                                 .toList().sortedByDescending { it.second },
                             documentTitle = "Câblage"
                         )
+                        // ANNEAU 2e dimension (E3) : la page Socapex porte l'anneau
+                        // DMX, la page DMX porte l'anneau Socapex.
                         socaView = cablingPlanView("Repérage Socapex", data, PlanColorMode.SOCAPEX,
-                            coloring.socaColor, coloring.socaLegend, coloring.cablingText, sat, hidden, refPlan)
+                            coloring.socaColor, coloring.socaLegend, coloring.cablingText, sat, hidden, refPlan,
+                            cablingRingColor = coloring.dmxColor)
                         dmxView = cablingPlanView("Repérage DMX", data, PlanColorMode.DMX_LINE,
-                            coloring.dmxColor, coloring.dmxLegend, coloring.cablingText, sat, hidden, refPlan)
+                            coloring.dmxColor, coloring.dmxLegend, coloring.cablingText, sat, hidden, refPlan,
+                            cablingRingColor = coloring.socaColor)
                     }
                     buildCablingPdf(
                         ctxCabling, parts, cablingDto, dmxDto, settings,
@@ -288,7 +297,8 @@ fun CablingScreen(
 
         if (tab == 1) {
             DmxCablingPanel(scene, mvrBytes, overrides, gdtfOverrides, dmxCabling,
-                Modifier.weight(1f).fillMaxWidth())
+                onSelectOnPlan = onSelectOnPlan,
+                modifier = Modifier.weight(1f).fillMaxWidth())
             return@Column
         }
         if (tab == 2) {
@@ -349,6 +359,7 @@ fun CablingScreen(
                         dist = d, cabling = cabling, settings = cabling.settings,
                         wattsOf = wattsOf, fixtureLabel = fixtureLabel,
                         onAssign = { circuit -> picker = d.id to circuit },
+                        onSelectOnPlan = onSelectOnPlan,
                         onEdit = { editDist = d.id },
                         onDelete = { cabling.removeDistributor(d.id) }
                     )
@@ -391,6 +402,7 @@ private fun DistributorCard(
     wattsOf: (String) -> Int?,
     fixtureLabel: Map<String, String>,
     onAssign: (Int) -> Unit,
+    onSelectOnPlan: (CablingAssignTarget) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -467,7 +479,7 @@ private fun DistributorCard(
                 )
                 for (c in 1..dist.circuitCount) {
                     if (dist.phaseOf(c) != phase) continue
-                    CircuitRow(dist, c, cabling, settings, wattsOf, fixtureLabel, onAssign)
+                    CircuitRow(dist, c, cabling, settings, wattsOf, fixtureLabel, onAssign, onSelectOnPlan)
                 }
             }
         }
@@ -484,7 +496,8 @@ private fun CircuitRow(
     settings: CablingSettings,
     wattsOf: (String) -> Int?,
     fixtureLabel: Map<String, String>,
-    onAssign: (Int) -> Unit
+    onAssign: (Int) -> Unit,
+    onSelectOnPlan: (CablingAssignTarget) -> Unit
 ) {
     val load = PowerCablingCalc.circuitLoad(dist, circuit, cabling.assignments.values.toList(), settings, wattsOf)
     val over = load.overloaded
@@ -508,6 +521,13 @@ private fun CircuitRow(
             )
             IconButton(onClick = { onAssign(circuit) }) {
                 Icon(Icons.Filled.Add, contentDescription = "Affecter des projecteurs")
+            }
+            // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
+            // affectation vers CE circuit. Conserve l'affectation par la liste (bouton +).
+            IconButton(onClick = {
+                onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.SOCA, dist.id, circuit))
+            }) {
+                Icon(Icons.Filled.Map, contentDescription = "Sélectionner sur le plan")
             }
         }
         // Projecteurs affectés à ce circuit (chips à retirer d'un tap).

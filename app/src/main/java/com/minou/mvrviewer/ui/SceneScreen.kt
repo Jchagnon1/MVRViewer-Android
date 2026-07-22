@@ -618,6 +618,9 @@ fun SceneScreen(
             onShareProject = sync?.let { { showShare = true } },
             onShowHistory = sync?.let { { showHistory = true } },
             onJoinProject = sync?.let { { showJoin = true } },
+            // Solo partagé avec la vue plan (survit aux bascules 3D ↔ plan).
+            soloElements = soloElements,
+            onSetSoloElements = { soloElements = it },
             onClose = onClose,
             modifier = modifier
         )

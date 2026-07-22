@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.MyLocation
@@ -172,7 +173,36 @@ private class LodState {
     var lastX = Float.NaN; var lastY = Float.NaN; var lastZ = Float.NaN
     var idle = 0
     var hidden = false
-    fun reset() { nodes.clear(); proxies.clear(); lastX = Float.NaN; idle = 0; hidden = false }
+    // Solo actif : le LOD (onFrame) laisse alors la visibilité au filtre solo au
+    // lieu de réafficher le détail — sinon il rallumerait le décor masqué.
+    var soloActive = false
+    fun reset() { nodes.clear(); proxies.clear(); lastX = Float.NaN; idle = 0; hidden = false; soloActive = false }
+}
+
+/**
+ * Applique (ou retire) le filtre SOLO à la scène 3D par VISIBILITÉ, sans rien
+ * reconstruire. Dans SceneView, `Node.isVisible` ne se propage PAS aux enfants
+ * (chaque RenderableNode lit sa PROPRE visibilité), donc on bascule chaque enfant
+ * de `geometryRoot`. Les projecteurs soloés restent montrés par le bloc de cubes
+ * déclaratif (hors geometryRoot).
+ */
+private fun applySolo3D(
+    geometryRoot: io.github.sceneview.node.Node,
+    lod: LodState,
+    solo: Set<String>
+) {
+    if (solo.isEmpty()) {
+        // Retour à l'état de repos : tout le décor/silhouettes visible, les
+        // cubes-proxies masqués (ils ne servent qu'en navigation), LOD réarmé.
+        runCatching { geometryRoot.childNodes.forEach { it.isVisible = true } }
+        lod.proxies.forEach { it.isVisible = false }
+        lod.hidden = false; lod.idle = 0; lod.soloActive = false
+    } else {
+        // Solo : masque TOUT geometryRoot (décor + silhouettes GDTF + proxies) ;
+        // seuls les cubes des projecteurs soloés (déclaratifs) restent visibles.
+        runCatching { geometryRoot.childNodes.forEach { it.isVisible = false } }
+        lod.soloActive = true
+    }
 }
 
 /** Ressources GPU du quad satellite 3D à libérer à chaque reconstruction. */
@@ -213,6 +243,11 @@ fun Scene3DScreen(
     onShareProject: (() -> Unit)? = null,
     onShowHistory: (() -> Unit)? = null,
     onJoinProject: (() -> Unit)? = null,
+    // Solo (parité iOS / vue plan) : ensemble d'INSTANCES à isoler (mvrInstanceKey).
+    // Vide = aucun filtre (on montre tout). Hissé dans SceneScreen et PARTAGÉ avec
+    // la vue plan → le solo survit aux bascules 3D ↔ plan.
+    soloElements: Set<String> = emptySet(),
+    onSetSoloElements: (Set<String>) -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -245,6 +280,9 @@ fun Scene3DScreen(
     // dessin des étiquettes, à chaque frame de mouvement caméra, serait O(n²)).
     // Aligné 1:1 avec layout.positions quand la scène a des projecteurs.
     val sceneFixtures = remember(scene) { scene.fixtures }
+    // Clés d'INSTANCE (mvrInstanceKey) alignées 1:1 sur sceneFixtures / layout —
+    // servent au filtrage solo (3D) et au marquage des étiquettes soloées.
+    val fixtureKeys = remember(sceneFixtures) { sceneFixtures.map { mvrInstanceKey(it) } }
 
     // Matériau gris uniforme quand « couleurs par calque » est désactivé.
     val grayMaterial = remember(materialLoader) { materialLoader.createColorInstance(GRAY) }
@@ -292,6 +330,10 @@ fun Scene3DScreen(
     // Indices (dans scene.fixtures) des projecteurs rendus avec leur VRAIE
     // silhouette GDTF — leurs cubes de repli sont masqués.
     var gdtfFixtures by remember(scene) { mutableStateOf(emptySet<Int>()) }
+    // Bumpé à la FIN de chaque (re)construction 3D → signal FIABLE de « scène
+    // prête » pour ré-appliquer le filtre solo (indépendant de la présence de
+    // silhouettes GDTF, contrairement à gdtfFixtures qui peut rester vide).
+    var buildTick by remember(scene) { mutableIntStateOf(0) }
     // Projecteurs qui ont DÉJÀ leur propre géométrie 3D (rendue par 2a/2b) : ni
     // silhouette GDTF (évite la superposition), ni cube de repli.
     val ownGeomFixtures = remember(scene) { fixturesWithOwnGeometry(scene) }
@@ -623,10 +665,20 @@ fun Scene3DScreen(
         }
         flushAdds()   // pousse le dernier lot de nœuds en attente
         gdtfFixtures = gdtfDone
+        buildTick++   // scène prête → le solo (s'il est actif) sera ré-appliqué
 
         status = "$placed objets 3D" +
             (if (gdtfDone.isNotEmpty()) " · ${gdtfDone.size} proj. GDTF" else "") +
             if (truncated) " (tronqué)" else ""
+    }
+
+    // Solo (3D) : n'afficher QUE les projecteurs soloés — le reste (décor,
+    // silhouettes GDTF, cubes des autres projecteurs) est masqué. Filtrage PAR
+    // VISIBILITÉ (aucune reconstruction). Re-déclenché quand le solo change OU
+    // quand la scène vient d'être (re)construite (buildTick) : un solo hérité de
+    // la vue plan est ainsi ré-appliqué dès que la scène est prête.
+    LaunchedEffect(soloElements, buildTick) {
+        applySolo3D(geometryRoot, lod, soloElements)
     }
 
     // Plan de repère DXF en 3D : lignes au sol, placées par la transformée du plan
@@ -978,6 +1030,20 @@ fun Scene3DScreen(
         return Offset(sp.x, sp.y)
     }
 
+    // Comme projectFixture, mais pour un point monde ARBITRAIRE (les 8 coins du
+    // cube de sélection). null si derrière la caméra ou non fini.
+    fun projectPoint(x: Float, y: Float, z: Float): Offset? {
+        val cam = cameraNode.worldPosition
+        val fdx = target.x - cam.x; val fdy = target.y - cam.y; val fdz = target.z - cam.z
+        val dx = x - cam.x; val dy = y - cam.y; val dz = z - cam.z
+        if (fdx * dx + fdy * dy + fdz * dz <= 0f) return null // derrière la caméra
+        val sp = runCatching {
+            cameraNode.worldToScreenPoint(io.github.sceneview.collision.Vector3(x, y, z))
+        }.getOrNull() ?: return null
+        if (!sp.x.isFinite() || !sp.y.isFinite()) return null
+        return Offset(sp.x, sp.y)
+    }
+
     // TAP : sélectionne le projecteur le plus proche du point touché (≤ ~55 px)
     // → l'AJOUTE (ou le retire s'il y est déjà) ; toucher dans le vide / sur un
     // élément qui n'est PAS un projecteur → désélectionne TOUT. On travaille dans
@@ -1113,7 +1179,9 @@ fun Scene3DScreen(
                     // ET les étiquettes de projecteurs (elles suivent la caméra).
                     if (moved && (selected.isNotEmpty() || measureI != null ||
                             (options.showLabels && hasAnyLabel))) projVersion++
-                    if (lod.nodes.isNotEmpty() || lod.proxies.isNotEmpty()) {
+                    // En mode solo, le filtre de visibilité prime : le LOD ne doit
+                    // PAS réafficher le décor masqué (il rallumerait geometryRoot).
+                    if (!lod.soloActive && (lod.nodes.isNotEmpty() || lod.proxies.isNotEmpty())) {
                         if (moved) {
                             lod.idle = 0
                             if (!lod.hidden) {
@@ -1138,10 +1206,18 @@ fun Scene3DScreen(
                 Node(apply = { addChildNode(dxfRoot) })
                 Node(apply = { addChildNode(markerRoot) })
                 val s = Float3(layout.cube, layout.cube, layout.cube)
+                val soloOn = soloElements.isNotEmpty()
                 layout.positions.forEachIndexed { i, p ->
-                    // Cube de repli SEULEMENT pour un projecteur « nu » : ni géométrie
-                    // propre (2a/2b), ni silhouette GDTF, et position valide.
-                    if (i !in gdtfFixtures && i !in ownGeomFixtures && layout.valid[i]) {
+                    if (!layout.valid[i]) return@forEachIndexed
+                    // Solo actif → un cube pour CHAQUE projecteur soloé : applySolo3D
+                    // masque le décor et les silhouettes GDTF, donc on matérialise le
+                    // soloé par son cube coloré. Sinon comportement normal : cube de
+                    // repli seulement pour un projecteur « nu » (ni géométrie propre
+                    // 2a/2b, ni silhouette GDTF).
+                    val show = if (soloOn) {
+                        val key = fixtureKeys.getOrNull(i); key != null && key in soloElements
+                    } else (i !in gdtfFixtures && i !in ownGeomFixtures)
+                    if (show) {
                         val mat = if (options.layerColors) fixtureMaterials.getValue(layout.colors[i]) else grayMaterial
                         CubeNode(size = s, materialInstance = mat, position = p)
                     }
@@ -1190,6 +1266,7 @@ fun Scene3DScreen(
                 Canvas(Modifier.fillMaxSize()) {
                     projVersion // dépendance de redraw quand la caméra bouge
                     val vw = size.width; val vh = size.height
+                    val soloOnLabels = soloElements.isNotEmpty()
                     var drawn = 0
                     var projected = 0
                     val n = minOf(labelLinesByFixture.size, sceneFixtures.size)
@@ -1199,6 +1276,11 @@ fun Scene3DScreen(
                         if (lines.isEmpty()) { i++; continue }
                         // Calque masqué (repère DXF/MVR) → pas d'étiquette.
                         if (sceneFixtures[i].layerName in hiddenLayers) { i++; continue }
+                        // Solo actif → seules les étiquettes des projecteurs soloés.
+                        if (soloOnLabels) {
+                            val key = fixtureKeys.getOrNull(i)
+                            if (key == null || key !in soloElements) { i++; continue }
+                        }
                         projected++
                         val p = projectFixture(i)
                         if (p != null &&
@@ -1213,6 +1295,27 @@ fun Scene3DScreen(
             }
             Canvas(Modifier.fillMaxSize()) {
                 projVersion // dépendance de redraw quand la caméra bouge
+                // Cube en fil de fer autour de chaque projecteur sélectionné : les 8
+                // coins d'une boîte (taille ∝ échelle scène) projetés un par un, puis
+                // les 12 arêtes reliées. Suit la caméra via projVersion. Cyan bien
+                // visible (souligné de noir pour tout fond), distinct du cercle jaune.
+                selected.forEach { i ->
+                    if (i !in layout.positions.indices || !layout.valid[i]) return@forEach
+                    val p = layout.positions[i]
+                    val hx = layout.cube * 1.15f
+                    val c = arrayOfNulls<Offset>(8)
+                    var k = 0
+                    for (sx in SEL_CUBE_SIGNS) for (sy in SEL_CUBE_SIGNS) for (sz in SEL_CUBE_SIGNS) {
+                        c[k++] = projectPoint(p.x + sx * hx, p.y + sy * hx, p.z + sz * hx)
+                    }
+                    for (e in SEL_CUBE_EDGES) {
+                        val a = c[e.first]; val b = c[e.second]
+                        if (a != null && b != null) {
+                            drawLine(Color.Black.copy(alpha = 0.45f), a, b, strokeWidth = 4f)
+                            drawLine(SELECTION_CUBE_COLOR, a, b, strokeWidth = 2f)
+                        }
+                    }
+                }
                 // Surbrillances des projecteurs sélectionnés.
                 selected.forEach { i ->
                     val o = projectFixture(i) ?: return@forEach
@@ -1292,6 +1395,22 @@ fun Scene3DScreen(
                         measureI = null; measureJ = null
                     }
                 ) { Icon(Icons.Filled.Straighten, contentDescription = "Mesurer une distance") }
+                // Solo : n'afficher QUE les projecteurs sélectionnés (le reste
+                // masqué), en 3D ET en plan (soloElements partagé, hissé dans
+                // SceneScreen). Visible dès qu'il y a une sélection ou qu'un solo est
+                // déjà actif — activer isole la sélection courante, désactiver rétablit
+                // tout (le solo est une VUE, pas une modification du show).
+                if (selected.isNotEmpty() || soloElements.isNotEmpty()) {
+                    FilledIconToggleButton(
+                        checked = soloElements.isNotEmpty(),
+                        onCheckedChange = { on ->
+                            if (on) {
+                                val keys = selected.mapNotNull { fixtureKeys.getOrNull(it) }.toSet()
+                                if (keys.isNotEmpty()) onSetSoloElements(keys)
+                            } else onSetSoloElements(emptySet())
+                        }
+                    ) { Icon(Icons.Filled.CenterFocusStrong, contentDescription = "Solo : n'afficher que la sélection") }
+                }
                 if (selected.isNotEmpty()) {
                     FilledIconButton(onClick = { selected.clear() }) {
                         Icon(Icons.Filled.Close, contentDescription = "Effacer la sélection")
@@ -1783,6 +1902,21 @@ private fun fixtureLayout(scene: MvrScene, center: Float3): FixtureLayout {
 
 /** Magenta de l'outil de mesure — même code couleur que la vue plan. */
 private val MEASURE_3D_COLOR = Color(0xFFD500A0)
+
+/** Cube de sélection : cyan bien visible. */
+private val SELECTION_CUBE_COLOR = Color(0xFF00E5FF)
+/** Les deux signes ±1 (Float) balayés pour engendrer les 8 coins du cube. */
+private val SEL_CUBE_SIGNS = floatArrayOf(-1f, 1f)
+/**
+ * Les 12 arêtes du cube. Ordre d'itération des coins : sx (extérieur), sy, sz
+ * (intérieur) → index de coin = bit2·sx | bit1·sy | bit0·sz. Une arête relie deux
+ * coins qui ne diffèrent QUE d'un axe.
+ */
+private val SEL_CUBE_EDGES = arrayOf(
+    0 to 4, 1 to 5, 2 to 6, 3 to 7,   // axe X (bit 2)
+    0 to 2, 1 to 3, 4 to 6, 5 to 7,   // axe Y (bit 1)
+    0 to 1, 2 to 3, 4 to 5, 6 to 7    // axe Z (bit 0)
+)
 
 /**
  * Dessine l'étiquette d'un projecteur dans le Canvas d'overlay, ANCRÉE au-dessus

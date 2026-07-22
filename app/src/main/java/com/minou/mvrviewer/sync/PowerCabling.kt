@@ -304,4 +304,40 @@ object PowerCablingCalc {
         settings: CablingSettings,
         wattsOf: (String) -> Int?
     ): Int = circuitLoads(dist, assignments, settings, wattsOf).sumOf { it.totalW }
+
+    /**
+     * DÉSÉQUILIBRE DE PHASE — DÉCISION UNIQUE PARTAGÉE iOS/Android. À ne PLUS
+     * recoder dans les fichiers PDF : les deux plateformes appellent CE point.
+     *
+     * Règle EXACTE (identique iOS `PowerCablingCalculator.isPhaseImbalanced`) :
+     *   déséquilibré = (nb de phases utilisées ≥ 2) ET max > 0
+     *                  ET (max − min) > max(0,15 × max, 300 W).
+     * `usedPhaseWatts` = les charges W des SEULES phases réellement utilisées.
+     */
+    fun isPhaseImbalanced(usedPhaseWatts: List<Int>): Boolean {
+        if (usedPhaseWatts.size < 2) return false
+        val maxW = usedPhaseWatts.maxOrNull() ?: return false
+        if (maxW <= 0) return false
+        val minW = usedPhaseWatts.minOrNull() ?: return false
+        val delta = (maxW - minW).toDouble()
+        return delta > maxOf(0.15 * maxW, 300.0)
+    }
+
+    /**
+     * Même décision à partir d'un distributeur : ne considère que les phases
+     * RÉELLEMENT utilisées par ses circuits (une ligne solo n'utilise qu'une seule
+     * phase → jamais déséquilibrée). Appel unique et identique des deux côtés.
+     */
+    fun isPhaseImbalanced(
+        dist: Distributor,
+        assignments: List<CablingAssignment>,
+        settings: CablingSettings,
+        wattsOf: (String) -> Int?
+    ): Boolean {
+        val usedPhases = (1..dist.circuitCount).map { dist.phaseOf(it) }.toSortedSet()
+        val watts = phaseLoads(dist, assignments, settings, wattsOf)
+            .filter { it.phase in usedPhases }
+            .map { it.totalW }
+        return isPhaseImbalanced(watts)
+    }
 }

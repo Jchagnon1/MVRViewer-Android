@@ -282,14 +282,23 @@ private fun buildElecRows(
                     rows.add(fixtureLineRow(m, left, right, "— aucun projecteur", C_MUTE))
                 else for (u in cl.fixtures) {
                     val w = wattsOf(u)
-                    val wtxt = if (w == null) "? W" else "$w W"
-                    val line = "${labelOf(u) ?: u} · ${specOf(u) ?: "—"} · $wtxt"
-                    rows.add(fixtureLineRow(m, left, right, line, if (w == null) C_AMBER else C_INK))
+                    // Colonnes alignées : ID | type GDTF | W (à droite). Ambre si conso inconnue.
+                    rows.add(fixtureColumnsRow(
+                        m, left, right,
+                        fixtureId = labelOf(u) ?: u,
+                        gdtfType = specOf(u) ?: "—",
+                        detail = null,
+                        value = if (w == null) "? W" else "$w W",
+                        unknown = w == null
+                    ))
                 }
             }
         }
-        // Pied : équilibrage des phases + total distributeur.
-        rows.add(phaseBalanceRow(m, left, right, phaseLoads, usedPhases))
+        // Pied : la ligne d'équilibrage L1/L2/L3 n'a de sens QUE pour un
+        // distributeur MULTI-PHASES (Socapex). Une ligne SOLO (une seule phase
+        // utilisée) n'affiche que son total — pas de ligne d'équilibrage (aligné iOS).
+        if (usedPhases.size >= 2)
+            rows.add(phaseBalanceRow(m, left, right, phaseLoads, usedPhases))
         val total = PowerCablingCalc.distributorTotalW(dist, dto.assignments, settings, wattsOf)
         rows.add(totalRow(m, left, right, "Total distributeur", "$total W"))
     }
@@ -328,11 +337,18 @@ private fun buildDmxRows(
                 rows.add(fixtureLineRow(m, left, right, "— aucun projecteur", C_MUTE))
             else for (u in cl.fixtures) {
                 val ch = channelsOf(u)
-                val chtxt = if (ch == null) "? canaux" else "$ch canaux"
-                val addr = addressOf(u) ?: "—"
+                val addr = addressOf(u) ?: "—"   // déjà formaté « Univers.Adresse »
                 val mode = modeOf(u) ?: "—"
-                val line = "${labelOf(u) ?: u} · $addr · $mode · $chtxt"
-                rows.add(fixtureLineRow(m, left, right, line, if (ch == null) C_AMBER else C_INK))
+                // Colonnes alignées : ID | TYPE GDTF (+ « Univers.Adresse · mode »
+                // grisé) | canaux (à droite). Ambre si empreinte inconnue.
+                rows.add(fixtureColumnsRow(
+                    m, left, right,
+                    fixtureId = labelOf(u) ?: u,
+                    gdtfType = specOf(u) ?: "—",
+                    detail = "$addr · $mode",
+                    value = if (ch == null) "? canaux" else "$ch canaux",
+                    unknown = ch == null
+                ))
             }
         }
         val total = DmxCablingCalc.distributorTotalChannels(dist, dto.assignments, channelsOf)
@@ -406,6 +422,44 @@ private fun fixtureLineRow(m: TextMeasurer, left: Float, right: Float, text: Str
     return Row(tl.size.height + 5f) { ds, top -> ds.drawText(tl, topLeft = Offset(left + 20f, top + 2f)) }
 }
 
+/**
+ * Ligne projecteur en COLONNES ALIGNÉES (point 5 de l'harmonisation, modèle iOS) :
+ *   GAUCHE = Fixture ID · MILIEU = type GDTF (+ détail DMX « Univers.Adresse · mode »
+ *   grisé) · DROITE = valeur (W élec / canaux DMX), alignée à DROITE.
+ * `unknown` teinte la VALEUR en ambre (conso/empreinte inconnue). La surcharge, elle,
+ * rougit l'en-tête de circuit/cœur (une ligne projecteur isolée n'est jamais « en
+ * surcharge », la surcharge étant une propriété du circuit/cœur).
+ */
+private fun fixtureColumnsRow(
+    m: TextMeasurer, left: Float, right: Float,
+    fixtureId: String, gdtfType: String, detail: String?,
+    value: String, unknown: Boolean
+): Row {
+    val indent = 20f
+    val idStart = left + indent
+    val idColW = ((right - left) * 0.30f).coerceAtLeast(60f)
+    val valueStyle = style(
+        10f, if (unknown) C_AMBER else C_INK,
+        if (unknown) FontWeight.Medium else FontWeight.Normal, mono = true
+    )
+    val valueTl = m.measure(value, valueStyle)
+    val midStart = idStart + idColW + 6f
+    // Colonne du milieu = tout l'espace entre l'ID et la valeur (bornée pour ne
+    // jamais mordre sur la valeur alignée à droite).
+    val midW = (right - 10f - valueTl.size.width - midStart).coerceAtLeast(24f)
+    val idTl = m.wrap(fixtureId, style(10f, C_INK), idColW - 4f)
+    val typeTl = m.wrap(gdtfType, style(10f, C_SUB), midW)
+    val detailTl = detail?.let { m.wrap(it, style(8.5f, C_MUTE), midW) }
+    val midH = typeTl.size.height + (detailTl?.size?.height ?: 0)
+    val h = maxOf(idTl.size.height, midH, valueTl.size.height) + 5f
+    return Row(h) { ds, top ->
+        ds.drawText(idTl, topLeft = Offset(idStart, top + 2f))
+        ds.drawText(typeTl, topLeft = Offset(midStart, top + 2f))
+        detailTl?.let { ds.drawText(it, topLeft = Offset(midStart, top + 2f + typeTl.size.height)) }
+        ds.drawText(valueTl, topLeft = Offset(right - valueTl.size.width, top + 2f))
+    }
+}
+
 private fun noteRow(m: TextMeasurer, left: Float, right: Float, text: String): Row {
     val tl = m.wrap(text, style(9f, C_AMBER, FontWeight.Medium), right - left - 24f)
     return Row(tl.size.height + 4f) { ds, top -> ds.drawText(tl, topLeft = Offset(left + 20f, top + 2f)) }
@@ -416,10 +470,11 @@ private fun phaseBalanceRow(m: TextMeasurer, left: Float, right: Float, phaseLoa
     val used = phaseLoads.filter { it.phase in usedPhases }
     val parts = used.joinToString("   ·   ") { "L${it.phase} ${it.totalW} W" }
     val totals = used.map { it.totalW }
-    val maxW = totals.maxOrNull() ?: 0
-    val minW = totals.minOrNull() ?: 0
-    val delta = maxW - minW
-    val imbalance = used.size >= 2 && maxW > 0 && delta > maxOf(200, (maxW * 0.1).toInt())
+    // DÉCISION PARTAGÉE : le seuil de déséquilibre vit dans le calculateur PUR
+    // (PowerCablingCalc.isPhaseImbalanced), plus jamais codé ici. Δ n'est calculé
+    // que pour l'AFFICHAGE.
+    val delta = (totals.maxOrNull() ?: 0) - (totals.minOrNull() ?: 0)
+    val imbalance = PowerCablingCalc.isPhaseImbalanced(totals)
     val txt = "Équilibrage — $parts" + if (imbalance) "    ⚠ déséquilibre (Δ $delta W)" else ""
     val tl = m.wrap(txt, style(10f, if (imbalance) C_AMBER else 0xFF444444, FontWeight.Medium), right - left - 8f)
     return Row(tl.size.height + 9f) { ds, top -> ds.drawText(tl, topLeft = Offset(left + 4f, top + 5f)) }

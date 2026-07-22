@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -49,11 +50,14 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.sync.CablingSettings
@@ -97,8 +102,10 @@ fun CablingScreen(
     modifier: Modifier = Modifier
 ) {
     // Projecteurs affectables = ceux à uuid stable (comme le patch synchronisé) ;
-    // le libellé prend le N° effectif s'il existe. Recalculé si le patch change.
-    val fixtures = remember(scene, overrides.version) {
+    // le libellé prend le N° effectif s'il existe. Re-clé aussi sur `power.version` :
+    // un vote de puissance déposé depuis l'onglet « Puissances » (voir plus bas)
+    // doit RECALCULER la conso câblée immédiatement, pas seulement à la réouverture.
+    val fixtures = remember(scene, overrides.version, power.version) {
         scene.fixtures.mapNotNull { f ->
             val uuid = f.uuid ?: return@mapNotNull null
             val id = overrides.effectiveId(f)?.trim()?.ifBlank { null }
@@ -115,6 +122,10 @@ fun CablingScreen(
     var picker by remember { mutableStateOf<Pair<String, Int>?>(null) } // (distId, circuit)
     var editDist by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    // Onglet actif : 0 = câblage (distributeurs/charges), 1 = puissances par type.
+    // On règle la conso SANS quitter l'écran ; revenir au câblage montre les charges
+    // recalculées (les votes remontent `power.version`, qui re-clé `fixtures`).
+    var tab by remember { mutableIntStateOf(0) }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -125,11 +136,22 @@ fun CablingScreen(
                 }
             },
             actions = {
-                IconButton(onClick = { showSettings = true }) {
+                if (tab == 0) IconButton(onClick = { showSettings = true }) {
                     Icon(Icons.Filled.Settings, contentDescription = "Réglages du câblage")
                 }
             }
         )
+        // Deux onglets : le câblage proprement dit, et le réglage des PUISSANCES par
+        // type — pour corriger une conso sans sortir de l'écran de câblage.
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Câblage") })
+            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Puissances") })
+        }
+
+        if (tab == 1) {
+            PowerTypesPanel(scene, power, Modifier.weight(1f).fillMaxWidth())
+            return@Column
+        }
         // Boutons d'ajout d'un distributeur.
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -561,4 +583,148 @@ private fun CablingSettingsDialog(
             }
         }
     )
+}
+
+/**
+ * PANNEAU « PUISSANCES » — régler la conso PAR TYPE (spec GDTF) sans quitter le
+ * câblage. On liste les TYPES présents dans le show (specs GDTF distinctes) plutôt
+ * que projecteur par projecteur : une valeur saisie profite à TOUS les projecteurs
+ * de ce type ET remonte à la bibliothèque partagée. Le mécanisme de vote est
+ * EXACTEMENT celui de la fiche projecteur ([PowerLibraryState.set] → onCommit →
+ * submitPowerVote), donc aucune duplication du store.
+ */
+@Composable
+private fun PowerTypesPanel(
+    scene: MvrScene,
+    power: PowerLibraryState,
+    modifier: Modifier = Modifier
+) {
+    // Types = specs GDTF distinctes + nombre de projecteurs de chacune. L'ensemble
+    // des types est STABLE (dépend du show, pas des votes) → clé sur `scene` seul ;
+    // les valeurs de conso, elles, sont relues live dans chaque ligne.
+    val types = remember(scene) {
+        scene.fixtures
+            .mapNotNull { it.gdtfSpec?.trim()?.ifBlank { null } }
+            .groupingBy { it }.eachCount()
+            .toList()
+            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
+    }
+
+    if (types.isEmpty()) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "Aucun type de projecteur (spec GDTF) dans ce show.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(32.dp)
+            )
+        }
+        return
+    }
+
+    Column(modifier) {
+        Text(
+            "Réglez la conso par TYPE : votre valeur profite à tous les projecteurs " +
+                "de ce type et alimente la bibliothèque partagée. Le câblage se met à jour aussitôt.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+        HorizontalDivider()
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(types, key = { it.first }) { (spec, count) ->
+                PowerTypeRow(spec = spec, count = count, power = power)
+            }
+        }
+    }
+}
+
+/**
+ * Une ligne de TYPE éditable sur place : nom du type, nombre de projecteurs, conso
+ * effective (consensus + confiance / GDTF / à saisir), champ de saisie + bouton
+ * « ✓ ». Le « ✓ » dépose MON vote : la valeur saisie si l'utilisateur en a tapé
+ * une, sinon la valeur affichée (confirmer sans retaper). Personne n'écrase le
+ * vote d'un autre — c'est le consensus qui est recalculé côté cloud.
+ */
+@Composable
+private fun PowerTypeRow(
+    spec: String,
+    count: Int,
+    power: PowerLibraryState
+) {
+    // Lecture LIVE : `effective`/`consensusVotes` lisent les SnapshotStateMap de la
+    // biblio → la ligne se recompose dès qu'un vote change la valeur.
+    val resolution = power.effective(spec)
+    val effWatts = resolution.watts
+    val votes = power.consensusVotes(spec)
+    // Nom lisible du type = spec sans l'extension « .gdtf ».
+    val typeName = if (spec.endsWith(".gdtf", true)) spec.dropLast(5) else spec
+    var myValue by remember(spec) { mutableStateOf("") }
+
+    val typed = myValue.trim().toIntOrNull()
+    val typedOk = myValue.isBlank() || (typed != null && typed > 0)
+    // On peut voter si l'utilisateur a saisi une valeur valide, OU s'il confirme une
+    // valeur déjà affichée (consensus/GDTF).
+    val canVote = (typed != null && typed > 0) || effWatts != null
+
+    val statusText = when (resolution.source) {
+        PowerSource.LIBRARY -> {
+            val n = votes ?: 1
+            "$effWatts W · $n vote${if (n > 1) "s" else ""}"
+        }
+        PowerSource.GDTF -> "$effWatts W · GDTF"
+        PowerSource.NONE -> "à saisir"
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(typeName, style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold, maxLines = 2)
+                    Text(
+                        "$count projecteur${if (count > 1) "s" else ""} · $statusText",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (resolution.source == PowerSource.LIBRARY)
+                            MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = myValue,
+                    onValueChange = { new -> myValue = new.filter { it.isDigit() } },
+                    label = { Text("Ma valeur (W)") },
+                    placeholder = { effWatts?.let { Text("$it") } },
+                    singleLine = true,
+                    isError = !typedOk,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(10.dp))
+                // ✓ : dépose mon vote (valeur saisie sinon valeur affichée), puis vide
+                // le champ — la valeur devient le consensus affiché sur la ligne.
+                FilledTonalButton(
+                    enabled = canVote,
+                    onClick = {
+                        val v = if (typed != null && typed > 0) typed else effWatts
+                        if (v != null && v > 0) {
+                            power.set(spec, v)
+                            myValue = ""
+                        }
+                    }
+                ) { Text("✓") }
+            }
+        }
+    }
 }

@@ -97,8 +97,12 @@ private fun powerMedianRounded(sortedCluster: List<Int>): Int {
  *
  * 1) 0 vote → `null`.
  * 2) CLUSTERS : trier croissant ; ouvrir un cluster sur le 1er vote ; y ajouter
- *    le vote suivant tant qu'il est proche du REPRÉSENTANT COURANT (le dernier
- *    vote ajouté au cluster), sinon ouvrir un nouveau cluster.
+ *    le vote suivant tant qu'il est proche de L'ANCRE (le PREMIER vote du
+ *    cluster), sinon ouvrir un nouveau cluster. On compare à l'ancre, PAS au
+ *    dernier ajouté : sinon un cluster « dériverait » de proche en proche
+ *    (1000→1100→1210…) et regrouperait des valeurs en réalité éloignées.
+ *    Identique à iOS (PowerConsensusEngine) — indispensable pour que deux
+ *    appareils calculent la MÊME valeur.
  * 3) Garder le PLUS GROS cluster ; à égalité de taille, la médiane la PLUS BASSE
  *    (choix prudent : sous-estimer la puissance n'est jamais dangereux
  *    électriquement). Valeur retenue = médiane du cluster gagnant, arrondie.
@@ -110,7 +114,7 @@ fun powerConsensus(votes: List<Int>): PowerConsensus? {
     var current = mutableListOf(sorted.first())
     for (i in 1 until sorted.size) {
         val v = sorted[i]
-        if (powerVotesClose(current.last(), v)) current.add(v)
+        if (powerVotesClose(current.first(), v)) current.add(v)
         else { clusters.add(current); current = mutableListOf(v) }
     }
     clusters.add(current)

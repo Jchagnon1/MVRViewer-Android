@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -744,6 +745,8 @@ fun PlanScreen(
 
     // N11 — panneau « Personnaliser la barre d'outils… » (mode édition).
     var showCustomize by remember { mutableStateOf(false) }
+    // N11 — sélecteur de couleur du fond ouvert par un bouton DOCKÉ (outil BACKGROUND).
+    var showBackgroundDialog by remember { mutableStateOf(false) }
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue plan : UNE liste consommée à la
     // fois par les 4 barres ancrables (AnchoredToolbars) ET la section « Outils » du
     // menu (toMenuTools) — supprime la duplication barre/menu. Les 12 premiers
@@ -815,6 +818,11 @@ fun PlanScreen(
         add(ToolSpec(ToolId.LEGEND, "Légende", Icons.Filled.FormatListBulleted,
             available = true, checked = options.showLegend,
             onInvoke = { options.showLegend = !options.showLegend }, inMenu = false))
+        // Couleur du fond (parité iOS catalogPlan) : ouvre le sélecteur ; le menu
+        // garde ses presets. Dockable ; hors menu « Outils » (déjà au menu).
+        add(ToolSpec(ToolId.BACKGROUND, "Couleur du fond", Icons.Filled.FormatColorFill,
+            available = true, checked = null,
+            onInvoke = { showBackgroundDialog = true }, inMenu = false))
     }
 
     Box(modifier = modifier.fillMaxSize().background(planBg)) {
@@ -1729,11 +1737,18 @@ fun PlanScreen(
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
         )
 
-        // N11 — barres d'outils ANCRABLES (remplace l'ancienne barre flottante
-        // bas-gauche). AnchoredToolbars rend les 4 bords d'après `layout` en filtrant
-        // toolsPlan au disponible : par défaut, exactement la barre bas-gauche
-        // d'avant (rectangle, masquer, solo, mesure, réafficher, GPS, calibrer,
-        // satellite, PDF, DXF…). Une barre vide n'est pas rendue.
+        // N11 — BARRE FLOTTANTE historique (bas-gauche) : rendue par DÉFAUT
+        // (dispositions vides). Montre les outils permanents (rectangle, masquer,
+        // solo, mesure, réafficher, GPS, calibrer, satellite, PDF, DXF…) SAUF ceux
+        // déplacés dans une barre ancrée (gating iOS → jamais en double).
+        FloatingToolbar(
+            permanentIds = ToolbarLayout.floatingPlan,
+            specs = toolsPlan,
+            layout = toolbarLayout
+        )
+        // N11 — barres d'outils ANCRABLES (défaut = vide). AnchoredToolbars rend les
+        // 4 bords d'après `layout` en filtrant toolsPlan au disponible : rien tant
+        // que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas rendue.
         AnchoredToolbars(layout = toolbarLayout, specs = toolsPlan)
 
         // Opacité du fond satellite : curseur flottant (impossible dans un menu).
@@ -2077,6 +2092,17 @@ fun PlanScreen(
                 default = ToolbarLayout.defaultPlan,
                 onLayout = onLayoutChange,
                 onDismiss = { showCustomize = false }
+            )
+        }
+
+        // N11 — sélecteur de couleur du fond ouvert par l'outil BACKGROUND docké.
+        if (showBackgroundDialog) {
+            BackgroundColorDialog(
+                title = "Couleur du fond 2D",
+                initial = options.background2D,
+                default = BackgroundColorStore.DEFAULT_2D,
+                onColorChange = { options.background2D = it },
+                onDismiss = { showBackgroundDialog = false }
             )
         }
     }

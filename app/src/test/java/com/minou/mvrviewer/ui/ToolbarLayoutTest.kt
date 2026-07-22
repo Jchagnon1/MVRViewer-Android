@@ -6,37 +6,87 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Verrouille le modèle N11 : défauts = barre bas-gauche actuelle (non-régression),
+ * Verrouille le modèle N11 harmonisé iOS/Android : défauts = VIDE (la barre
+ * flottante historique tient lieu de défaut, invariant de non-régression),
+ * identifiants persistés = CHAÎNES camelCase canoniques (mêmes rawValues qu'iOS),
  * round-trip JSON exact, tolérance aux ids inconnus (le catalogue peut évoluer),
  * et les helpers d'édition (moved / reordered / edgeOf).
  */
 class ToolbarLayoutTest {
 
     @Test
-    fun `defaut 3D reproduit la barre bas-gauche actuelle`() {
+    fun `defaut 3D est vide (barre flottante par defaut)`() {
         val d = ToolbarLayout.default3D
+        assertTrue(d.top.isEmpty() && d.bottom.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
+        assertTrue(d.allAssigned().isEmpty())
+    }
+
+    @Test
+    fun `defaut plan est vide (barre flottante par defaut)`() {
+        val d = ToolbarLayout.defaultPlan
+        assertTrue(d.top.isEmpty() && d.bottom.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
+        assertTrue(d.allAssigned().isEmpty())
+    }
+
+    @Test
+    fun `barre flottante 3D = ancienne barre bas-gauche`() {
         assertEquals(
             listOf(
                 ToolId.RECT, ToolId.MEASURE, ToolId.SOLO, ToolId.CLEAR_SEL,
                 ToolId.GPS, ToolId.GPS_MARKER_SIZE
             ),
-            d.bottom
+            ToolbarLayout.floating3D
         )
-        assertTrue(d.top.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
     }
 
     @Test
-    fun `defaut plan reproduit la barre bas-gauche actuelle`() {
-        val d = ToolbarLayout.defaultPlan
+    fun `barre flottante plan = ancienne barre bas-gauche`() {
         assertEquals(
             listOf(
                 ToolId.RECT, ToolId.MASK, ToolId.SOLO, ToolId.MEASURE, ToolId.SHOW_ALL,
                 ToolId.CLEAR_SOLO, ToolId.CLEAR_SEL, ToolId.GPS, ToolId.CALIBRATE,
                 ToolId.SATELLITE, ToolId.EXPORT_PDF, ToolId.DXF
             ),
-            d.bottom
+            ToolbarLayout.floatingPlan
         )
-        assertTrue(d.top.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
+    }
+
+    @Test
+    fun `rawId = rawValues iOS canoniques (camelCase, pas enum name)`() {
+        // Communs iOS/Android : la chaîne persistée est la rawValue Swift.
+        assertEquals("rectSelect", ToolId.RECT.rawId)
+        assertEquals("measure", ToolId.MEASURE.rawId)
+        assertEquals("solo", ToolId.SOLO.rawId)
+        assertEquals("mask", ToolId.MASK.rawId)
+        assertEquals("labels", ToolId.LABELS.rawId)
+        assertEquals("exportPDF", ToolId.EXPORT_PDF.rawId)
+        assertEquals("backgroundColor", ToolId.BACKGROUND.rawId)
+        assertEquals("resetCamera", ToolId.CAM_RESET.rawId)
+        assertEquals("patchList", ToolId.PATCH.rawId)
+        assertEquals("universe", ToolId.UNIVERSE.rawId)
+        assertEquals("cabling", ToolId.CABLING.rawId)
+        // AUCUN id persisté n'est un enum.name UPPER_SNAKE.
+        ToolId.entries.forEach { id ->
+            assertTrue("rawId ne doit pas être enum.name : ${id.rawId}", id.rawId != id.name)
+        }
+    }
+
+    @Test
+    fun `rawId round-trip via fromRawId pour tout le catalogue`() {
+        ToolId.entries.forEach { id ->
+            assertEquals(id, ToolId.fromRawId(id.rawId))
+        }
+        assertNull(ToolId.fromRawId("pasUnOutil"))
+    }
+
+    @Test
+    fun `toJson ecrit les chaines canoniques camelCase`() {
+        val l = ToolbarLayout(bottom = listOf(ToolId.RECT, ToolId.EXPORT_PDF))
+        val json = l.toJson()
+        assertTrue(json.contains("rectSelect"))
+        assertTrue(json.contains("exportPDF"))
+        // Jamais le nom d'énumération Kotlin.
+        assertTrue(!json.contains("EXPORT_PDF"))
     }
 
     @Test
@@ -53,9 +103,19 @@ class ToolbarLayoutTest {
 
     @Test
     fun `fromJson tolere les ids inconnus (ignores)`() {
-        val raw = """{"top":[],"bottom":["RECT","PAS_UN_OUTIL","MEASURE"],"left":[],"right":[]}"""
+        val raw = """{"top":[],"bottom":["rectSelect","pasUnOutil","measure"],"left":[],"right":[]}"""
         val l = ToolbarLayout.fromJson(raw, ToolbarLayout.default3D)
         assertEquals(listOf(ToolId.RECT, ToolId.MEASURE), l.bottom)
+    }
+
+    @Test
+    fun `fromJson decode les rawValues iOS (interop cross-plateforme)`() {
+        // Une disposition telle qu'iOS l'écrirait (rawValues Swift) se relit ici.
+        val raw = """{"top":["labels"],"bottom":["rectSelect","exportPDF"],"left":[],"right":["patchList"]}"""
+        val l = ToolbarLayout.fromJson(raw, ToolbarLayout.defaultPlan)
+        assertEquals(listOf(ToolId.LABELS), l.top)
+        assertEquals(listOf(ToolId.RECT, ToolId.EXPORT_PDF), l.bottom)
+        assertEquals(listOf(ToolId.PATCH), l.right)
     }
 
     @Test
@@ -67,7 +127,7 @@ class ToolbarLayoutTest {
 
     @Test
     fun `fromJson dedoublonne un id present dans deux barres`() {
-        val raw = """{"top":["RECT"],"bottom":["RECT","MEASURE"],"left":[],"right":[]}"""
+        val raw = """{"top":["rectSelect"],"bottom":["rectSelect","measure"],"left":[],"right":[]}"""
         val l = ToolbarLayout.fromJson(raw, ToolbarLayout.default3D)
         // Première occurrence gardée (haut → bas → gauche → droite).
         assertEquals(listOf(ToolId.RECT), l.top)

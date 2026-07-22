@@ -87,6 +87,34 @@ fun BoxScope.AnchoredToolbars(layout: ToolbarLayout, specs: List<ToolSpec>) {
     }
 }
 
+/**
+ * BARRE D'OUTILS FLOTTANTE historique (défaut, modèle iOS N11). Rend en bas-gauche
+ * — exactement l'ancienne barre bas-gauche remplacée par les barres ancrées — les
+ * outils « permanents » [permanentIds] de la vue, dans leur ordre, en FILTRANT :
+ *  1. ceux indisponibles (`available == false`) ;
+ *  2. ceux DÉJÀ placés dans une barre ancrée ([ToolbarLayout.allAssigned]) — GATING
+ *     identique à iOS : un outil docké disparaît de la flottante (jamais en double).
+ * Vide → rien n'est rendu. Comme les barres ancrées, elle ne capte que ses boutons
+ * (le reste du Box laisse passer les gestes vers la SceneView / le Canvas plan).
+ */
+@Composable
+fun BoxScope.FloatingToolbar(
+    permanentIds: List<ToolId>,
+    specs: List<ToolSpec>,
+    layout: ToolbarLayout
+) {
+    val byId = specs.associateBy { it.id }
+    val assigned = layout.allAssigned()
+    val items = permanentIds.mapNotNull { byId[it] }
+        .filter { it.available && it.id !in assigned }
+    if (items.isEmpty()) return
+    Row(
+        modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) { items.forEach { ToolbarButton(it) } }
+}
+
 @Composable
 private fun ToolbarButton(s: ToolSpec) {
     val checked = s.checked

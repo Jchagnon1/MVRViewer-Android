@@ -17,18 +17,74 @@ import org.json.JSONObject
 enum class ToolbarEdge { TOP, BOTTOM, LEFT, RIGHT }
 
 /**
- * Catalogue d'outils STABLE (les noms servent de clés persistées — NE PAS
- * renommer sans migration). Superset des deux vues ; chaque écran n'expose que
+ * Catalogue d'outils STABLE. Superset des deux vues ; chaque écran n'expose que
  * son sous-ensemble via ses [ToolSpec]. Volontairement SANS « mode de rendu » :
  * la vue 3D Android n'en a aucun (renderQuality figé à Performance).
+ *
+ * HARMONISATION iOS/Android (N11) : l'identité PERSISTÉE d'un outil n'est PAS le
+ * nom d'énumération Kotlin (`enum.name`, en UPPER_SNAKE) mais une CHAÎNE camelCase
+ * canonique — la MÊME que la `rawValue` du `ToolId` Swift (voir [rawId]). Ainsi une
+ * disposition encodée sur une plateforme se relit à l'identique sur l'autre. Ne
+ * jamais changer une [rawId] existante sans migration.
  */
 enum class ToolId {
     // Communs 3D + plan
     RECT, MEASURE, SOLO, CLEAR_SEL, GPS, SATELLITE, LABELS, LAYER_COLORS, BACKGROUND, SEARCH,
     // Spécifiques 3D
-    GPS_MARKER_SIZE, CAM_PRESETS, CAM_RESET,
+    GPS_MARKER_SIZE, CAM_PRESETS, CAM_RESET, LABEL_SIZE,
+    // Navigation / actions dockables (vue 3D) — présentes aussi au menu
+    PATCH, UNIVERSE, CABLING, GDTF_SHARE, PLAN_VIEW, ACCOUNT, SHARE_PROJECT, HISTORY,
     // Spécifiques plan
-    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE
+    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE;
+
+    /**
+     * Identifiant STABLE persisté (JSON) — MÊME chaîne camelCase que la `rawValue`
+     * du `ToolId` iOS pour les outils COMMUNS, et même convention camelCase pour
+     * les outils propres à Android. C'est CETTE valeur qui est écrite/relue, pas
+     * [name].
+     */
+    val rawId: String
+        get() = when (this) {
+            // Communs (rawValues iOS)
+            RECT -> "rectSelect"
+            MEASURE -> "measure"
+            SOLO -> "solo"
+            LABELS -> "labels"
+            LAYER_COLORS -> "layerColors"
+            BACKGROUND -> "backgroundColor"
+            LABEL_SIZE -> "labelSize"
+            MASK -> "mask"
+            EXPORT_PDF -> "exportPDF"
+            CAM_RESET -> "resetCamera"
+            DXF -> "importDXF"
+            PATCH -> "patchList"
+            UNIVERSE -> "universe"
+            CABLING -> "cabling"
+            GDTF_SHARE -> "gdtfShare"
+            PLAN_VIEW -> "planView"
+            ACCOUNT -> "account"
+            SHARE_PROJECT -> "shareProject"
+            HISTORY -> "history"
+            // Communs / propres à Android suivant la même convention camelCase
+            GPS -> "myLocation"
+            SATELLITE -> "satellite"
+            CALIBRATE -> "calibrate"
+            SHOW_ALL -> "showAll"
+            CLEAR_SOLO -> "clearSolo"
+            CLEAR_SEL -> "clearSelection"
+            SEARCH -> "search"
+            GPS_MARKER_SIZE -> "gpsMarkerSize"
+            CAM_PRESETS -> "cameraPresets"
+            STRUCTURE -> "structure"
+            LEGEND -> "legend"
+            COLOR_MODE -> "colorMode"
+        }
+
+    companion object {
+        private val byRawId: Map<String, ToolId> = entries.associateBy { it.rawId }
+        /** Décode une [rawId] persistée, ou null si inconnue (robustesse au catalogue). */
+        fun fromRawId(raw: String): ToolId? = byRawId[raw]
+    }
 }
 
 /**
@@ -86,9 +142,13 @@ data class ToolbarLayout(
         return withEdge(e, list)
     }
 
-    /** Encodage JSON stable {top:[names],bottom:[…],left:[…],right:[…]} (org.json). */
+    /**
+     * Encodage JSON stable {top:[rawIds],bottom:[…],left:[…],right:[…]} (org.json).
+     * Les ids sont les CHAÎNES canoniques camelCase ([ToolId.rawId]) — identiques à
+     * iOS — et NON le nom d'énumération Kotlin.
+     */
     fun toJson(): String {
-        fun arr(l: List<ToolId>) = JSONArray().apply { l.forEach { put(it.name) } }
+        fun arr(l: List<ToolId>) = JSONArray().apply { l.forEach { put(it.rawId) } }
         return JSONObject()
             .put("top", arr(top)).put("bottom", arr(bottom))
             .put("left", arr(left)).put("right", arr(right))
@@ -96,21 +156,33 @@ data class ToolbarLayout(
     }
 
     companion object {
-        /** Défaut 3D = barre bas-gauche actuelle (rien ne casse). */
-        val default3D = ToolbarLayout(
-            bottom = listOf(
-                ToolId.RECT, ToolId.MEASURE, ToolId.SOLO, ToolId.CLEAR_SEL,
-                ToolId.GPS, ToolId.GPS_MARKER_SIZE
-            )
+        /**
+         * DÉFAUT = VIDE (modèle iOS N11, invariant de non-régression). Au premier
+         * lancement AUCUNE barre ancrée n'est affichée : c'est la BARRE FLOTTANTE
+         * historique ([floating3D]) qui reste à l'écran, inchangée. Un outil
+         * n'apparaît dans une barre ancrée QUE lorsque l'utilisateur l'y place — il
+         * disparaît alors de la barre flottante (gating, cf. [allAssigned]).
+         */
+        val default3D = ToolbarLayout()
+
+        /** Défaut plan = VIDE (idem : la barre flottante [floatingPlan] tient lieu de défaut). */
+        val defaultPlan = ToolbarLayout()
+
+        /**
+         * BARRE FLOTTANTE historique de la vue 3D (l'ancienne barre bas-gauche).
+         * Rendue par défaut ; chaque outil en est masqué s'il a été placé dans une
+         * barre ancrée (jamais le même outil en double flottant/ancré).
+         */
+        val floating3D = listOf(
+            ToolId.RECT, ToolId.MEASURE, ToolId.SOLO, ToolId.CLEAR_SEL,
+            ToolId.GPS, ToolId.GPS_MARKER_SIZE
         )
 
-        /** Défaut plan = barre bas-gauche actuelle (rien ne casse). */
-        val defaultPlan = ToolbarLayout(
-            bottom = listOf(
-                ToolId.RECT, ToolId.MASK, ToolId.SOLO, ToolId.MEASURE, ToolId.SHOW_ALL,
-                ToolId.CLEAR_SOLO, ToolId.CLEAR_SEL, ToolId.GPS, ToolId.CALIBRATE,
-                ToolId.SATELLITE, ToolId.EXPORT_PDF, ToolId.DXF
-            )
+        /** BARRE FLOTTANTE historique de la vue plan (l'ancienne barre bas-gauche). */
+        val floatingPlan = listOf(
+            ToolId.RECT, ToolId.MASK, ToolId.SOLO, ToolId.MEASURE, ToolId.SHOW_ALL,
+            ToolId.CLEAR_SOLO, ToolId.CLEAR_SEL, ToolId.GPS, ToolId.CALIBRATE,
+            ToolId.SATELLITE, ToolId.EXPORT_PDF, ToolId.DXF
         )
 
         /**
@@ -126,7 +198,8 @@ data class ToolbarLayout(
                 fun ids(name: String): List<ToolId> {
                     val a = o.optJSONArray(name) ?: return emptyList()
                     return (0 until a.length()).mapNotNull { i ->
-                        runCatching { ToolId.valueOf(a.getString(i)) }.getOrNull()
+                        // rawId canonique (camelCase, commun iOS) — pas enum.name.
+                        runCatching { ToolId.fromRawId(a.getString(i)) }.getOrNull()
                     }.filter { seen.add(it) } // pas de doublon inter-barres
                 }
                 // Ordre de dédoublonnage : haut → bas → gauche → droite.

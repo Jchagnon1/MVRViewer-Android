@@ -13,14 +13,25 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Label
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectSmall
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
@@ -1143,13 +1154,18 @@ fun Scene3DScreen(
 
     // N11 — panneau « Personnaliser la barre d'outils… » (mode édition).
     var showCustomize by remember { mutableStateOf(false) }
+    // N11 — couleur du fond ouvrable depuis un bouton DOCKÉ (outil BACKGROUND) : le
+    // menu a déjà ses presets + « Personnalisée… », mais un bouton dans une barre
+    // doit pouvoir ouvrir le sélecteur directement.
+    var showBackgroundDialog by remember { mutableStateOf(false) }
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue 3D : UNE seule liste consommée
-    // à la fois par les 4 barres ancrables (AnchoredToolbars) ET par la section
-    // « Outils » du menu (toMenuTools) — supprime l'ancienne duplication barre/menu.
-    // Les 6 premiers reproduisent l'ancienne barre bas-gauche (mêmes actions, mêmes
-    // exclusions, mêmes conditions de visibilité) ; les extras (étiquettes, couleurs
-    // par calque) sont PLAÇABLES dans une barre mais restent hors du menu « Outils »
-    // (inMenu=false) car ils ont déjà leur bascule dédiée dans le menu.
+    // à la fois par la barre flottante / les 4 barres ancrables (AnchoredToolbars)
+    // ET par la section « Outils » du menu (toMenuTools). Les 6 premiers forment la
+    // BARRE FLOTTANTE historique (ToolbarLayout.floating3D). Les suivants sont
+    // DOCKABLES (catalogue de personnalisation) mais restent hors de la barre
+    // flottante et hors du menu « Outils » (inMenu=false) : soit ils ont déjà leur
+    // bascule dédiée au menu (étiquettes, couleurs), soit ils sont déjà rendus
+    // ailleurs dans le menu (navigation, synchro, presets caméra) — pas de double.
     val tools3D: List<ToolSpec> = buildList {
         add(ToolSpec(ToolId.RECT, "Sélection rectangle", Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
@@ -1191,6 +1207,52 @@ fun Scene3DScreen(
         add(ToolSpec(ToolId.LAYER_COLORS, "Couleurs par calque", Icons.Filled.Palette,
             available = true, checked = options.layerColors,
             onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
+        // Taille des étiquettes : cycle petite · moyenne · grande (même action que le
+        // menu « Étiquettes »). Dockable ; hors menu « Outils » (déjà dans le menu).
+        add(ToolSpec(ToolId.LABEL_SIZE, "Taille des étiquettes", Icons.Filled.FormatSize,
+            available = true, checked = null, onInvoke = {
+                options.labelSize = when {
+                    options.labelSize <= 0.75f -> 1f
+                    options.labelSize >= 1.3f -> 0.7f
+                    else -> 1.4f
+                }
+            }, inMenu = false))
+        // Couleur du fond : ouvre le sélecteur (le menu garde ses presets). Dockable.
+        add(ToolSpec(ToolId.BACKGROUND, "Couleur du fond", Icons.Filled.FormatColorFill,
+            available = true, checked = null,
+            onInvoke = { showBackgroundDialog = true }, inMenu = false))
+        // Recentrer la caméra (« Réinitialiser la vue ») : remet le pivot au centre
+        // du show et la caméra à sa position d'ensemble. Dockable ; déjà au menu
+        // « Points de vue ».
+        add(ToolSpec(ToolId.CAM_RESET, "Recentrer la caméra", Icons.Filled.RestartAlt,
+            available = true, checked = null,
+            onInvoke = { target = Float3(0f, 0f, 0f); camEye = camHome }, inMenu = false))
+        // ---- Navigation / actions ponctuelles, DOCKABLES (déjà au menu, donc
+        // inMenu=false pour ne pas doublonner la section « Outils »). ----
+        add(ToolSpec(ToolId.PLAN_VIEW, "Vue plan", Icons.Filled.Map,
+            available = true, checked = null, onInvoke = onShowPlan, inMenu = false))
+        add(ToolSpec(ToolId.PATCH, "Liste de patch", Icons.AutoMirrored.Filled.List,
+            available = true, checked = null, onInvoke = onShowPatch, inMenu = false))
+        add(ToolSpec(ToolId.UNIVERSE, "Univers DMX", Icons.Filled.GridView,
+            available = true, checked = null, onInvoke = onShowUniverse, inMenu = false))
+        add(ToolSpec(ToolId.CABLING, "Câblage électrique", Icons.Filled.Bolt,
+            available = true, checked = null, onInvoke = onShowCabling, inMenu = false))
+        add(ToolSpec(ToolId.GDTF_SHARE, "GDTF Share", Icons.Filled.CloudDownload,
+            available = true, checked = null, onInvoke = onShowGdtfShare, inMenu = false))
+        // Synchro cloud : présentes seulement si le service est branché (callbacks
+        // non nuls) — mêmes conditions que les entrées de menu.
+        onShowAccount?.let { cb ->
+            add(ToolSpec(ToolId.ACCOUNT, "Compte", Icons.Filled.AccountCircle,
+                available = true, checked = null, onInvoke = cb, inMenu = false))
+        }
+        onShareProject?.let { cb ->
+            add(ToolSpec(ToolId.SHARE_PROJECT, "Partager ce projet", Icons.Filled.Share,
+                available = true, checked = null, onInvoke = cb, inMenu = false))
+        }
+        onShowHistory?.let { cb ->
+            add(ToolSpec(ToolId.HISTORY, "Historique des modifications", Icons.Filled.History,
+                available = true, checked = null, onInvoke = cb, inMenu = false))
+        }
     }
 
     // Barre du haut dans une vraie TopAppBar (au-dessus de la SceneView). NB :
@@ -1485,10 +1547,18 @@ fun Scene3DScreen(
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).width(180.dp)
             )
 
-            // N11 — barres d'outils ANCRABLES (remplace l'ancienne barre flottante
-            // bas-gauche). AnchoredToolbars rend les 4 bords d'après `layout` en
-            // filtrant tools3D au disponible : par défaut, exactement la barre
-            // bas-gauche d'avant. Une barre vide n'est pas rendue.
+            // N11 — BARRE FLOTTANTE historique (bas-gauche) : rendue par DÉFAUT
+            // (dispositions vides). Elle montre les outils permanents SAUF ceux
+            // déplacés dans une barre ancrée (gating iOS → jamais en double).
+            FloatingToolbar(
+                permanentIds = ToolbarLayout.floating3D,
+                specs = tools3D,
+                layout = toolbarLayout
+            )
+            // N11 — barres d'outils ANCRABLES (défaut = vide). AnchoredToolbars rend
+            // les 4 bords d'après `layout` en filtrant tools3D au disponible : rien
+            // tant que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas
+            // rendue.
             AnchoredToolbars(layout = toolbarLayout, specs = tools3D)
 
             // Cote de la mesure (bas-centre) : le chiffre est ici plutôt que sur
@@ -1570,6 +1640,18 @@ fun Scene3DScreen(
                 default = ToolbarLayout.default3D,
                 onLayout = onLayoutChange,
                 onDismiss = { showCustomize = false }
+            )
+        }
+
+        // N11 — sélecteur de couleur du fond ouvert par l'outil BACKGROUND docké
+        // (le menu garde ses presets ; ceci ouvre le sélecteur fin, comme iOS).
+        if (showBackgroundDialog) {
+            BackgroundColorDialog(
+                title = "Couleur du fond 3D",
+                initial = options.background3D,
+                default = BackgroundColorStore.DEFAULT_3D,
+                onColorChange = { options.background3D = it },
+                onDismiss = { showBackgroundDialog = false }
             )
         }
     }

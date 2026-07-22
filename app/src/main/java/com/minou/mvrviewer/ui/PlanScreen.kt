@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -747,6 +748,9 @@ fun PlanScreen(
     var showCustomize by remember { mutableStateOf(false) }
     // N11 — sélecteur de couleur du fond ouvert par un bouton DOCKÉ (outil BACKGROUND).
     var showBackgroundDialog by remember { mutableStateOf(false) }
+    // N11 — réglages/champs d'étiquette ouverts par l'outil DOCKÉ labelSettings
+    // (parité iOS catalogPlan) : même contenu que la section « Étiquettes » du menu.
+    var showLabelSettingsDialog by remember { mutableStateOf(false) }
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue plan : UNE liste consommée à la
     // fois par les 4 barres ancrables (AnchoredToolbars) ET la section « Outils » du
     // menu (toMenuTools) — supprime la duplication barre/menu. Les 12 premiers
@@ -809,6 +813,12 @@ fun PlanScreen(
         add(ToolSpec(ToolId.LABELS, "Étiquettes", Icons.Filled.Label,
             available = true, checked = options.showLabels,
             onInvoke = { options.showLabels = !options.showLabels }, inMenu = false))
+        // Réglage des étiquettes (parité iOS catalogPlan) : ACTION ponctuelle qui
+        // ouvre les réglages/champs d'étiquette existants (mêmes contrôles que le
+        // menu). Dockable ; hors menu « Outils » (déjà accessible au menu).
+        add(ToolSpec(ToolId.LABEL_SETTINGS, "Réglage des étiquettes", Icons.Filled.Tune,
+            available = true, checked = null,
+            onInvoke = { showLabelSettingsDialog = true }, inMenu = false))
         add(ToolSpec(ToolId.LAYER_COLORS, "Couleurs par calque", Icons.Filled.Palette,
             available = true, checked = options.layerColors,
             onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
@@ -2105,7 +2115,82 @@ fun PlanScreen(
                 onDismiss = { showBackgroundDialog = false }
             )
         }
+
+        // N11 — réglages/champs d'étiquette ouverts par l'outil LABEL_SETTINGS docké.
+        if (showLabelSettingsDialog) {
+            LabelSettingsDialog(options = options, onDismiss = { showLabelSettingsDialog = false })
+        }
     }
+}
+
+/**
+ * Réglages des étiquettes (outil DOCKABLE labelSettings, parité iOS catalogPlan) :
+ * activation, CHAMPS affichés (plusieurs à la fois) avec l'option « bloc séparé »
+ * par champ, et taille (cycle petite · moyenne · grande). Agit directement sur le
+ * même [SceneOptions] partagé que la section « Étiquettes » du menu — aucun état
+ * dupliqué, les deux points d'accès restent cohérents.
+ */
+@Composable
+private fun LabelSettingsDialog(options: SceneOptions, onDismiss: () -> Unit) {
+    val sizeName = when {
+        options.labelSize <= 0.75f -> "petite"
+        options.labelSize >= 1.3f -> "grande"
+        else -> "moyenne"
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Réglage des étiquettes") },
+        text = {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = options.showLabels, onCheckedChange = { options.showLabels = it })
+                    Text("Afficher les étiquettes")
+                }
+                if (options.showLabels) {
+                    androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    Text("Contenu", style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp))
+                    LabelContent.entries.forEach { c ->
+                        val on = c in options.labelFields
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = on, onCheckedChange = {
+                                options.labelFields =
+                                    if (on) options.labelFields - c else options.labelFields + c
+                                if (on) options.labelDetached = options.labelDetached - c
+                            })
+                            Text(c.label)
+                        }
+                        if (on) {
+                            val loose = c in options.labelDetached
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 24.dp)
+                            ) {
+                                Checkbox(checked = loose, onCheckedChange = {
+                                    options.labelDetached =
+                                        if (loose) options.labelDetached - c else options.labelDetached + c
+                                })
+                                Text("Bloc séparé", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    androidx.compose.material3.TextButton(onClick = {
+                        options.labelSize = when {
+                            options.labelSize <= 0.75f -> 1f
+                            options.labelSize >= 1.3f -> 0.7f
+                            else -> 1.4f
+                        }
+                    }) { Text("Taille : $sizeName") }
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Fermer") }
+        }
+    )
 }
 
 /** Couleur d'affichage d'une entité DXF (0xRRGGBB) adaptée au fond : sur fond

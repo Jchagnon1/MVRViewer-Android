@@ -35,7 +35,7 @@ enum class ToolId {
     // Navigation / actions dockables (vue 3D) — présentes aussi au menu
     PATCH, UNIVERSE, CABLING, GDTF_SHARE, PLAN_VIEW, ACCOUNT, SHARE_PROJECT, HISTORY,
     // Spécifiques plan
-    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE;
+    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE, LABEL_SETTINGS;
 
     /**
      * Identifiant STABLE persisté (JSON) — MÊME chaîne camelCase que la `rawValue`
@@ -53,6 +53,7 @@ enum class ToolId {
             LAYER_COLORS -> "layerColors"
             BACKGROUND -> "backgroundColor"
             LABEL_SIZE -> "labelSize"
+            LABEL_SETTINGS -> "labelSettings"
             MASK -> "mask"
             EXPORT_PDF -> "exportPDF"
             CAM_RESET -> "resetCamera"

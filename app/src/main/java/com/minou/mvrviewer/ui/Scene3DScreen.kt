@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectSmall
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -1207,6 +1208,12 @@ fun Scene3DScreen(
         add(ToolSpec(ToolId.LAYER_COLORS, "Couleurs par calque", Icons.Filled.Palette,
             available = true, checked = options.layerColors,
             onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
+        // Fond satellite AUSSI dockable en 3D (le quad satellite géo-référencé existe
+        // déjà à l'écran) : parité avec la vue plan. Disponible seulement une fois la
+        // position calibrée ; bascule dédiée déjà au menu (inMenu=false, pas de double).
+        add(ToolSpec(ToolId.SATELLITE, "Fond satellite", Icons.Filled.Public,
+            available = calibration?.isCalibrated == true, checked = options.showSatellite,
+            onInvoke = { options.showSatellite = !options.showSatellite }, inMenu = false))
         // Taille des étiquettes : cycle petite · moyenne · grande (même action que le
         // menu « Étiquettes »). Dockable ; hors menu « Outils » (déjà dans le menu).
         add(ToolSpec(ToolId.LABEL_SIZE, "Taille des étiquettes", Icons.Filled.FormatSize,

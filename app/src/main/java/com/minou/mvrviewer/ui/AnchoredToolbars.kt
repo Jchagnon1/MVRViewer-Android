@@ -39,6 +39,17 @@ data class ToolSpec(
     val inMenu: Boolean = true
 )
 
+/**
+ * Décalage vertical appliqué à la BARRE FLOTTANTE quand la barre ANCRÉE du bas est
+ * présente : les deux partagent le bord bas-gauche (BottomStart), donc sans décalage
+ * elles se superposeraient dès qu'un outil est docké en bas. On lève la flottante
+ * juste au-dessus de la barre ancrée du bas — hauteur d'un bouton d'outil (~48 dp)
+ * + sa marge basse (12 dp) + un interstice (12 dp) — pour les EMPILER sans jamais
+ * les chevaucher. Bord bas VIDE (défaut) ⇒ pas de décalage : la flottante reste
+ * EXACTEMENT à sa position historique (invariant de non-régression).
+ */
+private val FloatingBottomClearance = 72.dp
+
 /** Descripteurs → items de la section « Outils » du menu (ordre préservé). */
 fun List<ToolSpec>.toMenuTools(): List<MenuTool> =
     filter { it.available && it.inMenu }.map { s ->
@@ -108,8 +119,16 @@ fun BoxScope.FloatingToolbar(
     val items = permanentIds.mapNotNull { byId[it] }
         .filter { it.available && it.id !in assigned }
     if (items.isEmpty()) return
+    // La BARRE ANCRÉE DU BAS (AnchoredToolbars) et cette barre flottante s'ancrent
+    // toutes deux en bas-gauche (BottomStart) : si un outil est docké au bord bas ET
+    // disponible, on décale la flottante VERS LE HAUT pour l'empiler par-dessus la
+    // barre ancrée du bas — elles ne se chevauchent JAMAIS. Bord bas vide ⇒ la
+    // flottante reste à sa marge basse historique (12 dp).
+    val bottomBarPresent = layout.bottom.mapNotNull { byId[it] }.any { it.available }
+    val bottomPad = if (bottomBarPresent) FloatingBottomClearance else 12.dp
     Row(
-        modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+        modifier = Modifier.align(Alignment.BottomStart)
+            .padding(start = 12.dp, end = 12.dp, bottom = bottomPad),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) { items.forEach { ToolbarButton(it) } }

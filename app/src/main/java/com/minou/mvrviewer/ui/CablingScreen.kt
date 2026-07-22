@@ -95,9 +95,12 @@ private data class CableFixture(
 @Composable
 fun CablingScreen(
     scene: MvrScene,
+    mvrBytes: ByteArray,
     overrides: PatchOverrides,
+    gdtfOverrides: GdtfOverrides,
     power: PowerLibraryState,
     cabling: PowerCablingState,
+    dmxCabling: DmxCablingState,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -122,9 +125,10 @@ fun CablingScreen(
     var picker by remember { mutableStateOf<Pair<String, Int>?>(null) } // (distId, circuit)
     var editDist by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
-    // Onglet actif : 0 = câblage (distributeurs/charges), 1 = puissances par type.
-    // On règle la conso SANS quitter l'écran ; revenir au câblage montre les charges
-    // recalculées (les votes remontent `power.version`, qui re-clé `fixtures`).
+    // Onglet actif : 0 = câblage électrique (distributeurs/charges), 1 = câblage
+    // DMX (lignes/multipaires), 2 = puissances par type. On règle la conso SANS
+    // quitter l'écran ; revenir au câblage montre les charges recalculées (les
+    // votes remontent `power.version`, qui re-clé `fixtures`).
     var tab by remember { mutableIntStateOf(0) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -141,14 +145,21 @@ fun CablingScreen(
                 }
             }
         )
-        // Deux onglets : le câblage proprement dit, et le réglage des PUISSANCES par
-        // type — pour corriger une conso sans sortir de l'écran de câblage.
+        // Trois onglets : le câblage électrique (Socapex), le câblage DMX (lignes /
+        // multipaires), et le réglage des PUISSANCES par type — pour corriger une
+        // conso sans sortir de l'écran de câblage.
         TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Câblage") })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Puissances") })
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Élec") })
+            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("DMX") })
+            Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Puissances") })
         }
 
         if (tab == 1) {
+            DmxCablingPanel(scene, mvrBytes, overrides, gdtfOverrides, dmxCabling,
+                Modifier.weight(1f).fillMaxWidth())
+            return@Column
+        }
+        if (tab == 2) {
             PowerTypesPanel(scene, power, Modifier.weight(1f).fillMaxWidth())
             return@Column
         }

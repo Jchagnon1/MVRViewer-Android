@@ -676,9 +676,12 @@ fun SceneScreen(
         )
         SceneMode.CABLING -> CablingScreen(
             scene = scene,
+            mvrBytes = mvrBytes,
             overrides = overrides,
+            gdtfOverrides = gdtfOverrides,
             power = power,
             cabling = cabling,
+            dmxCabling = dmxCabling,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

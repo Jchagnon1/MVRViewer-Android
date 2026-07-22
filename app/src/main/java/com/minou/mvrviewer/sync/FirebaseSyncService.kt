@@ -217,22 +217,33 @@ class FirebaseSyncService(context: Context) : SyncService {
         return next.toInt()
     }
 
-    // MARK: Bibliothèque de puissances (collection racine `powerLibrary`)
+    // MARK: Bibliothèque de puissances (collection racine `powerLibrary`, VOTES)
 
-    override suspend fun fetchPowerEntry(spec: String): PowerEntry? {
-        if (spec.isBlank()) return null
+    override suspend fun fetchPowerVotes(spec: String): List<PowerVote> {
+        if (spec.isBlank()) return emptyList()
         requireUid() // base communautaire : lecture réservée aux authentifiés
-        val doc = db.collection("powerLibrary").document(powerLibraryDocId(spec)).get().await()
-        return SectionCodec.powerFromMap(doc.data)
+        val docRef = db.collection("powerLibrary").document(powerLibraryDocId(spec))
+        val subs = docRef.collection("submissions").get().await()
+        val votes = subs.documents.mapNotNull { SectionCodec.powerVoteFromMap(it.data) }
+        if (votes.isNotEmpty()) return votes
+        // MIGRATION indolore : un ancien doc mono-valeur { watts } sans
+        // sous-collection est lu comme UN vote. On ne réécrit pas ce champ.
+        val legacy = SectionCodec.powerFromMap(docRef.get().await().data)
+        return legacy?.let { listOf(PowerVote(it.watts, it.updatedAtMillis)) } ?: emptyList()
     }
 
-    override suspend fun putPowerEntry(spec: String, watts: Int, updatedBy: String): PowerEntry {
-        requireUid()
-        // Dernier écrivain gagne : on horodate au MOMENT de l'écriture (ms).
-        val e = PowerEntry(spec, watts, updatedBy, System.currentTimeMillis())
-        db.collection("powerLibrary").document(powerLibraryDocId(spec))
-            .set(SectionCodec.powerToMap(e)).await()
-        return e
+    override suspend fun putPowerVote(spec: String, watts: Int, uid: String): PowerVote {
+        // La règle Firestore exige request.auth.uid == uid : on écrit TOUJOURS à
+        // son propre uid (l'argument est ignoré s'il diffère).
+        val myUid = requireUid()
+        val vote = PowerVote(watts, System.currentTimeMillis())
+        val docRef = db.collection("powerLibrary").document(powerLibraryDocId(spec))
+        // `spec` sur le doc parent : non requis au calcul, pratique au débogage
+        // et rend la collection lisible. Merge pour ne pas écraser d'autres champs.
+        docRef.set(mapOf("spec" to spec), com.google.firebase.firestore.SetOptions.merge())
+        docRef.collection("submissions").document(myUid)
+            .set(SectionCodec.powerVoteToMap(vote)).await()
+        return vote
     }
 
     // MARK: Observation (Firestore snapshot listeners → Flow)

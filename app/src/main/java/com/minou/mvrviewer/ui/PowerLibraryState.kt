@@ -15,27 +15,33 @@ import com.minou.mvrviewer.sync.resolvePower
  * fiches et la liste de patch se recomposent dès qu'une puissance change (cache
  * local, extraction GDTF ou fusion cloud).
  *
- * Deux cartes indexées par docId NORMALISÉ (cf. [powerLibraryDocId]) :
- *  - [library] : puissances SAISIES (le cache utilisateur, prioritaires) ;
- *  - [gdtf]    : puissances EXTRAITES du .gdtf (source de repli), remplies en
- *                arrière-plan à l'ouverture.
+ * Cartes indexées par docId NORMALISÉ (cf. [powerLibraryDocId]) :
+ *  - [library]      : valeur de CONSENSUS communautaire (prioritaire) ;
+ *  - [libraryVotes] : nombre de votes de ce consensus (la CONFIANCE affichée) ;
+ *  - [gdtf]         : puissances EXTRAITES du .gdtf (repli), remplies en
+ *                     arrière-plan à l'ouverture.
  *
- * [onCommit] est appelé après une saisie UTILISATEUR (pas les seeds/cloud) →
- * l'écran persiste dans le cache disque, pousse au cloud et journalise.
+ * [onCommit] est appelé après une saisie/vote UTILISATEUR (pas les seeds/cloud) →
+ * l'écran dépose le vote au cloud, met à jour le consensus, le cache et journalise.
  */
 class PowerLibraryState {
     val library: SnapshotStateMap<String, Int> = mutableStateMapOf()
+    val libraryVotes: SnapshotStateMap<String, Int> = mutableStateMapOf()
     val gdtf: SnapshotStateMap<String, Int> = mutableStateMapOf()
     var version by mutableIntStateOf(0)
         private set
 
-    /** (spec, ancienne puissance saisie ou null, nouvelle) — écriture utilisateur. */
+    /** (spec, ancienne valeur de consensus ou null, nouvelle valeur votée) — vote utilisateur. */
     var onCommit: ((String, Int?, Int) -> Unit)? = null
 
     fun libraryWatts(spec: String?): Int? =
         spec?.let { library[powerLibraryDocId(it)] }
     fun gdtfWatts(spec: String?): Int? =
         spec?.let { gdtf[powerLibraryDocId(it)] }
+
+    /** Nombre de votes du consensus courant pour une spec (null si aucun). */
+    fun consensusVotes(spec: String?): Int? =
+        spec?.let { libraryVotes[powerLibraryDocId(it)] }
 
     /** Puissance effective + provenance selon la règle du contrat. */
     fun effective(spec: String?): PowerResolution =
@@ -47,13 +53,18 @@ class PowerLibraryState {
         version++
     }
 
-    /** Sème le cache saisi (restauration disque / fusion cloud, aucun commit). Clé = docId. */
-    fun seedLibrary(docId: String, watts: Int) {
+    /** Sème le consensus (restauration disque / fetch cloud, aucun commit). Clé = docId. */
+    fun seedConsensus(docId: String, watts: Int, votes: Int) {
         library[docId] = watts
+        libraryVotes[docId] = votes
         version++
     }
 
-    /** Saisie UTILISATEUR : met à jour le cache + déclenche la persistance/push via onCommit. */
+    /**
+     * VOTE UTILISATEUR : met à jour le consensus de façon OPTIMISTE (valeur =
+     * mon vote) et déclenche onCommit, qui déposera le vote au cloud puis
+     * corrigera library/libraryVotes avec le consensus réel via [seedConsensus].
+     */
     fun set(spec: String, watts: Int) {
         val id = powerLibraryDocId(spec)
         val old = library[id]

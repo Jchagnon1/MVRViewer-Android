@@ -5,24 +5,33 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * BIBLIOTHÈQUE DE PUISSANCES — outil de câblage, phase 1.
+ * BIBLIOTHÈQUE DE PUISSANCES — outil de câblage.
  *
- * Base COMMUNAUTAIRE, hors projet : une puissance saisie à la main pour un TYPE
- * de projecteur est mémorisée une fois et profite à tous les projets et à tous
- * les utilisateurs. Elle vit dans une collection Firestore RACINE `powerLibrary`,
- * un document par type. Ce fichier définit le CONTRAT PARTAGÉ iOS/Android :
- * identité du document, forme de l'entrée, règle de résolution.
+ * Base COMMUNAUTAIRE, hors projet : une puissance saisie pour un TYPE de
+ * projecteur profite à tous les projets et à tous les utilisateurs. Elle vit
+ * dans une collection Firestore RACINE `powerLibrary`, un document par type. Ce
+ * fichier définit le CONTRAT PARTAGÉ iOS/Android : identité du document, forme
+ * des votes, algorithme de consensus, règle de résolution.
  *
- * Un document = une entrée [PowerEntry]. Fusion « dernier écrivain gagne » sur
- * [PowerEntry.updatedAtMillis].
+ * PHASE 2 — VOTES + CONSENSUS (remplace le LWW mono-valeur de la phase 1) :
+ * chaque utilisateur dépose SON vote dans la sous-collection
+ * `powerLibrary/{docId}/submissions/{uid}` = [PowerVote] ; personne n'écrase le
+ * vote d'un autre. La valeur retenue est le CONSENSUS ([powerConsensus]) de tous
+ * les votes. MIGRATION indolore : un ancien doc mono-valeur `{ watts }` (sans
+ * sous-collection) est relu comme UN vote.
  */
 
-/** Une entrée de la bibliothèque de puissances (miroir du doc Firestore `powerLibrary/{id}`). */
+/**
+ * ANCIENNE entrée mono-valeur (phase 1), conservée UNIQUEMENT pour lire un doc
+ * hérité `powerLibrary/{id}` avec un champ `watts` à la racine et le migrer en
+ * UN vote. On n'écrit plus jamais cette forme (les écritures vont dans
+ * `submissions/{uid}`).
+ */
 data class PowerEntry(
     val spec: String,          // spec GDTF d'ORIGINE, non normalisée (affichage/débogage)
     val watts: Int,            // puissance MAX saisie, en W
     val updatedBy: String,     // uid de l'auteur, ou "" (saisie hors ligne / stub)
-    val updatedAtMillis: Long  // epoch en MILLISECONDES (⚠ ms, pas s) — clé LWW
+    val updatedAtMillis: Long  // epoch en MILLISECONDES (⚠ ms, pas s)
 )
 
 /**
@@ -139,56 +148,60 @@ fun resolvePower(libraryWatts: Int?, gdtfWatts: Int?): PowerResolution = when {
     else -> PowerResolution(null, PowerSource.NONE)
 }
 
+/** Un instantané de CONSENSUS mis en cache pour une spec (affichage/repli hors ligne). */
+data class PowerCacheEntry(val watts: Int, val votes: Int, val updatedAtMillis: Long)
+
 /**
  * CACHE LOCAL de la bibliothèque, indépendant du backend et de la connexion :
  * un unique fichier GLOBAL `powerLibrary.json` dans filesDir (hors dossier
  * projet — la biblio est partagée par TOUS les projets). Il garantit que la
- * résolution est instantanée et fonctionne HORS LIGNE ; le cloud n'est qu'une
- * source supplémentaire fusionnée par-dessus (LWW). Clé = docId normalisé.
+ * résolution est instantanée et fonctionne HORS LIGNE.
+ *
+ * PHASE 2 : on ne cache plus une entrée LWW mono-valeur mais le dernier
+ * CONSENSUS connu (valeur + nombre de votes) par docId. Le cloud (somme des
+ * votes) reste la source de vérité ; ce cache n'est qu'un instantané d'affichage
+ * et de repli. Compat ascendante : un ancien cache mono-valeur (champ `watts`
+ * sans `votes`) est relu comme un consensus de 1 vote.
  */
 object PowerLibraryStore {
 
     private fun file(ctx: Context): File = File(ctx.filesDir, "powerLibrary.json")
 
     /** Tout le cache, indexé par docId normalisé. */
-    fun load(ctx: Context): Map<String, PowerEntry> {
+    fun load(ctx: Context): Map<String, PowerCacheEntry> {
         val obj = runCatching { JSONObject(file(ctx).readText()) }.getOrNull() ?: return emptyMap()
-        val out = LinkedHashMap<String, PowerEntry>()
+        val out = LinkedHashMap<String, PowerCacheEntry>()
         obj.keys().forEach { id ->
             val o = obj.optJSONObject(id) ?: return@forEach
-            out[id] = PowerEntry(
-                spec = o.optString("spec"),
+            if (!o.has("watts")) return@forEach
+            out[id] = PowerCacheEntry(
                 watts = o.optInt("watts"),
-                updatedBy = o.optString("updatedBy"),
+                // Ancien format sans `votes` → une seule valeur = 1 vote.
+                votes = if (o.has("votes")) o.optInt("votes") else 1,
                 updatedAtMillis = o.optLong("updatedAt")
             )
         }
         return out
     }
 
-    /** Puissance en cache pour une spec (null si jamais saisie). */
-    fun watts(ctx: Context, spec: String): Int? =
-        load(ctx)[powerLibraryDocId(spec)]?.watts
+    /** Consensus en cache pour une spec (null si jamais renseigné). */
+    fun entry(ctx: Context, spec: String): PowerCacheEntry? =
+        load(ctx)[powerLibraryDocId(spec)]
 
     /**
-     * Fusionne une entrée (LWW sur updatedAtMillis) et renvoie le cache complet.
-     * Une entrée plus ANCIENNE que celle en place est ignorée : c'est ce qui rend
-     * la fusion cloud↔local sûre quel que soit l'ordre d'arrivée.
+     * Écrit (remplace) l'instantané de consensus d'un docId et renvoie le cache
+     * complet. Le consensus étant recalculé sur l'ENSEMBLE des votes cloud à
+     * chaque fetch, on écrase simplement : pas de fusion LWW à faire ici.
      */
-    fun upsert(ctx: Context, entry: PowerEntry): Map<String, PowerEntry> {
-        val id = powerLibraryDocId(entry.spec)
+    fun put(ctx: Context, docId: String, watts: Int, votes: Int): Map<String, PowerCacheEntry> {
         val current = load(ctx).toMutableMap()
-        val existing = current[id]
-        if (existing == null || entry.updatedAtMillis >= existing.updatedAtMillis) {
-            current[id] = entry
-            val obj = JSONObject()
-            for ((k, e) in current) {
-                obj.put(k, JSONObject()
-                    .put("spec", e.spec).put("watts", e.watts)
-                    .put("updatedBy", e.updatedBy).put("updatedAt", e.updatedAtMillis))
-            }
-            runCatching { file(ctx).writeText(obj.toString()) }
+        current[docId] = PowerCacheEntry(watts, votes, System.currentTimeMillis())
+        val obj = JSONObject()
+        for ((k, e) in current) {
+            obj.put(k, JSONObject()
+                .put("watts", e.watts).put("votes", e.votes).put("updatedAt", e.updatedAtMillis))
         }
+        runCatching { file(ctx).writeText(obj.toString()) }
         return current
     }
 }

@@ -26,7 +26,6 @@ import com.minou.mvrviewer.sync.AuditFieldKey
 import com.minou.mvrviewer.sync.LocalMapper
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.sync.PatchStore
-import com.minou.mvrviewer.sync.PowerEntry
 import com.minou.mvrviewer.sync.PowerLibraryStore
 import com.minou.mvrviewer.sync.RefPlanInterop
 import com.minou.mvrviewer.sync.RemoteEvent
@@ -369,11 +368,11 @@ fun SceneScreen(
         s.events.collect { ev -> if (ev is RemoteEvent.Section) applySection(ev.change.payload) }
     }
 
-    // ---- Bibliothèque de puissances : semis + extraction GDTF + fusion cloud ---
+    // ---- Bibliothèque de puissances : semis + extraction GDTF + consensus cloud
     // 1) Semis du cache disque GLOBAL (hors projet, partagé par tous les projets).
     LaunchedEffect(Unit) {
         val cached = withContext(Dispatchers.IO) { PowerLibraryStore.load(ctx) }
-        cached.forEach { (id, e) -> power.seedLibrary(id, e.watts) }
+        cached.forEach { (id, e) -> power.seedConsensus(id, e.watts, e.votes) }
     }
     // 2) Extraction des puissances GDTF de tous les types du show (repli). Dépend
     //    des overrides GDTF : un modèle choisi à la main peut porter la conso que
@@ -392,28 +391,34 @@ fun SceneScreen(
             }
         }
     }
-    // 3) Fusion CLOUD : pour chaque type, on rapatrie l'entrée communautaire et on
-    //    la fusionne (LWW) dans le cache disque + l'état. No-op si non connecté.
+    // 3) CONSENSUS CLOUD : pour chaque type, on rapatrie TOUS les votes, on
+    //    calcule le consensus et on le sème dans l'état + le cache disque. No-op
+    //    si non connecté (le cache disque tient alors lieu de repli).
     LaunchedEffect(sync, scene, authState?.value) {
         val s = sync ?: return@LaunchedEffect
         if (authState?.value?.isSignedIn != true) return@LaunchedEffect
         val specs = scene.allObjects.mapNotNull { it.gdtfSpec?.trim()?.ifEmpty { null } }.distinct()
         for (spec in specs) {
-            val remote = s.fetchPowerEntry(spec) ?: continue
-            val merged = withContext(Dispatchers.IO) { PowerLibraryStore.upsert(ctx, remote) }
+            val consensus = com.minou.mvrviewer.sync.powerConsensus(s.fetchPowerVotes(spec).map { it.watts })
+                ?: continue
             val id = com.minou.mvrviewer.sync.powerLibraryDocId(spec)
-            merged[id]?.let { power.seedLibrary(id, it.watts) }
+            withContext(Dispatchers.IO) { PowerLibraryStore.put(ctx, id, consensus.watts, consensus.totalVotes) }
+            power.seedConsensus(id, consensus.watts, consensus.totalVotes)
         }
     }
-    // Commit d'une saisie UTILISATEUR de puissance → cache disque (LWW) + push
-    // cloud (clé = spec) au nom de l'utilisateur courant. Profite à tous.
+    // VOTE d'une puissance par l'utilisateur → dépose mon vote au cloud, récupère
+    // le CONSENSUS réel (mon vote inclus), corrige l'état + le cache disque. Hors
+    // ligne : consensus local de mon seul vote (bonus quand on est connecté).
     LaunchedEffect(sync, projectKey) {
         power.onCommit = { spec, _, watts ->
-            val by = sync?.currentAuthor?.first ?: ""
-            scope.launch(Dispatchers.IO) {
-                PowerLibraryStore.upsert(ctx, PowerEntry(spec, watts, by, System.currentTimeMillis()))
+            scope.launch {
+                val consensus = sync?.submitPowerVote(spec, watts)
+                val id = com.minou.mvrviewer.sync.powerLibraryDocId(spec)
+                val value = consensus?.watts ?: watts
+                val votes = consensus?.totalVotes ?: 1
+                withContext(Dispatchers.IO) { PowerLibraryStore.put(ctx, id, value, votes) }
+                power.seedConsensus(id, value, votes)
             }
-            sync?.putPowerEntry(spec, watts)
         }
     }
 

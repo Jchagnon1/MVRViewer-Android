@@ -274,6 +274,22 @@ object SectionCodec {
         )
     }
 
+    // ---- Doc Firestore : PowerVote ↔ Map (submissions/{uid}) ---------------
+    //
+    // Un doc de vote = { watts:Int, updatedAt:Number(epoch ms) }. Mêmes noms de
+    // champs que iOS. L'uid n'est PAS un champ : c'est l'ID du document.
+
+    fun powerVoteToMap(v: PowerVote): Map<String, Any?> = buildMap {
+        put("watts", v.watts.toLong()) // Firestore stocke les entiers en Long
+        put("updatedAt", v.updatedAtMillis)
+    }
+
+    fun powerVoteFromMap(map: Map<String, Any?>?): PowerVote? {
+        map ?: return null
+        val watts = (map["watts"] as? Number)?.toInt() ?: return null
+        return PowerVote(watts, (map["updatedAt"] as? Number)?.toLong() ?: 0L)
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     private fun mapToJson(m: Map<String, String>): JSONObject {

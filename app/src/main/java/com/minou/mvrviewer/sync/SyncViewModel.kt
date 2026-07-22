@@ -270,21 +270,26 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     // MARK: - Bibliothèque de puissances (base communautaire GLOBALE)
 
     /**
-     * Lit l'entrée cloud pour une spec (null si absente / non connecté / hors
-     * ligne). Ne LÈVE jamais : la résolution locale prend le relais.
+     * Lit TOUS les votes cloud pour une spec (vide si aucun / non connecté / hors
+     * ligne). Ne LÈVE jamais : la résolution locale prend le relais. Migre au
+     * passage un ancien doc mono-valeur en un vote unique (côté service).
      */
-    suspend fun fetchPowerEntry(spec: String): PowerEntry? =
-        runCatching { service.fetchPowerEntry(spec) }.getOrNull()
+    suspend fun fetchPowerVotes(spec: String): List<PowerVote> =
+        runCatching { service.fetchPowerVotes(spec) }.getOrDefault(emptyList())
 
     /**
-     * Pousse une puissance saisie dans la biblio partagée (clé = spec) au nom de
-     * l'utilisateur courant. Fire-and-forget : la saisie est déjà enregistrée
-     * localement (cache), le cloud n'est qu'un bonus quand on est connecté.
+     * Dépose (ou actualise) MON vote dans la biblio partagée puis renvoie le
+     * CONSENSUS fraîchement recalculé sur l'ENSEMBLE des votes (mon vote inclus).
+     * Renvoie `null` si non connecté / hors ligne — l'appelant retombe alors sur
+     * un consensus local de son seul vote. Personne n'écrase le vote d'un autre.
      */
-    fun putPowerEntry(spec: String, watts: Int) {
-        if (spec.isBlank()) return
+    suspend fun submitPowerVote(spec: String, watts: Int): PowerConsensus? {
+        if (spec.isBlank()) return null
         val by = _auth.value.accountOrNull?.uid ?: ""
-        viewModelScope.launch { runCatching { service.putPowerEntry(spec, watts, by) } }
+        return runCatching {
+            service.putPowerVote(spec, watts, by)
+            powerConsensus(service.fetchPowerVotes(spec).map { it.watts })
+        }.getOrNull()
     }
 
     // MARK: - Journal de modifications (audit)

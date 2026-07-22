@@ -46,10 +46,13 @@ interface SyncService {
     suspend fun fetchAudit(projectId: String): List<AuditEntry>
 
     // — Bibliothèque de puissances (collection RACINE `powerLibrary`, GLOBALE) —
-    // Base communautaire : lecture/écriture réservées aux AUTHENTIFIÉS (règle
-    // Firestore côté iOS). Hors de tout projet — indexée par spec de type.
-    suspend fun fetchPowerEntry(spec: String): PowerEntry?
-    suspend fun putPowerEntry(spec: String, watts: Int, updatedBy: String): PowerEntry
+    // Base communautaire par VOTES : chaque utilisateur dépose son vote dans
+    // `powerLibrary/{docId}/submissions/{uid}` ; la valeur retenue est le
+    // CONSENSUS de tous les votes. Lecture/écriture réservées aux AUTHENTIFIÉS
+    // (règle Firestore), l'écriture d'un vote à son propre uid seulement.
+    // fetchPowerVotes migre un ancien doc mono-valeur en UN vote.
+    suspend fun fetchPowerVotes(spec: String): List<PowerVote>
+    suspend fun putPowerVote(spec: String, watts: Int, uid: String): PowerVote
 
     // — Observation temps réel —
     fun observe(projectId: String): Flow<RemoteEvent>

@@ -72,26 +72,40 @@ le plugin appliqué, `FirebaseApp.getApps()` n'est plus vide → l'app bascule
   sont *reçus* mais pas appliqués côté Android (pas d'éditeur dédié encore) — le
   patch, la calibration et le placement du plan sont, eux, entièrement partagés.
 
-## Bibliothèque de puissances (`powerLibrary`) — outil de câblage
+## Bibliothèque de puissances (`powerLibrary`) — consensus par VOTES
 
 Collection Firestore **RACINE** `powerLibrary`, **GLOBALE** (hors projet) : un
 document par TYPE de projecteur, id = spec GDTF normalisée
-(`powerLibraryDocId` : minuscules, trim, `/ . # $ [ ]` → `_`). Champs partagés
-iOS/Android : `spec` (String d'origine), `watts` (Int, puissance max en W),
-`updatedBy` (uid ou ""), `updatedAt` (Number, epoch **millisecondes**). Fusion
-dernier écrivain gagne sur `updatedAt`.
+(`powerLibraryDocId` : minuscules, trim, `/ . # $ [ ]` → `_`, **inchangé**).
 
-**Règle Firestore** (à ajouter côté iOS dans `firestore.rules` ; **rien à écrire
-côté Android**, mais la MÊME règle s'applique — c'est une base communautaire) :
+**Modèle par votes** (remplace le LWW mono-valeur de la phase 1) : chaque
+utilisateur dépose SON vote dans la sous-collection
+`powerLibrary/{docId}/submissions/{uid}` = `{ watts:Int, updatedAt:Number(epoch
+ms) }`. **Personne n'écrase le vote d'un autre.** Un champ `spec` (String) peut
+rester sur le doc parent (non requis au calcul). La valeur retenue est le
+**CONSENSUS** de tous les votes (`powerConsensus`, algorithme PUR partagé
+iOS/Android : clusters ±10 %/±20 W au plus permissif, plus gros cluster gagnant,
+égalité → médiane la plus basse). **Migration indolore** : un ancien doc
+mono-valeur `{ watts }` sans sous-collection est lu comme UN vote ; on ne
+réécrit plus ce champ.
+
+**Règle Firestore** (à mettre côté iOS dans `firestore.rules` — remplace le bloc
+`powerLibrary` ; **rien à écrire côté Android**, mais la MÊME règle s'applique) :
 
 ```
 match /powerLibrary/{docId} {
-  allow read, write: if request.auth != null; // authentifiés uniquement
+  allow read: if request.auth != null;
+  allow write: if request.auth != null;
+  match /submissions/{uid} {
+    allow read: if request.auth != null;
+    allow write: if request.auth != null && request.auth.uid == uid;
+  }
 }
 ```
 
 Sans compte / hors ligne, la résolution fonctionne quand même : un **cache
-disque global** (`powerLibrary.json`) mémorise les saisies et sert de repli ;
-le cloud n'est fusionné (LWW) que lorsqu'on est connecté. En backend LOCAL
-(sans `google-services.json`), le stub reproduit la collection sous
-`CloudSim/powerLibrary/` pour rester testable.
+disque global** (`powerLibrary.json`) mémorise le dernier consensus connu
+(valeur + nombre de votes) et sert de repli ; le cloud (somme des votes) reste
+la source de vérité quand on est connecté. En backend LOCAL (sans
+`google-services.json`), le stub reproduit la sous-collection sous
+`CloudSim/powerLibrary/<docId>/submissions/<uid>.json` pour rester testable.

@@ -246,25 +246,39 @@ class LocalSyncService private constructor(appContext: Context) : SyncService {
         next
     }
 
-    // MARK: Bibliothèque de puissances (stub disque, hors projet)
+    // MARK: Bibliothèque de puissances (stub disque, hors projet, par VOTES)
     //
-    // Miroir du `powerLibrary` cloud sous CloudSim/powerLibrary/<docId>.json.
-    // Volontairement LENIENT (pas de requireUser) : la biblio doit rester lisible
-    // et testable HORS LIGNE / sans compte, contrairement au vrai backend où la
-    // règle Firestore exige l'authentification.
+    // Reproduit la sous-collection `submissions/{uid}` du cloud sous
+    // CloudSim/powerLibrary/<docId>/submissions/<uid>.json. Volontairement
+    // LENIENT (pas de requireUser) : la biblio doit rester lisible et testable
+    // HORS LIGNE / sans compte, contrairement au vrai backend où la règle
+    // Firestore exige l'authentification. L'ancien fichier mono-valeur
+    // <docId>.json (phase 1) est migré en UN vote.
 
-    private fun powerFile(docId: String) =
+    private fun powerSubmissionsDir(docId: String) =
+        File(File(File(root, "powerLibrary"), docId), "submissions").apply { mkdirs() }
+    private fun powerLegacyFile(docId: String) =
         File(File(root, "powerLibrary").apply { mkdirs() }, "$docId.json")
 
-    override suspend fun fetchPowerEntry(spec: String): PowerEntry? = lock.withLock {
-        if (spec.isBlank()) return null
-        readObj(powerFile(powerLibraryDocId(spec)))?.let { SectionCodec.powerFromMap(jsonToMap(it)) }
+    override suspend fun fetchPowerVotes(spec: String): List<PowerVote> = lock.withLock {
+        if (spec.isBlank()) return emptyList()
+        val docId = powerLibraryDocId(spec)
+        val votes = (powerSubmissionsDir(docId).listFiles { f -> f.extension == "json" } ?: emptyArray())
+            .mapNotNull { readObj(it)?.let { o -> SectionCodec.powerVoteFromMap(jsonToMap(o)) } }
+        if (votes.isNotEmpty()) return votes
+        // Migration : ancien fichier mono-valeur = UN vote.
+        val legacy = readObj(powerLegacyFile(docId))?.let { SectionCodec.powerFromMap(jsonToMap(it)) }
+        legacy?.let { listOf(PowerVote(it.watts, it.updatedAtMillis)) } ?: emptyList()
     }
 
-    override suspend fun putPowerEntry(spec: String, watts: Int, updatedBy: String): PowerEntry = lock.withLock {
-        val e = PowerEntry(spec, watts, updatedBy, System.currentTimeMillis())
-        writeText(powerFile(powerLibraryDocId(spec)), JSONObject(SectionCodec.powerToMap(e)).toString())
-        e
+    override suspend fun putPowerVote(spec: String, watts: Int, uid: String): PowerVote = lock.withLock {
+        val vote = PowerVote(watts, System.currentTimeMillis())
+        val docId = powerLibraryDocId(spec)
+        // Stub LENIENT : sans compte, uid vide → un doc de vote « local ».
+        val key = uid.ifBlank { "local" }
+        writeText(File(powerSubmissionsDir(docId), "$key.json"),
+            JSONObject(SectionCodec.powerVoteToMap(vote)).toString())
+        vote
     }
 
     // MARK: Observation (diffusion en process)

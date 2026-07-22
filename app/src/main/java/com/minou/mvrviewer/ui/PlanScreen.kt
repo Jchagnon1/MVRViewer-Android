@@ -1383,14 +1383,18 @@ fun PlanScreen(
         // au câblage (onAssignDone, hissé dans SceneScreen).
         val at = assignTarget
         if (assignMode && at != null) {
+            // Bandeau d'affectation : « <nom> C<index> » (élec) / « <nom> D<index> »
+            // (DMX), espace + lettre, SANS point médian — identique à iOS
+            // (PlanAssignTarget.indexTag) ; le « D<index> » s'affiche toujours,
+            // même pour une ligne DMX simple (1 départ).
             val targetLabel = when (at.kind) {
                 CablingAssignTarget.Kind.SOCA -> {
                     val name = cabling.distributors.firstOrNull { it.id == at.distributorId }?.name ?: "Socapex"
-                    CablingLabels.soca(name, at.index)
+                    "$name C${at.index}"
                 }
                 CablingAssignTarget.Kind.DMX -> {
-                    val d = dmxCabling.distributors.firstOrNull { it.id == at.distributorId }
-                    CablingLabels.dmx(d?.name ?: "DMX", d?.coreCount ?: 1, at.index)
+                    val name = dmxCabling.distributors.firstOrNull { it.id == at.distributorId }?.name ?: "DMX"
+                    "$name D${at.index}"
                 }
             }
             Surface(

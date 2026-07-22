@@ -1991,22 +1991,89 @@ internal object PlanWireCache {
     }
 }
 
+/**
+ * TUILE de tracé : un morceau de dessin (Path) avec sa boîte englobante et le
+ * nombre de segments qu'il porte.
+ *
+ * POURQUOI (parité iOS) : côté iOS la vue plan a été fluidifiée par un DXF
+ * « tuilé culé au viewport ». Android dessinait au contraire des Path
+ * MONOLITHIQUES couvrant tout le plan, reparcourus INTÉGRALEMENT à chaque frame
+ * (Skia clippe mais doit lire tous les verbes) → coût dominant du pan/zoom sur
+ * un gros show. En découpant le dessin en tuiles et en ne traçant que celles qui
+ * coupent l'écran, le coût par frame suit la surface VISIBLE, pas la taille
+ * totale du fichier.
+ */
+internal class PathTile(
+    var minX: Float, var minY: Float, var maxX: Float, var maxY: Float,
+    val path: androidx.compose.ui.graphics.Path,
+    var segs: Int
+) {
+    fun grow(x: Float, y: Float) {
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+    }
+    /** Coupe-t-elle le rectangle [vx0,vy0]–[vx1,vy1] ? (test AABB.) */
+    fun visible(vx0: Float, vy0: Float, vx1: Float, vy1: Float): Boolean =
+        maxX >= vx0 && minX <= vx1 && maxY >= vy0 && minY <= vy1
+}
+
+/**
+ * Accumulateur de tuiles : range des sous-tracés dans une grille spatiale — la
+ * tuile est choisie sur le CENTRE du sous-tracé, et sa bbox est agrégée sur la
+ * géométrie réelle (le cull reste donc exact même pour un tracé qui déborde de
+ * sa case). `tileSize` est en unités du repère de dessin considéré.
+ */
+internal class TileBucket(private val tileSize: Float) {
+    private val tiles = HashMap<Long, PathTile>()
+    private fun key(x: Float, y: Float): Long {
+        val tx = Math.floor((x / tileSize).toDouble()).toInt()
+        val ty = Math.floor((y / tileSize).toDouble()).toInt()
+        return (tx.toLong() shl 32) xor (ty.toLong() and 0xffffffffL)
+    }
+    fun tileAt(cx: Float, cy: Float): PathTile =
+        tiles.getOrPut(key(cx, cy)) {
+            PathTile(Float.MAX_VALUE, Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE,
+                androidx.compose.ui.graphics.Path(), 0)
+        }
+    fun toList(): List<PathTile> = ArrayList(tiles.values)
+}
+
+/**
+ * Plafond ADAPTATIF de points DXF conservés. Un SkPath natif coûte ~24 o/point et
+ * l'app a un historique d'OOM sur gros show ; le garde-fou fixe (1,5 M) était
+ * généreux et aveugle au heap réel. On le borne désormais au heap max de la VM —
+ * plus il est petit, plus on plafonne bas — entre 300 k et 1,5 M points.
+ */
+internal fun dxfPointCap(): Int {
+    val maxMb = (Runtime.getRuntime().maxMemory() / (1024L * 1024L))
+    return (maxMb * 4000L).coerceIn(300_000L, 1_500_000L).toInt()
+}
+
 /** Tracés DXF pré-construits, en coordonnées LOCALES du DXF (y déjà inversé). */
 internal class DxfPaths(
-    /** (calque, couleur) → tracé : masquer un calque ne reconstruit RIEN. */
-    val strokes: Map<Pair<String, Int>, androidx.compose.ui.graphics.Path>,
-    /** (calque, couleur, plein) → zone remplie. */
+    /** (calque, couleur) → TUILES de traits : masquer un calque ne reconstruit RIEN. */
+    val strokeTiles: Map<Pair<String, Int>, List<PathTile>>,
+    /**
+     * (calque, couleur, plein) → zone remplie, MONOLITHIQUE : les remplissages
+     * (HATCH/SOLID) sont peu nombreux, et l'EvenOdd d'une entité doit rester
+     * groupé pour dessiner ses trous — on ne les tuile donc pas.
+     */
     val fills: Map<Triple<String, Int, Boolean>, androidx.compose.ui.graphics.Path>,
-    val points: Int
+    val points: Int,
+    /** Taille de tuile (unités locales DXF) : sert de marge au cull. */
+    val tileSize: Float
 ) {
     /** Assez léger pour RESTER dessiné pendant un pan/zoom (sinon il s'efface). */
     val light: Boolean get() = points < 60_000
 }
 
-/** Fil de fer des structures prêt à dessiner (coordonnées plan). */
+/** Fil de fer des structures prêt à dessiner (coordonnées plan), tuilé. */
 internal class StructPaths(
-    val byLayer: Map<String, androidx.compose.ui.graphics.Path>,
-    val edges: Int
+    val byLayer: Map<String, List<PathTile>>,
+    val edges: Int,
+    val tileSize: Float
 ) {
     val light: Boolean get() = edges < 40_000
 }
@@ -2022,14 +2089,27 @@ internal const val PATH_KEY_SEP = '\u0000'
 internal fun buildStructurePaths(
     wf: PlanWireframe.Built, hidden: Set<String>
 ): StructPaths {
-    val out = HashMap<String, androidx.compose.ui.graphics.Path>()
+    // Taille de tuile depuis l'étendue des centres d'instance (coordonnées plan).
+    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+    for (inst in wf.instances) {
+        if (inst.id in hidden || wf.edgesByKey[inst.key] == null) continue
+        if (inst.cx < minX) minX = inst.cx; if (inst.cx > maxX) maxX = inst.cx
+        if (inst.cy < minY) minY = inst.cy; if (inst.cy > maxY) maxY = inst.cy
+    }
+    val ext = max(maxX - minX, maxY - minY)
+    val tileSize = if (!ext.isFinite() || ext <= 0f) 1f else (ext / 32f).coerceAtLeast(1e-3f)
+
+    val buckets = HashMap<String, TileBucket>()
     var count = 0
     for (inst in wf.instances) {
         if (inst.id in hidden) continue
         val edges = wf.edgesByKey[inst.key] ?: continue
         val world = inst.world
         if (count > MAX_STRUCT_PATH_SEGMENTS) break   // garde-fou mémoire
-        val path = out.getOrPut(inst.layer) { androidx.compose.ui.graphics.Path() }
+        // Un tracé par calque, découpé en tuiles : chaque instance atterrit dans
+        // la tuile de son centre (inst.cx/cy sont déjà en repère plan).
+        val tile = buckets.getOrPut(inst.layer) { TileBucket(tileSize) }.tileAt(inst.cx, inst.cy)
         count += edges.size / 6
         var i = 0
         while (i + 5 < edges.size) {
@@ -2040,10 +2120,12 @@ internal fun buildStructurePaths(
             val way = world.x.y * ax + world.y.y * ay + world.z.y * az + world.w.y
             val wbx = world.x.x * bx + world.y.x * by + world.z.x * bz + world.w.x
             val wby = world.x.y * bx + world.y.y * by + world.z.y * bz + world.w.y
-            path.moveTo(wax, -way); path.lineTo(wbx, -wby)
+            tile.path.moveTo(wax, -way); tile.path.lineTo(wbx, -wby)
+            tile.grow(wax, -way); tile.grow(wbx, -wby)
+            tile.segs += 1
         }
     }
-    return StructPaths(out, count)
+    return StructPaths(buckets.mapValues { it.value.toList() }, count, tileSize)
 }
 
 /**
@@ -2065,12 +2147,13 @@ internal fun structureDots(wf: PlanWireframe.Built?, hidden: Set<String>): List<
         if (it.id !in hidden && wf.edgesByKey[it.key] == null) it.cx to it.cy else null
     }
 
-/** Silhouettes des projecteurs, prêtes à dessiner. */
+/** Silhouettes des projecteurs, prêtes à dessiner (tuilées). */
 internal class FixturePaths(
-    val byKey: Map<String, androidx.compose.ui.graphics.Path>,
+    val byKey: Map<String, List<PathTile>>,
     /** Specs réellement TRACÉES (le budget peut en écarter) → pastille sinon. */
     val specs: Set<String>,
-    val segments: Int
+    val segments: Int,
+    val tileSize: Float
 )
 
 /**
@@ -2086,7 +2169,17 @@ internal class FixturePaths(
 internal fun buildFixturePaths(
     data: PlanData, fw: PlanWireframe.FixtureWire, hidden: Set<String>
 ): FixturePaths {
-    val out = HashMap<String, androidx.compose.ui.graphics.Path>()
+    // Taille de tuile depuis l'étendue des centres de projecteurs (repère plan).
+    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+    for (f in data.fixtures) {
+        if (f.px < minX) minX = f.px; if (f.px > maxX) maxX = f.px
+        if (f.py < minY) minY = f.py; if (f.py > maxY) maxY = f.py
+    }
+    val ext = max(maxX - minX, maxY - minY)
+    val tileSize = if (!ext.isFinite() || ext <= 0f) 1f else (ext / 32f).coerceAtLeast(1e-3f)
+
+    val buckets = HashMap<String, TileBucket>()
     val specs = HashSet<String>()
     var segments = 0
     for (f in data.fixtures) {
@@ -2099,7 +2192,10 @@ internal fun buildFixturePaths(
         if (segments > MAX_FIXTURE_PATH_SEGMENTS && spec !in specs) continue
         val world = f.world
         specs.add(spec)
-        val path = out.getOrPut(f.layer + PATH_KEY_SEP + spec) { androidx.compose.ui.graphics.Path() }
+        // Un tracé par « calque + spec », découpé en tuiles : chaque projecteur
+        // atterrit dans la tuile de son centre (f.px/py sont en repère plan).
+        val tile = buckets.getOrPut(f.layer + PATH_KEY_SEP + spec) { TileBucket(tileSize) }
+            .tileAt(f.px, f.py)
         segments += edges.size / 6
         var k = 0
         while (k + 5 < edges.size) {
@@ -2110,10 +2206,12 @@ internal fun buildFixturePaths(
             val way = world.x.y * ax + world.y.y * ay + world.z.y * az + world.w.y
             val wbx = world.x.x * bx + world.y.x * by + world.z.x * bz + world.w.x
             val wby = world.x.y * bx + world.y.y * by + world.z.y * bz + world.w.y
-            path.moveTo(wax, -way); path.lineTo(wbx, -wby)
+            tile.path.moveTo(wax, -way); tile.path.lineTo(wbx, -wby)
+            tile.grow(wax, -way); tile.grow(wbx, -wby)
+            tile.segs += 1
         }
     }
-    return FixturePaths(out, specs, segments)
+    return FixturePaths(buckets.mapValues { it.value.toList() }, specs, segments, tileSize)
 }
 
 /** ~14 Mo de SkPath au maximum pour les silhouettes de projecteurs. */
@@ -2146,22 +2244,57 @@ internal fun buildDxfPaths(plan: com.minou.mvrviewer.mvr.DxfPlan): DxfPaths {
             fp.close()
         }
     }
-    val strokes = HashMap<Pair<String, Int>, androidx.compose.ui.graphics.Path>()
-    var drawn = 0
-    loop@ for (pl in plan.polylines) {
-        val path = strokes.getOrPut(pl.layer to pl.color) { androidx.compose.ui.graphics.Path() }
+    // ---- Traits (polylignes) : TUILÉS pour le culling au viewport ----
+    // Passe A : étendue globale (coordonnées locales, Y déjà inversé) → tuile.
+    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+    for (pl in plan.polylines) {
         val pts = pl.points
         var i = 0
+        while (i + 1 < pts.size) {
+            val x = pts[i]; val y = -pts[i + 1]; i += 2
+            if (x < minX) minX = x; if (x > maxX) maxX = x
+            if (y < minY) minY = y; if (y > maxY) maxY = y
+        }
+    }
+    val ext = max(maxX - minX, maxY - minY)
+    // ~48 tuiles sur le plus grand côté : assez fin pour bien culer, assez gros
+    // pour ne pas exploser le nombre de Path natifs.
+    val tileSize = if (!ext.isFinite() || ext <= 0f) 1f else (ext / 48f).coerceAtLeast(1e-3f)
+
+    // Passe B : range chaque polyligne dans la tuile de son CENTRE.
+    val cap = dxfPointCap()
+    val buckets = HashMap<Pair<String, Int>, TileBucket>()
+    var drawn = 0
+    loop@ for (pl in plan.polylines) {
+        val pts = pl.points
+        if (pts.size < 4) continue
+        // bbox de la polyligne → centre pour choisir la tuile.
+        var pmnx = Float.MAX_VALUE; var pmny = Float.MAX_VALUE
+        var pmxx = -Float.MAX_VALUE; var pmxy = -Float.MAX_VALUE
+        var i = 0
+        while (i + 1 < pts.size) {
+            val x = pts[i]; val y = -pts[i + 1]; i += 2
+            if (x < pmnx) pmnx = x; if (x > pmxx) pmxx = x
+            if (y < pmny) pmny = y; if (y > pmxy) pmxy = y
+        }
+        val tile = buckets.getOrPut(pl.layer to pl.color) { TileBucket(tileSize) }
+            .tileAt((pmnx + pmxx) * 0.5f, (pmny + pmxy) * 0.5f)
+        i = 0
         var first = true
         while (i + 1 < pts.size) {
             val x = pts[i]; val y = -pts[i + 1]; i += 2
-            if (first) { path.moveTo(x, y); first = false } else path.lineTo(x, y)
+            if (first) { tile.path.moveTo(x, y); first = false } else tile.path.lineTo(x, y)
+            tile.grow(x, y)
         }
-        if (pl.closed && pts.size >= 4) path.lineTo(pts[0], -pts[1])
-        drawn += pts.size / 2
-        if (drawn > 1_500_000) break@loop  // garde-fou mémoire (construit UNE fois)
+        if (pl.closed && pts.size >= 4) { tile.path.lineTo(pts[0], -pts[1]); tile.grow(pts[0], -pts[1]) }
+        val segs = pts.size / 2
+        tile.segs += segs
+        drawn += segs
+        if (drawn > cap) break@loop  // garde-fou mémoire ADAPTATIF (construit UNE fois)
     }
-    return DxfPaths(strokes, fills, drawn)
+    val strokeTiles = buckets.mapValues { it.value.toList() }
+    return DxfPaths(strokeTiles, fills, drawn, tileSize)
 }
 
 /**

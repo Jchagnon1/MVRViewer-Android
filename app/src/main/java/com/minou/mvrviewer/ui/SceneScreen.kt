@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -578,6 +579,20 @@ fun SceneScreen(
     var showShare by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showJoin by remember { mutableStateOf(false) }
+
+    // N8 — Gestion du bouton/geste RETOUR système : reculer DANS l'appli au lieu
+    // de la réduire. Les BackHandler sont évalués du DERNIER composé au premier
+    // (le dernier actif gagne), donc on les pose du cas le moins prioritaire au
+    // plus prioritaire :
+    //   1. Vue 3D (racine de la scène) → fermer le projet, retour à l'Accueil.
+    //   2. Sous-vue (plan/patch/GDTF/univers/câblage) → revenir à la vue 3D.
+    //   3. Un dialogue de synchro ouvert → le fermer d'abord (priorité maximale).
+    // L'Accueil (HomeScreen) n'a AUCUN handler : seul lui laisse l'OS réduire l'appli.
+    BackHandler(enabled = mode == SceneMode.THREE_D) { onClose() }
+    BackHandler(enabled = mode != SceneMode.THREE_D) { mode = SceneMode.THREE_D }
+    BackHandler(enabled = showAccount || showShare || showHistory || showJoin) {
+        showAccount = false; showShare = false; showHistory = false; showJoin = false
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
     when (mode) {

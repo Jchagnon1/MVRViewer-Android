@@ -1565,11 +1565,23 @@ internal class DistanceZoomManipulator(
     private val maxDistance: Float,
     /** px physiques par dp — le geste est mesuré en pixels bruts par SceneView. */
     private val density: Float,
-    inner: io.github.sceneview.gesture.CameraGestureDetector.CameraManipulator,
+    private val inner: io.github.sceneview.gesture.CameraGestureDetector.CameraManipulator,
 ) : io.github.sceneview.gesture.CameraGestureDetector.CameraManipulator by inner {
 
     var distance = clampStart(startDistance, minDistance, maxDistance)
         private set
+
+    /**
+     * N1 — Remappage des gestes : 1 DOIGT = déplacement (pan), 2 DOIGTS = orbite.
+     * Le détecteur SceneView appelle `grabBegin(strafe=false)` pour 1 doigt (orbite
+     * par défaut Filament) et `grabBegin(strafe=true)` pour 2 doigts en translation
+     * (pan). On INVERSE le drapeau `strafe` : 1 doigt devient pan, 2 doigts orbite.
+     * Le mode reste ORBIT (il honore `strafe`), et le pincement/zoom (scrollUpdate)
+     * n'est pas touché → zoom conservé.
+     */
+    override fun grabBegin(x: Int, y: Int, strafe: Boolean) {
+        inner.grabBegin(x, y, !strafe)
+    }
 
     override fun scrollUpdate(x: Int, y: Int, previousSeparation: Float, currentSeparation: Float) {
         // Écartement des doigts en pixels : positif = on écarte = zoom AVANT.

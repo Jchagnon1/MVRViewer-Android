@@ -16,7 +16,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * Tout ce dont le DESSIN du plan a besoin, et rien d'autre.
@@ -144,6 +147,67 @@ internal class PlanRenderSpec(
 }
 
 /**
+ * Budget de segments VISIBLES au-delà duquel, PENDANT UN GESTE seulement, on
+ * saute le contenu détaillé (DXF / décor / silhouettes) pour rester fluide — cas
+ * du dézoom sur un très gros plan où tout est à l'écran et le culling n'aide plus.
+ * Hors geste, on dessine toujours les tuiles visibles (le culling suffit).
+ */
+private const val GESTURE_SEG_BUDGET = 120_000
+
+/**
+ * Somme des segments des tuiles qui coupent le rectangle de viewport donné.
+ * Sert à décider, pendant un geste, si le contenu détaillé tient dans le budget.
+ */
+internal fun visibleSegs(
+    tilesByKey: Map<*, List<PathTile>>, vx0: Float, vy0: Float, vx1: Float, vy1: Float
+): Int {
+    var s = 0
+    for ((_, tiles) in tilesByKey) for (t in tiles) if (t.visible(vx0, vy0, vx1, vy1)) s += t.segs
+    return s
+}
+
+/**
+ * Rectangle englobant, en coordonnées LOCALES du DXF, de ce qui est visible à
+ * l'écran : on projette les 4 coins de l'écran DANS le repère du DXF (inverse
+ * exact de la matrice de dessin — centre/échelle plan, puis placement
+ * décalage/rotation/échelle du DXF). Renvoie [minX, minY, maxX, maxY].
+ */
+internal fun dxfLocalViewport(
+    w: Float, h: Float, bs: Float, centerPx: Offset,
+    dataCx: Float, dataCy: Float, tf: com.minou.mvrviewer.mvr.ReferencePlanTransform
+): FloatArray {
+    val sfac = tf.scale.toFloat()
+    if (!sfac.isFinite() || sfac == 0f || bs <= 0f) {
+        // Placement dégénéré : pas de cull (on dessinera tout).
+        return floatArrayOf(-Float.MAX_VALUE, -Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE)
+    }
+    // Le dessin applique rotate(-rotationDeg) : φ est l'angle RÉELLEMENT appliqué.
+    val phi = -tf.rotationDeg.toFloat() * (Math.PI.toFloat() / 180f)
+    val cs = cos(phi); val sn = sin(phi)
+    val offX = tf.offsetX.toFloat(); val offY = tf.offsetY.toFloat()
+    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+    val xs = floatArrayOf(0f, w, 0f, w); val ys = floatArrayOf(0f, 0f, h, h)
+    for (i in 0 until 4) {
+        // écran → repère plan (échelle bs, centre) :
+        val cX = (xs[i] - centerPx.x) / bs + dataCx
+        val cY = (ys[i] - centerPx.y) / bs + dataCy
+        // retirer la translation du placement (offsetX, -offsetY) :
+        val bX = cX - offX
+        val bY = cY + offY
+        // rotation inverse R(-φ) :
+        val aX = bX * cs + bY * sn
+        val aY = -bX * sn + bY * cs
+        // retirer l'échelle du placement :
+        val lx = aX / sfac
+        val ly = aY / sfac
+        if (lx < minX) minX = lx; if (lx > maxX) maxX = lx
+        if (ly < minY) minY = ly; if (ly > maxY) maxY = ly
+    }
+    return floatArrayOf(minX, minY, maxX, maxY)
+}
+
+/**
  * FONCTION DE DESSIN UNIQUE du plan (fond satellite, plan DXF, décor, silhouettes
  * de projecteurs, pastilles, étiquettes, barre d'échelle).
  *
@@ -159,6 +223,16 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     if (bs <= 0f) return
     // Échelle de DÉCISION (cf. detailPxPerMm) : identique à `bs` à l'écran.
     val det = s.detailPxPerMm?.takeIf { it > 0f } ?: bs
+
+    // Viewport courant en coordonnées PLAN (décor + silhouettes partagent cette
+    // projection, sans rotation) : inverse direct de `translate(centerPx) ;
+    // scale(bs) ; translate(-dataC)`. Sert au CULLING des tuiles → seul ce qui
+    // touche l'écran est dessiné (parité avec le tuilage iOS ; vaut aussi pour le
+    // PDF, où `size` est la page). Bornes triées (bs > 0).
+    val planVX0 = (0f - s.centerPx.x) / bs + s.data.cx
+    val planVX1 = (w - s.centerPx.x) / bs + s.data.cx
+    val planVY0 = (0f - s.centerPx.y) / bs + s.data.cy
+    val planVY1 = (h - s.centerPx.y) / bs + s.data.cy
 
     // ---- Fond satellite géo-référencé, SOUS tout le reste ----
     // L'image porte ses 4 coins en monde MVR ; on la dessine comme un quad via la
@@ -186,56 +260,81 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     // fait qu'empiler placement du DXF + projection dans la matrice du Canvas.
     val tfRef = s.refTransform
     val dxf = s.dxfPaths
-    if (tfRef != null && dxf != null && tfRef.visible && (!s.lowDetail || dxf.light)) {
+    if (tfRef != null && dxf != null && tfRef.visible) {
         val tf = tfRef
         val sfac = tf.scale.toFloat()
         val ppu = bs * sfac              // pixels par unité locale du DXF
-        withTransform({
-            translate(s.centerPx.x, s.centerPx.y)
-            scale(bs, bs, Offset.Zero)
-            translate(-s.data.cx, -s.data.cy)
-            // Repère plan = (x, −y) : la rotation du placement s'y lit donc à
-            // l'envers, et le décalage Y aussi.
-            translate(tf.offsetX.toFloat(), -tf.offsetY.toFloat())
-            rotate(-tf.rotationDeg.toFloat(), Offset.Zero)
-            scale(sfac, sfac, Offset.Zero)
-        }) {
-            // Zones remplies (HATCH/SOLID) SOUS les traits, en semi-transparent
-            // pour ne pas masquer projecteurs et décor.
-            for ((key, fp) in dxf.fills) {
-                val (layer, rgb, solid) = key
-                if (layer in s.hiddenLayers) continue
-                drawPath(fp, dxfDisplayColor(rgb, s.bgDark).copy(alpha = if (solid) 0.40f else 0.20f))
-            }
-            if (ppu > 0f) {
-                val sw = 0.7f / ppu   // épaisseur constante à l'écran / sur la page
-                for ((key, path) in dxf.strokes) {
-                    val (layer, rgb) = key
+        // Viewport en coordonnées LOCALES DXF (inverse de la matrice de dessin) :
+        // on ne tracera que les tuiles qui l'intersectent.
+        val vp = dxfLocalViewport(w, h, bs, s.centerPx, s.data.cx, s.data.cy, tf)
+        val mg = dxf.tileSize            // marge = une tuile (traits en bordure)
+        val vx0 = vp[0] - mg; val vy0 = vp[1] - mg; val vx1 = vp[2] + mg; val vy1 = vp[3] + mg
+        // Pendant un GESTE, si trop de traits restent visibles (dézoom sur très
+        // gros plan), on saute le DXF pour rester fluide ; sinon il reste affiché
+        // même en cours de geste — il ne « clignote » plus (cf. GESTURE_SEG_BUDGET).
+        val segsVis = if (s.lowDetail) visibleSegs(dxf.strokeTiles, vx0, vy0, vx1, vy1) else 0
+        if (!s.lowDetail || segsVis <= GESTURE_SEG_BUDGET) {
+            withTransform({
+                translate(s.centerPx.x, s.centerPx.y)
+                scale(bs, bs, Offset.Zero)
+                translate(-s.data.cx, -s.data.cy)
+                // Repère plan = (x, −y) : la rotation du placement s'y lit donc à
+                // l'envers, et le décalage Y aussi.
+                translate(tf.offsetX.toFloat(), -tf.offsetY.toFloat())
+                rotate(-tf.rotationDeg.toFloat(), Offset.Zero)
+                scale(sfac, sfac, Offset.Zero)
+            }) {
+                // Zones remplies (HATCH/SOLID) SOUS les traits, en semi-transparent
+                // pour ne pas masquer projecteurs et décor.
+                for ((key, fp) in dxf.fills) {
+                    val (layer, rgb, solid) = key
                     if (layer in s.hiddenLayers) continue
-                    drawPath(path, dxfDisplayColor(rgb, s.bgDark), style = Stroke(sw))
+                    drawPath(fp, dxfDisplayColor(rgb, s.bgDark).copy(alpha = if (solid) 0.40f else 0.20f))
+                }
+                if (ppu > 0f) {
+                    val sw = 0.7f / ppu   // épaisseur constante à l'écran / sur la page
+                    for ((key, tiles) in dxf.strokeTiles) {
+                        val (layer, rgb) = key
+                        if (layer in s.hiddenLayers) continue
+                        val col = dxfDisplayColor(rgb, s.bgDark)
+                        for (t in tiles) {
+                            if (!t.visible(vx0, vy0, vx1, vy1)) continue
+                            drawPath(t.path, col, style = Stroke(sw))
+                        }
+                    }
                 }
             }
         }
     }
 
-    // ---- Décor / structure : fil de fer vectoriel ----
+    // ---- Décor / structure : fil de fer vectoriel (tuilé + culé) ----
     if (s.showStructure) {
         val sp = s.structPaths
+        val mg = sp?.tileSize ?: 0f
+        val vx0 = planVX0 - mg; val vy0 = planVY0 - mg; val vx1 = planVX1 + mg; val vy1 = planVY1 + mg
+        // Même arbitrage que le DXF : hors geste on trace les tuiles visibles ;
+        // en geste on ne les saute que si le budget visible est dépassé (dézoom
+        // sur très gros décor). → le décor ne clignote plus au pan quand on est
+        // zoomé, tout en restant fluide quand tout est à l'écran.
+        val segsVis = if (s.lowDetail && sp != null) visibleSegs(sp.byLayer, vx0, vy0, vx1, vy1) else 0
+        val wireOk = sp != null && (!s.lowDetail || segsVis <= GESTURE_SEG_BUDGET)
         withTransform({
             translate(s.centerPx.x, s.centerPx.y)
             scale(bs, bs, Offset.Zero)
             translate(-s.data.cx, -s.data.cy)
         }) {
-            val wireOk = sp != null && (!s.lowDetail || sp.light)
-            if (wireOk) {
+            if (wireOk && sp != null) {
                 val sw = 0.8f / bs
-                for ((layer, path) in sp.byLayer) {
+                for ((layer, tiles) in sp.byLayer) {
                     val col = if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, layer)) else STRUCT_COLOR
-                    drawPath(path, col, style = Stroke(sw))
+                    for (t in tiles) {
+                        if (!t.visible(vx0, vy0, vx1, vy1)) continue
+                        drawPath(t.path, col, style = Stroke(sw))
+                    }
                 }
             }
-            // Structures sans fil de fer (ou repli pendant un geste) : un point
-            // chacune, en UN SEUL tracé (Skia élague hors écran).
+            // Structures sans fil de fer (ou repli quand le budget de geste saute
+            // le décor) : un point chacune, en UN SEUL tracé (Skia élague hors écran).
             val dots = if (wireOk) s.structDots else s.fallbackDots
             drawPath(dots, STRUCT_COLOR, style = Stroke(width = 3.2f / bs, cap = StrokeCap.Round))
         }
@@ -252,20 +351,29 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     val labelsZoomOk = s.showLabels && (!s.hideLabelsWhenZoomedOut || det > 0.02f)
     val fw = s.fixWire
     val fp = s.fixPaths
+    // Viewport plan des silhouettes (même projection que le décor) + arbitrage de
+    // geste : `silhouettesOn` décide UNE fois si la passe 1 a le droit de tracer.
+    // Elles restent donc affichées pendant un pan tant que le budget visible tient
+    // — c'est le cœur du « les icônes disparaissent » : avant, TOUT geste les
+    // éteignait (lowDetail), d'où le clignotement au moindre déplacement.
+    val fmg = fp?.tileSize ?: 0f
+    val fvx0 = planVX0 - fmg; val fvy0 = planVY0 - fmg; val fvx1 = planVX1 + fmg; val fvy1 = planVY1 + fmg
+    val fSegsVis = if (s.lowDetail && fp != null) visibleSegs(fp.byKey, fvx0, fvy0, fvx1, fvy1) else 0
+    val silhouettesOn = fp != null && fw != null && (!s.lowDetail || fSegsVis <= GESTURE_SEG_BUDGET)
     fun silhouetteVisible(spec: String?): Boolean {
-        if (s.lowDetail || fw == null || fp == null || spec == null) return false
+        if (!silhouettesOn || fw == null || fp == null || spec == null) return false
         val t = spec.trim()
         if (t !in fp.specs || fw.edgesBySpec[t] == null) return false
         return (fw.radiusBySpec[t] ?: 0f) * det > 7f
     }
-    if (!s.lowDetail && fp != null) {
+    if (silhouettesOn && fp != null) {
         withTransform({
             translate(s.centerPx.x, s.centerPx.y)
             scale(bs, bs, Offset.Zero)
             translate(-s.data.cx, -s.data.cy)
         }) {
             val sw = 1.2f / bs
-            for ((key, path) in fp.byKey) {
+            for ((key, tiles) in fp.byKey) {
                 val sep = key.indexOf(PATH_KEY_SEP)
                 if (sep < 0) continue
                 val layer = key.substring(0, sep)
@@ -275,7 +383,10 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
                 // projecteur → gris neutre. La pastille (passe 2) porte la couleur.
                 val c = if (s.colorMode == PlanColorMode.LAYER && s.layerColors)
                     Color(LayerColors.colorInt(s.layerIndex, layer)) else NEUTRAL_FIXTURE_GRAY
-                drawPath(path, c, style = Stroke(sw))
+                for (t in tiles) {
+                    if (!t.visible(fvx0, fvy0, fvx1, fvy1)) continue
+                    drawPath(t.path, c, style = Stroke(sw))
+                }
             }
         }
     }

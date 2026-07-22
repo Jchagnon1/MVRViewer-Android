@@ -172,8 +172,28 @@ object PowerLibraryStore {
     private fun file(ctx: Context): File = File(ctx.filesDir, "powerLibrary.json")
 
     /** Tout le cache, indexé par docId normalisé. */
-    fun load(ctx: Context): Map<String, PowerCacheEntry> {
-        val obj = runCatching { JSONObject(file(ctx).readText()) }.getOrNull() ?: return emptyMap()
+    fun load(ctx: Context): Map<String, PowerCacheEntry> = loadFrom(file(ctx))
+
+    /** Consensus en cache pour une spec (null si jamais renseigné). */
+    fun entry(ctx: Context, spec: String): PowerCacheEntry? =
+        load(ctx)[powerLibraryDocId(spec)]
+
+    /**
+     * Écrit (remplace) l'instantané de consensus d'un docId et renvoie le cache
+     * complet. Le consensus étant recalculé sur l'ENSEMBLE des votes cloud à
+     * chaque fetch, on écrase simplement : pas de fusion LWW à faire ici.
+     */
+    fun put(ctx: Context, docId: String, watts: Int, votes: Int): Map<String, PowerCacheEntry> =
+        putInto(file(ctx), docId, watts, votes)
+
+    // ---- Cœur PUR (basé sur un File, sans Context) : testable en JVM ----------
+    // Le round-trip put→load garantit qu'un vote déposé est RELU au rechargement
+    // (bug utilisateur « conso non gardée »). On l'isole du Context pour le tester
+    // sur un fichier temporaire, sans Robolectric.
+
+    /** Lit le cache d'un fichier (map vide si absent/illisible/JSON abîmé). */
+    internal fun loadFrom(f: File): Map<String, PowerCacheEntry> {
+        val obj = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return emptyMap()
         val out = LinkedHashMap<String, PowerCacheEntry>()
         obj.keys().forEach { id ->
             val o = obj.optJSONObject(id) ?: return@forEach
@@ -188,24 +208,16 @@ object PowerLibraryStore {
         return out
     }
 
-    /** Consensus en cache pour une spec (null si jamais renseigné). */
-    fun entry(ctx: Context, spec: String): PowerCacheEntry? =
-        load(ctx)[powerLibraryDocId(spec)]
-
-    /**
-     * Écrit (remplace) l'instantané de consensus d'un docId et renvoie le cache
-     * complet. Le consensus étant recalculé sur l'ENSEMBLE des votes cloud à
-     * chaque fetch, on écrase simplement : pas de fusion LWW à faire ici.
-     */
-    fun put(ctx: Context, docId: String, watts: Int, votes: Int): Map<String, PowerCacheEntry> {
-        val current = load(ctx).toMutableMap()
+    /** Fusionne un instantané dans le fichier (écrase le docId) et renvoie le tout. */
+    internal fun putInto(f: File, docId: String, watts: Int, votes: Int): Map<String, PowerCacheEntry> {
+        val current = loadFrom(f).toMutableMap()
         current[docId] = PowerCacheEntry(watts, votes, System.currentTimeMillis())
         val obj = JSONObject()
         for ((k, e) in current) {
             obj.put(k, JSONObject()
                 .put("watts", e.watts).put("votes", e.votes).put("updatedAt", e.updatedAtMillis))
         }
-        runCatching { file(ctx).writeText(obj.toString()) }
+        runCatching { f.writeText(obj.toString()) }
         return current
     }
 }

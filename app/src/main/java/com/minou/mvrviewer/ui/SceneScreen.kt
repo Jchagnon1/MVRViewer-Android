@@ -93,6 +93,11 @@ fun SceneScreen(
     // = la fiche est présentée par-dessus la vue courante.
     var editFixture by remember { mutableStateOf<MvrSceneObject?>(null) }
     val gdtfOverrides = remember { GdtfOverrides() }
+    // Projecteurs custom V1 : biblio LOCALE (par appareil, hors projet) + résolveur
+    // central (défs du PROJET ∪ biblio LOCALE, projet prioritaire). L'assignation
+    // fixture→custom voyage via la section PATCH ; les DÉFINITIONS via customFixtures.
+    val customLibrary = remember { CustomFixtureLibrary() }
+    val customResolver = remember { CustomFixtureResolver() }
     // Bibliothèque de puissances (outil de câblage) : cache réactif de la conso
     // par type. Semée du cache disque global, remplie par extraction GDTF +
     // fusion cloud (cf. LaunchedEffect plus bas).
@@ -210,6 +215,11 @@ fun SceneScreen(
         )
     }
 
+    // Libellé d'affichage d'une spec de rendu (audit) : « Standard » si aucune,
+    // sinon le nom du type custom résolu, sinon la spec brute.
+    fun specLabel(spec: String?): String =
+        if (spec.isNullOrBlank()) "Standard" else customResolver.resolveSpec(spec)?.name ?: spec
+
     // Applique une section DISTANTE — partagé par l'instantané d'ouverture ET le
     // flux live (mirroir de applyRemote/applySnapshot iOS, champ par champ).
     suspend fun applySection(p: SectionPayload) {
@@ -296,8 +306,36 @@ fun SceneScreen(
                         com.minou.mvrviewer.sync.DmxCablingCodec.toJsonString(clean))
                 }
             }
+            // Défs de types custom reçues : on FUSIONNE dans la table résoluble
+            // (projet ∪ biblio locale, projet prioritaire) puis on persiste
+            // localement — un projet partagé s'ouvre avec ses types custom.
+            is SectionPayload.CustomFixtures -> {
+                customResolver.mergeProject(p.dto.types)
+                withContext(Dispatchers.IO) {
+                    ProjectStore.saveCustomFixtures(ctx, projectKey,
+                        if (p.dto.types.isEmpty()) null
+                        else com.minou.mvrviewer.sync.CustomFixturesCodec.toJsonString(p.dto))
+                }
+            }
             else -> {} // layerColors/labelSides/orientations : reçus, non appliqués en v1
         }
+    }
+
+    // Collecte les DÉFINITIONS de types custom UTILISÉS dans le projet (ids
+    // référencées par une assignation patch), les rend PROJET (mergeProject),
+    // persiste la section + pousse au cloud. Appelée après une assignation ou une
+    // édition de type, et depuis pushAllLocalState.
+    suspend fun syncCustomFixtures() {
+        val ids = overrides.edits.values.mapNotNull { com.minou.mvrviewer.sync.customFixtureIdOf(it.spec) }.toSet()
+        val types = ids.mapNotNull { customResolver.resolve(it) }
+        customResolver.mergeProject(types)
+        withContext(Dispatchers.IO) {
+            ProjectStore.saveCustomFixtures(ctx, projectKey,
+                if (types.isEmpty()) null
+                else com.minou.mvrviewer.sync.CustomFixturesCodec.toJsonString(
+                    com.minou.mvrviewer.sync.CustomFixturesDTO(types)))
+        }
+        sync?.pushCustomFixtures(com.minou.mvrviewer.sync.CustomFixturesDTO(types))
     }
 
     // Pousse TOUT l'état local courant (au moment du partage) — mirroir de
@@ -321,6 +359,8 @@ fun SceneScreen(
         if (overrides.edits.isNotEmpty()) s.pushPatch(scene, overrides.toPersistedList())
         if (cabling.distributors.isNotEmpty() || cabling.assignments.isNotEmpty()) s.pushPowerCabling(cabling.toDTO())
         if (dmxCabling.distributors.isNotEmpty() || dmxCabling.assignments.isNotEmpty()) s.pushDmxCabling(dmxCabling.toDTO())
+        // Définitions des types custom UTILISÉS dans le projet (si assignation).
+        if (overrides.edits.values.any { it.spec != null }) syncCustomFixtures()
     }
 
     // Rattache le projet cloud à l'ouverture ET à la connexion (réunion par empreinte).
@@ -337,6 +377,7 @@ fun SceneScreen(
             snap.patch?.let { applySection(SectionPayload.Patch(it)) }
             snap.powerCabling?.let { applySection(SectionPayload.PowerCabling(it)) }
             snap.dmxCabling?.let { applySection(SectionPayload.DmxCabling(it)) }
+            snap.customFixtures?.let { applySection(SectionPayload.CustomFixtures(it)) }
         }
     }
 
@@ -360,6 +401,26 @@ fun SceneScreen(
         val json = withContext(Dispatchers.IO) { ProjectStore.loadDmxCabling(ctx, projectKey) } ?: return@LaunchedEffect
         val dto = com.minou.mvrviewer.sync.DmxCablingCodec.fromJsonString(json) ?: return@LaunchedEffect
         dmxCabling.load(dto.sanitized(validFixtureUuids))
+    }
+
+    // ---- Projecteurs custom V1 : biblio locale + section projet ----
+    // 1) Semis de la biblio LOCALE (par appareil, hors projet) + miroir résolveur.
+    LaunchedEffect(Unit) {
+        val list = withContext(Dispatchers.IO) { CustomFixtureLibraryStore.load(ctx) }
+        customLibrary.seed(list)
+        customResolver.setLibrary(list)
+    }
+    // 2) À chaque ÉDITION de la biblio (création/édition/suppression) : re-miroir du
+    //    résolveur + persistance disque locale (semis initial exclu : version == 0).
+    LaunchedEffect(customLibrary.version) {
+        if (customLibrary.version == 0) return@LaunchedEffect
+        customResolver.setLibrary(customLibrary.types.toList())
+        withContext(Dispatchers.IO) { CustomFixtureLibraryStore.save(ctx, customLibrary.types.toList()) }
+    }
+    // 3) Restaure les DÉFINITIONS de types custom du PROJET (fusion résoluble).
+    LaunchedEffect(projectKey) {
+        val json = withContext(Dispatchers.IO) { ProjectStore.loadCustomFixtures(ctx, projectKey) } ?: return@LaunchedEffect
+        com.minou.mvrviewer.sync.CustomFixturesCodec.fromJsonString(json)?.let { customResolver.mergeProject(it.types) }
     }
 
     // Commit d'une modification UTILISATEUR du câblage → persistance locale + push
@@ -415,9 +476,17 @@ fun SceneScreen(
                 if (old.name != new.name) auditEntry(
                     "patch", target, "Nom", old.name ?: "", new.name ?: "",
                     objKey, AuditFieldKey.NAME, old.name ?: "", new.name ?: ""
+                ) else null,
+                // Type de rendu custom (« custom:<id> ») assigné/retiré.
+                if (old.spec != new.spec) auditEntry(
+                    "patch", target, "Type de rendu", specLabel(old.spec), specLabel(new.spec),
+                    objKey, AuditFieldKey.SPEC, old.spec ?: "", new.spec ?: ""
                 ) else null
             )
             s.recordAudit(audits)
+            // Une (dé)assignation de type custom garantit la présence de sa
+            // définition dans la section customFixtures du projet + pousse.
+            if (old.spec != new.spec) scope.launch { syncCustomFixtures() }
         }
     }
 
@@ -577,6 +646,13 @@ fun SceneScreen(
                     if (e.fieldKey == AuditFieldKey.NAME) raw else overrides.effectiveName(f)
                 )
             }
+            // Type de rendu custom : réassigne la spec d'origine (vide = Standard).
+            // Passe par assignSpec → onCommit (persiste + pousse + re-journalise).
+            AuditFieldKey.SPEC -> {
+                val key = e.objectKey ?: return
+                val f = scene.fixtures.firstOrNull { overrides.key(it) == key } ?: return
+                overrides.assignSpec(f, raw.ifBlank { null })
+            }
             AuditFieldKey.GEO_ANCHORS -> {
                 val anchors = AuditCoding.decodeAnchors(raw)
                 calibration.reset(); anchors.forEach { calibration.addAnchor(it) }
@@ -628,6 +704,8 @@ fun SceneScreen(
             // Overrides de patch : sert au NOM effectif des étiquettes 3D, de la
             // recherche et de la fiche de sélection (renommage).
             overrides = overrides,
+            // Projecteurs custom V1 : géométrie 3D résolue via baseGdtfSpec.
+            customResolver = customResolver,
             referencePlan = referencePlan,
             hiddenLayers = hiddenLayers,
             calibration = calibration,
@@ -728,6 +806,9 @@ fun SceneScreen(
             mvrBytes = mvrBytes,
             overrides = overrides,
             power = power,
+            gdtfOverrides = gdtfOverrides,
+            customLibrary = customLibrary,
+            customResolver = customResolver,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )
@@ -744,6 +825,8 @@ fun SceneScreen(
             overrides = gdtfOverrides,
             // Overrides de patch : NOM effectif des projecteurs dans la vue Univers.
             patchOverrides = overrides,
+            // Projecteurs custom V1 : empreinte + noms de canaux du type.
+            customResolver = customResolver,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )
@@ -755,6 +838,8 @@ fun SceneScreen(
             power = power,
             cabling = cabling,
             dmxCabling = dmxCabling,
+            // Projecteurs custom V1 : empreinte DMX + puissance résolues via le type.
+            customResolver = customResolver,
             // Pages « Plans repérés » de l'export PDF : mêmes données que la vue plan
             // (plan de repère DXF, satellite géo-référencé, calques masqués), hissées
             // ici pour survivre aux bascules 3D ↔ plan.
@@ -808,6 +893,9 @@ fun SceneScreen(
         editFixture?.let { f ->
             FixtureDetailSheet(
                 fixture = f, mvrBytes = mvrBytes, overrides = overrides, power = power,
+                scene = scene, gdtfOverrides = gdtfOverrides,
+                customLibrary = customLibrary, customResolver = customResolver,
+                onCustomLibraryChanged = { scope.launch { syncCustomFixtures() } },
                 onDismiss = { editFixture = null }
             )
         }

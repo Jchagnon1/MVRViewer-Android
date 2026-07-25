@@ -240,6 +240,9 @@ fun Scene3DScreen(
     // Overrides de patch — NOM d'AFFICHAGE effectif (renommage) dans les étiquettes
     // 3D, la recherche et la fiche de sélection. Défaut vide = noms bruts du .mvr.
     overrides: PatchOverrides = remember { PatchOverrides() },
+    // Projecteurs custom V1 : la GÉOMÉTRIE d'un projecteur assigné à « custom:<id> »
+    // vient de `baseGdtfSpec` du type (résolu ici). Défaut vide = aucun custom.
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
     hiddenLayers: Set<String> = emptySet(),
     calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
@@ -362,8 +365,10 @@ fun Scene3DScreen(
     // silhouette GDTF (évite la superposition), ni cube de repli.
     val ownGeomFixtures = remember(scene) { fixturesWithOwnGeometry(scene) }
 
-    // Reconstruit quand un modèle GDTF Share est appliqué (version bump).
-    LaunchedEffect(scene, mvrBytes, gdtfOverrides.version) {
+    // Reconstruit quand un modèle GDTF Share est appliqué (version bump) OU quand un
+    // type custom change (customResolver.version) — la géométrie d'un projecteur
+    // custom vient de baseGdtfSpec, qui peut changer.
+    LaunchedEffect(scene, mvrBytes, gdtfOverrides.version, customResolver.version) {
         // Repart d'une scène vide (appliquer un modèle GDTF Share re-déclenche cet
         // effet). ⚠️ On DÉTRUIT les anciens nœuds (removeChildNode NE libère PAS
         // les ressources Filament : VertexBuffer/IndexBuffer/renderable). Sans ça,
@@ -559,7 +564,9 @@ fun Scene3DScreen(
         val fixtures = scene.fixtures
         val bySpec = LinkedHashMap<String, MutableList<Int>>()
         fixtures.forEachIndexed { fi2, f ->
-            val s = f.gdtfSpec?.trim()
+            // Projecteur custom → géométrie de baseGdtfSpec (résolveur) ; sinon la
+            // spec brute. Tout le pipeline d'assemblage (571+) reste INCHANGÉ.
+            val s = effectiveGeometrySpec(f, overrides, customResolver)?.trim()
             // GDTF = REPLI : on ignore les projecteurs qui ont déjà leur géométrie
             // propre (sinon silhouette GDTF superposée au modèle embarqué).
             if (!s.isNullOrEmpty() && fi2 !in ownGeomFixtures) bySpec.getOrPut(s) { mutableListOf() }.add(fi2)

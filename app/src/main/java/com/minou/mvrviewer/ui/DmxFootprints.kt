@@ -34,10 +34,11 @@ internal data class DmxCableFixture(
     val address: String?    // adresse formatée « u.a » (affichage)
 )
 
-/** Base légère (labels + mode + patch) avant résolution des empreintes GDTF. */
+/** Base légère (labels + mode + patch) avant résolution des empreintes GDTF.
+ *  `customChannels` non nul = type custom résolu → empreinte fixée hors GDTF. */
 private data class DmxBaseFx(
     val uuid: String, val label: String, val spec: String?, val mode: String?,
-    val universe: Int?, val address: String?
+    val universe: Int?, val address: String?, val customChannels: Int?
 )
 
 /**
@@ -51,7 +52,8 @@ internal suspend fun resolveDmxFootprints(
     scene: MvrScene,
     mvrBytes: ByteArray,
     overrides: PatchOverrides,
-    gdtfOverrides: GdtfOverrides
+    gdtfOverrides: GdtfOverrides,
+    resolver: CustomFixtureResolver = CustomFixtureResolver()
 ): List<DmxCableFixture> = withContext(Dispatchers.Default) {
     // Base : labels, mode effectif, patch (univers.adresse). Lectures d'état
     // snapshot sûres hors-main (le système de snapshot autorise les lectures
@@ -62,8 +64,10 @@ internal suspend fun resolveDmxFootprints(
         val label = (id?.let { "#$it · " } ?: "") + overrides.effectiveName(f)
         val rawAddr = overrides.effectiveAddress(f)
         val ua = rawAddr?.let { parseUniverseAddress(it) }
+        // Type custom résolu → empreinte du type (canaux), sinon résolution GDTF.
+        val custom = customTypeOf(f, overrides, resolver)
         DmxBaseFx(uuid, label, f.gdtfSpec?.trim(), overrides.effectiveMode(f),
-            ua?.first, ua?.let { "${it.first}.${it.second}" })
+            ua?.first, ua?.let { "${it.first}.${it.second}" }, custom?.let { maxOf(1, it.footprint) })
     }
     // Parse d'un .gdtf par spec distincte (comme la vue Univers DMX / l'onglet DMX).
     val gmap = gdtfOverrides.map.toMap()
@@ -77,11 +81,14 @@ internal suspend fun resolveDmxFootprints(
         if (data != null) modesBySpec[spec] = runCatching { GdtfModes.parse(data) }.getOrDefault(emptyList())
     }
     base.map { b ->
-        val modes = b.spec?.let { modesBySpec[it] }
-        val channels = if (!modes.isNullOrEmpty()) {
-            val mode = modes.firstOrNull { it.name == b.mode } ?: modes.first()
-            maxOf(1, mode.footprint)
-        } else null
+        // Empreinte : type custom prioritaire (canaux réécrits), sinon empreinte GDTF.
+        val channels = b.customChannels ?: run {
+            val modes = b.spec?.let { modesBySpec[it] }
+            if (!modes.isNullOrEmpty()) {
+                val mode = modes.firstOrNull { it.name == b.mode } ?: modes.first()
+                maxOf(1, mode.footprint)
+            } else null
+        }
         DmxCableFixture(b.uuid, b.label, b.spec, b.mode, channels, b.universe, b.address)
     }
 }

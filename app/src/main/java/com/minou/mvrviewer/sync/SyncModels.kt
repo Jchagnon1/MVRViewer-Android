@@ -105,6 +105,8 @@ object AuditFieldKey {
     const val GEO_ANCHORS = "geoAnchors"
     const val REF_PLAN_TRANSFORM = "refPlanTransform"
     const val REF_PLAN_HIDDEN_LAYERS = "refPlanHiddenLayers"
+    // Type de rendu custom assigné à un projecteur (« custom:<id> » ou vide).
+    const val SPEC = "spec"
 }
 
 /** Sections d'état synchronisées indépendamment (LWW par section). */
@@ -117,7 +119,11 @@ enum class ProjectSectionKind(val raw: String) {
     FIXTURE_ORIENTATIONS("fixtureOrientations"),
     GDTF_MAPPINGS("gdtfMappings"),
     POWER_CABLING("powerCabling"),
-    DMX_CABLING("dmxCabling");
+    DMX_CABLING("dmxCabling"),
+    // Projecteurs custom V1 : la LISTE des DÉFINITIONS de types custom utilisés
+    // dans le projet (raw IDENTIQUE iOS/Android). L'assignation fixture→custom,
+    // elle, voyage via la section PATCH (cf. PatchEntryDTO.spec).
+    CUSTOM_FIXTURES("customFixtures");
 
     companion object {
         fun from(raw: String): ProjectSectionKind? = entries.firstOrNull { it.raw == raw }
@@ -160,7 +166,13 @@ data class PatchEntryDTO(
     // Override de NOM d'affichage par instance (clé `name` PARTAGÉE iOS/Android).
     // Optionnel : encodé seulement si non nul (encodeIfPresent côté Swift), donc
     // un projecteur non renommé ne porte pas cette clé.
-    val name: String? = null
+    val name: String? = null,
+    // Override de SPEC de rendu par instance (projecteurs custom V1) : « custom:<id> »
+    // quand un type custom est assigné à CE projecteur, sinon absent. Clé `spec`
+    // PARTAGÉE iOS/Android, optionnelle (encodeIfPresent) → un projecteur non
+    // custom ne porte pas cette clé. C'est le CANAL de l'assignation fixture→custom
+    // (la section per-projecteur déjà synchronisée), pas la section gdtfMappings.
+    val spec: String? = null
 )
 
 data class PatchDTO(val entries: List<PatchEntryDTO> = emptyList())
@@ -222,6 +234,9 @@ sealed class SectionPayload {
     data class DmxCabling(val dto: DmxCablingDTO) : SectionPayload() {
         override val kind get() = ProjectSectionKind.DMX_CABLING
     }
+    data class CustomFixtures(val dto: CustomFixturesDTO) : SectionPayload() {
+        override val kind get() = ProjectSectionKind.CUSTOM_FIXTURES
+    }
 }
 
 /**
@@ -238,7 +253,8 @@ data class ProjectSnapshot(
     var fixtureOrientations: FixtureOrientationsDTO? = null,
     var gdtfMappings: GDTFMappingsDTO? = null,
     var powerCabling: PowerCablingDTO? = null,
-    var dmxCabling: DmxCablingDTO? = null
+    var dmxCabling: DmxCablingDTO? = null,
+    var customFixtures: CustomFixturesDTO? = null
 ) {
     /** Applique un payload dans l'instantané (reconstruction section-par-section). */
     fun apply(p: SectionPayload) {
@@ -252,6 +268,7 @@ data class ProjectSnapshot(
             is SectionPayload.GdtfMappings -> gdtfMappings = p.dto
             is SectionPayload.PowerCabling -> powerCabling = p.dto
             is SectionPayload.DmxCabling -> dmxCabling = p.dto
+            is SectionPayload.CustomFixtures -> customFixtures = p.dto
         }
     }
 }

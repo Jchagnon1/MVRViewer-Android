@@ -73,7 +73,11 @@ object LocalMapper {
                 gdtfModeName = e.modeName ?: f.gdtfMode,
                 // L'override SEUL (pas de repli sur f.name) : un nom d'affichage
                 // n'est poussé que s'il a été explicitement saisi.
-                name = e.name
+                name = e.name,
+                // Idem pour la spec de rendu custom (« custom:<id> ») : override seul,
+                // jamais de repli sur f.gdtfSpec — un projecteur non custom ne porte
+                // pas cette clé.
+                spec = e.spec
             )
         }
         return PatchDTO(entries)
@@ -89,7 +93,8 @@ object LocalMapper {
             fixtureId = e.fixtureId,
             address = e.addresses.firstOrNull(),
             modeName = e.gdtfModeName,
-            name = e.name
+            name = e.name,
+            spec = e.spec
         )
     }
 }

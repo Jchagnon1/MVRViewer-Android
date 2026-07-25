@@ -93,12 +93,14 @@ fun DmxUniverseScreen(
     // Overrides de patch — NOM d'AFFICHAGE effectif (renommage) des projecteurs.
     // Défaut vide = noms bruts du .mvr (aucun changement pour qui ne renomme pas).
     patchOverrides: PatchOverrides = remember { PatchOverrides() },
+    // Projecteurs custom V1 : empreinte + noms de canaux d'un type « custom:<id> ».
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val layerIndex = remember(scene) { LayerColors.index(scene) }
-    val loadState by produceState<List<DmxPatch>?>(null, scene, mvrBytes, overrides.version, patchOverrides.version) {
-        value = withContext(Dispatchers.Default) { buildDmxPatches(scene, mvrBytes, overrides.map.toMap(), patchOverrides) }
+    val loadState by produceState<List<DmxPatch>?>(null, scene, mvrBytes, overrides.version, patchOverrides.version, customResolver.version) {
+        value = withContext(Dispatchers.Default) { buildDmxPatches(scene, mvrBytes, overrides.map.toMap(), patchOverrides, customResolver) }
     }
     val patches = loadState ?: emptyList()
     val loading = loadState == null
@@ -390,7 +392,7 @@ private fun parseUniverseChannel(raw: String): Pair<Int, Int>? {
 
 private fun buildDmxPatches(
     scene: MvrScene, mvrBytes: ByteArray, overrides: Map<String, ByteArray>,
-    patchOverrides: PatchOverrides
+    patchOverrides: PatchOverrides, customResolver: CustomFixtureResolver
 ): List<DmxPatch> {
     val fixtures = scene.fixtures
     // Empreintes GDTF résolues UNE fois par type (override GDTF Share sinon embarqué).
@@ -409,14 +411,22 @@ private fun buildDmxPatches(
         if (addrs.isEmpty()) continue
         var footprint = 1
         var attrs: List<String> = emptyList()
-        val spec = f.gdtfSpec?.trim()
-        val modes = spec?.let { modesBySpec[it] }
-        if (!modes.isNullOrEmpty()) {
-            val mode = modes.firstOrNull { it.name == f.gdtfMode } ?: modes.first()
-            footprint = maxOf(1, mode.footprint)
-            val a = MutableList(footprint) { "" }
-            for (ch in mode.channels) for (off in ch.offsets) if (off in 1..footprint) a[off - 1] = ch.attribute
-            attrs = a
+        // Type custom résolu → empreinte (footprint) + NOMS de canaux du type ;
+        // sinon résolution GDTF classique. Au-delà des canaux nommés, repli "".
+        val custom = customTypeOf(f, patchOverrides, customResolver)
+        if (custom != null) {
+            footprint = maxOf(1, custom.footprint)
+            attrs = List(footprint) { i -> custom.channels.getOrElse(i) { "" } }
+        } else {
+            val spec = f.gdtfSpec?.trim()
+            val modes = spec?.let { modesBySpec[it] }
+            if (!modes.isNullOrEmpty()) {
+                val mode = modes.firstOrNull { it.name == f.gdtfMode } ?: modes.first()
+                footprint = maxOf(1, mode.footprint)
+                val a = MutableList(footprint) { "" }
+                for (ch in mode.channels) for (off in ch.offsets) if (off in 1..footprint) a[off - 1] = ch.attribute
+                attrs = a
+            }
         }
         val key = f.uuid ?: "${f.name}|${f.layerName}"
         // NOM d'AFFICHAGE effectif (renommage) ; l'identité (key) reste l'originale.

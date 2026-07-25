@@ -19,7 +19,10 @@ data class PersistedPatchEdit(
     val address: String?,
     val modeName: String?,
     // Override de NOM d'affichage (renommage) — même transport que le reste du patch.
-    val name: String?
+    val name: String?,
+    // Override de SPEC de rendu (« custom:<id> » d'un type custom assigné) — même
+    // transport que le reste du patch. Optionnel : absent pour un projecteur non custom.
+    val spec: String? = null
 )
 
 private fun projectDir(ctx: Context, key: String): File =
@@ -43,7 +46,8 @@ object PatchStore {
                 fixtureId = o.optStringOrNullP("fixtureId"),
                 address = o.optStringOrNullP("address"),
                 modeName = o.optStringOrNullP("modeName"),
-                name = o.optStringOrNullP("name")
+                name = o.optStringOrNullP("name"),
+                spec = o.optStringOrNullP("spec")
             )
         }
     }
@@ -56,6 +60,7 @@ object PatchStore {
             e.address?.let { o.put("address", it) }
             e.modeName?.let { o.put("modeName", it) }
             e.name?.let { o.put("name", it) }
+            e.spec?.let { o.put("spec", it) }
             arr.put(o)
         }
         runCatching { file(ctx, key).writeText(arr.toString()) }

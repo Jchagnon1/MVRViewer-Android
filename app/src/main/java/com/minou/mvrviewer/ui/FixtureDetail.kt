@@ -43,8 +43,15 @@ import com.minou.mvrviewer.sync.PowerSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Modification de patch d'un projecteur (ID / adresse DMX / mode / nom). */
-data class PatchEdit(val fixtureId: String?, val address: String?, val modeName: String?, val name: String?)
+/**
+ * Modification de patch d'un projecteur (ID / adresse DMX / mode / nom / spec de
+ * rendu). `spec` = override de SPEC (« custom:<id> » d'un type custom assigné à CE
+ * projecteur, cf. projecteurs custom V1), null = aucun override (spec brute du .mvr).
+ */
+data class PatchEdit(
+    val fixtureId: String?, val address: String?, val modeName: String?,
+    val name: String?, val spec: String? = null
+)
 
 /**
  * Une adresse DMX s'écrit « univers.adresse » : QUE des chiffres et UN seul
@@ -124,11 +131,34 @@ class PatchOverrides {
      * reste `mvrInstanceKey`, donc sélection / masquage / patch ne bougent pas.
      */
     fun effectiveName(o: MvrSceneObject): String = edits[key(o)]?.name?.takeIf { it.isNotBlank() } ?: o.name
+    /**
+     * SPEC de rendu EFFECTIVE : l'override « custom:<id> » s'il est présent, sinon
+     * la spec brute du .mvr. C'est le point d'entrée UNIQUE des projecteurs custom :
+     * partout où la résolution GDTF/empreinte lisait `f.gdtfSpec`, on lit désormais
+     * `effectiveSpec(f)` (custom → résolveur ; non-custom → inchangé).
+     */
+    fun effectiveSpec(o: MvrSceneObject): String? = edits[key(o)]?.spec?.takeIf { it.isNotBlank() } ?: o.gdtfSpec
     fun isEdited(o: MvrSceneObject) = edits.containsKey(key(o))
 
     fun set(o: MvrSceneObject, id: String?, address: String?, mode: String?, name: String?) {
-        val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o), effectiveName(o))
-        val new = PatchEdit(id?.ifBlank { null }, address?.ifBlank { null }, mode, name?.ifBlank { null })
+        val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o), effectiveName(o), effectiveSpec(o))
+        // On PRÉSERVE l'override de spec de rendu existant (l'édition ID/adresse/mode/
+        // nom ne doit pas effacer l'assignation d'un type custom).
+        val new = PatchEdit(id?.ifBlank { null }, address?.ifBlank { null }, mode, name?.ifBlank { null }, edits[key(o)]?.spec)
+        edits[key(o)] = new
+        version++
+        onCommit?.invoke(o, old, new)
+    }
+
+    /**
+     * Assigne (ou retire) une SPEC de rendu custom à un projecteur (« custom:<id> »,
+     * ou null pour revenir au GDTF standard). Préserve ID/adresse/mode/nom. Passe par
+     * le MÊME `onCommit` que le reste du patch → persistance patch + push cloud + audit.
+     */
+    fun assignSpec(o: MvrSceneObject, spec: String?) {
+        val cur = edits[key(o)]
+        val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o), effectiveName(o), effectiveSpec(o))
+        val new = PatchEdit(cur?.fixtureId, cur?.address, cur?.modeName, cur?.name, spec?.ifBlank { null })
         edits[key(o)] = new
         version++
         onCommit?.invoke(o, old, new)
@@ -137,12 +167,12 @@ class PatchOverrides {
     /** État persistable (clé → édit) pour PatchStore / mapping cloud. */
     fun toPersistedList(): List<com.minou.mvrviewer.sync.PersistedPatchEdit> =
         edits.map { (k, e) ->
-            com.minou.mvrviewer.sync.PersistedPatchEdit(k, e.fixtureId, e.address, e.modeName, e.name)
+            com.minou.mvrviewer.sync.PersistedPatchEdit(k, e.fixtureId, e.address, e.modeName, e.name, e.spec)
         }
 
     /** Applique des édits (restauration disque OU distant) SANS déclencher onCommit. */
     fun applyPersisted(list: List<com.minou.mvrviewer.sync.PersistedPatchEdit>) {
-        for (e in list) edits[e.key] = PatchEdit(e.fixtureId, e.address, e.modeName, e.name)
+        for (e in list) edits[e.key] = PatchEdit(e.fixtureId, e.address, e.modeName, e.name, e.spec)
         version++
     }
 }
@@ -159,8 +189,21 @@ fun FixtureDetailSheet(
     mvrBytes: ByteArray,
     overrides: PatchOverrides,
     power: PowerLibraryState,
+    // Projecteurs custom V1 : biblio (édition/création de types) + résolveur
+    // (assignation depuis cette fiche) + scène/gdtfOverrides (choix du GDTF de base
+    // et pré-remplissage des canaux depuis son mode). Défauts vides = fiche
+    // standard, aucune régression pour qui n'utilise pas les types custom.
+    scene: com.minou.mvrviewer.mvr.MvrScene? = null,
+    gdtfOverrides: GdtfOverrides = remember { GdtfOverrides() },
+    customLibrary: CustomFixtureLibrary = remember { CustomFixtureLibrary() },
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
+    // Appelé quand la biblio de types custom change (création/édition/suppression) —
+    // SceneScreen y persiste la section customFixtures et la pousse au cloud.
+    onCustomLibraryChanged: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
+    // Type custom résolu de CE projecteur (empreinte/canaux/nom réécrits), ou null.
+    val customType = customTypeOf(fixture, overrides, customResolver)
     val modes by produceState(initialValue = emptyList<DmxMode>(), fixture) {
         value = withContext(Dispatchers.IO) {
             val spec = fixture.gdtfSpec ?: return@withContext emptyList()
@@ -180,6 +223,10 @@ fun FixtureDetailSheet(
     // Nom d'AFFICHAGE éditable (renommage) : initialisé sur le nom effectif. Un
     // override d'affichage, pas d'identité — le keying (mvrInstanceKey) ne change pas.
     var nameText by remember(fixture) { mutableStateOf(overrides.effectiveName(fixture)) }
+    // Projecteurs custom V1 : menu d'assignation + éditeur de type (création/édition).
+    var typeMenu by remember { mutableStateOf(false) }
+    var showEditor by remember { mutableStateOf(false) }
+    var editorInitial by remember(fixture) { mutableStateOf<com.minou.mvrviewer.sync.CustomFixtureTypeDTO?>(null) }
 
     // Puissance extraite du GDTF pour CE type si elle n'est pas déjà en cache
     // (repli robuste : SceneScreen remplit déjà toutes les specs à l'ouverture,
@@ -244,7 +291,47 @@ fun FixtureDetailSheet(
                 )
             }
 
-            // Choix du mode.
+            // ---- Type de rendu (projecteurs custom V1) ----------------------
+            // Assigner un TYPE custom = donner à ce projecteur la spec « custom:<id> »
+            // (portée par la section patch, déjà synchronisée). GÉOMÉTRIE = baseGdtfSpec,
+            // empreinte/canaux = ceux du type. « Standard » revient au GDTF d'origine.
+            Text("Type de rendu", style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+            OutlinedButton(onClick = { typeMenu = true }) {
+                Text(customType?.let { "${it.name}  ·  ${maxOf(1, it.footprint)} canaux (custom)" }
+                    ?: "Standard : ${fixture.gdtfSpec ?: "—"}")
+            }
+            DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
+                DropdownMenuItem(
+                    text = { Text("Standard : ${fixture.gdtfSpec ?: "—"}") },
+                    onClick = { overrides.assignSpec(fixture, null); typeMenu = false }
+                )
+                if (customLibrary.types.isNotEmpty()) HorizontalDivider()
+                customLibrary.types.forEach { t ->
+                    DropdownMenuItem(
+                        text = { Text("${t.name}  ·  ${maxOf(1, t.footprint)} canaux") },
+                        onClick = {
+                            overrides.assignSpec(fixture, com.minou.mvrviewer.sync.customFixtureSpec(t.id))
+                            typeMenu = false
+                        }
+                    )
+                }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("＋ Nouveau type custom…") },
+                    onClick = { editorInitial = null; showEditor = true; typeMenu = false }
+                )
+                customType?.let { ct ->
+                    DropdownMenuItem(
+                        text = { Text("✎ Éditer « ${ct.name} »") },
+                        onClick = { editorInitial = ct; showEditor = true; typeMenu = false }
+                    )
+                }
+            }
+
+            // Choix du mode — MASQUÉ pour un type custom (l'empreinte et les noms de
+            // canaux viennent du type, pas d'un mode GDTF).
+            if (customType == null) {
             Text("Mode", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             OutlinedButton(onClick = { modeMenu = true }, enabled = modes.isNotEmpty()) {
                 Text(
@@ -298,6 +385,31 @@ fun FixtureDetailSheet(
                             if (ranges.size > 10) Text("  +${ranges.size - 10}…",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    }
+                }
+            }
+            } else {
+                // Canaux RÉÉCRITS du type custom (empreinte = footprint du type).
+                Text("Canaux custom (${maxOf(1, customType.footprint)})",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+                HorizontalDivider()
+                val fp = maxOf(1, customType.footprint)
+                LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                    items(fp) { i ->
+                        val nm = customType.channels.getOrElse(i) { "" }.ifBlank { "—" }
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${i + 1}", modifier = Modifier.width(36.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(nm, style = MaterialTheme.typography.bodyMedium)
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }
@@ -397,5 +509,34 @@ fun FixtureDetailSheet(
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
             ) { Text("Enregistrer") }
         }
+    }
+
+    // Éditeur de type custom (création / édition). Nécessite la scène (choix du
+    // GDTF de base + pré-remplissage des canaux depuis son mode).
+    if (showEditor && scene != null) {
+        CustomFixtureEditorSheet(
+            initial = editorInitial,
+            scene = scene,
+            mvrBytes = mvrBytes,
+            gdtfOverrides = gdtfOverrides,
+            defaultBaseSpec = editorInitial?.baseGdtfSpec?.takeIf { it.isNotBlank() } ?: fixture.gdtfSpec,
+            onSave = { t ->
+                customLibrary.upsert(t)
+                // Miroir immédiat dans le résolveur (biblio + projet) → l'assignation
+                // ci-dessous résout tout de suite, sans attendre l'effet de SceneScreen.
+                customResolver.setLibrary(customLibrary.types.toList())
+                customResolver.mergeProject(listOf(t))
+                overrides.assignSpec(fixture, com.minou.mvrviewer.sync.customFixtureSpec(t.id))
+                onCustomLibraryChanged()
+                showEditor = false
+            },
+            onDelete = editorInitial?.let { { id ->
+                customLibrary.remove(id)
+                customResolver.setLibrary(customLibrary.types.toList())
+                onCustomLibraryChanged()
+                showEditor = false
+            } },
+            onDismiss = { showEditor = false }
+        )
     }
 }

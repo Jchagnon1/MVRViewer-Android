@@ -271,6 +271,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     fun pushDmxCabling(dto: DmxCablingDTO) =
         push(SectionPayload.DmxCabling(dto))
 
+    /** Projecteurs custom (liste des DÉFINITIONS de types utilisés dans le projet). */
+    fun pushCustomFixtures(dto: CustomFixturesDTO) =
+        push(SectionPayload.CustomFixtures(dto))
+
     // MARK: - Bibliothèque de puissances (base communautaire GLOBALE)
 
     /**

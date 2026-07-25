@@ -57,6 +57,10 @@ fun PatchListScreen(
     mvrBytes: ByteArray,
     overrides: PatchOverrides,
     power: PowerLibraryState,
+    // Projecteurs custom V1 : biblio + résolveur (assignation depuis la fiche).
+    gdtfOverrides: GdtfOverrides = remember { GdtfOverrides() },
+    customLibrary: CustomFixtureLibrary = remember { CustomFixtureLibrary() },
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -160,7 +164,7 @@ fun PatchListScreen(
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(filtered) { f ->
-                FixtureRow(f, overrides, power, overrides.effectiveId(f)?.trim() in dupIds) { detail = f }
+                FixtureRow(f, overrides, power, customResolver, overrides.effectiveId(f)?.trim() in dupIds) { detail = f }
             }
         }
     }
@@ -168,6 +172,8 @@ fun PatchListScreen(
     detail?.let { f ->
         FixtureDetailSheet(
             fixture = f, mvrBytes = mvrBytes, overrides = overrides, power = power,
+            scene = scene, gdtfOverrides = gdtfOverrides,
+            customLibrary = customLibrary, customResolver = customResolver,
             onDismiss = { detail = null }
         )
     }
@@ -207,6 +213,7 @@ private fun FacetChip(label: String, options: List<String>, selected: Set<String
 @Composable
 private fun FixtureRow(
     f: MvrSceneObject, overrides: PatchOverrides, power: PowerLibraryState,
+    customResolver: CustomFixtureResolver,
     duplicateId: Boolean = false, onClick: () -> Unit
 ) {
     val edited = overrides.isEdited(f)
@@ -225,8 +232,11 @@ private fun FixtureRow(
                 color = if (duplicateId) MaterialTheme.colorScheme.error else Color.Unspecified
             )
         }
-        val spec = f.gdtfSpec ?: "—"
-        val mode = overrides.effectiveMode(f) ?: "—"
+        // Type custom résolu → affiche le NOM du type + « N canaux » à la place du
+        // GDTF/mode (parité iOS). Non-custom : inchangé.
+        val custom = customTypeOf(f, overrides, customResolver)
+        val spec = custom?.name ?: f.gdtfSpec ?: "—"
+        val mode = custom?.let { "${maxOf(1, it.footprint)} canaux" } ?: overrides.effectiveMode(f) ?: "—"
         val addr = overrides.effectiveAddress(f)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "—"
         // Puissance effective à côté du patch (outil de câblage). « ? » = à saisir ;
         // « * » = valeur saisie (bibliothèque) plutôt que GDTF.

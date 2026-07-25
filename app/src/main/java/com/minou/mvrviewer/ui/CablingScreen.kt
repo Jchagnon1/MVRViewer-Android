@@ -109,6 +109,9 @@ fun CablingScreen(
     power: PowerLibraryState,
     cabling: PowerCablingState,
     dmxCabling: DmxCablingState,
+    // Projecteurs custom V1 : empreinte DMX + puissance résolues via le type
+    // (baseGdtfSpec pour la conso, footprint du type pour l'empreinte DMX).
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
     // Pour les pages « Plans repérés » de l'export PDF : mêmes données que la vue
     // plan (plan de repère DXF, satellite, calques masqués). Vides = pages plan
     // sans DXF/satellite (le PDF reste correct).
@@ -126,11 +129,14 @@ fun CablingScreen(
     // le libellé prend le N° effectif s'il existe. Re-clé aussi sur `power.version` :
     // un vote de puissance déposé depuis l'onglet « Puissances » (voir plus bas)
     // doit RECALCULER la conso câblée immédiatement, pas seulement à la réouverture.
-    val fixtures = remember(scene, overrides.version, power.version) {
+    val fixtures = remember(scene, overrides.version, power.version, customResolver.version) {
         scene.fixtures.mapNotNull { f ->
             val uuid = f.uuid ?: return@mapNotNull null
             val id = overrides.effectiveId(f)?.trim()?.ifBlank { null }
-            CableFixture(uuid, (id?.let { "#$it · " } ?: "") + overrides.effectiveName(f), f.gdtfSpec, power.effective(f.gdtfSpec).watts)
+            // Conso résolue via la spec de GÉOMÉTRIE (baseGdtfSpec pour un custom) :
+            // un type custom réutilise la puissance du GDTF de base.
+            val powerSpec = effectiveGeometrySpec(f, overrides, customResolver)
+            CableFixture(uuid, (id?.let { "#$it · " } ?: "") + overrides.effectiveName(f), f.gdtfSpec, power.effective(powerSpec).watts)
         }
     }
     // Conso par projecteur (uuid → W connus), relue quand la biblio change.
@@ -187,7 +193,7 @@ fun CablingScreen(
                     var addressOf: (String) -> String? = { null }
                     var modeOf: (String) -> String? = { null }
                     if (needDmx) {
-                        val resolved = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides)
+                        val resolved = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides, customResolver)
                         val chMap = resolved.associate { it.uuid to it.channels }
                         val uniMap = resolved.associate { it.uuid to it.universe }
                         val addrMap = resolved.associate { it.uuid to it.address }
@@ -297,6 +303,7 @@ fun CablingScreen(
 
         if (tab == 1) {
             DmxCablingPanel(scene, mvrBytes, overrides, gdtfOverrides, dmxCabling,
+                customResolver = customResolver,
                 onSelectOnPlan = onSelectOnPlan,
                 modifier = Modifier.weight(1f).fillMaxWidth())
             return@Column

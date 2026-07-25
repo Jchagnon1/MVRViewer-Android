@@ -38,6 +38,7 @@ object SectionCodec {
             is SectionPayload.GdtfMappings -> encodeGdtfMappings(payload.dto)
             is SectionPayload.PowerCabling -> PowerCablingCodec.toJson(payload.dto)
             is SectionPayload.DmxCabling -> DmxCablingCodec.toJson(payload.dto)
+            is SectionPayload.CustomFixtures -> CustomFixturesCodec.toJson(payload.dto)
         }
         val wrapped = JSONObject().put("_0", inner)
         return JSONObject().put(payload.kind.raw, wrapped).toString()
@@ -58,6 +59,7 @@ object SectionCodec {
             ProjectSectionKind.GDTF_MAPPINGS -> SectionPayload.GdtfMappings(decodeGdtfMappings(inner))
             ProjectSectionKind.POWER_CABLING -> SectionPayload.PowerCabling(PowerCablingCodec.fromJson(inner))
             ProjectSectionKind.DMX_CABLING -> SectionPayload.DmxCabling(DmxCablingCodec.fromJson(inner))
+            ProjectSectionKind.CUSTOM_FIXTURES -> SectionPayload.CustomFixtures(CustomFixturesCodec.fromJson(inner))
         }
     }
 
@@ -86,6 +88,7 @@ object SectionCodec {
             o.put("addresses", JSONArray(e.addresses))
             e.gdtfModeName?.let { o.put("gdtfModeName", it) }
             e.name?.let { o.put("name", it) }
+            e.spec?.let { o.put("spec", it) }
             arr.put(o)
         }
         put("entries", arr)
@@ -146,7 +149,8 @@ object SectionCodec {
                 fixtureId = e.optStringOrNull("fixtureId"),
                 addresses = e.optJSONArray("addresses").toStringList(),
                 gdtfModeName = e.optStringOrNull("gdtfModeName"),
-                name = e.optStringOrNull("name")
+                name = e.optStringOrNull("name"),
+                spec = e.optStringOrNull("spec")
             )
         }
         return PatchDTO(entries)

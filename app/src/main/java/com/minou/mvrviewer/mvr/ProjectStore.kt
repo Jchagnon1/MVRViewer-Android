@@ -249,6 +249,23 @@ object ProjectStore {
     fun loadDmxCabling(ctx: Context, key: String): String? =
         readManifest(ctx, key).optJSONObject("dmxCabling")?.toString()
 
+    // ---- Projecteurs custom (section « customFixtures », V1) ----
+    // Même principe que le câblage : le JSON du DTO de section (sans enveloppe) est
+    // rangé dans le manifeste ; rouvrir le .mvr retrouve les DÉFINITIONS de types
+    // custom utilisés dans le projet, même hors ligne. L'ASSIGNATION fixture→custom,
+    // elle, vit dans patch.json (section PATCH per-projecteur).
+
+    fun saveCustomFixtures(ctx: Context, key: String, json: String?) = synchronized(manifestLock) {
+        val m = readManifest(ctx, key)
+        if (json.isNullOrBlank()) m.remove("customFixtures")
+        else runCatching { m.put("customFixtures", JSONObject(json)) }
+        writeManifest(ctx, key, m)
+    }
+
+    /** JSON du DTO customFixtures persisté (null si jamais enregistré). */
+    fun loadCustomFixtures(ctx: Context, key: String): String? =
+        readManifest(ctx, key).optJSONObject("customFixtures")?.toString()
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
     fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) = synchronized(manifestLock) {

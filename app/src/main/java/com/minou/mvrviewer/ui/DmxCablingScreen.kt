@@ -85,6 +85,8 @@ fun DmxCablingPanel(
     overrides: PatchOverrides,
     gdtfOverrides: GdtfOverrides,
     dmx: DmxCablingState,
+    // Projecteurs custom V1 : empreinte DMX résolue via le type (footprint réécrit).
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
     // AFFECTATION SUR LE PLAN (E2) : bascule la vue plan en mode affectation vers le
     // départ DMX choisi. Voir CablingScreen / PlanScreen.
     onSelectOnPlan: (CablingAssignTarget) -> Unit = {},
@@ -94,9 +96,9 @@ fun DmxCablingPanel(
     // fonction suspend PARTAGÉE avec l'export PDF : une seule source de vérité pour
     // l'empreinte, l'univers et l'adresse. Nul tant que non résolu → loader.
     val resolved by produceState<List<DmxCableFixture>?>(
-        null, scene, overrides.version, mvrBytes, gdtfOverrides.version
+        null, scene, overrides.version, mvrBytes, gdtfOverrides.version, customResolver.version
     ) {
-        value = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides)
+        value = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides, customResolver)
     }
     val fixtures = resolved ?: emptyList()
     val channelsOf: (String) -> Int? = remember(fixtures) {

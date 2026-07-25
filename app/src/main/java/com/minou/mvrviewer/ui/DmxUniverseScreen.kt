@@ -90,12 +90,15 @@ fun DmxUniverseScreen(
     scene: MvrScene,
     mvrBytes: ByteArray,
     overrides: GdtfOverrides,
+    // Overrides de patch — NOM d'AFFICHAGE effectif (renommage) des projecteurs.
+    // Défaut vide = noms bruts du .mvr (aucun changement pour qui ne renomme pas).
+    patchOverrides: PatchOverrides = remember { PatchOverrides() },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val layerIndex = remember(scene) { LayerColors.index(scene) }
-    val loadState by produceState<List<DmxPatch>?>(null, scene, mvrBytes, overrides.version) {
-        value = withContext(Dispatchers.Default) { buildDmxPatches(scene, mvrBytes, overrides.map.toMap()) }
+    val loadState by produceState<List<DmxPatch>?>(null, scene, mvrBytes, overrides.version, patchOverrides.version) {
+        value = withContext(Dispatchers.Default) { buildDmxPatches(scene, mvrBytes, overrides.map.toMap(), patchOverrides) }
     }
     val patches = loadState ?: emptyList()
     val loading = loadState == null
@@ -385,7 +388,10 @@ private fun parseUniverseChannel(raw: String): Pair<Int, Int>? {
     return u to a
 }
 
-private fun buildDmxPatches(scene: MvrScene, mvrBytes: ByteArray, overrides: Map<String, ByteArray>): List<DmxPatch> {
+private fun buildDmxPatches(
+    scene: MvrScene, mvrBytes: ByteArray, overrides: Map<String, ByteArray>,
+    patchOverrides: PatchOverrides
+): List<DmxPatch> {
     val fixtures = scene.fixtures
     // Empreintes GDTF résolues UNE fois par type (override GDTF Share sinon embarqué).
     val modesBySpec = HashMap<String, List<DmxMode>>()
@@ -413,8 +419,10 @@ private fun buildDmxPatches(scene: MvrScene, mvrBytes: ByteArray, overrides: Map
             attrs = a
         }
         val key = f.uuid ?: "${f.name}|${f.layerName}"
+        // NOM d'AFFICHAGE effectif (renommage) ; l'identité (key) reste l'originale.
+        val displayName = patchOverrides.effectiveName(f)
         for ((u, c) in addrs) {
-            out.add(DmxPatch(key, f.fixtureId, f.name, f.layerName, f.gdtfMode, u, c, footprint, attrs))
+            out.add(DmxPatch(key, f.fixtureId, displayName, f.layerName, f.gdtfMode, u, c, footprint, attrs))
         }
     }
     return out

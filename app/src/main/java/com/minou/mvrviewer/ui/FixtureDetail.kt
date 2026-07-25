@@ -43,8 +43,8 @@ import com.minou.mvrviewer.sync.PowerSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Modification de patch d'un projecteur (ID / adresse DMX / mode). */
-data class PatchEdit(val fixtureId: String?, val address: String?, val modeName: String?)
+/** Modification de patch d'un projecteur (ID / adresse DMX / mode / nom). */
+data class PatchEdit(val fixtureId: String?, val address: String?, val modeName: String?, val name: String?)
 
 /**
  * Une adresse DMX s'écrit « univers.adresse » : QUE des chiffres et UN seul
@@ -118,11 +118,17 @@ class PatchOverrides {
     fun effectiveId(o: MvrSceneObject) = edits[key(o)]?.fixtureId ?: o.fixtureId
     fun effectiveAddress(o: MvrSceneObject) = edits[key(o)]?.address ?: o.addresses.firstOrNull()
     fun effectiveMode(o: MvrSceneObject) = edits[key(o)]?.modeName ?: o.gdtfMode
+    /**
+     * Nom d'AFFICHAGE effectif : l'override de nom s'il est non vide, sinon le nom
+     * d'origine du .mvr. Un OVERRIDE D'AFFICHAGE, jamais une identité — la [key]
+     * reste `mvrInstanceKey`, donc sélection / masquage / patch ne bougent pas.
+     */
+    fun effectiveName(o: MvrSceneObject): String = edits[key(o)]?.name?.takeIf { it.isNotBlank() } ?: o.name
     fun isEdited(o: MvrSceneObject) = edits.containsKey(key(o))
 
-    fun set(o: MvrSceneObject, id: String?, address: String?, mode: String?) {
-        val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o))
-        val new = PatchEdit(id?.ifBlank { null }, address?.ifBlank { null }, mode)
+    fun set(o: MvrSceneObject, id: String?, address: String?, mode: String?, name: String?) {
+        val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o), effectiveName(o))
+        val new = PatchEdit(id?.ifBlank { null }, address?.ifBlank { null }, mode, name?.ifBlank { null })
         edits[key(o)] = new
         version++
         onCommit?.invoke(o, old, new)
@@ -131,12 +137,12 @@ class PatchOverrides {
     /** État persistable (clé → édit) pour PatchStore / mapping cloud. */
     fun toPersistedList(): List<com.minou.mvrviewer.sync.PersistedPatchEdit> =
         edits.map { (k, e) ->
-            com.minou.mvrviewer.sync.PersistedPatchEdit(k, e.fixtureId, e.address, e.modeName)
+            com.minou.mvrviewer.sync.PersistedPatchEdit(k, e.fixtureId, e.address, e.modeName, e.name)
         }
 
     /** Applique des édits (restauration disque OU distant) SANS déclencher onCommit. */
     fun applyPersisted(list: List<com.minou.mvrviewer.sync.PersistedPatchEdit>) {
-        for (e in list) edits[e.key] = PatchEdit(e.fixtureId, e.address, e.modeName)
+        for (e in list) edits[e.key] = PatchEdit(e.fixtureId, e.address, e.modeName, e.name)
         version++
     }
 }
@@ -171,6 +177,9 @@ fun FixtureDetailSheet(
     }
     var modeName by remember(fixture) { mutableStateOf(overrides.effectiveMode(fixture)) }
     var modeMenu by remember { mutableStateOf(false) }
+    // Nom d'AFFICHAGE éditable (renommage) : initialisé sur le nom effectif. Un
+    // override d'affichage, pas d'identité — le keying (mvrInstanceKey) ne change pas.
+    var nameText by remember(fixture) { mutableStateOf(overrides.effectiveName(fixture)) }
 
     // Puissance extraite du GDTF pour CE type si elle n'est pas déjà en cache
     // (repli robuste : SceneScreen remplit déjà toutes les specs à l'ouverture,
@@ -199,12 +208,19 @@ fun FixtureDetailSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
-            Text(fixture.name, style = MaterialTheme.typography.headlineSmall)
+            Text(overrides.effectiveName(fixture), style = MaterialTheme.typography.headlineSmall)
             Text(
                 "${fixture.gdtfSpec ?: "—"} · ${fixture.layerName}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            // Nom d'affichage renommable — synchronisé par la MÊME section de patch.
+            OutlinedTextField(
+                value = nameText, onValueChange = { nameText = it },
+                label = { Text("Nom") }, singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -362,7 +378,7 @@ fun FixtureDetailSheet(
             Button(
                 enabled = addrOk && wattsSaveOk,
                 onClick = {
-                    overrides.set(fixture, id, addr, modeName)
+                    overrides.set(fixture, id, addr, modeName, nameText)
                     // Dépose MON vote SAUF s'il est strictement redondant avec un
                     // consensus DÉJÀ établi (même règle qu'iOS `shouldWriteWatts`).
                     // Conséquence : retaper la valeur GDTF puis « Enregistrer »

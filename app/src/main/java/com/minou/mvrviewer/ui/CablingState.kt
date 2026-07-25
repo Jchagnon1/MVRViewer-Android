@@ -114,6 +114,19 @@ class PowerCablingState {
         if (assignments.remove(fixture) != null) commit()
     }
 
+    /**
+     * VIDE un circuit : retire d'un coup TOUTES les affectations de CE circuit
+     * précis (ni les autres circuits, ni les autres distributeurs). Un seul
+     * `commit()` → un seul push cloud + une seule persistance (comme
+     * [removeDistributor]). Sans effet (donc sans commit) si le circuit est déjà vide.
+     */
+    fun clearCircuit(distributor: String, circuit: Int) {
+        val keys = assignments.filterValues { it.distributor == distributor && it.circuit == circuit }.keys.toList()
+        if (keys.isEmpty()) return
+        keys.forEach { assignments.remove(it) }
+        commit()
+    }
+
     fun assignmentOf(fixture: String): CablingAssignment? = assignments[fixture]
 
     // ---- Réglages -----------------------------------------------------------

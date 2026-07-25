@@ -70,7 +70,10 @@ object LocalMapper {
                 mvrUUID = e.key,
                 fixtureId = e.fixtureId ?: f.fixtureId,
                 addresses = e.address?.let { listOf(it) } ?: f.addresses,
-                gdtfModeName = e.modeName ?: f.gdtfMode
+                gdtfModeName = e.modeName ?: f.gdtfMode,
+                // L'override SEUL (pas de repli sur f.name) : un nom d'affichage
+                // n'est poussé que s'il a été explicitement saisi.
+                name = e.name
             )
         }
         return PatchDTO(entries)
@@ -85,7 +88,8 @@ object LocalMapper {
             key = e.mvrUUID,
             fixtureId = e.fixtureId,
             address = e.addresses.firstOrNull(),
-            modeName = e.gdtfModeName
+            modeName = e.gdtfModeName,
+            name = e.name
         )
     }
 }

@@ -59,7 +59,7 @@ internal suspend fun resolveDmxFootprints(
     val base = scene.fixtures.mapNotNull { f ->
         val uuid = f.uuid ?: return@mapNotNull null
         val id = overrides.effectiveId(f)?.trim()?.ifBlank { null }
-        val label = (id?.let { "#$it · " } ?: "") + f.name
+        val label = (id?.let { "#$it · " } ?: "") + overrides.effectiveName(f)
         val rawAddr = overrides.effectiveAddress(f)
         val ua = rawAddr?.let { parseUniverseAddress(it) }
         DmxBaseFx(uuid, label, f.gdtfSpec?.trim(), overrides.effectiveMode(f),

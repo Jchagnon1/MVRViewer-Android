@@ -127,5 +127,18 @@ class DmxCablingState {
         if (assignments.remove(fixture) != null) commit()
     }
 
+    /**
+     * VIDE un départ : retire d'un coup TOUTES les affectations de CE départ
+     * précis (ni les autres départs, ni les autres lignes). Un seul `commit()` →
+     * un seul push cloud + une seule persistance (comme [removeDistributor]).
+     * Sans effet (donc sans commit) si le départ est déjà vide.
+     */
+    fun clearCore(distributor: String, core: Int) {
+        val keys = assignments.filterValues { it.distributor == distributor && it.core == core }.keys.toList()
+        if (keys.isEmpty()) return
+        keys.forEach { assignments.remove(it) }
+        commit()
+    }
+
     fun assignmentOf(fixture: String): DmxCablingAssignment? = assignments[fixture]
 }

@@ -237,6 +237,9 @@ fun Scene3DScreen(
     mvrBytes: ByteArray,
     options: SceneOptions,
     gdtfOverrides: GdtfOverrides,
+    // Overrides de patch — NOM d'AFFICHAGE effectif (renommage) dans les étiquettes
+    // 3D, la recherche et la fiche de sélection. Défaut vide = noms bruts du .mvr.
+    overrides: PatchOverrides = remember { PatchOverrides() },
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
     hiddenLayers: Set<String> = emptySet(),
     calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
@@ -941,7 +944,7 @@ fun Scene3DScreen(
     // seulement quand les champs choisis ou le câblage changent (pas à chaque frame).
     val textMeasurer = rememberTextMeasurer()
     val labelLinesByFixture: List<List<String>> =
-        remember(sceneFixtures, options.labelFields, cabling.version, dmxCabling.version) {
+        remember(sceneFixtures, options.labelFields, cabling.version, dmxCabling.version, overrides.version) {
             val fields = options.labelFields
             if (fields.isEmpty()) List(sceneFixtures.size) { emptyList() }
             else {
@@ -964,7 +967,7 @@ fun Scene3DScreen(
                 val idMat = Mat4()   // transform inutile pour le texte (seul le monde compte)
                 sceneFixtures.map { o ->
                     val pf = PlanFixture(
-                        mvrInstanceKey(o), 0f, 0f, o.fixtureId, o.name, o.gdtfSpec,
+                        mvrInstanceKey(o), 0f, 0f, o.fixtureId, overrides.effectiveName(o), o.gdtfSpec,
                         o.layerName, o.addresses.joinToString(","), o.gdtfMode, idMat
                     )
                     val lines = ArrayList<String>(fields.size)
@@ -1016,7 +1019,7 @@ fun Scene3DScreen(
                 val rank = when {
                     id != null && id.startsWith(q, true) -> 1
                     id != null && id.contains(q, true) -> 2
-                    f.name.contains(q, true) -> 3
+                    overrides.effectiveName(f).contains(q, true) -> 3
                     else -> Int.MAX_VALUE
                 }
                 if (rank < bestRank) { bestRank = rank; best = i }
@@ -1603,7 +1606,7 @@ fun Scene3DScreen(
             if (!measureMode && selected.isNotEmpty()) {
                 val label = if (selected.size == 1 && selected.first() in scene.fixtures.indices) {
                     val f = scene.fixtures[selected.first()]
-                    "N° ${f.fixtureId ?: "?"} · ${f.name}"
+                    "N° ${f.fixtureId ?: "?"} · ${overrides.effectiveName(f)}"
                 } else "${selected.size} projecteurs sélectionnés"
                 Surface(
                     color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp),

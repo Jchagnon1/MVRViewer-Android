@@ -77,11 +77,11 @@ fun PatchListScreen(
         fixtures.flatMap { it.addresses }.mapNotNull { universeOf(it) }.distinct().sortedBy { it.toIntOrNull() ?: 0 }
     }
 
-    val filtered = remember(scene, query, selLayers, selTypes, selModes, selUniverses) {
+    val filtered = remember(scene, query, selLayers, selTypes, selModes, selUniverses, overrides.version) {
         val q = query.trim()
         fixtures.filter { f ->
             (q.isEmpty() ||
-                f.fixtureId?.contains(q, true) == true || f.name.contains(q, true) ||
+                f.fixtureId?.contains(q, true) == true || overrides.effectiveName(f).contains(q, true) ||
                 f.gdtfSpec?.contains(q, true) == true || f.layerName.contains(q, true) ||
                 f.addresses.any { it.contains(q, true) }) &&
             (selLayers.isEmpty() || f.layerName in selLayers) &&
@@ -220,7 +220,7 @@ private fun FixtureRow(
                     tint = MaterialTheme.colorScheme.error, modifier = Modifier.padding(end = 6.dp))
             }
             Text(
-                "$id${f.name}" + if (edited) "  ✎" else "",
+                "$id${overrides.effectiveName(f)}" + if (edited) "  ✎" else "",
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (duplicateId) MaterialTheme.colorScheme.error else Color.Unspecified
             )

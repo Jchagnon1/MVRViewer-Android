@@ -85,6 +85,7 @@ object SectionCodec {
             e.fixtureId?.let { o.put("fixtureId", it) }
             o.put("addresses", JSONArray(e.addresses))
             e.gdtfModeName?.let { o.put("gdtfModeName", it) }
+            e.name?.let { o.put("name", it) }
             arr.put(o)
         }
         put("entries", arr)
@@ -144,7 +145,8 @@ object SectionCodec {
                 mvrUUID = e.optString("mvrUUID", ""),
                 fixtureId = e.optStringOrNull("fixtureId"),
                 addresses = e.optJSONArray("addresses").toStringList(),
-                gdtfModeName = e.optStringOrNull("gdtfModeName")
+                gdtfModeName = e.optStringOrNull("gdtfModeName"),
+                name = e.optStringOrNull("name")
             )
         }
         return PatchDTO(entries)

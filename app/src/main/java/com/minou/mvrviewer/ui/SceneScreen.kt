@@ -411,6 +411,10 @@ fun SceneScreen(
                 if (old.modeName != new.modeName) auditEntry(
                     "patch", target, "Mode", old.modeName ?: "", new.modeName ?: "",
                     objKey, AuditFieldKey.MODE, old.modeName ?: "", new.modeName ?: ""
+                ) else null,
+                if (old.name != new.name) auditEntry(
+                    "patch", target, "Nom", old.name ?: "", new.name ?: "",
+                    objKey, AuditFieldKey.NAME, old.name ?: "", new.name ?: ""
                 ) else null
             )
             s.recordAudit(audits)
@@ -562,14 +566,15 @@ fun SceneScreen(
     fun undoAudit(e: AuditEntry) {
         val raw = e.oldRaw ?: return
         when (e.fieldKey) {
-            AuditFieldKey.FIXTURE_ID, AuditFieldKey.ADDRESS, AuditFieldKey.MODE -> {
+            AuditFieldKey.FIXTURE_ID, AuditFieldKey.ADDRESS, AuditFieldKey.MODE, AuditFieldKey.NAME -> {
                 val key = e.objectKey ?: return
                 val f = scene.fixtures.firstOrNull { overrides.key(it) == key } ?: return
                 overrides.set(
                     f,
                     if (e.fieldKey == AuditFieldKey.FIXTURE_ID) raw else overrides.effectiveId(f),
                     if (e.fieldKey == AuditFieldKey.ADDRESS) raw else overrides.effectiveAddress(f),
-                    if (e.fieldKey == AuditFieldKey.MODE) raw.ifBlank { null } else overrides.effectiveMode(f)
+                    if (e.fieldKey == AuditFieldKey.MODE) raw.ifBlank { null } else overrides.effectiveMode(f),
+                    if (e.fieldKey == AuditFieldKey.NAME) raw else overrides.effectiveName(f)
                 )
             }
             AuditFieldKey.GEO_ANCHORS -> {
@@ -620,6 +625,9 @@ fun SceneScreen(
             mvrBytes = mvrBytes,
             options = options,
             gdtfOverrides = gdtfOverrides,
+            // Overrides de patch : sert au NOM effectif des étiquettes 3D, de la
+            // recherche et de la fiche de sélection (renommage).
+            overrides = overrides,
             referencePlan = referencePlan,
             hiddenLayers = hiddenLayers,
             calibration = calibration,
@@ -690,6 +698,9 @@ fun SceneScreen(
             // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à distance.
             onTransformChanged = { t -> commitTransform(t) },
             gdtfOverrides = gdtfOverrides,
+            // Overrides de patch : NOM effectif des étiquettes 2D, de la recherche
+            // plan et de la fiche de sélection (renommage).
+            overrides = overrides,
             // Câblage (phase 4) : coloration du plan par distributeur + champs
             // d'étiquette Socapex / Ligne DMX. Objets déjà hissés ici (L87/L90).
             cabling = cabling,
@@ -731,6 +742,8 @@ fun SceneScreen(
             scene = scene,
             mvrBytes = mvrBytes,
             overrides = gdtfOverrides,
+            // Overrides de patch : NOM effectif des projecteurs dans la vue Univers.
+            patchOverrides = overrides,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

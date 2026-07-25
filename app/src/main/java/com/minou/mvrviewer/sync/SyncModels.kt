@@ -101,6 +101,7 @@ object AuditFieldKey {
     const val FIXTURE_ID = "fixtureId"
     const val ADDRESS = "address"
     const val MODE = "mode"
+    const val NAME = "name"
     const val GEO_ANCHORS = "geoAnchors"
     const val REF_PLAN_TRANSFORM = "refPlanTransform"
     const val REF_PLAN_HIDDEN_LAYERS = "refPlanHiddenLayers"
@@ -155,7 +156,11 @@ data class PatchEntryDTO(
     val mvrUUID: String,
     val fixtureId: String? = null,
     val addresses: List<String> = emptyList(),
-    val gdtfModeName: String? = null
+    val gdtfModeName: String? = null,
+    // Override de NOM d'affichage par instance (clé `name` PARTAGÉE iOS/Android).
+    // Optionnel : encodé seulement si non nul (encodeIfPresent côté Swift), donc
+    // un projecteur non renommé ne porte pas cette clé.
+    val name: String? = null
 )
 
 data class PatchDTO(val entries: List<PatchEntryDTO> = emptyList())

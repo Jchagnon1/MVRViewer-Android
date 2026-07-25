@@ -130,7 +130,7 @@ fun CablingScreen(
         scene.fixtures.mapNotNull { f ->
             val uuid = f.uuid ?: return@mapNotNull null
             val id = overrides.effectiveId(f)?.trim()?.ifBlank { null }
-            CableFixture(uuid, (id?.let { "#$it · " } ?: "") + f.name, f.gdtfSpec, power.effective(f.gdtfSpec).watts)
+            CableFixture(uuid, (id?.let { "#$it · " } ?: "") + overrides.effectiveName(f), f.gdtfSpec, power.effective(f.gdtfSpec).watts)
         }
     }
     // Conso par projecteur (uuid → W connus), relue quand la biblio change.
@@ -201,7 +201,7 @@ fun CablingScreen(
                     var socaView: PlanViewCapture? = null
                     var dmxView: PlanViewCapture? = null
                     if (needPlans) {
-                        val data = planData(scene)
+                        val data = planData(scene, overrides)
                         val coloring = buildCablingColoring(data, cablingDto, dmxDto)
                         planSrc = PlanExportSource(
                             data = data,
@@ -501,6 +501,10 @@ private fun CircuitRow(
 ) {
     val load = PowerCablingCalc.circuitLoad(dist, circuit, cabling.assignments.values.toList(), settings, wattsOf)
     val over = load.overloaded
+    // Affectations de CE circuit (réutilisées pour les chips ET le bouton « Vider »).
+    val fx = cabling.assignments.values.filter { it.distributor == dist.id && it.circuit == circuit }
+    // Confirmation « Vider le circuit ? » locale à la ligne (n'affecte que ce circuit).
+    var confirmClear by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -529,9 +533,17 @@ private fun CircuitRow(
             }) {
                 Icon(Icons.Filled.Map, contentDescription = "Sélectionner sur le plan")
             }
+            // VIDER LE CIRCUIT : retire toutes les affectations de CE circuit (pas
+            // les autres). Une ligne PC16 (SOLO) n'ayant qu'un circuit, le même
+            // bouton la vide entièrement. Masqué si le circuit est déjà vide.
+            if (fx.isNotEmpty()) {
+                IconButton(onClick = { confirmClear = true }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Vider le circuit",
+                        tint = MaterialTheme.colorScheme.error)
+                }
+            }
         }
         // Projecteurs affectés à ce circuit (chips à retirer d'un tap).
-        val fx = cabling.assignments.values.filter { it.distributor == dist.id && it.circuit == circuit }
         if (fx.isEmpty()) {
             Text("  — aucun projecteur", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -553,6 +565,23 @@ private fun CircuitRow(
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            confirmButton = {
+                TextButton(onClick = { cabling.clearCircuit(dist.id, circuit); confirmClear = false }) {
+                    Text("Vider")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Annuler") } },
+            title = { Text("Vider le circuit ?") },
+            text = {
+                Text("Retirer les ${fx.size} projecteur(s) du circuit $circuit de « ${dist.name} » ? " +
+                    "Les autres circuits ne sont pas touchés.")
+            }
+        )
     }
 }
 

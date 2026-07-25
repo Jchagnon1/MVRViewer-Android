@@ -269,6 +269,10 @@ private fun DmxCoreRow(
     val load = DmxCablingCalc.coreLoad(dist, core, dmx.assignments.values.toList(), channelsOf, universeOf)
     // Libellé du départ : « Départ k » pour une multipaire, « Ligne » pour une simple.
     val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) "Paire $core" else "Ligne"
+    // Affectations de CE départ (réutilisées pour les chips ET le bouton « Vider »).
+    val fx = dmx.assignments.values.filter { it.distributor == dist.id && it.core == core }
+    // Confirmation « Vider le départ ? » locale à la ligne (n'affecte que ce départ).
+    var confirmClear by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(coreLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
@@ -295,6 +299,14 @@ private fun DmxCoreRow(
             }) {
                 Icon(Icons.Filled.Map, contentDescription = "Sélectionner sur le plan")
             }
+            // VIDER LE DÉPART : retire toutes les affectations de CE départ (pas les
+            // autres). Masqué si le départ est déjà vide.
+            if (fx.isNotEmpty()) {
+                IconButton(onClick = { confirmClear = true }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Vider le départ",
+                        tint = MaterialTheme.colorScheme.error)
+                }
+            }
         }
         // Alertes DISCRÈTES (sans blocage) : dépassement de 512, univers mélangés.
         if (load.over512) {
@@ -305,7 +317,6 @@ private fun DmxCoreRow(
             Text("⚠ univers de patch mélangés : ${load.universes.joinToString(", ")}",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
         }
-        val fx = dmx.assignments.values.filter { it.distributor == dist.id && it.core == core }
         if (fx.isEmpty()) {
             Text("  — aucun projecteur", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -326,6 +337,24 @@ private fun DmxCoreRow(
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        val departLabel = if (dist.kind == DmxDistributorKind.MULTI) "la paire $core" else "la ligne"
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            confirmButton = {
+                TextButton(onClick = { dmx.clearCore(dist.id, core); confirmClear = false }) {
+                    Text("Vider")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Annuler") } },
+            title = { Text("Vider le départ ?") },
+            text = {
+                Text("Retirer les ${fx.size} projecteur(s) de $departLabel de « ${dist.name} » ? " +
+                    "Les autres départs ne sont pas touchés.")
+            }
+        )
     }
 }
 

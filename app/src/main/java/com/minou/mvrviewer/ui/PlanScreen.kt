@@ -134,6 +134,12 @@ fun PlanScreen(
     onSetSoloElements: (Set<String>) -> Unit = {},
     gdtfOverrides: GdtfOverrides? = null,
     /**
+     * Overrides de patch — sert au NOM d'AFFICHAGE effectif (renommage) : étiquettes
+     * 2D (champ NAME via PlanFixture.name), recherche par nom et fiche de sélection.
+     * Défaut vide = noms bruts du .mvr (aucun changement pour qui ne renomme pas).
+     */
+    overrides: PatchOverrides = remember { PatchOverrides() },
+    /**
      * États de câblage (phase 4) : servent la COLORATION du plan par distributeur
      * et les champs d'étiquette SOCAPEX / DMX_LINE. Réactifs via `.version`. Vides
      * par défaut (aucun câblage → mode Calque seul, sélecteur masqué).
@@ -172,7 +178,9 @@ fun PlanScreen(
     // qui affecte/retire un projecteur déclenche un retour court, différencié.
     val hapticView = androidx.compose.ui.platform.LocalView.current
     val layerIndex = remember(scene) { LayerColors.index(scene) }
-    val data = remember(scene) { planData(scene) }
+    // Re-clé sur `overrides.version` : PlanFixture.name porte le NOM EFFECTIF, donc
+    // un renommage doit reconstruire `data` (étiquettes/recherche/fiche à jour).
+    val data = remember(scene, overrides.version) { planData(scene, overrides) }
     // N12 — appui long → fiche d'édition patch : la PlanFixture ne porte qu'une clé
     // d'instance (mvrInstanceKey) ; on retrouve l'objet MVR réel par cette clé
     // (même identité que le masquage/patch partout ailleurs).
@@ -2962,8 +2970,12 @@ internal class PlanData(
     val cx: Float, val cy: Float, val spanX: Float, val spanY: Float
 )
 
-/** Projette la scène en plan (top : x, −y en mm) — projecteurs + décor. */
-internal fun planData(scene: MvrScene): PlanData {
+/**
+ * Projette la scène en plan (top : x, −y en mm) — projecteurs + décor.
+ * `overrides` fournit le NOM D'AFFICHAGE EFFECTIF (renommage) porté par
+ * `PlanFixture.name` ; défaut vide = nom brut du .mvr.
+ */
+internal fun planData(scene: MvrScene, overrides: PatchOverrides = PatchOverrides()): PlanData {
     val fixtures = ArrayList<PlanFixture>()
     val structure = ArrayList<Pair<Float, Float>>()
     // Identité (même index que `structure`) : le repli « un point par objet »
@@ -2981,7 +2993,7 @@ internal fun planData(scene: MvrScene): PlanData {
         val px = t[0]; val py = -t[1]
         if (o.isFixture) {
             fixtures.add(
-                PlanFixture(mvrInstanceKey(o), px, py, o.fixtureId, o.name, o.gdtfSpec, o.layerName,
+                PlanFixture(mvrInstanceKey(o), px, py, o.fixtureId, overrides.effectiveName(o), o.gdtfSpec, o.layerName,
                     o.addresses.joinToString(","), o.gdtfMode, drMat(o.transform.m))
             )
             extend(px, py)

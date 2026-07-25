@@ -17,7 +17,9 @@ data class PersistedPatchEdit(
     val key: String,
     val fixtureId: String?,
     val address: String?,
-    val modeName: String?
+    val modeName: String?,
+    // Override de NOM d'affichage (renommage) — même transport que le reste du patch.
+    val name: String?
 )
 
 private fun projectDir(ctx: Context, key: String): File =
@@ -40,7 +42,8 @@ object PatchStore {
                 key = o.optString("key"),
                 fixtureId = o.optStringOrNullP("fixtureId"),
                 address = o.optStringOrNullP("address"),
-                modeName = o.optStringOrNullP("modeName")
+                modeName = o.optStringOrNullP("modeName"),
+                name = o.optStringOrNullP("name")
             )
         }
     }
@@ -52,6 +55,7 @@ object PatchStore {
             e.fixtureId?.let { o.put("fixtureId", it) }
             e.address?.let { o.put("address", it) }
             e.modeName?.let { o.put("modeName", it) }
+            e.name?.let { o.put("name", it) }
             arr.put(o)
         }
         runCatching { file(ctx, key).writeText(arr.toString()) }

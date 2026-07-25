@@ -168,6 +168,9 @@ fun PlanScreen(
     modifier: Modifier = Modifier
 ) {
     val ctxPlan = androidx.compose.ui.platform.LocalContext.current
+    // Vue hôte pour le RETOUR HAPTIQUE du mode affectation câblage (E2) : chaque tap
+    // qui affecte/retire un projecteur déclenche un retour court, différencié.
+    val hapticView = androidx.compose.ui.platform.LocalView.current
     val layerIndex = remember(scene) { LayerColors.index(scene) }
     val data = remember(scene) { planData(scene) }
     // N12 — appui long → fiche d'édition patch : la PlanFixture ne porte qu'une clé
@@ -506,6 +509,51 @@ fun PlanScreen(
     // et son bouton « Terminé ». Le tap/rectangle AFFECTE au lieu de sélectionner.
     val assignMode = assignTarget != null
 
+    // ---- MARQUAGE E2 (mode affectation) : projecteurs affectés à la CIBLE --------
+    // Retour VISUEL + compteur du bandeau. RÉACTIF (lit cabling/dmxCabling.version) :
+    // l'anneau, le libellé et le compteur se mettent à jour IMMÉDIATEMENT à chaque
+    // affectation/retrait, et NE concernent QUE la cible courante (pas les autres
+    // circuits/départs). Table clé→PlanFixture pour retrouver la position à l'écran.
+    val fixtureByPlanKey = remember(data) { data.fixtures.associateBy { it.key } }
+    val assignedToTarget: Set<String> = run {
+        val t = assignTarget
+        when (t?.kind) {
+            CablingAssignTarget.Kind.SOCA -> {
+                cabling.version.let { }
+                cabling.assignments.values.asSequence()
+                    .filter { it.distributor == t.distributorId && it.circuit == t.index }
+                    .mapTo(HashSet()) { it.fixture }
+            }
+            CablingAssignTarget.Kind.DMX -> {
+                dmxCabling.version.let { }
+                dmxCabling.assignments.values.asSequence()
+                    .filter { it.distributor == t.distributorId && it.core == t.index }
+                    .mapTo(HashSet()) { it.fixture }
+            }
+            null -> emptySet()
+        }
+    }
+    // Couleur (colorArgb) du distributeur ciblé — teinte de l'anneau et de la pastille
+    // de libellé. Réactif au renommage/recoloration (lit .distributors).
+    val assignTargetColor: Color? = run {
+        val t = assignTarget ?: return@run null
+        when (t.kind) {
+            CablingAssignTarget.Kind.SOCA ->
+                cabling.distributors.firstOrNull { it.id == t.distributorId }?.colorArgb
+            CablingAssignTarget.Kind.DMX ->
+                dmxCabling.distributors.firstOrNull { it.id == t.distributorId }?.colorArgb
+        }?.let { Color(it) }
+    }
+    // Libellé de circuit près du projecteur affecté : « C<index> » / « D<index> »
+    // (même convention « lettre + index » que le bandeau).
+    val assignIndexTag: String = run {
+        val t = assignTarget ?: return@run ""
+        when (t.kind) {
+            CablingAssignTarget.Kind.SOCA -> "C${t.index}"
+            CablingAssignTarget.Kind.DMX -> "D${t.index}"
+        }
+    }
+
     // ---- Mesure entre deux points ----
     // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
     // cote ne doit pas changer quand on déplace ou zoome le plan entre les deux
@@ -671,20 +719,24 @@ fun PlanScreen(
     // le retour visuel immédiat. On NE touche PAS à `selected` (indépendant du câblage).
     fun toggleAssign(fx: String) {
         val t = assignTarget ?: return
-        when (t.kind) {
+        val removed: Boolean = when (t.kind) {
             CablingAssignTarget.Kind.SOCA -> {
                 val cur = cabling.assignmentOf(fx)
-                if (cur != null && cur.distributor == t.distributorId && cur.circuit == t.index)
-                    cabling.unassign(fx)
-                else cabling.assign(setOf(fx), t.distributorId, t.index)
+                if (cur != null && cur.distributor == t.distributorId && cur.circuit == t.index) {
+                    cabling.unassign(fx); true
+                } else { cabling.assign(setOf(fx), t.distributorId, t.index); false }
             }
             CablingAssignTarget.Kind.DMX -> {
                 val cur = dmxCabling.assignmentOf(fx)
-                if (cur != null && cur.distributor == t.distributorId && cur.core == t.index)
-                    dmxCabling.unassign(fx)
-                else dmxCabling.assign(setOf(fx), t.distributorId, t.index)
+                if (cur != null && cur.distributor == t.distributorId && cur.core == t.index) {
+                    dmxCabling.unassign(fx); true
+                } else { dmxCabling.assign(setOf(fx), t.distributorId, t.index); false }
             }
         }
+        // RETOUR HAPTIQUE court, différencié affectation vs retrait. N'est appelée
+        // QUE quand un projecteur est réellement touché (le hit-test a trouvé une
+        // cible) → aucun retour sur un tap dans le vide.
+        assignHaptic(hapticView, assigned = !removed)
     }
 
     /**
@@ -862,11 +914,16 @@ fun PlanScreen(
                                             val s = toScreen(f.px, f.py, canvas.x, canvas.y)
                                             if (s.x in l..r && s.y in t..bo) enclos.add(f.key)
                                         }
-                                        if (enclos.isNotEmpty()) when (tgt.kind) {
-                                            CablingAssignTarget.Kind.SOCA ->
-                                                cabling.assign(enclos, tgt.distributorId, tgt.index)
-                                            CablingAssignTarget.Kind.DMX ->
-                                                dmxCabling.assign(enclos, tgt.distributorId, tgt.index)
+                                        if (enclos.isNotEmpty()) {
+                                            when (tgt.kind) {
+                                                CablingAssignTarget.Kind.SOCA ->
+                                                    cabling.assign(enclos, tgt.distributorId, tgt.index)
+                                                CablingAssignTarget.Kind.DMX ->
+                                                    dmxCabling.assign(enclos, tgt.distributorId, tgt.index)
+                                            }
+                                            // Rectangle en mode affectation : UN seul retour
+                                            // haptique à la fin (pas un par projecteur).
+                                            assignHaptic(hapticView, assigned = true)
                                         }
                                     } else if (maskMode) {
                                         // Le cadre MASQUE tout ce qu'il contient
@@ -1439,6 +1496,50 @@ fun PlanScreen(
                 }
             }
 
+            // MARQUAGE E2 — projecteurs affectés à la CIBLE d'affectation courante :
+            // ANNEAU de la couleur du distributeur ciblé + petit LIBELLÉ « C<i> » /
+            // « D<i> » près de chaque projecteur. Dessiné PAR-DESSUS les symboles, et
+            // seulement en mode affectation → aide transitoire, pas dans l'export PDF.
+            // assignedToTarget est réactif : l'affecté apparaît, le retiré disparaît
+            // immédiatement. Rayon 18 > anneau câblage (~10,5) et sélection (13) : les
+            // marquages restent distincts.
+            if (assignMode && assignTargetColor != null && assignedToTarget.isNotEmpty()) {
+                val ringCol = assignTargetColor
+                // Encre du libellé : contraste sur la pastille couleur cible.
+                val tagInk = if (0.299f * ringCol.red + 0.587f * ringCol.green +
+                        0.114f * ringCol.blue > 0.6f) Color.Black else Color.White
+                val tagLayout = if (assignIndexTag.isNotEmpty()) measurer.measure(
+                    assignIndexTag,
+                    style = TextStyle(
+                        fontSize = 11.sp, color = tagInk,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                    )
+                ) else null
+                for (fx in assignedToTarget) {
+                    val f = fixtureByPlanKey[fx] ?: continue
+                    if (fx in effectiveHidden) continue
+                    val p = toScreen(f.px, f.py, w, h)
+                    if (p.x !in -24f..w + 24f || p.y !in -24f..h + 24f) continue
+                    // Liseré de contraste dessous, anneau couleur cible par-dessus.
+                    drawCircle(if (bgDark) Color.Black else Color.White, radius = 18f,
+                        center = p, style = androidx.compose.ui.graphics.drawscope.Stroke(5f))
+                    drawCircle(ringCol, radius = 18f, center = p,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+                    if (tagLayout != null) {
+                        val tw = tagLayout.size.width.toFloat()
+                        val th = tagLayout.size.height.toFloat()
+                        val bx = p.x + 20f; val by = p.y - 24f
+                        drawRoundRect(
+                            ringCol,
+                            topLeft = Offset(bx - 3f, by - 2f),
+                            size = androidx.compose.ui.geometry.Size(tw + 6f, th + 4f),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+                        )
+                        drawText(tagLayout, topLeft = Offset(bx, by))
+                    }
+                }
+            }
+
             // Cadre de sélection en cours (rectangle OU affectation E2).
             val a = rectStart; val b = rectEnd
             if ((rectMode || assignMode) && a != null && b != null) {
@@ -1541,7 +1642,9 @@ fun PlanScreen(
                     modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 2.dp, bottom = 2.dp)
                 ) {
                     Text(
-                        "Affectation → $targetLabel",
+                        // + NOMBRE de projecteurs actuellement affectés à la cible
+                        // (recalculé à chaque affectation/retrait via assignedToTarget).
+                        "Affectation → $targetLabel · ${assignedToTarget.size} projecteur(s)",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
                     )
@@ -2121,6 +2224,24 @@ fun PlanScreen(
             LabelSettingsDialog(options = options, onDismiss = { showLabelSettingsDialog = false })
         }
     }
+}
+
+/**
+ * Retour HAPTIQUE court du mode affectation câblage (E2). Différencie l'AFFECTATION
+ * (retour plus ferme) du RETRAIT (tick plus léger), à l'image d'iOS (.medium vs
+ * .light). Utilise les constantes système (aucune permission VIBRATE requise).
+ * CONFIRM n'existe qu'à partir d'API 30 (minSdk 28) → repli sur LONG_PRESS ;
+ * CONTEXT_CLICK (retrait) est disponible dès l'API 23.
+ */
+private fun assignHaptic(view: android.view.View, assigned: Boolean) {
+    val constant = if (assigned) {
+        if (android.os.Build.VERSION.SDK_INT >= 30)
+            android.view.HapticFeedbackConstants.CONFIRM
+        else android.view.HapticFeedbackConstants.LONG_PRESS
+    } else {
+        android.view.HapticFeedbackConstants.CONTEXT_CLICK
+    }
+    view.performHapticFeedback(constant)
 }
 
 /**

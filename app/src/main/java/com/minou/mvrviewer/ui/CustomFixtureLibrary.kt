@@ -66,6 +66,22 @@ class CustomFixtureLibrary {
         if (types.removeAll { it.id == id }) version++
     }
 
+    /**
+     * Duplique un type (parité iOS `CustomFixtureLibraryStore.duplicate`) : NOUVEL
+     * id, nom suffixé « (copie) », mêmes GDTF de base / canaux / empreinte. Renvoie
+     * la copie (ou null si l'id source est introuvable) — mutation utilisateur.
+     */
+    fun duplicate(id: String): CustomFixtureTypeDTO? {
+        val src = types.firstOrNull { it.id == id } ?: return null
+        val copy = src.copy(
+            id = java.util.UUID.randomUUID().toString(),
+            name = src.name + " (copie)"
+        )
+        types.add(copy)
+        version++
+        return copy
+    }
+
     fun get(id: String): CustomFixtureTypeDTO? = types.firstOrNull { it.id == id }
 }
 

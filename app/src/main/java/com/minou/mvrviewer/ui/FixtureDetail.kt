@@ -326,6 +326,20 @@ fun FixtureDetailSheet(
                         text = { Text("✎ Éditer « ${ct.name} »") },
                         onClick = { editorInitial = ct; showEditor = true; typeMenu = false }
                     )
+                    // Dupliquer (parité iOS) : nouvel id + nom « (copie) », puis on
+                    // assigne la copie à ce projecteur (miroir immédiat du résolveur).
+                    DropdownMenuItem(
+                        text = { Text("⧉ Dupliquer « ${ct.name} »") },
+                        onClick = {
+                            typeMenu = false
+                            customLibrary.duplicate(ct.id)?.let { copy ->
+                                customResolver.setLibrary(customLibrary.types.toList())
+                                customResolver.mergeProject(listOf(copy))
+                                overrides.assignSpec(fixture, com.minou.mvrviewer.sync.customFixtureSpec(copy.id))
+                                onCustomLibraryChanged()
+                            }
+                        }
+                    )
                 }
             }
 

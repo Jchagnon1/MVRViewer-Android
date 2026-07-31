@@ -97,6 +97,53 @@ class RasterPlanTest {
         assertEquals(-3000f, c[6], 1e-2f); assertEquals(-1500f, c[7], 1e-2f)  // SO
     }
 
+    // ---- ROUTAGE DU FORMAT (R5) ----------------------------------------------
+
+    private val dxfHead = "  0\r\nSECTION".toByteArray()
+    private fun fmt(head: ByteArray = ByteArray(0), mime: String? = null, name: String? = null) =
+        RasterPlanLoader.formatFor(head, mime, name)
+
+    @Test fun dxfNestJamaisDetourneVersLeDecodeurDImage() {
+        // `image/vnd.dxf` est le type MIME ENREGISTRÉ du DXF : il commence par
+        // « image/ » et les fournisseurs de documents le renvoient tel quel. Sans
+        // exclusion, la règle générique l'enverrait à BitmapFactory → « illisible ».
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "image/vnd.dxf", "plan.dxf"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "image/vnd.dxf", null))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "IMAGE/VND.DXF; charset=utf-8", null))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "application/dxf", null))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "drawing/x-dxf", null))
+        // Extension .dxf sous un MIME générique « image/* » ou « tout type ».
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "image/jpeg", "plan.dxf"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "application/octet-stream", "plan.dxf"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, null, "plan.DXF"))
+    }
+
+    @Test fun imagesEtPdfRestentRoutesCommeAvant() {
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        val jpg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte())
+        val pdf = "%PDF-1.7".toByteArray()
+        assertEquals(RasterPlanLoader.Format.PNG, fmt(png, null, null))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(jpg, null, null))
+        assertEquals(RasterPlanLoader.Format.PDF, fmt(pdf, null, null))
+        // Sans octets de tête exploitables : MIME puis extension.
+        assertEquals(RasterPlanLoader.Format.PNG, fmt(mime = "image/png"))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(mime = "image/heic"))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(mime = "image/webp"))
+        assertEquals(RasterPlanLoader.Format.PDF, fmt(mime = "application/pdf"))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(name = "plan.JPG"))
+        assertEquals(RasterPlanLoader.Format.PDF, fmt(name = "plan.pdf"))
+        // Inconnu → parseur DXF (comportement historique).
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(name = "plan.bin"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt())
+    }
+
+    @Test fun lesOctetsDeTetePrimentSurLeNom() {
+        // Une vraie image mal nommée reste une image : la signature gagne, comme
+        // avant — l'exclusion DXF ne s'applique qu'à défaut de signature connue.
+        val jpg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte())
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(jpg, "image/vnd.dxf", "photo.dxf"))
+    }
+
     @Test fun rotationDeQuatreVingtDixDegres() {
         // Rotation pure : le coin NO part sur la droite, sans déformation
         // (les 4 côtés gardent leurs longueurs 4000 × 2000).

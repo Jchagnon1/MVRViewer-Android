@@ -82,6 +82,19 @@ object RasterPlanLoader {
     }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/')
 
     /**
+     * Types MIME sous lesquels un VRAI DXF est enregistré. Le piège est
+     * `image/vnd.dxf` : c'est le type officiellement enregistré du DXF (IANA), il
+     * commence par « image/ » et les fournisseurs de documents le renvoient tel
+     * quel. Sans cette liste, la règle générique des types « image/… » enverrait
+     * un dessin vectoriel à `BitmapFactory`, qui échoue — plan « illisible ».
+     */
+    private val DXF_MIMES = setOf(
+        "image/vnd.dxf", "image/x-dxf", "image/dxf",
+        "application/dxf", "application/x-dxf", "application/vnd.dxf",
+        "drawing/x-dxf", "drawing/dxf"
+    )
+
+    /**
      * Type du document : octets de tête d'abord (seule source fiable), MIME puis
      * extension en appoint. Tout ce qui n'est ni image ni PDF part au parseur DXF
      * — c'est le comportement historique, donc l'import DXF est inchangé.
@@ -99,6 +112,18 @@ object RasterPlanLoader {
                 b.copyOf(n)
             }
         }.getOrNull() ?: ByteArray(0)
+        val mime = runCatching { cr.getType(uri) }.getOrNull()
+        return formatFor(head, mime, name)
+    }
+
+    /**
+     * Décision de format, PURE (donc testable en JVM) : octets de tête, puis
+     * exclusion explicite du DXF, puis MIME, puis extension.
+     *
+     * R5 — un fichier d'extension `.dxf` ou de MIME DXF part TOUJOURS au parseur
+     * DXF, avant même d'examiner la règle générique des types « image/… ».
+     */
+    internal fun formatFor(head: ByteArray, mime: String?, name: String?): Format {
         if (head.size >= 4) {
             val b0 = head[0].toInt() and 0xFF
             val b1 = head[1].toInt() and 0xFF
@@ -108,13 +133,16 @@ object RasterPlanLoader {
             if (b0 == 0x89 && b1 == 0x50 && b2 == 0x4E && b3 == 0x47) return Format.PNG   // ‰PNG
             if (b0 == 0xFF && b1 == 0xD8 && b2 == 0xFF) return Format.JPEG                // SOI
         }
-        val mime = runCatching { cr.getType(uri) }.getOrNull()?.lowercase()
-        when {
-            mime == "application/pdf" -> return Format.PDF
-            mime == "image/png" -> return Format.PNG
-            mime != null && mime.startsWith("image/") -> return Format.JPEG
-        }
+        // « image/vnd.dxf; charset=… » → on ne garde que le type.
+        val m = mime?.substringBefore(';')?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
         val ext = name?.substringAfterLast('.', "")?.lowercase()
+        // R5 : le DXF d'abord, sinon la règle « image/* » ci-dessous l'avalerait.
+        if (ext == "dxf" || (m != null && m in DXF_MIMES)) return Format.DXF
+        when {
+            m == "application/pdf" -> return Format.PDF
+            m == "image/png" -> return Format.PNG
+            m != null && m.startsWith("image/") -> return Format.JPEG
+        }
         return when (ext) {
             "pdf" -> Format.PDF
             "png" -> Format.PNG

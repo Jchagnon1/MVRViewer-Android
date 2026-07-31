@@ -306,7 +306,8 @@ fun Scene3DScreen(
      * VERSION du placement du plan de repère. La transformée est un objet muté EN
      * PLACE (l'instance du plan ne change pas) : sans ce compteur, un réglage
      * d'homothétie ou de décalage ne se verrait qu'en 2D. C'est donc LUI, et pas
-     * l'instance, qui commande la reconstruction du quad matriciel.
+     * l'instance, qui commande la reconstruction du plan de repère en 3D — quad
+     * matriciel ET traits DXF (R7).
      */
     refPlanTransformVersion: Int = 0,
     hiddenLayers: Set<String> = emptySet(),
@@ -858,7 +859,10 @@ fun Scene3DScreen(
     // Plan de repère DXF en 3D : lignes au sol, placées par la transformée du plan
     // (offset/rotation/échelle/hauteur), dans le MÊME repère monde que les
     // projecteurs (le retour en 3D recompose → reflète les derniers réglages).
-    LaunchedEffect(referencePlan, hiddenLayers) {
+    // R7 — la VERSION du placement fait partie de la clé, exactement comme pour le
+    // plan matriciel : la transformée est mutée EN PLACE, sans elle les traits DXF
+    // resteraient figés à l'ancien emplacement tant que l'instance ne change pas.
+    LaunchedEffect(referencePlan, refPlanTransformVersion, hiddenLayers) {
         dxfRoot.childNodes.toList().forEach {
             dxfRoot.removeChildNode(it)
             runCatching { it.destroy() }   // libère VertexBuffer/IndexBuffer (sinon fuite à chaque ré-import)

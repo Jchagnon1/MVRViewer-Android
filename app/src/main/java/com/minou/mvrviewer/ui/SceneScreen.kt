@@ -867,11 +867,15 @@ fun SceneScreen(
                 hiddenLayers = if (layer in hiddenLayers) hiddenLayers - layer else hiddenLayers + layer
             },
             onCalibrationChanged = { calibTick++ },
-            // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à distance.
-            // La VERSION est incrémentée dans tous les cas : c'est elle qui fait
-            // reconstruire le plan matriciel en 3D (R7), la transformée étant un
-            // objet muté EN PLACE que Compose ne peut pas observer.
-            onTransformChanged = { t -> refPlanTransformVersion++; commitTransform(t) },
+            // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à
+            // distance. DÉBOUNCÉ (persistance) — ce n'est donc PAS lui qui
+            // rafraîchit l'affichage.
+            onTransformChanged = { t -> commitTransform(t) },
+            // R7 — rafraîchissement IMMÉDIAT : la version est incrémentée dès la
+            // retouche, sans délai ni condition de projet. C'est elle qui fait
+            // reconstruire le plan de repère en 3D (quad matriciel ET traits DXF),
+            // la transformée étant un objet muté EN PLACE que Compose n'observe pas.
+            onTransformTouched = { refPlanTransformVersion++ },
             gdtfOverrides = gdtfOverrides,
             // Overrides de patch : NOM effectif des étiquettes 2D, de la recherche
             // plan et de la fiche de sélection (renommage).

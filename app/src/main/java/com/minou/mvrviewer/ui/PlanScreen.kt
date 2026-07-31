@@ -110,6 +110,14 @@ fun PlanScreen(
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
     onCalibrationChanged: () -> Unit = {},
     onTransformChanged: (com.minou.mvrviewer.mvr.ReferencePlanTransform) -> Unit = {},
+    /**
+     * R7 — signal IMMÉDIAT « le placement du plan vient de changer », émis à
+     * chaque retouche, sans débounce ni condition de projet. Il sert à faire
+     * repeindre les autres vues (le quad matriciel ET les traits DXF en 3D), la
+     * transformée étant un objet muté en place que Compose n'observe pas.
+     * `onTransformChanged` reste, lui, l'événement DÉBOUNCÉ de persistance/push.
+     */
+    onTransformTouched: () -> Unit = {},
     hiddenLayers: Set<String> = emptySet(),
     onToggleLayer: (String) -> Unit = {},
     /**
@@ -682,6 +690,17 @@ fun PlanScreen(
             wsum += w; lat += f.latitude * w; lon += f.longitude * w
         }
         return if (wsum > 0) lat / wsum to lon / wsum else null
+    }
+
+    // R7 — RAFRAÎCHISSEMENT 3D RÉELLEMENT IMMÉDIAT. La transformée du plan est un
+    // objet muté EN PLACE : seule une VERSION dit aux autres vues qu'il faut
+    // redessiner. Cette notification est donc émise SANS DÉLAI et SANS condition
+    // de projectKey — l'ancien montage ne la déclenchait qu'après le débounce de
+    // persistance (500 ms), et jamais du tout sans projet enregistré.
+    // Le débounce reste, lui, sur l'ÉCRITURE disque + le push cloud plus bas.
+    val rpLive = referencePlan
+    LaunchedEffect(dxfVersion, rpLive) {
+        if (rpLive != null) onTransformTouched()
     }
 
     // Persistance projet : réenregistre le placement du plan DXF (glissé/rotation/

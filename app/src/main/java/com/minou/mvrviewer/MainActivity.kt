@@ -101,14 +101,19 @@ private fun App(
                             vm.openBytes(it, project.name)
                         }
                     }
-                }
+                },
+                // Étapes nommées + pourcentage global du chargement (#4).
+                progress = vm.progress
             )
         is SceneViewModel.UiState.Loaded ->
             SceneScreen(
                 scene = s.scene, fileName = s.fileName, mvrBytes = s.bytes, modifier = modifier,
                 onClose = { sync.detach(); vm.reset() },
                 sync = sync,
-                onReopenBytes = { bytes, name -> vm.openBytes(bytes, name) }
+                onReopenBytes = { bytes, name -> vm.openBytes(bytes, name) },
+                // La suite du chargement (3D, GDTF, plan) continue d'alimenter la
+                // MÊME progression : le pourcentage est global, pas par écran.
+                progress = vm.progress
             )
     }
 }

@@ -53,7 +53,10 @@ fun SceneScreen(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     sync: SyncViewModel? = null,
-    onReopenBytes: (ByteArray, String) -> Unit = { _, _ -> }
+    onReopenBytes: (ByteArray, String) -> Unit = { _, _ -> },
+    // Avancement NOMMÉ du chargement (#4) : la vue 3D poursuit la progression
+    // commencée à l'accueil (lecture/parse) jusqu'à 100 %.
+    progress: LoadProgress? = null
 ) {
     var mode by remember { mutableStateOf(SceneMode.THREE_D) }
     val ctx = LocalContext.current
@@ -731,6 +734,9 @@ fun SceneScreen(
             // N11 — disposition des barres d'outils 3D (persistée globalement).
             toolbarLayout = layout3D,
             onLayoutChange = { layout3D = it },
+            // Étapes nommées + pourcentage global : la construction 3D poursuit la
+            // progression commencée à l'accueil (#4).
+            progress = progress,
             onClose = onClose,
             modifier = modifier
         )

@@ -34,6 +34,13 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = mutableStateOf<UiState>(UiState.Home)
     val state: State<UiState> = _state
 
+    /**
+     * Avancement NOMMÉ du chargement (lot A #4), partagé par l'accueil (lecture
+     * + parse) et la vue 3D (construction de la scène). Porté par le ViewModel :
+     * il survit aux recréations d'activité comme le reste du chargement.
+     */
+    val progress = LoadProgress()
+
     // Fichier en cours (chargé ou en chargement) : rend `open` IDEMPOTENT.
     // Le ViewModel survit aux recréations d'activité (rotation, mode sombre,
     // retour depuis le multitâche) → si la même URI est re-livrée, on NE
@@ -62,12 +69,17 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         _state.value = UiState.Loading(name)
+        progress.restart()
+        progress.report(LoadStep.READ_MVR, 0f)
         loadJob = viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val bytes = getApplication<Application>().contentResolver
                         .openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalStateException("Lecture du fichier impossible.")
+                    // Octets lus : la moitié de l'étape « Lecture du fichier MVR… »
+                    // est faite, le parse du XML de scène est l'autre moitié.
+                    progress.report(LoadStep.READ_MVR, 0.5f)
                     bytes to MvrParser.parse(bytes)
                 }
             }
@@ -75,11 +87,13 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                 onSuccess = { (bytes, scene) ->
                     // Projet ouvert avec succès → mémorisé dans les récents.
                     runCatching { RecentProjects.record(getApplication(), uri.toString(), name, System.currentTimeMillis()) }
+                    progress.report(LoadStep.READ_MVR, 1f)
                     UiState.Loaded(scene, name, bytes)
                 },
                 onFailure = {
                     // URI périmée (permission perdue, fichier déplacé) → retirée des récents.
                     runCatching { RecentProjects.remove(getApplication(), uri.toString()) }
+                    progress.finish()   // plus de chargement en cours
                     UiState.Error(it.message ?: "Erreur inconnue.")
                 }
             )
@@ -95,11 +109,25 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
         loadJob?.cancel()
         currentUri = null
         _state.value = UiState.Loading(name)
+        progress.restart()
+        progress.report(LoadStep.READ_MVR, 0f)
         loadJob = viewModelScope.launch {
-            val result = runCatching { withContext(Dispatchers.IO) { bytes to MvrParser.parse(bytes) } }
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    // Octets déjà en main (projet cloud) : il ne reste que le parse.
+                    progress.report(LoadStep.READ_MVR, 0.5f)
+                    bytes to MvrParser.parse(bytes)
+                }
+            }
             _state.value = result.fold(
-                onSuccess = { (b, scene) -> UiState.Loaded(scene, name, b) },
-                onFailure = { UiState.Error(it.message ?: "Erreur inconnue.") }
+                onSuccess = { (b, scene) ->
+                    progress.report(LoadStep.READ_MVR, 1f)
+                    UiState.Loaded(scene, name, b)
+                },
+                onFailure = {
+                    progress.finish()
+                    UiState.Error(it.message ?: "Erreur inconnue.")
+                }
             )
         }
     }

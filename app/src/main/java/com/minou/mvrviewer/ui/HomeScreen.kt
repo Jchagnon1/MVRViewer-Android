@@ -26,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,7 +53,9 @@ fun HomeScreen(
     onOpen: (Uri) -> Unit,
     modifier: Modifier = Modifier,
     sync: com.minou.mvrviewer.sync.SyncViewModel? = null,
-    onOpenCloudProject: (com.minou.mvrviewer.sync.CloudProject) -> Unit = {}
+    onOpenCloudProject: (com.minou.mvrviewer.sync.CloudProject) -> Unit = {},
+    // Avancement NOMMÉ du chargement (#4). null → ancien indicateur indéterminé.
+    progress: LoadProgress? = null
 ) {
     val ctx = LocalContext.current
     var showAccount by remember { mutableStateOf(false) }
@@ -80,11 +83,28 @@ fun HomeScreen(
 
         when (state) {
             is SceneViewModel.UiState.Loading -> {
-                CircularProgressIndicator()
+                // Barre DÉTERMINÉE + libellé de l'ÉTAPE en cours + pourcentage
+                // GLOBAL (#4). Le nom du fichier passe en 2e ligne discrète.
+                if (progress != null) {
+                    LinearProgressIndicator(
+                        progress = { progress.percent / 100f },
+                        modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()
+                    )
+                    Text(
+                        "${progress.step?.label ?: LoadStep.READ_MVR.label}  ${progress.percent} %",
+                        modifier = Modifier.padding(top = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else {
+                    CircularProgressIndicator()
+                }
                 Text(
-                    "Lecture de ${state.fileName}…",
-                    modifier = Modifier.padding(top = 16.dp),
-                    style = MaterialTheme.typography.bodyMedium
+                    state.fileName,
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             else -> {

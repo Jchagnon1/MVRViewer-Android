@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +41,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -275,6 +277,10 @@ fun Scene3DScreen(
     // barre bas-gauche actuelle → aucun changement pour qui ne personnalise pas.
     toolbarLayout: ToolbarLayout = ToolbarLayout.default3D,
     onLayoutChange: (ToolbarLayout) -> Unit = {},
+    // Avancement NOMMÉ du chargement (#4) : la construction 3D est la SUITE de la
+    // lecture du .mvr commencée à l'accueil (même pourcentage global 0→100 %).
+    // null = pas de progression pilotée (aperçus, tests).
+    progress: LoadProgress? = null,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -368,7 +374,17 @@ fun Scene3DScreen(
     // Reconstruit quand un modèle GDTF Share est appliqué (version bump) OU quand un
     // type custom change (customResolver.version) — la géométrie d'un projecteur
     // custom vient de baseGdtfSpec, qui peut changer.
+    // Passe « plan de repère en 3D » terminée pour le plan COURANT (rien à faire
+    // s'il n'y a pas de plan). Sert UNIQUEMENT à savoir quand le chargement est
+    // réellement fini : la construction 3D et la construction du plan sont deux
+    // effets CONCURRENTS, le 100 % n'est atteint que lorsque les deux ont fini.
+    var planPassDone by remember(referencePlan) { mutableStateOf(referencePlan == null) }
+
     LaunchedEffect(scene, mvrBytes, gdtfOverrides.version, customResolver.version) {
+        // Reconstruction APRÈS un chargement déjà terminé (modèle GDTF appliqué,
+        // type custom modifié) : on repart d'une progression neuve plutôt que de
+        // rester bloqué à 100 %.
+        if (progress != null && !progress.active) progress.restart()
         // Repart d'une scène vide (appliquer un modèle GDTF Share re-déclenche cet
         // effet). ⚠️ On DÉTRUIT les anciens nœuds (removeChildNode NE libère PAS
         // les ressources Filament : VertexBuffer/IndexBuffer/renderable). Sans ça,
@@ -449,6 +465,7 @@ fun Scene3DScreen(
         //    des .3ds, parse + normales), MISE EN CACHE par scène : un retour en
         //    3D après un détour par le plan réutilise tout (plus de re-parse ~30s).
         //    Les .glb sont extraits PAR LOTS plus bas (un show peut en avoir 14 000).
+        progress?.report(LoadStep.GEOMETRY, 0f)
         val holder = Prepared3DCache.get(scene)
         if (!holder.ready) {
             val prep = withContext(Dispatchers.Default) {
@@ -476,10 +493,14 @@ fun Scene3DScreen(
             holder.refs = prep.refs; holder.meshDataByFile = prep.meshDataByFile
             holder.maxDimByFile = prep.maxDimByFile; holder.imageBytes = prep.imageBytes
         }
+        progress?.report(LoadStep.GEOMETRY, 1f)
         val refs = holder.refs!!
         val meshDataByFile = holder.meshDataByFile!!
         val maxDimByFile = holder.maxDimByFile!!
         val imageBytes = holder.imageBytes ?: emptyMap()
+        // Dénominateur d'avancement de l'étape « Construction de la scène… » :
+        // nombre total de références rendables (3ds + glb) à placer.
+        val totalRefs = (refs.tds.size + refs.glb.size).coerceAtLeast(1)
 
         // 2) Thread moteur : budget global de nœuds/triangles partagé 3ds+glb.
         val builtCache = HashMap<String, List<BuiltMesh>>()
@@ -506,7 +527,12 @@ fun Scene3DScreen(
                 nodes++; triangles += bm.triangles
             }
             placed++
-            if (placed % 40 == 0) status = "$placed objets 3D…"
+            if (placed % 40 == 0) {
+                status = "$placed objets 3D…"
+                // MÊME cadence que le statut (tous les 40 objets, jamais par
+                // objet) : l'écriture d'état est en plus filtrée par le % entier.
+                progress?.report(LoadStep.BUILD, placed.toFloat() / totalRefs)
+            }
         }
 
         // 2b) .glb : createInstancedModel (N instances d'un même fichier = 1 seul
@@ -552,6 +578,8 @@ fun Scene3DScreen(
                         nodes += take
                         placed += take
                         status = "$placed objets 3D…"
+                        // Une fois par FICHIER .glb (cadence existante du statut).
+                        progress?.report(LoadStep.BUILD, placed.toFloat() / totalRefs)
                     }
                 }
             }
@@ -572,6 +600,9 @@ fun Scene3DScreen(
             if (!s.isNullOrEmpty() && fi2 !in ownGeomFixtures) bySpec.getOrPut(s) { mutableListOf() }.add(fi2)
         }
         val gdtfDone = HashSet<Int>()
+        // Dénominateur d'avancement de l'étape « Chargement des GDTF… » : nombre de
+        // projecteurs qui attendent une silhouette (tous specs confondus).
+        val gdtfTotal = bySpec.values.sumOf { it.size }.coerceAtLeast(1)
         // Modèle GDTF préparé HORS THREAD MOTEUR : octets + ext + MeshData (déjà
         // normalisés) + dimension brute (pour l'échelle), au lieu de meshes bruts.
         class GdtfModelPrep(val ext: String, val bytes: ByteArray, val meshData: List<MeshData>, val rawMax: Float)
@@ -688,14 +719,25 @@ fun Scene3DScreen(
                             lod.proxies.add(proxy)
                         }
                     }
-                    if (gdtfDone.size % 40 == 0) status = "$placed objets · ${gdtfDone.size} proj. GDTF…"
+                    if (gdtfDone.size % 40 == 0) {
+                        status = "$placed objets · ${gdtfDone.size} proj. GDTF…"
+                        progress?.report(LoadStep.GDTF, gdtfDone.size.toFloat() / gdtfTotal)
+                    }
                     slice()
                 }
+                // Fin d'un spec (un TYPE de projecteur) : avancement fiable même
+                // si un spec ne produit aucune silhouette (repli sans géométrie).
+                progress?.report(LoadStep.GDTF, gdtfDone.size.toFloat() / gdtfTotal)
                 break@sourceLoop  // spec rendu — pas besoin du repli
             }
         }
         flushAdds()   // pousse le dernier lot de nœuds en attente
         gdtfFixtures = gdtfDone
+        progress?.report(LoadStep.GDTF, 1f)
+        // Reste-t-il le plan DXF à préparer ? Si oui, on passe la main à l'étape
+        // « Préparation du plan… » ; le 100 % est posé par l'effet de fin, quand
+        // les DEUX passes (3D + plan) sont terminées.
+        if (referencePlan != null && !planPassDone) progress?.report(LoadStep.PLAN, 0f)
         buildTick++   // scène prête → le solo (s'il est actif) sera ré-appliqué
 
         status = "$placed objets 3D" +
@@ -720,8 +762,8 @@ fun Scene3DScreen(
             dxfRoot.removeChildNode(it)
             runCatching { it.destroy() }   // libère VertexBuffer/IndexBuffer (sinon fuite à chaque ré-import)
         }
-        val rp = referencePlan ?: return@LaunchedEffect
-        if (!rp.transform.visible || rp.plan.isEmpty) return@LaunchedEffect
+        val rp = referencePlan ?: run { planPassDone = true; return@LaunchedEffect }
+        if (!rp.transform.visible || rp.plan.isEmpty) { planPassDone = true; return@LaunchedEffect }
         val cx = center.x; val cy = center.y; val cz = center.z
         // Prep HORS THREAD PRINCIPAL : chaque segment DXF devient un fin QUAD posé
         // à plat au sol (2 triangles, double-face). On rend des TRIANGLES — le
@@ -780,7 +822,7 @@ fun Scene3DScreen(
             vByColor to iByColor
         }
         val (vByColor, iByColor) = prep
-        if (vByColor.isEmpty()) return@LaunchedEffect
+        if (vByColor.isEmpty()) { planPassDone = true; return@LaunchedEffect }
         // Build moteur (thread principal) : une géométrie + un matériau par couleur.
         for ((rgb, verts) in vByColor) {
             val idx = iByColor[rgb] ?: continue
@@ -790,6 +832,14 @@ fun Scene3DScreen(
             val mat = dxfMatByColor.getOrPut(rgb) { materialLoader.createUnlitColorInstance(dxf3DColorInt(rgb)) }
             dxfRoot.addChildNode(GeometryNode(engine, geom, listOf(mat)))
         }
+        planPassDone = true
+    }
+
+    // FIN DU CHARGEMENT (#4) : 100 % seulement quand la scène 3D est construite
+    // (buildTick) ET que la passe du plan de repère a terminé — les deux effets
+    // sont concurrents, l'ordre d'arrivée n'est pas garanti.
+    LaunchedEffect(buildTick, planPassDone) {
+        if (buildTick > 0 && planPassDone) progress?.finish()
     }
 
     // Fond satellite en 3D : un quad texturé posé au sol, aux MÊMES 4 coins
@@ -1280,8 +1330,16 @@ fun Scene3DScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
+                // Pendant le chargement : LIBELLÉ DE L'ÉTAPE en cours + pourcentage
+                // GLOBAL (#4). Une fois terminé, le titre reprend le récapitulatif
+                // habituel (« N objets 3D · M proj. GDTF »).
+                val loading = progress?.takeIf { it.active }
                 Text(
-                    if (status.isBlank()) "Vue 3D" else "3D · $status",
+                    when {
+                        loading != null -> "${loading.step?.label.orEmpty()} ${loading.percent} %"
+                        status.isBlank() -> "Vue 3D"
+                        else -> "3D · $status"
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1
                 )
@@ -1340,6 +1398,14 @@ fun Scene3DScreen(
                 )
             }
         )
+        // Barre DÉTERMINÉE fine, pleine largeur, sous la barre du haut : elle
+        // prolonge visuellement celle de l'accueil (même pourcentage global).
+        progress?.takeIf { it.active }?.let { p ->
+            LinearProgressIndicator(
+                progress = { p.percent / 100f },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         Box(modifier = Modifier.fillMaxSize().background(options.background3D)
             .onGloballyPositioned { scenePos = it.positionInWindow() }) {
             Scene(

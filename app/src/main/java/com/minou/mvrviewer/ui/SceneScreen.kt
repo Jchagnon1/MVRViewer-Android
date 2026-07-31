@@ -133,6 +133,11 @@ fun SceneScreen(
     // pour survivre aux bascules 3D ↔ plan — PlanScreen est détruit à chaque
     // aller-retour, un état local se perdrait à la première visite en 3D.
     var hiddenElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    // LOD d'interaction par calque MVR (#1) : réglage d'AFFICHAGE 3D, persisté
+    // LOCALEMENT avec le projet. Volontairement HORS synchro cloud (la fluidité
+    // dépend de l'appareil) : aucun DTO ni contrat de synchro n'est touché.
+    // Map vide = tous les calques en « Auto » (comportement historique).
+    var layerLod by remember(projectKey) { mutableStateOf<Map<String, LayerLodMode>>(emptyMap()) }
     // Ensemble SOLO (identité d'INSTANCE, comme hiddenElements) : quand il est
     // non vide, la vue plan n'affiche QUE ces éléments — c'est l'inverse exact du
     // masquage. Hissé ici pour la MÊME raison que hiddenElements : PlanScreen est
@@ -160,7 +165,21 @@ fun SceneScreen(
         if (calibration.isCalibrated) options.showSatellite = ProjectStore.loadShowSatellite(ctx, projectKey)
         val hidden = withContext(Dispatchers.IO) { ProjectStore.loadRefPlanHiddenLayers(ctx, projectKey) }
         if (hidden.isNotEmpty()) { hiddenLayers = hidden; lastHiddenSig = hiddenSig(hidden) }
+        // LOD par calque : clé absente = « Auto » partout (projet existant inchangé).
+        val lod = withContext(Dispatchers.IO) { ProjectStore.loadLayerLod(ctx, projectKey) }
+        if (lod.isNotEmpty()) {
+            layerLod = lod.mapValues { (_, v) -> LayerLodMode.fromStored(v) }
+                .filterValues { it != LayerLodMode.AUTO }
+        }
         restored = true
+    }
+    // Sauvegarde LOCALE du réglage LOD par calque : ni audit, ni push cloud —
+    // c'est un réglage d'affichage propre à l'appareil.
+    LaunchedEffect(layerLod) {
+        if (!restored) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            ProjectStore.saveLayerLod(ctx, projectKey, layerLod.mapValues { (_, m) -> m.stored })
+        }
     }
     // Sauvegarde des modèles GDTF appliqués quand ils changent (action utilisateur).
     LaunchedEffect(gdtfOverrides.version) {
@@ -734,6 +753,9 @@ fun SceneScreen(
             // N11 — disposition des barres d'outils 3D (persistée globalement).
             toolbarLayout = layout3D,
             onLayoutChange = { layout3D = it },
+            // LOD d'interaction par calque (persisté localement avec le projet).
+            layerLod = layerLod,
+            onSetLayerLod = { layerLod = it },
             // Étapes nommées + pourcentage global : la construction 3D poursuit la
             // progression commencée à l'accueil (#4).
             progress = progress,

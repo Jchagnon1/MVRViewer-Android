@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
@@ -171,6 +172,11 @@ fun SceneOptionsMenu(
      * (vues sans barres personnalisables).
      */
     onCustomizeToolbar: (() -> Unit)? = null,
+    /**
+     * Panneau « Calques… » de la vue 3D (#1) : réglage du LOD d'interaction par
+     * calque. null → entrée masquée (vues sans panneau de calques).
+     */
+    onShowLayers: (() -> Unit)? = null,
     // Synchro cloud : entrées de menu (au lieu d'un bouton flottant séparé).
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
@@ -233,11 +239,13 @@ fun SceneOptionsMenu(
         // ---- Outils de la vue (N10) : mêmes actions que la barre flottante,
         // accessibles ici. Les bascules gardent le menu ouvert ; les actions le
         // referment. Rendus dans l'ordre fourni par l'écran.
-        if (tools.isNotEmpty() || onCustomizeToolbar != null) {
+        if (tools.isNotEmpty() || onCustomizeToolbar != null || onShowLayers != null) {
             HorizontalDivider()
             Text("Outils", style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+            // Panneau des calques (réglage du LOD d'interaction par calque).
+            onShowLayers?.let { nav("Calques…", Icons.Filled.Layers) { open = false; it() } }
             tools.forEach { t ->
                 when (t) {
                     is MenuTool.Toggle -> toolToggle(t.label, t.icon, t.checked) { t.onToggle() }

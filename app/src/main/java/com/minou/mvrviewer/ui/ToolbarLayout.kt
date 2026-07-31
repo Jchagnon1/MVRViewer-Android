@@ -31,7 +31,7 @@ enum class ToolId {
     // Communs 3D + plan
     RECT, MEASURE, SOLO, CLEAR_SEL, GPS, SATELLITE, LABELS, LAYER_COLORS, BACKGROUND, SEARCH,
     // Spécifiques 3D
-    GPS_MARKER_SIZE, CAM_PRESETS, CAM_RESET, LABEL_SIZE,
+    GPS_MARKER_SIZE, CAM_PRESETS, CAM_RESET, LABEL_SIZE, LAYERS,
     // Navigation / actions dockables (vue 3D) — présentes aussi au menu
     PATCH, UNIVERSE, CABLING, GDTF_SHARE, PLAN_VIEW, ACCOUNT, SHARE_PROJECT, HISTORY,
     // Spécifiques plan
@@ -75,6 +75,7 @@ enum class ToolId {
             CLEAR_SEL -> "clearSelection"
             SEARCH -> "search"
             GPS_MARKER_SIZE -> "gpsMarkerSize"
+            LAYERS -> "layers"
             CAM_PRESETS -> "cameraPresets"
             STRUCTURE -> "structure"
             LEGEND -> "legend"

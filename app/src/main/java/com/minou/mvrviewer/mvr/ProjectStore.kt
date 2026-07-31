@@ -181,6 +181,38 @@ object ProjectStore {
         return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }.toSet()
     }
 
+    // ---- LOD d'interaction par calque MVR (vue 3D) ----
+    // Volontairement HORS synchro cloud, comme les décalages d'étiquettes : c'est
+    // un réglage d'AFFICHAGE propre à l'appareil (la fluidité dépend du matériel),
+    // pas une donnée de show. Aucun DTO de synchro n'est touché.
+    // Format : {"<nom de calque>":"always"|"hideNav"} — « Auto » = clé ABSENTE,
+    // donc un projet existant (sans la clé) s'ouvre en Auto partout.
+
+    fun saveLayerLod(ctx: Context, key: String, modes: Map<String, String>) = synchronized(manifestLock) {
+        val m = readManifest(ctx, key)
+        val kept = modes.filterValues { it.isNotBlank() }
+        if (kept.isEmpty()) m.remove("layerLod")
+        else {
+            val o = JSONObject()
+            for ((layer, mode) in kept) o.put(layer, mode)
+            m.put("layerLod", o)
+        }
+        writeManifest(ctx, key, m)
+    }
+
+    /** (calque → valeur persistée) ; vide si jamais réglé. */
+    fun loadLayerLod(ctx: Context, key: String): Map<String, String> {
+        val o = readManifest(ctx, key).optJSONObject("layerLod") ?: return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        val it = o.keys()
+        while (it.hasNext()) {
+            val k = it.next()
+            val v = o.optString(k)
+            if (v.isNotBlank()) out[k] = v
+        }
+        return out
+    }
+
     // ---- Décalage manuel des étiquettes en vue plan (par projecteur) ----
     // Volontairement HORS synchro cloud : c'est un confort de lecture propre à
     // l'appareil (et au zoom auquel on travaille), pas une donnée de show ;

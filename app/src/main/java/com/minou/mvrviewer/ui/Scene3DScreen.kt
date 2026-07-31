@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Label
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
@@ -182,15 +183,66 @@ private fun srgbToLinear(s: Float): Double {
  * calls sur un gros show → les masquer en nav change tout).
  */
 private class LodState {
-    val nodes = ArrayList<io.github.sceneview.node.Node>()
-    val proxies = ArrayList<io.github.sceneview.node.Node>()
+    // Éléments suivis, AVEC leur calque : la source de vérité, d'où sont dérivées
+    // les listes plates ci-dessous à chaque changement de réglage.
+    val entries = ArrayList<LodItem<io.github.sceneview.node.Node>>()
+    val proxyEntries = ArrayList<LodItem<io.github.sceneview.node.Node>>()
+    // Réglage par calque en vigueur (vide = tout en « Auto »).
+    var modes: Map<String, LayerLodMode> = emptyMap()
+    // LISTES PLATES consommées par onFrame : aucun accès map ni calcul par frame,
+    // le coût reste exactement celui d'avant (deux boucles de visibilité).
+    var hideOnMove = ArrayList<io.github.sceneview.node.Node>()
+    var showOnMove = ArrayList<io.github.sceneview.node.Node>()
     var lastX = Float.NaN; var lastY = Float.NaN; var lastZ = Float.NaN
     var idle = 0
     var hidden = false
     // Solo actif : le LOD (onFrame) laisse alors la visibilité au filtre solo au
     // lieu de réafficher le détail — sinon il rallumerait le décor masqué.
     var soloActive = false
-    fun reset() { nodes.clear(); proxies.clear(); lastX = Float.NaN; idle = 0; hidden = false; soloActive = false }
+
+    fun reset() {
+        entries.clear(); proxyEntries.clear()
+        hideOnMove = ArrayList(); showOnMove = ArrayList()
+        lastX = Float.NaN; idle = 0; hidden = false; soloActive = false
+    }
+
+    /**
+     * Enregistre un nœud de DÉTAIL (masquable en navigation) avec son calque.
+     * L'ajout aux listes plates est fait ici en O(1) — la scène se construit par
+     * lots pendant plusieurs secondes, et le LOD doit rester opérant pendant ce
+     * temps (l'utilisateur peut déjà naviguer).
+     */
+    fun addEntry(node: io.github.sceneview.node.Node, layer: String, autoCandidate: Boolean) {
+        entries.add(LodItem(node, layer, autoCandidate))
+        if (lodHidesOnMove(modes.lodMode(layer), autoCandidate)) hideOnMove.add(node)
+    }
+
+    /** Enregistre un cube de repli (affiché à la place du détail) avec son calque. */
+    fun addProxy(node: io.github.sceneview.node.Node, layer: String) {
+        proxyEntries.add(LodItem(node, layer, true))
+        if (lodShowsProxy(modes.lodMode(layer))) showOnMove.add(node)
+    }
+
+    /**
+     * Applique un nouveau réglage par calque : recalcule les deux listes plates.
+     * Si le LOD est en train de masquer (geste en cours), la visibilité est
+     * RE-SYNCHRONISÉE immédiatement — on rétablit d'abord l'ancien état, puis on
+     * applique le nouveau, sans jamais toucher à quoi que ce soit en mode solo.
+     */
+    fun applyModes(newModes: Map<String, LayerLodMode>) {
+        modes = newModes
+        val oldHide = hideOnMove; val oldShow = showOnMove
+        val b = computeLodBuckets(entries, proxyEntries, newModes)
+        hideOnMove = ArrayList(b.hideOnMove); showOnMove = ArrayList(b.showOnMove)
+        if (hidden && !soloActive) {
+            runCatching {
+                oldHide.forEach { it.isVisible = true }    // repartir de l'état de repos…
+                oldShow.forEach { it.isVisible = false }
+                hideOnMove.forEach { it.isVisible = false } // …puis réappliquer le geste
+                showOnMove.forEach { it.isVisible = true }
+            }
+        }
+    }
 }
 
 /**
@@ -209,7 +261,7 @@ private fun applySolo3D(
         // Retour à l'état de repos : tout le décor/silhouettes visible, les
         // cubes-proxies masqués (ils ne servent qu'en navigation), LOD réarmé.
         runCatching { geometryRoot.childNodes.forEach { it.isVisible = true } }
-        lod.proxies.forEach { it.isVisible = false }
+        lod.proxyEntries.forEach { it.node.isVisible = false }
         lod.hidden = false; lod.idle = 0; lod.soloActive = false
     } else {
         // Solo : masque TOUT geometryRoot (décor + silhouettes GDTF + proxies) ;
@@ -277,6 +329,10 @@ fun Scene3DScreen(
     // barre bas-gauche actuelle → aucun changement pour qui ne personnalise pas.
     toolbarLayout: ToolbarLayout = ToolbarLayout.default3D,
     onLayoutChange: (ToolbarLayout) -> Unit = {},
+    // LOD d'interaction PAR CALQUE (#1) : « Auto » (absent de la map) = comportement
+    // historique. N'affecte QUE la navigation, jamais la visibilité au repos.
+    layerLod: Map<String, LayerLodMode> = emptyMap(),
+    onSetLayerLod: (Map<String, LayerLodMode>) -> Unit = {},
     // Avancement NOMMÉ du chargement (#4) : la construction 3D est la SUITE de la
     // lecture du .mvr commencée à l'accueil (même pourcentage global 0→100 %).
     // null = pas de progression pilotée (aperçus, tests).
@@ -394,6 +450,10 @@ fun Scene3DScreen(
         // On vide le LOD AVANT de détruire (sinon onFrame toucherait un nœud
         // détruit pendant la reconstruction → crash).
         lod.reset()
+        // Réglage LOD par calque en vigueur AVANT tout peuplement : les nœuds
+        // ajoutés pendant la construction (plusieurs secondes) sont classés du
+        // premier coup, sans attendre la ré-application de fin de build.
+        lod.modes = layerLod
         gdtfFixtures = emptySet()
         // Détacher TOUT d'un coup : removeChildNode() recalcule le Set d'enfants à
         // CHAQUE appel (O(n)) → détacher des milliers de nœuds un par un = O(n²) et
@@ -523,7 +583,10 @@ fun Scene3DScreen(
                 val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
                 node.transform = r.world
                 enqueueAdd(node)
-                if (small) lod.nodes.add(node)
+                // Suivi par le LOD AVEC son calque : en « Auto » seul le petit
+                // décor est masqué (comportement historique) ; « Masquer en
+                // navigation » peut désormais viser aussi le gros décor.
+                lod.addEntry(node, r.layer, autoCandidate = small)
                 nodes++; triangles += bm.triangles
             }
             placed++
@@ -539,7 +602,14 @@ fun Scene3DScreen(
         //    parse), extraction du zip PAR LOTS de fichiers uniques.
         if (refs.glb.isNotEmpty() && nodes < sceneNodeBudget) {
             val byFile = LinkedHashMap<String, MutableList<Mat4>>()
-            for (r in refs.glb) byFile.getOrPut(r.fileName) { mutableListOf() }.add(r.world)
+            // Calque du fichier (premier objet qui le référence) : un .glb partagé
+            // entre calques suit celui de sa première occurrence — suffisant pour
+            // un réglage d'affichage, et O(1).
+            val layerByFile = HashMap<String, String>()
+            for (r in refs.glb) {
+                byFile.getOrPut(r.fileName) { mutableListOf() }.add(r.world)
+                layerByFile.getOrPut(r.fileName) { r.layer }
+            }
             val resolver: (String) -> java.nio.Buffer? = { uri ->
                 imageBytes[uri.substringAfterLast('/')]?.let { java.nio.ByteBuffer.wrap(it) }
             }
@@ -570,10 +640,15 @@ fun Scene3DScreen(
                             modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), take, resolver)
                         }.getOrNull() ?: continue
                         instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
+                        val glbLayer = layerByFile[name] ?: ""
                         for (k in 0 until minOf(take, instances.size)) {
                             val node = io.github.sceneview.node.ModelNode(instances[k])
                             node.transform = transforms[k]
                             enqueueAdd(node)
+                            // autoCandidate = false : le gros décor .glb n'est
+                            // JAMAIS masqué en « Auto » (invariant de
+                            // non-régression) — seulement sur demande explicite.
+                            lod.addEntry(node, glbLayer, autoCandidate = false)
                         }
                         nodes += take
                         placed += take
@@ -681,6 +756,7 @@ fun Scene3DScreen(
                 for (fi2 in idxs) {
                     if (nodes >= MAX_NODES) { truncated = true; break@specLoop }
                     val worldFix = conv * drMat(fixtures[fi2].transform.m) * GLB_SCALE // assemblage m → mm
+                    val fixLayer = fixtures[fi2].layerName
                     var any = false
                     for (p in asm.placements) {
                         val b = builds[p.modelName] ?: continue
@@ -690,7 +766,9 @@ fun Scene3DScreen(
                                 val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
                                 node.transform = world
                                 enqueueAdd(node)
-                                lod.nodes.add(node)   // détail masqué en navigation
+                                // Détail masqué en navigation (« Auto ») ; le calque
+                                // du projecteur pilote désormais la décision.
+                                lod.addEntry(node, fixLayer, autoCandidate = true)
                                 nodes++
                             }
                             any = true
@@ -699,7 +777,7 @@ fun Scene3DScreen(
                             val node = io.github.sceneview.node.ModelNode(inst)
                             node.transform = world
                             enqueueAdd(node)
-                            lod.nodes.add(node)
+                            lod.addEntry(node, fixLayer, autoCandidate = true)
                             nodes++
                             any = true
                         }
@@ -716,7 +794,7 @@ fun Scene3DScreen(
                             )
                             proxy.isVisible = false
                             enqueueAdd(proxy)
-                            lod.proxies.add(proxy)
+                            lod.addProxy(proxy, fixLayer)
                         }
                     }
                     if (gdtfDone.size % 40 == 0) {
@@ -752,6 +830,13 @@ fun Scene3DScreen(
     // la vue plan est ainsi ré-appliqué dès que la scène est prête.
     LaunchedEffect(soloElements, buildTick) {
         applySolo3D(geometryRoot, lod, soloElements)
+    }
+
+    // LOD par calque (#1) : recalcule les listes plates consommées par onFrame.
+    // Re-déclenché au changement de réglage ET après chaque (re)construction
+    // (buildTick) pour que le réglage survive à un rebuild GDTF/custom.
+    LaunchedEffect(layerLod, buildTick) {
+        lod.applyModes(layerLod)
     }
 
     // Plan de repère DXF en 3D : lignes au sol, placées par la transformée du plan
@@ -1215,6 +1300,14 @@ fun Scene3DScreen(
 
     // N11 — panneau « Personnaliser la barre d'outils… » (mode édition).
     var showCustomize by remember { mutableStateOf(false) }
+    // Panneau « Calques » de la vue 3D (#1) : réglage du LOD par calque.
+    var showLayers by remember { mutableStateOf(false) }
+    // Calques du show + nombre d'objets, figés par scène (scene.layers est déjà
+    // une liste, mais on évite de reconstruire les paires à chaque recomposition).
+    val layerRows = remember(scene) {
+        val idx = LayerColors.index(scene)
+        scene.layers.map { LayerRow(it.name, it.objects.size, LayerColors.colorInt(idx, it.name)) }
+    }
     // N11 — couleur du fond ouvrable depuis un bouton DOCKÉ (outil BACKGROUND) : le
     // menu a déjà ses presets + « Personnalisée… », mais un bouton dans une barre
     // doit pouvoir ouvrir le sélecteur directement.
@@ -1261,6 +1354,12 @@ fun Scene3DScreen(
                     else -> 1.6f
                 }
             }))
+        // Panneau des calques : dockable en barre ; l'entrée de menu dédiée
+        // (« Calques… ») est rendue par SceneOptionsMenu → inMenu=false ici pour
+        // ne pas la doubler.
+        add(ToolSpec(ToolId.LAYERS, "Calques", Icons.Filled.Layers,
+            available = true, checked = null,
+            onInvoke = { showLayers = true }, inMenu = false))
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
         add(ToolSpec(ToolId.LABELS, "Étiquettes", Icons.Filled.Label,
             available = true, checked = options.showLabels,
@@ -1387,6 +1486,8 @@ fun Scene3DScreen(
                     // duplication. Mêmes actions, mêmes bascules, mêmes conditions.
                     tools = tools3D.toMenuTools(),
                     onCustomizeToolbar = { showCustomize = true },
+                    // Panneau des calques (LOD d'interaction par calque).
+                    onShowLayers = { showLayers = true },
                     // Étiquettes de projecteurs aussi en 3D : même bascule + mêmes
                     // champs/taille que le plan (SceneOptions partagé).
                     showLabelsToggle = true,
@@ -1441,20 +1542,22 @@ fun Scene3DScreen(
                             (options.showLabels && hasAnyLabel))) projVersion++
                     // En mode solo, le filtre de visibilité prime : le LOD ne doit
                     // PAS réafficher le décor masqué (il rallumerait geometryRoot).
-                    if (!lod.soloActive && (lod.nodes.isNotEmpty() || lod.proxies.isNotEmpty())) {
+                    // Deux listes PLATES déjà filtrées par le réglage de calque
+                    // (cf. LodState.applyModes) : aucun calcul par frame ici.
+                    if (!lod.soloActive && (lod.hideOnMove.isNotEmpty() || lod.showOnMove.isNotEmpty())) {
                         if (moved) {
                             lod.idle = 0
                             if (!lod.hidden) {
                                 // Masque le détail, montre les cubes-proxies.
-                                lod.nodes.forEach { it.isVisible = false }
-                                lod.proxies.forEach { it.isVisible = true }
+                                lod.hideOnMove.forEach { it.isVisible = false }
+                                lod.showOnMove.forEach { it.isVisible = true }
                                 lod.hidden = true
                             }
                         } else {
                             lod.idle++
                             if (lod.hidden && lod.idle > 8) {
-                                lod.nodes.forEach { it.isVisible = true }
-                                lod.proxies.forEach { it.isVisible = false }
+                                lod.hideOnMove.forEach { it.isVisible = true }
+                                lod.showOnMove.forEach { it.isVisible = false }
                                 lod.hidden = false
                             }
                         }
@@ -1715,6 +1818,23 @@ fun Scene3DScreen(
         // N11 — panneau « Personnaliser la barre d'outils » (vue 3D). Agit sur la
         // disposition de CETTE vue uniquement ; onLayoutChange remonte à SceneScreen
         // qui persiste globalement (par appareil).
+        // Panneau « Calques » (#1) : LOD d'interaction par calque. Le réglage
+        // remonte à SceneScreen, qui le persiste avec le projet (local seul).
+        if (showLayers) {
+            LayersSheet(
+                layers = layerRows,
+                modes = layerLod,
+                onSetMode = { layer, m ->
+                    // « Auto » = absence de clé → un projet neuf reste neutre.
+                    onSetLayerLod(
+                        if (m == LayerLodMode.AUTO) layerLod - layer else layerLod + (layer to m)
+                    )
+                },
+                onResetAll = { onSetLayerLod(emptyMap()) },
+                onDismiss = { showLayers = false }
+            )
+        }
+
         if (showCustomize) {
             ToolbarCustomizeSheet(
                 title = "Barre d'outils · Vue 3D",
@@ -1742,7 +1862,8 @@ fun Scene3DScreen(
 
 // ---- Résolution des références de géométrie ----
 
-private class RenderRef(val world: Mat4, val fileName: String)
+/** [layer] = calque MVR de l'objet d'origine — nécessaire au LOD par calque (#1). */
+private class RenderRef(val world: Mat4, val fileName: String, val layer: String)
 private class RenderRefs(val tds: List<RenderRef>, val glb: List<RenderRef>)
 
 /** Les .glb MVR sont en MÈTRES, le monde MVR en mm → ×1000 (même fix qu'iOS). */
@@ -1760,26 +1881,28 @@ private val GLB_SCALE = Mat4(
 private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
     val tds = ArrayList<RenderRef>()
     val glb = ArrayList<RenderRef>()
-    fun walk(refs: List<MvrGeometryRef>, parent: Mat4, depth: Int) {
+    // `layer` est propagé le long de la descente (y compris à travers les
+    // Symdef) : le LOD par calque a besoin du calque MVR de l'objet d'origine.
+    fun walk(refs: List<MvrGeometryRef>, parent: Mat4, depth: Int, layer: String) {
         if (depth > 8) return
         for (g in refs) when (g) {
             is MvrGeometryRef.File -> {
                 val world = parent * drMat(g.transform.m)
                 when {
                     g.fileName.endsWith(".3ds", ignoreCase = true) ->
-                        tds.add(RenderRef(world, g.fileName))
+                        tds.add(RenderRef(world, g.fileName, layer))
                     g.fileName.endsWith(".glb", ignoreCase = true) ||
                         g.fileName.endsWith(".gltf", ignoreCase = true) ->
-                        glb.add(RenderRef(world * GLB_SCALE, g.fileName))
+                        glb.add(RenderRef(world * GLB_SCALE, g.fileName, layer))
                 }
             }
             is MvrGeometryRef.Symbol -> {
                 val sd = scene.symdefs[g.symdefUuid] ?: continue
-                walk(sd.items.take(MAX_SYMDEF_ITEMS), parent * drMat(g.transform.m), depth + 1)
+                walk(sd.items.take(MAX_SYMDEF_ITEMS), parent * drMat(g.transform.m), depth + 1, layer)
             }
         }
     }
-    for (obj in scene.allObjects) walk(obj.geometryRefs, conv * drMat(obj.transform.m), 0)
+    for (obj in scene.allObjects) walk(obj.geometryRefs, conv * drMat(obj.transform.m), 0, obj.layerName)
     return RenderRefs(tds, glb)
 }
 

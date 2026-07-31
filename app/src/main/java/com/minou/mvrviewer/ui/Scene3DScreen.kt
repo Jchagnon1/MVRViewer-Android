@@ -271,7 +271,11 @@ private fun applySolo3D(
     }
 }
 
-/** Ressources GPU du quad satellite 3D à libérer à chaque reconstruction. */
+/**
+ * Ressources GPU d'un quad texturé 3D (fond satellite, plan de repère image) à
+ * libérer à chaque reconstruction — `ModelNode.destroy()` ne libère NI la texture
+ * NI l'instance de matériau : sans ça, chaque rebuild fuit plusieurs Mo de VRAM.
+ */
 private class SatGpu {
     var texture: com.google.android.filament.Texture? = null
     var material: MaterialInstance? = null
@@ -404,6 +408,11 @@ fun Scene3DScreen(
     // LIBÉRÉES à la reconstruction (changement d'image ou d'opacité) : sinon
     // chaque rebuild fuyait une texture GPU (l'image fait ~1–3 Mo).
     val satGpu = remember { SatGpu() }
+    // Plan de repère MATRICIEL (image / PDF) posé au sol : même patron que le
+    // quad satellite (quad texturé + ressources GPU libérées à chaque rebuild),
+    // mais placé par la transformée du plan et non par la géo-référence.
+    val rasterRoot = rememberNode(engine)
+    val rasterGpu = remember { SatGpu() }
     // Marqueur « ma position » (GPS) en 3D : nœud dédié, mis à jour SANS
     // reconstruire la scène (même principe non destructif que le quad satellite /
     // le plan DXF). Bleu, non éclairé → toujours visible.
@@ -856,7 +865,7 @@ fun Scene3DScreen(
         // LINES que SceneView ne restitue pas correctement (elles se remplissent).
         val prep = withContext(Dispatchers.Default) {
             val tf = rp.transform
-            val s = tf.scale; val r = Math.toRadians(tf.rotationDeg)
+            val s = tf.effScale; val r = Math.toRadians(tf.rotationDeg)
             val cc = kotlin.math.cos(r); val sn = kotlin.math.sin(r)
             val ox = tf.offsetX; val oy = tf.offsetY; val hz = tf.heightZ.toFloat()
             val fy = (hz - cz) / 1000f      // hauteur Filament (sol), constante
@@ -991,6 +1000,51 @@ fun Scene3DScreen(
         val satGeom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
             .vertices(quad).primitivesIndices(listOf(listOf(0, 1, 2, 0, 2, 3))).build(engine)
         satRoot.addChildNode(GeometryNode(engine, satGeom, listOf(mat)))
+    }
+
+    // Plan de repère MATRICIEL (JPEG / PNG / page 1 d'un PDF) posé au sol : quad
+    // texturé aux 4 coins MONDE de l'image, donc exactement au même endroit qu'en
+    // vue plan (mêmes décalage / rotation / échelle / homothétie). Placé 1 cm sous
+    // le sol MVR — au-dessus du satellite (−2 cm), sous les traits DXF (z = 0) —
+    // pour éviter tout z-fighting entre les trois fonds.
+    LaunchedEffect(referencePlan) {
+        rasterRoot.childNodes.toList().forEach {
+            rasterRoot.removeChildNode(it); runCatching { it.destroy() }
+        }
+        rasterGpu.material?.let { m -> runCatching { engine.destroyMaterialInstance(m) } }; rasterGpu.material = null
+        rasterGpu.texture?.let { t -> runCatching { engine.destroyTexture(t) } }; rasterGpu.texture = null
+        val rp = referencePlan ?: return@LaunchedEffect
+        val rast = rp.raster ?: return@LaunchedEffect
+        if (!rp.transform.visible || rast.bitmap.width <= 0 || rast.bitmap.height <= 0) return@LaunchedEffect
+        val tex = runCatching {
+            io.github.sceneview.texture.ImageTexture.Builder().bitmap(rast.bitmap).build(engine)
+        }.getOrNull() ?: return@LaunchedEffect
+        val sampler = com.google.android.filament.TextureSampler(
+            com.google.android.filament.TextureSampler.MinFilter.LINEAR,
+            com.google.android.filament.TextureSampler.MagFilter.LINEAR,
+            com.google.android.filament.TextureSampler.WrapMode.CLAMP_TO_EDGE
+        )
+        val mat = materialLoader.createImageInstance(tex, sampler).apply {
+            runCatching { setCullingMode(com.google.android.filament.Material.CullingMode.NONE) }
+            runCatching { setDepthWrite(false) }
+        }
+        rasterGpu.texture = tex; rasterGpu.material = mat
+        val cx = center.x; val cy = center.y; val cz = center.z
+        val fy = (rp.transform.heightZ.toFloat() - cz) / 1000f - 0.01f
+        fun fp(x: Float, y: Float) = Float3((x - cx) / 1000f, fy, -(y - cy) / 1000f)
+        val up = Float3(0f, 1f, 0f)
+        // Coins NO / NE / SE / SO en monde mm (Y vers le haut) ; l'image est
+        // « nord en haut » comme le quad satellite → mêmes UV.
+        val c4 = rast.worldCorners(rp.transform)
+        val quad = listOf(
+            Geometry.Vertex(position = fp(c4[0], c4[1]), normal = up, uvCoordinate = Float2(0f, 0f)),
+            Geometry.Vertex(position = fp(c4[2], c4[3]), normal = up, uvCoordinate = Float2(1f, 0f)),
+            Geometry.Vertex(position = fp(c4[4], c4[5]), normal = up, uvCoordinate = Float2(1f, 1f)),
+            Geometry.Vertex(position = fp(c4[6], c4[7]), normal = up, uvCoordinate = Float2(0f, 1f))
+        )
+        val geom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+            .vertices(quad).primitivesIndices(listOf(listOf(0, 1, 2, 0, 2, 3))).build(engine)
+        rasterRoot.addChildNode(GeometryNode(engine, geom, listOf(mat)))
     }
 
     // Marqueur GPS : reconstruit à chaque relevé (peu fréquent) tant que
@@ -1565,6 +1619,7 @@ fun Scene3DScreen(
                 }
             ) {
                 Node(apply = { addChildNode(satRoot) })
+                Node(apply = { addChildNode(rasterRoot) })
                 Node(apply = { addChildNode(geometryRoot) })
                 Node(apply = { addChildNode(dxfRoot) })
                 Node(apply = { addChildNode(markerRoot) })
@@ -1811,6 +1866,7 @@ fun Scene3DScreen(
                     runCatching { geometryRoot.clearChildNodes() }
                     runCatching { dxfRoot.clearChildNodes() }
                     runCatching { satRoot.clearChildNodes() }
+                    runCatching { rasterRoot.clearChildNodes() }
                 }
             }
         }

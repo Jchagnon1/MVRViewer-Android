@@ -30,6 +30,18 @@ object ProjectStore {
     private fun manifestFile(ctx: Context, key: String) = File(dir(ctx, key), "manifest.json")
     private fun planFile(ctx: Context, key: String) = File(dir(ctx, key), "refplan.bin")
 
+    /** Copie persistée du plan de repère MATRICIEL (image / rendu de page PDF). */
+    private fun imageFiles(ctx: Context, key: String): List<File> {
+        val d = dir(ctx, key)
+        return listOf(File(d, "refimage.png"), File(d, "refimage.jpg"))
+    }
+    private fun deleteImageFiles(ctx: Context, key: String) {
+        imageFiles(ctx, key).forEach { runCatching { it.delete() } }
+    }
+    /** Vrai si le projet porte un plan de repère (vectoriel OU matriciel). */
+    private fun hasAnyPlan(ctx: Context, key: String): Boolean =
+        planFile(ctx, key).exists() || imageFiles(ctx, key).any { it.exists() }
+
     /**
      * Le manifeste est un SEUL fichier écrit par plusieurs producteurs
      * indépendants (placement DXF, calibration GPS, drapeaux d'affichage,
@@ -82,49 +94,113 @@ object ProjectStore {
     // ---- Plan DXF de repère (géométrie + transform + nom) ----
 
     fun saveReferencePlan(ctx: Context, key: String, rp: ReferencePlan, name: String?) = synchronized(manifestLock) {
-        runCatching { planFile(ctx, key).writeBytes(DxfPlanCodec.encode(rp.plan)) }
+        // Un plan MATRICIEL porte un DxfPlan vide : n'écrire `refplan.bin` que
+        // s'il y a vraiment de la géométrie, sinon un ancien fichier vectoriel
+        // resterait à côté de la nouvelle image et serait rechargé à sa place.
+        if (!rp.plan.isEmpty) runCatching { planFile(ctx, key).writeBytes(DxfPlanCodec.encode(rp.plan)) }
+        else runCatching { planFile(ctx, key).delete() }
         val m = readManifest(ctx, key)
         m.put("dxfName", name ?: JSONObject.NULL)
         m.put("refTransform", transformJson(rp.transform))
+        // ---- Plan matriciel : on persiste le BITMAP TEL QU'AFFICHÉ ----
+        // (déjà sous-échantillonné, EXIF appliqué, page PDF rendue). Recharger
+        // est alors un simple décodage : ni re-rendu PDF, ni ré-application EXIF,
+        // donc réouverture rapide ET strictement identique à l'écran quitté.
+        deleteImageFiles(ctx, key)
+        val r = rp.raster
+        if (r == null) m.remove("refImage")
+        else {
+            val fname = "refimage.${r.fileExt}"
+            val ok = runCatching {
+                File(dir(ctx, key), fname).outputStream().use { out ->
+                    val fmt = if (r.kind == RasterPlan.Kind.JPEG)
+                        android.graphics.Bitmap.CompressFormat.JPEG
+                    else android.graphics.Bitmap.CompressFormat.PNG
+                    r.bitmap.compress(fmt, 92, out)
+                }
+            }.getOrDefault(false)
+            if (ok) m.put("refImage", JSONObject()
+                .put("file", fname)
+                .put("widthMm", r.widthMm.toDouble()).put("heightMm", r.heightMm.toDouble())
+                .put("name", r.sourceName).put("kind", r.kind.name).put("pages", r.pageCount))
+            else m.remove("refImage")
+        }
         writeManifest(ctx, key, m)
     }
 
-    /** Met à jour SEULEMENT le placement (glissé/rotation/échelle) — pas la géométrie. */
+    /** Met à jour SEULEMENT le placement (glissé/rotation/échelle/homothétie) — pas la géométrie. */
     fun saveTransform(ctx: Context, key: String, t: ReferencePlanTransform) = synchronized(manifestLock) {
-        if (planFile(ctx, key).exists()) {
+        // Garde élargie au plan MATRICIEL : sinon le placement d'une image
+        // importée n'était jamais enregistré (aucun refplan.bin sur le disque).
+        if (hasAnyPlan(ctx, key)) {
             val m = readManifest(ctx, key)
             m.put("refTransform", transformJson(t))
             writeManifest(ctx, key, m)
         }
     }
 
+    /**
+     * Recharge le plan de repère : géométrie DXF SI présente, image SI présente,
+     * null seulement si les deux manquent (un projet peut n'avoir que l'une).
+     */
     fun loadReferencePlan(ctx: Context, key: String): ReferencePlan? {
+        val m = readManifest(ctx, key)
+        val t = m.optJSONObject("refTransform")?.let(::transformFrom) ?: ReferencePlanTransform()
         val f = planFile(ctx, key)
-        if (!f.exists()) return null
-        val plan = runCatching { DxfPlanCodec.decode(f.readBytes()) }.getOrNull() ?: return null
-        val t = readManifest(ctx, key).optJSONObject("refTransform")?.let(::transformFrom)
-            ?: ReferencePlanTransform()
-        return ReferencePlan(plan, t)
+        val plan = if (f.exists()) runCatching { DxfPlanCodec.decode(f.readBytes()) }.getOrNull() else null
+        val raster = m.optJSONObject("refImage")?.let { o -> loadRaster(ctx, key, o) }
+        return when {
+            raster != null -> ReferencePlan(plan ?: emptyDxfPlanFor(raster), t, raster)
+            plan != null -> ReferencePlan(plan, t)
+            else -> null
+        }
+    }
+
+    private fun loadRaster(ctx: Context, key: String, o: JSONObject): RasterPlan? {
+        val file = File(dir(ctx, key), o.optString("file").ifBlank { return null })
+        if (!file.exists()) return null
+        // Même garde-fou mémoire qu'à l'import : le fichier a beau venir de nous,
+        // il a pu être écrit par une version antérieure aux bornes actuelles.
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val opts = android.graphics.BitmapFactory.Options().apply {
+            inSampleSize = RasterPlanLoader.sampleSizeFor(bounds.outWidth, bounds.outHeight, 4096, 12_000_000L)
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val bmp = runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts) }
+            .getOrNull() ?: return null
+        val kind = runCatching { RasterPlan.Kind.valueOf(o.optString("kind", "PNG")) }
+            .getOrDefault(RasterPlan.Kind.PNG)
+        val w = o.optDouble("widthMm", 0.0).toFloat()
+        val h = o.optDouble("heightMm", 0.0).toFloat()
+        if (!(w > 0f) || !(h > 0f)) return null
+        return RasterPlan(bmp, w, h, o.optString("name", "Plan"), kind, o.optInt("pages", 1))
     }
 
     fun removeReferencePlan(ctx: Context, key: String) = synchronized(manifestLock) {
         runCatching { planFile(ctx, key).delete() }
+        deleteImageFiles(ctx, key)
         val m = readManifest(ctx, key)
-        m.remove("refTransform"); m.remove("dxfName")
+        m.remove("refTransform"); m.remove("dxfName"); m.remove("refImage")
         writeManifest(ctx, key, m)
     }
 
     fun dxfName(ctx: Context, key: String): String? =
         readManifest(ctx, key).optString("dxfName").takeIf { it.isNotBlank() }
 
+    // `homothety` est une CLÉ EN PLUS : absente d'un manifeste existant, elle
+    // reprend son défaut 1.0 → le plan se replace exactement comme avant.
     private fun transformJson(t: ReferencePlanTransform) = JSONObject()
         .put("offsetX", t.offsetX).put("offsetY", t.offsetY).put("rotationDeg", t.rotationDeg)
         .put("scale", t.scale).put("heightZ", t.heightZ).put("visible", t.visible)
+        .put("homothety", t.homothety)
 
     private fun transformFrom(o: JSONObject) = ReferencePlanTransform(
         offsetX = o.optDouble("offsetX", 0.0), offsetY = o.optDouble("offsetY", 0.0),
         rotationDeg = o.optDouble("rotationDeg", 0.0), scale = o.optDouble("scale", 1.0),
-        heightZ = o.optDouble("heightZ", 0.0), visible = o.optBoolean("visible", true)
+        heightZ = o.optDouble("heightZ", 0.0), visible = o.optBoolean("visible", true),
+        homothety = o.optDouble("homothety", 1.0)
     )
 
     // ---- Calibration GPS ----

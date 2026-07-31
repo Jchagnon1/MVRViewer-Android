@@ -119,6 +119,12 @@ internal class PlanRenderSpec(
      */
     val refTransform: com.minou.mvrviewer.mvr.ReferencePlanTransform?,
     val dxfPaths: DxfPaths?,
+    /**
+     * Plan de repère MATRICIEL (JPEG / PNG / page 1 d'un PDF) — alternative à
+     * `dxfPaths`, placée par la MÊME `refTransform`. Null = plan vectoriel ou pas
+     * de plan (défaut : aucun site d'appel existant à toucher).
+     */
+    val rasterPlan: com.minou.mvrviewer.mvr.RasterPlan? = null,
     val satellite: com.minou.mvrviewer.mvr.SatelliteOverlay?,
     val showSatellite: Boolean,
     val satelliteOpacity: Float,
@@ -184,7 +190,7 @@ internal fun dxfLocalViewport(
     w: Float, h: Float, bs: Float, centerPx: Offset,
     dataCx: Float, dataCy: Float, tf: com.minou.mvrviewer.mvr.ReferencePlanTransform
 ): FloatArray {
-    val sfac = tf.scale.toFloat()
+    val sfac = tf.effScale.toFloat()
     if (!sfac.isFinite() || sfac == 0f || bs <= 0f) {
         // Placement dégénéré : pas de cull (on dessinera tout).
         return floatArrayOf(-Float.MAX_VALUE, -Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE)
@@ -263,6 +269,30 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
         drawIntoCanvas { it.nativeCanvas.drawBitmap(sat.bitmap, m, paint) }
     }
 
+    // ---- Plan de repère MATRICIEL (image / PDF), au-dessus du satellite et
+    // SOUS le DXF, le décor et les projecteurs ----
+    // L'image est posée par ses 4 coins monde (donc décalage + rotation + échelle
+    // + homothétie sont déjà appliqués) : un seul drawBitmap, aucun enjeu de
+    // fluidité (contrairement aux dizaines de milliers de traits d'un DXF).
+    val rast = s.rasterPlan
+    if (rast != null && s.refTransform?.visible == true && rast.bitmap.width > 0 && rast.bitmap.height > 0) {
+        val c4 = rast.worldCorners(s.refTransform)
+        // Repère de dessin = (x, −y), comme partout ailleurs dans le plan.
+        val nw = s.toDraw(c4[0], -c4[1])
+        val ne = s.toDraw(c4[2], -c4[3])
+        val sw = s.toDraw(c4[6], -c4[7])
+        val iw = rast.bitmap.width.toFloat(); val ih = rast.bitmap.height.toFloat()
+        val a = (ne.x - nw.x) / iw; val b = (ne.y - nw.y) / iw
+        val c = (sw.x - nw.x) / ih; val d = (sw.y - nw.y) / ih
+        if (a.isFinite() && b.isFinite() && c.isFinite() && d.isFinite()) {
+            val m = android.graphics.Matrix().apply {
+                setValues(floatArrayOf(a, c, nw.x, b, d, nw.y, 0f, 0f, 1f))
+            }
+            val paint = android.graphics.Paint().apply { isAntiAlias = true; isFilterBitmap = true }
+            drawIntoCanvas { it.nativeCanvas.drawBitmap(rast.bitmap, m, paint) }
+        }
+    }
+
     // ---- Plan de repère DXF importé (sous tout le reste) ----
     // Les tracés sont déjà construits (coordonnées locales du DXF) : ici on ne
     // fait qu'empiler placement du DXF + projection dans la matrice du Canvas.
@@ -270,7 +300,7 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
     val dxf = s.dxfPaths
     if (tfRef != null && dxf != null && tfRef.visible) {
         val tf = tfRef
-        val sfac = tf.scale.toFloat()
+        val sfac = tf.effScale.toFloat()
         val ppu = bs * sfac              // pixels par unité locale du DXF
         // Viewport en coordonnées LOCALES DXF (inverse de la matrice de dessin) :
         // on ne tracera que les tuiles qui l'intersectent.

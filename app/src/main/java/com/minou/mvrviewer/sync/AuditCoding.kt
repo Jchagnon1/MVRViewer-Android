@@ -29,8 +29,12 @@ object AuditCoding {
         }
 
     // Placement du plan DXF : "offsetX,offsetY,rotationDeg,scale,heightZ,visible".
+    // La chaîne reste à SIX champs (contrat cross-plateforme, décodé par index) :
+    // l'HOMOTHÉTIE n'y ajoute pas de colonne, elle est fondue dans `scale` via
+    // `effScale`. Homothétie = 1 (défaut, tout le chemin DXF) → chaîne identique
+    // au bit près. La factorisation scale/homothety, elle, reste locale.
     fun encodeTransform(t: ReferencePlanTransform): String =
-        "${t.offsetX},${t.offsetY},${t.rotationDeg},${t.scale},${t.heightZ},${t.visible}"
+        "${t.offsetX},${t.offsetY},${t.rotationDeg},${t.effScale},${t.heightZ},${t.visible}"
 
     fun decodeTransform(raw: String): ReferencePlanTransform? {
         val f = raw.split(",")

@@ -215,6 +215,7 @@ fun CablingScreen(
                             wire = PlanWireCache.buildStructures(scene, mvrBytes),
                             fixWire = PlanWireCache.buildFixtures(scene, mvrBytes, ovVersion, ovMap),
                             dxfPaths = refPlan?.plan?.let { buildDxfPaths(it) },
+                            rasterPlan = refPlan?.raster,
                             satellite = sat,
                             legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
                                 .toList().sortedByDescending { it.second },

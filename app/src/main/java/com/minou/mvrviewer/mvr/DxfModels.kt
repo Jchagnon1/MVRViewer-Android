@@ -66,19 +66,49 @@ class ReferencePlanTransform(
     var rotationDeg: Double = 0.0,
     var scale: Double = 1.0,
     var heightZ: Double = 0.0,
-    var visible: Boolean = true
+    var visible: Boolean = true,
+    /**
+     * HOMOTHÉTIE — facteur de mise à l'échelle PROPORTIONNELLE réglé par
+     * l'utilisateur (curseur + valeur éditable), distinct de `scale` qui, lui,
+     * rattrape l'unité du fichier / le cadrage initial. Les deux se MULTIPLIENT
+     * (cf. `effScale`) : garder deux champs permet de « Réinitialiser »
+     * l'homothétie sans perdre l'échelle d'origine du plan importé.
+     *
+     * Défaut 1.0 → `effScale == scale` au bit près : un projet existant (et tout
+     * le chemin DXF) se comporte exactement comme avant.
+     */
+    var homothety: Double = 1.0
 ) {
+    /**
+     * Échelle RÉELLEMENT appliquée au dessin (2D, 3D, mesure, export) : produit
+     * de l'échelle de placement et de l'homothétie. C'est la SEULE valeur que
+     * doivent lire les rendus — jamais `scale` seul.
+     */
+    val effScale: Double get() = scale * homothety
+
     /** Point DXF (mm local) → point monde MVR (mm, X/Y au sol). */
     fun worldXY(x: Float, y: Float): Pair<Float, Float> {
-        val s = scale
+        val s = effScale
         val r = Math.toRadians(rotationDeg)
         val c = cos(r); val sn = sin(r)
         val sx = x * s; val sy = y * s
         return (offsetX + (sx * c - sy * sn)).toFloat() to (offsetY + (sx * sn + sy * c)).toFloat()
     }
 
-    fun copy() = ReferencePlanTransform(offsetX, offsetY, rotationDeg, scale, heightZ, visible)
+    fun copy() = ReferencePlanTransform(offsetX, offsetY, rotationDeg, scale, heightZ, visible, homothety)
 }
 
-/** Un plan importé + son placement. */
-class ReferencePlan(val plan: DxfPlan, val transform: ReferencePlanTransform)
+/**
+ * Un plan importé + son placement.
+ *
+ * Le plan est SOIT vectoriel (DXF → `plan` non vide), SOIT matriciel (JPEG / PNG
+ * / page 1 d'un PDF → `raster` non nul). Dans le second cas `plan` est un
+ * `DxfPlan` VIDE dont seules les bornes portent le rectangle de l'image (en mm) :
+ * tout le code existant qui teste `plan.isEmpty` (passe 3D, tracés 2D) sort donc
+ * proprement, sans trait fantôme, et le centrage/les bornes restent partagés.
+ */
+class ReferencePlan(
+    val plan: DxfPlan,
+    val transform: ReferencePlanTransform,
+    val raster: RasterPlan? = null
+)

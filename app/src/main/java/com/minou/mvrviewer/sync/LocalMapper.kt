@@ -17,9 +17,14 @@ object LocalMapper {
 
     // ---- Transform ----------------------------------------------------------
 
+    // HOMOTHÉTIE : le DTO cross-plateforme (figé par iOS) n'a PAS de champ pour
+    // elle — y en ajouter un serait improviser un contrat non aligné. On pousse
+    // donc le PRODUIT `scale × homothety` dans `scale` : les autres postes voient
+    // le plan à la bonne taille, et seule la factorisation (locale) est perdue.
+    // Homothétie = 1 par défaut → valeur strictement inchangée pour un DXF.
     fun fromTransform(t: ReferencePlanTransform) = RefPlanTransformDTO(
         offsetX = t.offsetX, offsetY = t.offsetY, rotationDeg = t.rotationDeg,
-        scale = t.scale, heightZ = t.heightZ, visible = t.visible
+        scale = t.effScale, heightZ = t.heightZ, visible = t.visible
     )
 
     fun toTransform(d: RefPlanTransformDTO) = ReferencePlanTransform(

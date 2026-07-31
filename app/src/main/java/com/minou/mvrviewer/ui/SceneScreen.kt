@@ -269,7 +269,9 @@ fun SceneScreen(
                     val nt = LocalMapper.toTransform(t)
                     lastTransformSig = transformSig(nt)
                     referencePlan?.let { rp ->
-                        referencePlan = ReferencePlan(rp.plan, nt)
+                        // `rp.raster` reporté : un placement venu du cloud ne doit
+                        // pas faire disparaître le plan image chargé localement.
+                        referencePlan = ReferencePlan(rp.plan, nt, rp.raster)
                         withContext(Dispatchers.IO) { ProjectStore.saveTransform(ctx, projectKey, nt) }
                     }
                 }
@@ -367,7 +369,11 @@ fun SceneScreen(
         val s = sync ?: return
         if (!s.isCurrentProjectShared) return
         val rp = referencePlan
-        val sha = if (rp != null) s.uploadRefPlan(RefPlanInterop.encode(rp.plan)) else refPlanSha
+        // ⚠ Le blob partagé est VECTORIEL (DXP1, contrat figé par iOS). Un plan
+        // MATRICIEL porte un DxfPlan vide : le téléverser écraserait par un blob
+        // vide le DXF de toute l'équipe. On ne pousse donc que de la géométrie
+        // réelle ; l'image reste locale (cf. décision de synchro v1).
+        val sha = if (rp != null && !rp.plan.isEmpty) s.uploadRefPlan(RefPlanInterop.encode(rp.plan)) else refPlanSha
         refPlanSha = sha
         rp?.transform?.let { lastTransformSig = transformSig(it) }
         s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), rp?.transform,
@@ -688,7 +694,7 @@ fun SceneScreen(
             AuditFieldKey.REF_PLAN_TRANSFORM -> {
                 val t = AuditCoding.decodeTransform(raw) ?: return
                 val rp = referencePlan ?: return
-                referencePlan = ReferencePlan(rp.plan, t)
+                referencePlan = ReferencePlan(rp.plan, t, rp.raster)
                 scope.launch(Dispatchers.IO) { ProjectStore.saveTransform(ctx, projectKey, t) }
                 commitTransform(t)
             }
@@ -785,8 +791,15 @@ fun SceneScreen(
                 // SYNCHRO : téléverse le plan (format d'échange DXP1) + pousse le manifeste.
                 sync?.let { s ->
                     scope.launch {
-                        refPlanSha = if (rp != null)
-                            s.uploadRefPlan(RefPlanInterop.encode(rp.plan)) else null
+                        // Même garde qu'en pushAllLocalState : un plan IMAGE (DxfPlan
+                        // vide) ne doit ni téléverser un blob vide, ni effacer le SHA
+                        // du DXF vectoriel déjà partagé. Retrait explicite (rp == null)
+                        // = seul cas où l'on remet le SHA à null.
+                        refPlanSha = when {
+                            rp == null -> null
+                            !rp.plan.isEmpty -> s.uploadRefPlan(RefPlanInterop.encode(rp.plan))
+                            else -> refPlanSha
+                        }
                         rp?.transform?.let { lastTransformSig = transformSig(it) }
                         s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey),
                             rp?.transform, hiddenLayers.toList(), options.showSatellite, refPlanSha)

@@ -97,6 +97,8 @@ internal class PlanExportSource(
     val wire: PlanWireframe.Built?,
     val fixWire: PlanWireframe.FixtureWire?,
     val dxfPaths: DxfPaths?,
+    /** Plan de repère matriciel (image / PDF) — parité écran/papier, cf. PlanRenderSpec. */
+    val rasterPlan: com.minou.mvrviewer.mvr.RasterPlan? = null,
     val satellite: com.minou.mvrviewer.mvr.SatelliteOverlay?,
     /** Légende : calque → nombre de projecteurs, déjà triée. */
     val legend: List<Pair<String, Int>>,
@@ -295,6 +297,7 @@ private fun DrawScope.drawPdfPage(
                 fixWire = src.fixWire,
                 refTransform = v.refTransform,
                 dxfPaths = src.dxfPaths,
+                rasterPlan = src.rasterPlan,
                 satellite = src.satellite,
                 showSatellite = v.showSatellite,
                 satelliteOpacity = v.satelliteOpacity,

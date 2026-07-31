@@ -113,7 +113,7 @@ internal fun snapDxfVertex(
     if (local.isEmpty() || radius <= 0f) return null
     // Placement déplié à la main : worldXY() par sommet ferait deux appels
     // trigonométriques et une paire allouée pour chacun des 200 000 points.
-    val s = tf.scale
+    val s = tf.effScale
     val r = Math.toRadians(tf.rotationDeg)
     val c = kotlin.math.cos(r)
     val sn = kotlin.math.sin(r)

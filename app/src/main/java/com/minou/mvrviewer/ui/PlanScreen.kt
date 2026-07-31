@@ -406,20 +406,53 @@ fun PlanScreen(
     ) { uri -> if (uri != null) { pickedUri = uri; importing = true } }
     LaunchedEffect(pickedUri) {
         val uri = pickedUri ?: return@LaunchedEffect
-        val plan = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        // POINT D'ENTRÉE UNIQUE du plan de repère : le sélecteur est en « */* »
+        // (le DXF n'a pas de type MIME fiable), c'est donc ICI qu'on route selon
+        // le CONTENU — image / PDF → plan matriciel, tout le reste → parseur DXF
+        // (chemin historique strictement inchangé).
+        val imported = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
-                context.contentResolver.openInputStream(uri)?.use { com.minou.mvrviewer.mvr.DxfParser.parse(it) }
+                val cr = context.contentResolver
+                val name = com.minou.mvrviewer.mvr.RasterPlanLoader.displayName(cr, uri)
+                val fmt = com.minou.mvrviewer.mvr.RasterPlanLoader.sniff(cr, uri, name)
+                when (fmt) {
+                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.DXF ->
+                        cr.openInputStream(uri)?.use { com.minou.mvrviewer.mvr.DxfParser.parse(it) }
+                            ?.let { ImportedRefPlan(dxf = it) }
+                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PDF ->
+                        com.minou.mvrviewer.mvr.RasterPlanLoader.renderPdfFirstPage(cr, uri)?.let { (bmp, pages) ->
+                            ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
+                                bmp, name ?: "Plan PDF", com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
+                                pages, data.spanX, data.spanY))
+                        }
+                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG,
+                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.JPEG -> {
+                        val png = fmt == com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG
+                        com.minou.mvrviewer.mvr.RasterPlanLoader.loadImage(cr, uri, png)?.let { bmp ->
+                            ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
+                                bmp, name ?: "Plan image",
+                                if (png) com.minou.mvrviewer.mvr.RasterPlan.Kind.PNG
+                                else com.minou.mvrviewer.mvr.RasterPlan.Kind.JPEG,
+                                1, data.spanX, data.spanY))
+                        }
+                    }
+                }
             }.getOrNull()
         }
         importing = false
         pickedUri = null
-        if (plan != null && !plan.isEmpty) {
-            // Centrer le DXF sur le centre de la scène MVR (repère monde).
+        // Un plan matriciel porte un DxfPlan VIDE dont les bornes sont celles de
+        // l'image : le centrage ci-dessous, les flèches de déplacement et les
+        // sorties anticipées `plan.isEmpty` marchent alors sans cas particulier.
+        val raster = imported?.raster
+        val plan = imported?.dxf ?: raster?.let { com.minou.mvrviewer.mvr.emptyDxfPlanFor(it) }
+        if (plan != null && (raster != null || !plan.isEmpty)) {
+            // Centrer le plan importé sur le centre de la scène MVR (repère monde).
             val tf = com.minou.mvrviewer.mvr.ReferencePlanTransform(
                 offsetX = (data.cx - plan.centerX).toDouble(),
                 offsetY = (-data.cy - plan.centerY).toDouble()
             )
-            onSetReferencePlan(com.minou.mvrviewer.mvr.ReferencePlan(plan, tf))
+            onSetReferencePlan(com.minou.mvrviewer.mvr.ReferencePlan(plan, tf, raster))
             showDxfPanel = true
             dxfVersion++
         }
@@ -863,7 +896,13 @@ fun PlanScreen(
             onInvoke = { options.showSatellite = !options.showSatellite }, inMenu = false))
         add(ToolSpec(ToolId.EXPORT_PDF, "Export PDF", Icons.Filled.PictureAsPdf,
             available = true, checked = exportMode, onInvoke = { exportMode = !exportMode }))
-        add(ToolSpec(ToolId.DXF, "Plan DXF", Icons.Filled.Layers,
+        // POINT D'ENTRÉE UNIQUE du plan de repère (Android n'a pas d'import en 3D) :
+        // le libellé dit ce que fait l'action — importer tant qu'aucun plan n'est
+        // chargé, ouvrir/fermer le panneau de placement ensuite. Le ToolSpec est
+        // reconstruit à chaque recomposition, donc le libellé suit l'état.
+        add(ToolSpec(ToolId.DXF,
+            if (referencePlan == null) "Importer un plan (DXF, image, PDF)…" else "Plan de repère",
+            Icons.Filled.Layers,
             available = true, checked = referencePlan != null && showDxfPanel, busy = importing,
             onInvoke = {
                 if (referencePlan == null) importLauncher.launch(arrayOf("*/*"))
@@ -1445,6 +1484,7 @@ fun PlanScreen(
                     fixPaths = fixPaths,
                     refTransform = referencePlan?.transform,
                     dxfPaths = dxfPaths,
+                    rasterPlan = referencePlan?.raster,
                     satellite = satellite,
                     showSatellite = options.showSatellite,
                     satelliteOpacity = options.satelliteOpacity,
@@ -1905,15 +1945,30 @@ fun PlanScreen(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp).width(230.dp)
             ) {
                 androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
+                    val rast = rpPanel.raster
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Plan DXF · ${rpPanel.plan.unitLabel}", style = MaterialTheme.typography.labelLarge,
+                        Text(
+                            if (rast != null) "Plan ${rast.label}" else "Plan DXF · ${rpPanel.plan.unitLabel}",
+                            style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f))
                         androidx.compose.material3.TextButton(onClick = { onSetReferencePlan(null); showDxfPanel = false }) {
                             Text("Retirer", color = Color(0xFFC62828))
                         }
                     }
-                    Text("${rpPanel.plan.segmentCount} segments" + if (rpPanel.plan.truncatedSegments > 0) " (+${rpPanel.plan.truncatedSegments} tronqués)" else "",
-                        style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666))
+                    if (rast != null) {
+                        Text("${rast.bitmap.width} × ${rast.bitmap.height} px",
+                            style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // Un PDF multi-pages n'utilise QUE la page 1 : le dire, sinon
+                        // l'utilisateur croit son plan tronqué par un bug.
+                        if (rast.pageCount > 1) {
+                            Text("PDF de ${rast.pageCount} pages — page 1 utilisée",
+                                style = MaterialTheme.typography.bodySmall, color = Color(0xFFB26A00))
+                        }
+                    } else {
+                        Text("${rpPanel.plan.segmentCount} segments" + if (rpPanel.plan.truncatedSegments > 0) " (+${rpPanel.plan.truncatedSegments} tronqués)" else "",
+                            style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666))
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Visible", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                         androidx.compose.material3.Switch(checked = tf.visible, onCheckedChange = { tf.visible = it; bump() })
@@ -1937,6 +1992,60 @@ fun PlanScreen(
                         Text("Échelle", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale /= 1.1; bump() }) { Text("÷") }
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale *= 1.1; bump() }) { Text("×") }
+                    }
+
+                    // ---- HOMOTHÉTIE (mise à l'échelle PROPORTIONNELLE) ----
+                    // Un SEUL facteur appliqué aux deux axes : jamais de déformation.
+                    // Le curseur travaille en log10 (×0,1 → ×10) pour rester lisible
+                    // aux deux bouts ; le champ accepte n'importe quelle valeur de la
+                    // plage. Même panneau que le DXF → le réglage vaut pour les DEUX
+                    // (le rendu ne lit plus `scale` mais `effScale = scale × homothety`).
+                    var homoLog by remember(rpPanel) { mutableFloatStateOf(homothetySlider(tf.homothety)) }
+                    var homoText by remember(rpPanel) { mutableStateOf(formatHomothety(tf.homothety)) }
+                    fun applyHomothety(v: Double, syncSlider: Boolean, syncText: Boolean) {
+                        val c = v.coerceIn(HOMOTHETY_MIN, HOMOTHETY_MAX)
+                        tf.homothety = c
+                        if (syncSlider) homoLog = homothetySlider(c)
+                        if (syncText) homoText = formatHomothety(c)
+                        bump()
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 6.dp)) {
+                        Text("Homothétie", style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f))
+                        androidx.compose.material3.TextButton(
+                            contentPadding = pad,
+                            onClick = { applyHomothety(1.0, syncSlider = true, syncText = true) }
+                        ) { Text("Réinitialiser", style = MaterialTheme.typography.labelSmall) }
+                    }
+                    androidx.compose.material3.Slider(
+                        value = homoLog,
+                        onValueChange = { v ->
+                            homoLog = v
+                            applyHomothety(Math.pow(10.0, v.toDouble()), syncSlider = false, syncText = true)
+                        },
+                        valueRange = -1f..1f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("×", style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.OutlinedTextField(
+                            value = homoText,
+                            onValueChange = { s ->
+                                homoText = s
+                                // Saisie libre : on n'applique que si le texte est un
+                                // nombre valide, sinon on laisse l'utilisateur finir de
+                                // taper (« 1, » n'est pas encore une valeur).
+                                s.replace(',', '.').toDoubleOrNull()?.let {
+                                    if (it > 0.0) applyHomothety(it, syncSlider = true, syncText = false)
+                                }
+                            },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                     // Calques du plan DXF : masquer/afficher (rend lisible un plan
                     // d'architecte surchargé). L'état est persisté et synchronisé.
@@ -2057,6 +2166,7 @@ fun PlanScreen(
                                 val src = PlanExportSource(
                                     data = data, layerIndex = layerIndex,
                                     wire = wire, fixWire = fixWire, dxfPaths = dxfPaths,
+                                    rasterPlan = referencePlan?.raster,
                                     satellite = satellite,
                                     legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
                                         .toList().sortedByDescending { it.second },
@@ -2962,6 +3072,34 @@ private fun drMat(m: FloatArray): dev.romainguy.kotlin.math.Mat4 =
         dev.romainguy.kotlin.math.Float4(m[8], m[9], m[10], m[11]),
         dev.romainguy.kotlin.math.Float4(m[12], m[13], m[14], m[15])
     )
+
+// ---- HOMOTHÉTIE : bornes du réglage + formatage de la valeur éditable --------
+// Le CURSEUR couvre ×0,1 → ×10 (log10 de −1 à +1, la courbe la plus lisible :
+// autant de course pour diviser que pour multiplier). Le CHAMP accepte un peu
+// plus large (×0,05 → ×20) pour les cas extrêmes ; le curseur s'y colle alors à
+// sa borne, sans jamais contredire la valeur réellement appliquée.
+internal const val HOMOTHETY_MIN = 0.05
+internal const val HOMOTHETY_MAX = 20.0
+
+/** Position de curseur (log10, bornée) correspondant à un facteur. */
+internal fun homothetySlider(v: Double): Float =
+    kotlin.math.log10(v.coerceIn(HOMOTHETY_MIN, HOMOTHETY_MAX)).coerceIn(-1.0, 1.0).toFloat()
+
+/** Facteur affiché dans le champ : 3 décimales, sans zéros inutiles (« 1 », « 0,85 »). */
+internal fun formatHomothety(v: Double): String {
+    val s = "%.3f".format(java.util.Locale.US, v)
+    return s.trimEnd('0').trimEnd('.').ifEmpty { "1" }
+}
+
+/**
+ * Résultat brut d'un import de plan de repère : SOIT une géométrie DXF, SOIT une
+ * image (JPEG / PNG / page 1 d'un PDF). Sert uniquement à faire remonter le
+ * routage fait hors thread principal jusqu'au composable.
+ */
+private class ImportedRefPlan(
+    val dxf: com.minou.mvrviewer.mvr.DxfPlan? = null,
+    val raster: com.minou.mvrviewer.mvr.RasterPlan? = null
+)
 
 internal class PlanData(
     val fixtures: List<PlanFixture>,

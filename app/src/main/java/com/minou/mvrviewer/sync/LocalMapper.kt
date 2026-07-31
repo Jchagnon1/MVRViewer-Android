@@ -17,19 +17,25 @@ object LocalMapper {
 
     // ---- Transform ----------------------------------------------------------
 
-    // HOMOTHÉTIE : le DTO cross-plateforme (figé par iOS) n'a PAS de champ pour
-    // elle — y en ajouter un serait improviser un contrat non aligné. On pousse
-    // donc le PRODUIT `scale × homothety` dans `scale` : les autres postes voient
-    // le plan à la bonne taille, et seule la factorisation (locale) est perdue.
-    // Homothétie = 1 par défaut → valeur strictement inchangée pour un DXF.
+    // HOMOTHÉTIE = RÉGLAGE LOCAL (règle canonique, alignée sur iOS). Le DTO
+    // cross-plateforme n'a PAS de champ pour elle, et ce n'est pas une raison
+    // pour la fondre dans `scale` : le manifeste partagé transporte l'ÉCHELLE
+    // PURE. Chacun garde donc SON homothétie, et un écho distant ne vient plus
+    // redimensionner le plan des autres.
     fun fromTransform(t: ReferencePlanTransform) = RefPlanTransformDTO(
         offsetX = t.offsetX, offsetY = t.offsetY, rotationDeg = t.rotationDeg,
-        scale = t.effScale, heightZ = t.heightZ, visible = t.visible
+        scale = t.scale, heightZ = t.heightZ, visible = t.visible
     )
 
-    fun toTransform(d: RefPlanTransformDTO) = ReferencePlanTransform(
+    /**
+     * DTO distant → transformée locale. `localHomothety` est l'homothétie
+     * COURANTE de ce poste : elle est PRÉSERVÉE telle quelle (le distant n'en
+     * transporte pas), sinon le moindre écho la remettrait à 1.
+     */
+    fun toTransform(d: RefPlanTransformDTO, localHomothety: Double = 1.0) = ReferencePlanTransform(
         offsetX = d.offsetX, offsetY = d.offsetY, rotationDeg = d.rotationDeg,
-        scale = d.scale, heightZ = d.heightZ, visible = d.visible
+        scale = d.scale, heightZ = d.heightZ, visible = d.visible,
+        homothety = if (localHomothety.isFinite() && localHomothety > 0.0) localHomothety else 1.0
     )
 
     // ---- Manifeste ----------------------------------------------------------

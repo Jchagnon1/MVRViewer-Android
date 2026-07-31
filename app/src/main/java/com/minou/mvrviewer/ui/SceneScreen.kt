@@ -216,11 +216,36 @@ fun SceneScreen(
     var lastCalibSig by remember(projectKey) { mutableStateOf("") }
     var lastSatellitePushed by remember(projectKey) { mutableStateOf<Boolean?>(null) }
     var lastTransformSig by remember(projectKey) { mutableStateOf("") }
+    // Dernier placement CONNU DU PARTAGÉ (poussé ou reçu). Sert quand le plan
+    // courant est MATRICIEL : on ré-émet celui-là au lieu du nôtre (cf. plus bas),
+    // pour ne pas déplacer le DXF de l'équipe ni l'effacer du manifeste.
+    var sharedTransform by remember(projectKey) { mutableStateOf<ReferencePlanTransform?>(null) }
     val authState = sync?.auth?.collectAsState()
     val curProject = sync?.currentProject?.collectAsState()
 
     fun transformSig(t: ReferencePlanTransform) = AuditCoding.encodeTransform(t)
     fun calibSig() = AuditCoding.encodeAnchors(calibration.anchors)
+
+    // R7 — le placement est un objet MUTABLE non observable : cette VERSION
+    // s'incrémente à chaque réglage (homothétie, décalage, rotation…) et sert de
+    // clé de reconstruction au quad matriciel 3D, qui sinon ne verrait rien
+    // changer (l'instance du plan, elle, reste la même).
+    var refPlanTransformVersion by remember(projectKey) { mutableIntStateOf(0) }
+
+    // Le plan courant est-il MATRICIEL (image / PDF) ? Un tel plan est LOCAL.
+    fun isRasterPlan() = referencePlan?.raster != null
+
+    /**
+     * Placement à écrire dans le manifeste PARTAGÉ. Tant que le plan courant est
+     * matriciel, on ne pousse plus le nôtre — il ferait « sauter » le DXF des
+     * coéquipiers — mais on ré-émet le dernier placement partagé connu pour ne
+     * pas l'effacer non plus. Sur un plan vectoriel, rien ne change.
+     */
+    fun manifestTransform(local: ReferencePlanTransform?): ReferencePlanTransform? {
+        if (isRasterPlan()) return sharedTransform
+        if (local != null) sharedTransform = local.copy()
+        return local
+    }
 
     // Fabrique une entrée d'audit AVEC ses coordonnées machine — sans elles,
     // l'entrée est un simple texte que l'historique ne saurait pas rejouer.
@@ -266,12 +291,17 @@ fun SceneScreen(
                 withContext(Dispatchers.IO) { ProjectStore.saveRefPlanHiddenLayers(ctx, projectKey, remoteHidden) }
                 m.showSatellite?.let { lastSatellitePushed = it; options.showSatellite = it }
                 m.refPlanTransform?.let { t ->
-                    val nt = LocalMapper.toTransform(t)
+                    // HOMOTHÉTIE = réglage LOCAL : on la PRÉSERVE telle quelle,
+                    // sinon un simple écho distant la remettrait à 1 et le plan
+                    // changerait de taille sous les yeux de son propriétaire.
+                    val nt = LocalMapper.toTransform(t, referencePlan?.transform?.homothety ?: 1.0)
                     lastTransformSig = transformSig(nt)
+                    sharedTransform = nt.copy()
                     referencePlan?.let { rp ->
                         // `rp.raster` reporté : un placement venu du cloud ne doit
                         // pas faire disparaître le plan image chargé localement.
                         referencePlan = ReferencePlan(rp.plan, nt, rp.raster)
+                        refPlanTransformVersion++
                         withContext(Dispatchers.IO) { ProjectStore.saveTransform(ctx, projectKey, nt) }
                     }
                 }
@@ -375,8 +405,9 @@ fun SceneScreen(
         // réelle ; l'image reste locale (cf. décision de synchro v1).
         val sha = if (rp != null && !rp.plan.isEmpty) s.uploadRefPlan(RefPlanInterop.encode(rp.plan)) else refPlanSha
         refPlanSha = sha
-        rp?.transform?.let { lastTransformSig = transformSig(it) }
-        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), rp?.transform,
+        if (rp?.raster == null) rp?.transform?.let { lastTransformSig = transformSig(it) }
+        // Placement : celui de l'équipe si notre plan courant est une image (local).
+        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), manifestTransform(rp?.transform),
             hiddenLayers.toList(), options.showSatellite, sha)
         lastSatellitePushed = options.showSatellite
         lastHiddenSig = hiddenSig(hiddenLayers)
@@ -609,7 +640,8 @@ fun SceneScreen(
         if (!restored || !s.isCurrentProjectShared) return@LaunchedEffect
         if (lastSatellitePushed == options.showSatellite) return@LaunchedEffect
         lastSatellitePushed = options.showSatellite
-        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), referencePlan?.transform,
+        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey),
+            manifestTransform(referencePlan?.transform),
             hiddenLayers.toList(), options.showSatellite, refPlanSha)
     }
 
@@ -628,7 +660,8 @@ fun SceneScreen(
             "", AuditFieldKey.REF_PLAN_HIDDEN_LAYERS, before, sig
         )?.let { s.recordAudit(listOf(it)) }
         if (!s.isCurrentProjectShared) return@LaunchedEffect
-        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), referencePlan?.transform,
+        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey),
+            manifestTransform(referencePlan?.transform),
             hiddenLayers.toList(), options.showSatellite, refPlanSha)
     }
 
@@ -637,6 +670,11 @@ fun SceneScreen(
     // par valeur — l'anti-écho `lastTransformSig` évite de rejouer le distant.
     fun commitTransform(t: ReferencePlanTransform) {
         val s = sync ?: return
+        // R2 — plan MATRICIEL courant : son placement est purement LOCAL. Ni
+        // journal partagé ni manifeste : le plan de l'équipe ne doit pas bouger
+        // parce qu'un membre a glissé son image de repérage. (La persistance
+        // locale, elle, est faite par la vue plan, indépendamment d'ici.)
+        if (isRasterPlan()) return
         val sig = transformSig(t)
         if (sig == lastTransformSig) return
         val before = lastTransformSig
@@ -650,6 +688,7 @@ fun SceneScreen(
             )?.let { s.recordAudit(listOf(it)) }
         }
         if (!s.isCurrentProjectShared) return
+        sharedTransform = t.copy()
         scope.launch {
             s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey), t,
                 hiddenLayers.toList(), options.showSatellite, refPlanSha)
@@ -694,7 +733,12 @@ fun SceneScreen(
             AuditFieldKey.REF_PLAN_TRANSFORM -> {
                 val t = AuditCoding.decodeTransform(raw) ?: return
                 val rp = referencePlan ?: return
+                // Le journal transporte l'ÉCHELLE PURE : l'homothétie, réglage
+                // LOCAL, est reportée telle quelle (annuler un déplacement ne doit
+                // pas redimensionner le plan).
+                t.homothety = rp.transform.homothety
                 referencePlan = ReferencePlan(rp.plan, t, rp.raster)
+                refPlanTransformVersion++
                 scope.launch(Dispatchers.IO) { ProjectStore.saveTransform(ctx, projectKey, t) }
                 commitTransform(t)
             }
@@ -735,6 +779,9 @@ fun SceneScreen(
             // Projecteurs custom V1 : géométrie 3D résolue via baseGdtfSpec.
             customResolver = customResolver,
             referencePlan = referencePlan,
+            // R7 : la transformée du plan est mutée EN PLACE ; cette version dit à
+            // la 3D quand refaire le quad matriciel (homothétie/décalage immédiats).
+            refPlanTransformVersion = refPlanTransformVersion,
             hiddenLayers = hiddenLayers,
             calibration = calibration,
             satellite = satellite,
@@ -779,6 +826,7 @@ fun SceneScreen(
             referencePlan = referencePlan,
             onSetReferencePlan = { rp ->
                 referencePlan = rp
+                refPlanTransformVersion++
                 // À l'import : masquer d'emblée les calques éteints/gelés du DXF.
                 if (rp != null && hiddenLayers.isEmpty() && rp.plan.defaultHiddenLayers.isNotEmpty()) {
                     hiddenLayers = rp.plan.defaultHiddenLayers.toSet()
@@ -800,9 +848,14 @@ fun SceneScreen(
                             !rp.plan.isEmpty -> s.uploadRefPlan(RefPlanInterop.encode(rp.plan))
                             else -> refPlanSha
                         }
-                        rp?.transform?.let { lastTransformSig = transformSig(it) }
+                        // R2 — l'import d'une IMAGE ne doit jamais envoyer un
+                        // placement recalculé : il ferait « sauter » le DXF chez
+                        // les coéquipiers. On garde donc l'anti-écho ET le champ
+                        // du manifeste sur le dernier placement PARTAGÉ.
+                        if (rp?.raster == null) rp?.transform?.let { lastTransformSig = transformSig(it) }
                         s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey),
-                            rp?.transform, hiddenLayers.toList(), options.showSatellite, refPlanSha)
+                            manifestTransform(rp?.transform),
+                            hiddenLayers.toList(), options.showSatellite, refPlanSha)
                     }
                 }
             },
@@ -815,7 +868,10 @@ fun SceneScreen(
             },
             onCalibrationChanged = { calibTick++ },
             // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à distance.
-            onTransformChanged = { t -> commitTransform(t) },
+            // La VERSION est incrémentée dans tous les cas : c'est elle qui fait
+            // reconstruire le plan matriciel en 3D (R7), la transformée étant un
+            // objet muté EN PLACE que Compose ne peut pas observer.
+            onTransformChanged = { t -> refPlanTransformVersion++; commitTransform(t) },
             gdtfOverrides = gdtfOverrides,
             // Overrides de patch : NOM effectif des étiquettes 2D, de la recherche
             // plan et de la fiche de sélection (renommage).

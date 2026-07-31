@@ -35,6 +35,27 @@ object RasterPlanLoader {
 
     enum class Format { DXF, JPEG, PNG, PDF }
 
+    /** Convention d'arrivée d'un bitmap : 96 dpi NEUTRE (voir `place`). */
+    private const val NEUTRAL_DPI = 96.0
+    /** Millimètres par pouce. */
+    private const val MM_PER_INCH = 25.4
+    /** Points PostScript par pouce (unité de la MediaBox d'un PDF). */
+    private const val POINTS_PER_INCH = 72.0
+
+    /**
+     * Image décodée + dimensions d'ORIGINE en pixels (avant sous-échantillonnage
+     * et après rotation EXIF). Ce sont ELLES qui donnent la taille monde : le
+     * bitmap, lui, a pu être divisé pour tenir en mémoire.
+     */
+    class DecodedImage(val bitmap: Bitmap, val srcWidthPx: Int, val srcHeightPx: Int)
+
+    /**
+     * Page 1 d'un PDF rendue + nombre de pages + MediaBox en POINTS PostScript.
+     * La taille monde vient des points, pas du rendu (dont la résolution n'est
+     * qu'un compromis mémoire).
+     */
+    class RenderedPdf(val bitmap: Bitmap, val pageCount: Int, val pointWidth: Int, val pointHeight: Int)
+
     /**
      * Facteur de sous-échantillonnage (puissance de 2, ≥ 1) tel que l'image
      * décodée tienne SOUS les deux bornes : côté maximal et budget de pixels.
@@ -106,19 +127,21 @@ object RasterPlanLoader {
      * Décode une image bornée en mémoire, orientation EXIF appliquée (sinon les
      * photos de plan arrivent couchées). Appeler HORS thread principal.
      */
-    fun loadImage(cr: ContentResolver, uri: Uri, png: Boolean): Bitmap? {
+    fun loadImage(cr: ContentResolver, uri: Uri, png: Boolean): DecodedImage? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         runCatching { cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } }
             .getOrNull()
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val srcW = bounds.outWidth
+        val srcH = bounds.outHeight
         val opts = BitmapFactory.Options().apply {
-            inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, IMAGE_MAX_SIDE, IMAGE_MAX_PIXELS)
+            inSampleSize = sampleSizeFor(srcW, srcH, IMAGE_MAX_SIDE, IMAGE_MAX_PIXELS)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         val bmp = runCatching {
             cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
         }.getOrNull() ?: return null
-        if (png) return bmp   // un PNG ne porte pas d'orientation EXIF
+        if (png) return DecodedImage(bmp, srcW, srcH)   // un PNG ne porte pas d'orientation EXIF
         // ExifInterface du FRAMEWORK (déprécié mais présent depuis l'API 24, donc
         // toujours au-dessus de notre minSdk 28) : évite d'ajouter une dépendance
         // pour la seule lecture d'un entier d'orientation.
@@ -131,7 +154,13 @@ object RasterPlanLoader {
                 )
             } ?: android.media.ExifInterface.ORIENTATION_NORMAL
         }.getOrNull() ?: android.media.ExifInterface.ORIENTATION_NORMAL
-        return applyExif(bmp, rot)
+        // Une rotation d'un quart de tour ÉCHANGE aussi les dimensions d'origine :
+        // sans ça, une photo couchée arriverait au format de son voisin.
+        val swap = rot == android.media.ExifInterface.ORIENTATION_ROTATE_90 ||
+            rot == android.media.ExifInterface.ORIENTATION_ROTATE_270 ||
+            rot == android.media.ExifInterface.ORIENTATION_TRANSPOSE ||
+            rot == android.media.ExifInterface.ORIENTATION_TRANSVERSE
+        return DecodedImage(applyExif(bmp, rot), if (swap) srcH else srcW, if (swap) srcW else srcH)
     }
 
     @Suppress("DEPRECATION")
@@ -154,8 +183,8 @@ object RasterPlanLoader {
         }.getOrDefault(src)
     }
 
-    /** Rendu de la page 1 d'un PDF + nombre total de pages (null si illisible). */
-    fun renderPdfFirstPage(cr: ContentResolver, uri: Uri): Pair<Bitmap, Int>? = runCatching {
+    /** Rendu de la page 1 d'un PDF + pages + MediaBox en points (null si illisible). */
+    fun renderPdfFirstPage(cr: ContentResolver, uri: Uri): RenderedPdf? = runCatching {
         cr.openFileDescriptor(uri, "r")?.use { pfd ->
             android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
                 val pages = renderer.pageCount
@@ -173,29 +202,45 @@ object RasterPlanLoader {
                     // noir sur transparent devient invisible sur fond sombre.
                     Canvas(bmp).drawColor(Color.WHITE)
                     page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    bmp to pages
+                    RenderedPdf(bmp, pages, pw, ph)
                 }
             }
         }
     }.getOrNull()
 
     /**
-     * Construit le plan matriciel placé : l'image est dimensionnée pour que son
-     * PLUS GRAND côté couvre le plus grand côté de la scène MVR (aucun JPEG ne
-     * porte d'échelle réelle), en conservant strictement ses proportions.
-     * L'utilisateur ajuste ensuite à l'« Homothétie ».
+     * Taille MONDE (mm) d'un plan matriciel — convention d'arrivée COMMUNE aux
+     * deux plateformes, DÉTERMINISTE et indépendante du show :
      *
-     * @param sceneSpanX/@param sceneSpanY étendue de la scène en mm.
+     *  - bitmap (JPEG/PNG) : pixels d'ORIGINE ÷ 96 × 25,4. La base 96 dpi est
+     *    NEUTRE et volontairement constante : le dpi déclaré dans un fichier est
+     *    faux bien trop souvent pour qu'on ose s'y fier ;
+     *  - PDF : MediaBox en points × 25,4 ÷ 72 — un PDF tracé à l'échelle arrive
+     *    donc à sa TAILLE PHYSIQUE réelle.
+     *
+     * On n'étire SURTOUT PAS le plan sur l'emprise de la scène MVR : la taille
+     * d'arrivée ne doit pas dépendre du show ouvert, sinon le même fichier
+     * n'arrive pas pareil chez deux personnes. L'utilisateur ajuste ensuite à
+     * l'« Homothétie ».
+     *
+     * @param srcWidth/@param srcHeight dimensions SOURCE : pixels d'origine pour
+     *   une image, points PostScript de la MediaBox pour un PDF.
      */
+    fun worldSizeMm(kind: RasterPlan.Kind, srcWidth: Float, srcHeight: Float): Pair<Float, Float> {
+        val w = if (srcWidth.isFinite() && srcWidth > 0f) srcWidth.toDouble() else 1.0
+        val h = if (srcHeight.isFinite() && srcHeight > 0f) srcHeight.toDouble() else 1.0
+        val perUnit =
+            if (kind == RasterPlan.Kind.PDF) MM_PER_INCH / POINTS_PER_INCH
+            else MM_PER_INCH / NEUTRAL_DPI
+        return (w * perUnit).toFloat() to (h * perUnit).toFloat()
+    }
+
+    /** Construit le plan matriciel placé à sa taille d'arrivée (cf. `worldSizeMm`). */
     fun place(
         bitmap: Bitmap, name: String, kind: RasterPlan.Kind, pageCount: Int,
-        sceneSpanX: Float, sceneSpanY: Float
+        srcWidth: Float, srcHeight: Float
     ): RasterPlan {
-        val iw = bitmap.width.coerceAtLeast(1).toFloat()
-        val ih = bitmap.height.coerceAtLeast(1).toFloat()
-        // Scène dégénérée (un seul projecteur, ou pas de décor) → repli 20 m.
-        val span = maxOf(sceneSpanX, sceneSpanY).let { if (it.isFinite() && it > 1f) it else 20_000f }
-        val f = span / maxOf(iw, ih)
-        return RasterPlan(bitmap, iw * f, ih * f, name, kind, pageCount)
+        val (mmW, mmH) = worldSizeMm(kind, srcWidth, srcHeight)
+        return RasterPlan(bitmap, mmW, mmH, name, kind, pageCount)
     }
 }

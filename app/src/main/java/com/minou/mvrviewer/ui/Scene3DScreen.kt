@@ -302,6 +302,13 @@ fun Scene3DScreen(
     // vient de `baseGdtfSpec` du type (résolu ici). Défaut vide = aucun custom.
     customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
+    /**
+     * VERSION du placement du plan de repère. La transformée est un objet muté EN
+     * PLACE (l'instance du plan ne change pas) : sans ce compteur, un réglage
+     * d'homothétie ou de décalage ne se verrait qu'en 2D. C'est donc LUI, et pas
+     * l'instance, qui commande la reconstruction du quad matriciel.
+     */
+    refPlanTransformVersion: Int = 0,
     hiddenLayers: Set<String> = emptySet(),
     calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
@@ -1007,7 +1014,10 @@ fun Scene3DScreen(
     // vue plan (mêmes décalage / rotation / échelle / homothétie). Placé 1 cm sous
     // le sol MVR — au-dessus du satellite (−2 cm), sous les traits DXF (z = 0) —
     // pour éviter tout z-fighting entre les trois fonds.
-    LaunchedEffect(referencePlan) {
+    // La clé est la VERSION du placement (et non l'instance du plan) : la
+    // transformée étant mutée EN PLACE, régler l'homothétie ou le décalage doit
+    // se voir IMMÉDIATEMENT en 3D comme en 2D.
+    LaunchedEffect(referencePlan, refPlanTransformVersion) {
         rasterRoot.childNodes.toList().forEach {
             rasterRoot.removeChildNode(it); runCatching { it.destroy() }
         }

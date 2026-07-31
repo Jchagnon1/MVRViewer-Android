@@ -419,21 +419,25 @@ fun PlanScreen(
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.DXF ->
                         cr.openInputStream(uri)?.use { com.minou.mvrviewer.mvr.DxfParser.parse(it) }
                             ?.let { ImportedRefPlan(dxf = it) }
+                    // TAILLE D'ARRIVÉE : elle vient du FICHIER (MediaBox du PDF en
+                    // points, pixels d'origine de l'image à 96 dpi neutre), jamais
+                    // de l'emprise de la scène — le même document doit arriver
+                    // identique quel que soit le show ouvert.
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PDF ->
-                        com.minou.mvrviewer.mvr.RasterPlanLoader.renderPdfFirstPage(cr, uri)?.let { (bmp, pages) ->
+                        com.minou.mvrviewer.mvr.RasterPlanLoader.renderPdfFirstPage(cr, uri)?.let { pdf ->
                             ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                bmp, name ?: "Plan PDF", com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
-                                pages, data.spanX, data.spanY))
+                                pdf.bitmap, name ?: "Plan PDF", com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
+                                pdf.pageCount, pdf.pointWidth.toFloat(), pdf.pointHeight.toFloat()))
                         }
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG,
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.JPEG -> {
                         val png = fmt == com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG
-                        com.minou.mvrviewer.mvr.RasterPlanLoader.loadImage(cr, uri, png)?.let { bmp ->
+                        com.minou.mvrviewer.mvr.RasterPlanLoader.loadImage(cr, uri, png)?.let { img ->
                             ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                bmp, name ?: "Plan image",
+                                img.bitmap, name ?: "Plan image",
                                 if (png) com.minou.mvrviewer.mvr.RasterPlan.Kind.PNG
                                 else com.minou.mvrviewer.mvr.RasterPlan.Kind.JPEG,
-                                1, data.spanX, data.spanY))
+                                1, img.srcWidthPx.toFloat(), img.srcHeightPx.toFloat()))
                         }
                     }
                 }
@@ -3075,11 +3079,12 @@ private fun drMat(m: FloatArray): dev.romainguy.kotlin.math.Mat4 =
 
 // ---- HOMOTHÉTIE : bornes du réglage + formatage de la valeur éditable --------
 // Le CURSEUR couvre ×0,1 → ×10 (log10 de −1 à +1, la courbe la plus lisible :
-// autant de course pour diviser que pour multiplier). Le CHAMP accepte un peu
-// plus large (×0,05 → ×20) pour les cas extrêmes ; le curseur s'y colle alors à
-// sa borne, sans jamais contredire la valeur réellement appliquée.
-internal const val HOMOTHETY_MIN = 0.05
-internal const val HOMOTHETY_MAX = 20.0
+// autant de course pour diviser que pour multiplier). La valeur SAISIE, elle, va
+// de ×0,01 à ×100 — mêmes bornes que iOS, pour qu'un même plan se règle à
+// l'identique sur les deux plateformes ; le curseur se colle alors à sa borne,
+// sans jamais contredire la valeur réellement appliquée.
+internal const val HOMOTHETY_MIN = 0.01
+internal const val HOMOTHETY_MAX = 100.0
 
 /** Position de curseur (log10, bornée) correspondant à un facteur. */
 internal fun homothetySlider(v: Double): Float =

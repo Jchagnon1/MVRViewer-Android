@@ -14,9 +14,9 @@ import org.junit.Test
  *     au bit près, et les chaînes de synchro/audit sont inchangées ;
  *  2. l'application PROPORTIONNELLE (même facteur sur les deux axes, jamais de
  *     déformation) via `worldXY` ;
- *  3. le contrat cloud : le DTO et la chaîne d'audit à SIX champs transportent le
- *     PRODUIT `scale × homothety` — aucun 7e champ, donc `decodeTransform`
- *     (indexé f[0..5]) continue de fonctionner.
+ *  3. le contrat cloud : le DTO et la chaîne d'audit à SIX champs transportent
+ *     l'ÉCHELLE PURE — l'homothétie est un réglage LOCAL, jamais fondue dedans et
+ *     jamais remise à 1 par un écho distant (règle canonique, alignée sur iOS).
  */
 class ReferencePlanHomothetyTest {
 
@@ -57,15 +57,27 @@ class ReferencePlanHomothetyTest {
         assertEquals(false, c.visible)
     }
 
-    @Test fun contratCloudSixChampsAvecProduit() {
+    @Test fun contratCloudSixChampsEchellePure() {
         val t = ReferencePlanTransform(scale = 2.0, homothety = 4.0)
         val raw = AuditCoding.encodeTransform(t)
         assertEquals(6, raw.split(",").size)
         val back = AuditCoding.decodeTransform(raw)!!
-        // Le poste distant reçoit la BONNE taille ; seule la factorisation est perdue.
-        assertEquals(8.0, back.scale, 1e-12)
-        assertEquals(8.0, back.effScale, 1e-12)
-        assertEquals(8.0, LocalMapper.fromTransform(t).scale, 1e-12)
+        // L'échelle partagée est PURE : l'homothétie ×4 reste chez son auteur.
+        assertEquals(2.0, back.scale, 1e-12)
+        assertEquals(1.0, back.homothety, 1e-12)
+        assertEquals(2.0, LocalMapper.fromTransform(t).scale, 1e-12)
+    }
+
+    /** Un écho distant ne doit PAS remettre l'homothétie locale à 1. */
+    @Test fun receptionPreserveLHomothetieLocale() {
+        val distant = LocalMapper.fromTransform(
+            ReferencePlanTransform(offsetX = 10.0, scale = 3.0, homothety = 1.0))
+        val local = LocalMapper.toTransform(distant, localHomothety = 2.5)
+        assertEquals(3.0, local.scale, 1e-12)     // l'échelle vient bien du distant
+        assertEquals(2.5, local.homothety, 1e-12) // …mais l'homothétie reste la nôtre
+        assertEquals(7.5, local.effScale, 1e-12)
+        // Valeur absurde (0 ou négative) → repli sur 1, jamais de plan aplati.
+        assertEquals(1.0, LocalMapper.toTransform(distant, 0.0).homothety, 0.0)
     }
 
     @Test fun bornesEtFormatageDuReglage() {
@@ -77,5 +89,8 @@ class ReferencePlanHomothetyTest {
         assertEquals(-1f, com.minou.mvrviewer.ui.homothetySlider(0.001), 1e-6f)
         assertEquals("1", com.minou.mvrviewer.ui.formatHomothety(1.0))
         assertEquals("0.85", com.minou.mvrviewer.ui.formatHomothety(0.85))
+        // Bornes de la valeur SAISIE : ×0,01 → ×100, comme iOS.
+        assertEquals(0.01, com.minou.mvrviewer.ui.HOMOTHETY_MIN, 0.0)
+        assertEquals(100.0, com.minou.mvrviewer.ui.HOMOTHETY_MAX, 0.0)
     }
 }

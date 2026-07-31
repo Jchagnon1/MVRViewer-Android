@@ -50,6 +50,30 @@ class RasterPlanTest {
         assertEquals(1, sample(-5, 100))
     }
 
+    // ---- TAILLE D'ARRIVÉE (convention commune aux deux plateformes) ----------
+
+    @Test fun imageArriveEn96DpiNeutre() {
+        // 96 px à 96 dpi = 1 pouce = 25,4 mm. La taille ne dépend NI du dpi
+        // déclaré dans le fichier, NI de l'emprise de la scène ouverte.
+        val (w, h) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.JPEG, 96f, 192f)
+        assertEquals(25.4f, w, 1e-3f)
+        assertEquals(50.8f, h, 1e-3f)
+        val (w2, _) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.PNG, 6000f, 3000f)
+        assertEquals((6000.0 / 96.0 * 25.4).toFloat(), w2, 1e-2f)
+    }
+
+    @Test fun pdfArriveASaTaillePhysique() {
+        // MediaBox A4 = 595 × 842 points → ~210 × 297 mm.
+        val (w, h) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.PDF, 595f, 842f)
+        assertEquals(210f, w, 0.5f)
+        assertEquals(297f, h, 0.5f)
+    }
+
+    @Test fun dimensionsSourceInvalidesNeCassentPas() {
+        val (w, h) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.PNG, 0f, Float.NaN)
+        assertTrue(w > 0f && h > 0f)
+    }
+
     @Test fun bornesLocalesCentreesSurLOrigine() {
         // Le DxfPlan porteur est VIDE (aucune polyligne) mais garde les bornes de
         // l'image : c'est ce qui fait sortir proprement la passe DXF 3D et les

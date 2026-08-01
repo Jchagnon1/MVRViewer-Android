@@ -312,7 +312,7 @@ private fun ChannelInspector(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
                         Box(Modifier.size(10.dp).clip(CircleShape)
                             .background(LayerColors.color(layerIndex, p.layerName)))
-                        Text("  " + (p.fixtureId?.let { "N° $it" } ?: "—"),
+                        Text("  " + (p.fixtureId?.let { stringResource(R.string.fixture_id_fmt, it) } ?: "—"),
                             style = MaterialTheme.typography.labelMedium)
                         Text("  ${p.name}", style = MaterialTheme.typography.bodySmall,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -353,7 +353,7 @@ private fun FixtureLegend(
                 Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp))
                     .background(LayerColors.color(layerIndex, p.layerName)))
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text((p.fixtureId?.let { "N° $it" } ?: p.name) + if (conflict) "  ⚠" else "",
+                    Text((p.fixtureId?.let { stringResource(R.string.fixture_id_fmt, it) } ?: p.name) + if (conflict) "  ⚠" else "",
                         style = MaterialTheme.typography.bodyMedium)
                     Text("${p.name} · ${p.mode ?: "—"}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,

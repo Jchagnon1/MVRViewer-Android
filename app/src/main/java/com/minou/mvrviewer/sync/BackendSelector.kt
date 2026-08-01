@@ -27,7 +27,7 @@ object BackendSelector {
     }
 
     fun activeBackendLabel(context: Context): String =
-        if (firebaseAvailable(context)) "Firebase" else "Local (démo)"
+        if (firebaseAvailable(context)) "Firebase" else context.getString(com.minou.mvrviewer.R.string.sync_backend_local)
 
     fun makeService(context: Context): SyncService =
         if (firebaseAvailable(context)) FirebaseSyncService(context)

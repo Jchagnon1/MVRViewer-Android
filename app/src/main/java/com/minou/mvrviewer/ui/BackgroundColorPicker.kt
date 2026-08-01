@@ -24,6 +24,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Sélecteur de couleur (TSV) pour le fond d'une vue. Compose n'a pas de
@@ -66,13 +68,13 @@ fun BackgroundColorDialog(
                 )
                 // On recalcule la couleur À PARTIR de la nouvelle valeur du curseur
                 // (et non du `current` de la frame précédente, qui serait périmé).
-                Text("Teinte", style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.color_hue), style = MaterialTheme.typography.labelSmall)
                 Slider(value = hue, valueRange = 0f..360f,
                     onValueChange = { hue = it; onColorChange(Color.hsv(it.coerceIn(0f, 360f), sat.coerceIn(0f, 1f), value.coerceIn(0f, 1f))) })
-                Text("Saturation", style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.color_saturation), style = MaterialTheme.typography.labelSmall)
                 Slider(value = sat, valueRange = 0f..1f,
                     onValueChange = { sat = it; onColorChange(Color.hsv(hue.coerceIn(0f, 360f), it.coerceIn(0f, 1f), value.coerceIn(0f, 1f))) })
-                Text("Luminosité", style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.color_brightness), style = MaterialTheme.typography.labelSmall)
                 Slider(value = value, valueRange = 0f..1f,
                     onValueChange = { value = it; onColorChange(Color.hsv(hue.coerceIn(0f, 360f), sat.coerceIn(0f, 1f), it.coerceIn(0f, 1f))) })
             }
@@ -83,7 +85,7 @@ fun BackgroundColorDialog(
                 val h = default.toHsv()
                 hue = h[0]; sat = h[1]; value = h[2]
                 onColorChange(default)
-            }) { Text("Rétablir le défaut") }
+            }) { Text(stringResource(R.string.color_restore_default)) }
         }
     )
 }

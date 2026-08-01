@@ -164,8 +164,7 @@ fun GdtfShareScreen(
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
             if (!loggedIn) {
                 Text(
-                    stringResource(R.string.gdtf_intro) + (
-                        ""),
+                    stringResource(R.string.gdtf_intro),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
@@ -290,6 +289,7 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var downloadingRid by remember { mutableStateOf<Int?>(null) }
+    val searchCtx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     // Disponibilité d'un VRAI modèle 3D par révision (rid) : absent = pas encore
     // vérifié (spinner). Le .gdtf téléchargé pour la vérif est réutilisé au choix.
@@ -311,7 +311,7 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
         prefetched.clear(); modelAvail.clear(); checking.clear()
         runCatching { GdtfShareClient.search(query) }.fold(
             onSuccess = { results = it; error = null },
-            onFailure = { error = it.message ?: "Recherche impossible." }
+            onFailure = { error = it.message ?: searchCtx.getString(R.string.gdtf_search_failed) }
         )
         loading = false
     }
@@ -370,7 +370,7 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
                                 val data = prefetched[entry.rid]
                                     ?: runCatching { GdtfShareClient.download(entry.rid) }.getOrNull()
                                 downloadingRid = null
-                                if (data != null) onChosen(data, entry.rid) else error = "Téléchargement échoué."
+                                if (data != null) onChosen(data, entry.rid) else error = searchCtx.getString(R.string.gdtf_download_failed)
                             }
                         }
                         .padding(horizontal = 16.dp, vertical = 12.dp)

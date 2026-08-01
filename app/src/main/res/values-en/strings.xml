@@ -71,10 +71,14 @@
     <string name="cfx_type_name">Type name</string>
     <string name="color_beige">Beige</string>
     <string name="color_black">Black</string>
+    <string name="color_brightness">Brightness</string>
     <string name="color_charcoal">Charcoal</string>
     <string name="color_grey">Grey</string>
+    <string name="color_hue">Hue</string>
     <string name="color_light_grey">Light grey</string>
     <string name="color_midnight_blue">Midnight blue</string>
+    <string name="color_restore_default">Restore the default</string>
+    <string name="color_saturation">Saturation</string>
     <string name="color_white">White</string>
     <string name="common_apply">Apply</string>
     <string name="common_back">Back</string>
@@ -152,6 +156,8 @@
     <string name="facet_mode">Mode</string>
     <string name="facet_type">Type</string>
     <string name="facet_universe">Universe</string>
+    <string name="fixture_id_fmt">ID %1$s</string>
+    <string name="fixture_id_name_fmt">ID %1$s · %2$s</string>
     <string name="fx_addr_format_hint">Format: universe.address (1–512)</string>
     <string name="fx_addr_placeholder">universe.address</string>
     <string name="fx_channel_default_fmt"> · default %1$d</string>
@@ -182,6 +188,7 @@
     <string name="gdtf_connected">Connected.</string>
     <string name="gdtf_connected_to_share">Connected to GDTF Share.</string>
     <string name="gdtf_connecting">Connecting…</string>
+    <string name="gdtf_download_failed">Download failed.</string>
     <string name="gdtf_improve_all">Improve everything automatically</string>
     <string name="gdtf_intro">Sign in with your GDTF Share account (free, gdtf-share.com) to replace fixture 3D models with the manufacturers\' profiles.</string>
     <string name="gdtf_login_failed">Sign-in failed.</string>
@@ -192,6 +199,7 @@
     <string name="gdtf_reconnecting">Reconnecting…</string>
     <string name="gdtf_resolved_fmt">%1$d / %2$d type(s) found automatically.</string>
     <string name="gdtf_resolving_fmt">Resolving %1$d/%2$d…</string>
+    <string name="gdtf_search_failed">Search failed.</string>
     <string name="gdtf_search_hint">Manufacturer or model</string>
     <string name="gdtf_share_title">GDTF Share</string>
     <string name="gdtf_status_auto">real model (auto)</string>
@@ -228,6 +236,7 @@
     <string name="lod_always">Always visible</string>
     <string name="lod_auto">Auto</string>
     <string name="lod_hide_nav">Hide while navigating</string>
+    <string name="measure_between_fmt">ID %1$s → ID %2$s: %3$s</string>
     <string name="measure_snapped">snapped</string>
     <string name="measure_start_placed">start point set — tap the end point</string>
     <string name="measure_tap_again">tap for a new measurement</string>
@@ -279,7 +288,9 @@
     <string name="patch_duplicate_ids">Duplicate IDs: </string>
     <string name="patch_filter_hint">Filter (ID, GDTF, layer, DMX…)</string>
     <string name="patch_title">Patch</string>
+    <string name="pdf_balance_fmt">Balance — %1$s</string>
     <string name="pdf_core_fmt">Core %1$d</string>
+    <string name="pdf_imbalance_fmt">imbalance (Δ %1$d W)</string>
     <string name="pdf_multicore_cores_fmt">Multicore %1$d cores</string>
     <string name="pdf_no_cabling_data">No cabling data to export.</string>
     <string name="pdf_no_dmx_line">No DMX line.</string>
@@ -333,6 +344,7 @@
     <string name="status_truncated"> (truncated)</string>
     <string name="sync_audit_by_fmt">by %1$s · %2$s</string>
     <string name="sync_backend_fmt">Backend: %1$s</string>
+    <string name="sync_backend_local">Local (demo)</string>
     <string name="sync_create_account">Create an account</string>
     <string name="sync_display_name">Display name (optional)</string>
     <string name="sync_downloading_fmt">Downloading %1$d %%</string>
@@ -342,6 +354,7 @@
     <string name="sync_err_email_in_use">This e-mail is already in use.</string>
     <string name="sync_err_invalid_credentials">Wrong e-mail or password.</string>
     <string name="sync_err_invite_invalid">Invalid or expired share code.</string>
+    <string name="sync_err_no_open_project">No open project to share.</string>
     <string name="sync_err_not_a_member">You do not have access to this project.</string>
     <string name="sync_err_not_signed_in">You are not signed in.</string>
     <string name="sync_err_project_not_found">Project not found.</string>
@@ -352,6 +365,7 @@
     <string name="sync_join">Join</string>
     <string name="sync_join_hint">You join the project team; the file is downloaded next.</string>
     <string name="sync_later">Later</string>
+    <string name="sync_me_offline">Me (offline)</string>
     <string name="sync_new_version_fmt">A new version of the file (v%1$d) is available.</string>
     <string name="sync_password">Password</string>
     <string name="sync_publish">Publish</string>

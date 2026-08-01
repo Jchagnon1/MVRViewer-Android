@@ -69,9 +69,19 @@ class LayerLodTest {
         }
         assertEquals(LayerLodMode.AUTO, LayerLodMode.fromStored(null))
         assertEquals(LayerLodMode.AUTO, LayerLodMode.fromStored("valeur inconnue"))
-        // Libellés FIGÉS (vocabulaire commun iOS/Android).
-        assertEquals("Auto", LayerLodMode.AUTO.label)
-        assertEquals("Toujours visible", LayerLodMode.ALWAYS.label)
-        assertEquals("Masquer en navigation", LayerLodMode.HIDE_NAV.label)
+        // Libellés FIGÉS (vocabulaire commun iOS/Android) : ils vivent désormais
+        // dans les ressources (res/values + res/values-en) pour suivre la langue
+        // du téléphone. Ce qui doit rester vrai ICI : chaque mode porte SON
+        // libellé, distinct des autres, et aucune valeur PERSISTÉE ne change.
+        assertEquals("Auto", LayerLodMode.AUTO.labelRes,
+            com.minou.mvrviewer.R.string.lod_auto)
+        assertEquals("Toujours visible", LayerLodMode.ALWAYS.labelRes,
+            com.minou.mvrviewer.R.string.lod_always)
+        assertEquals("Masquer en navigation", LayerLodMode.HIDE_NAV.labelRes,
+            com.minou.mvrviewer.R.string.lod_hide_nav)
+        assertEquals(
+            LayerLodMode.entries.size,
+            LayerLodMode.entries.map { it.labelRes }.toSet().size
+        )
     }
 }

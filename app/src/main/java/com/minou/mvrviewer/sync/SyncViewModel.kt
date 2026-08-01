@@ -172,7 +172,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun publishCurrentProject(name: String): InviteCode {
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
         val key = currentContentKey; val data = currentMvrBytes
-        if (key == null || data == null) throw SyncException.Message("Aucun projet ouvert à partager.")
+        if (key == null || data == null) throw SyncException.Message(ctx.getString(com.minou.mvrviewer.R.string.sync_err_no_open_project))
         _status.value = SyncStatus.Syncing
         try {
             val project = runCatching { service.projectMatchingContentKey(key) }.getOrNull()
@@ -304,7 +304,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Auteur courant (compte connecté, sinon local hors-ligne). */
     val currentAuthor: Pair<String, String>
-        get() = _auth.value.accountOrNull?.let { it.uid to it.displayName } ?: ("" to "Moi (hors ligne)")
+        get() = _auth.value.accountOrNull?.let { it.uid to it.displayName } ?: ("" to ctx.getString(com.minou.mvrviewer.R.string.sync_me_offline))
 
     fun newAuditId(): String = UUID.randomUUID().toString()
     fun nowEpoch(): Double = System.currentTimeMillis() / 1000.0

@@ -50,6 +50,7 @@ internal class CablingPlanColoring(
  * [CablingLabels], légende « distributeurs utilisés (+ Non câblé) ».
  */
 internal fun buildCablingColoring(
+    ctx: android.content.Context,
     data: PlanData,
     cabling: PowerCablingDTO,
     dmx: DmxCablingDTO
@@ -82,12 +83,12 @@ internal fun buildCablingColoring(
     val socaUsed = cabling.assignments.mapTo(HashSet()) { it.distributor }
     val socaLegend = buildList {
         cabling.distributors.filter { it.id in socaUsed }.forEach { add(it.name to Color(it.colorArgb)) }
-        if (data.fixtures.any { it.key !in socaColor }) add("Non câblé" to CABLING_UNASSIGNED_GRAY)
+        if (data.fixtures.any { it.key !in socaColor }) add(ctx.getString(com.minou.mvrviewer.R.string.cabling_unassigned) to CABLING_UNASSIGNED_GRAY)
     }
     val dmxUsed = dmx.assignments.mapTo(HashSet()) { it.distributor }
     val dmxLegend = buildList {
         dmx.distributors.filter { it.id in dmxUsed }.forEach { add(it.name to Color(it.colorArgb)) }
-        if (data.fixtures.any { it.key !in dmxColor }) add("Non câblé" to CABLING_UNASSIGNED_GRAY)
+        if (data.fixtures.any { it.key !in dmxColor }) add(ctx.getString(com.minou.mvrviewer.R.string.cabling_unassigned) to CABLING_UNASSIGNED_GRAY)
     }
 
     return CablingPlanColoring(socaColor, dmxColor, socaLegend, dmxLegend, cablingText)

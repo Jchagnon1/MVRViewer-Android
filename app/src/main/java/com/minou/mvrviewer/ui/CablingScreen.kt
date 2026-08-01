@@ -220,7 +220,7 @@ fun CablingScreen(
                     var dmxView: PlanViewCapture? = null
                     if (needPlans) {
                         val data = planData(scene, overrides)
-                        val coloring = buildCablingColoring(data, cablingDto, dmxDto)
+                        val coloring = buildCablingColoring(ctxCabling, data, cablingDto, dmxDto)
                         planSrc = PlanExportSource(
                             data = data,
                             layerIndex = LayerColors.index(scene),
@@ -836,8 +836,7 @@ private fun PowerTypesPanel(
 
     Column(modifier) {
         Text(
-            stringResource(R.string.power_tab_hint) + (
-                ""),
+            stringResource(R.string.power_tab_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)

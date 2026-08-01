@@ -305,7 +305,7 @@ private fun buildElecRows(
         // distributeur MULTI-PHASES (Socapex). Une ligne SOLO (une seule phase
         // utilisée) n'affiche que son total — pas de ligne d'équilibrage (aligné iOS).
         if (usedPhases.size >= 2)
-            rows.add(phaseBalanceRow(m, left, right, phaseLoads, usedPhases))
+            rows.add(phaseBalanceRow(ctx, m, left, right, phaseLoads, usedPhases))
         val total = PowerCablingCalc.distributorTotalW(dist, dto.assignments, settings, wattsOf)
         rows.add(totalRow(m, left, right, ctx.getString(R.string.pdf_total_distributor), "$total W"))
     }
@@ -474,7 +474,7 @@ private fun noteRow(m: TextMeasurer, left: Float, right: Float, text: String): R
 }
 
 /** Pied du distributeur élec : totaux L1/L2/L3 + marqueur de déséquilibre. */
-private fun phaseBalanceRow(m: TextMeasurer, left: Float, right: Float, phaseLoads: List<PhaseLoad>, usedPhases: Set<Int>): Row {
+private fun phaseBalanceRow(ctx: android.content.Context, m: TextMeasurer, left: Float, right: Float, phaseLoads: List<PhaseLoad>, usedPhases: Set<Int>): Row {
     val used = phaseLoads.filter { it.phase in usedPhases }
     val parts = used.joinToString("   ·   ") { "L${it.phase} ${it.totalW} W" }
     val totals = used.map { it.totalW }
@@ -483,7 +483,7 @@ private fun phaseBalanceRow(m: TextMeasurer, left: Float, right: Float, phaseLoa
     // que pour l'AFFICHAGE.
     val delta = (totals.maxOrNull() ?: 0) - (totals.minOrNull() ?: 0)
     val imbalance = PowerCablingCalc.isPhaseImbalanced(totals)
-    val txt = "Équilibrage — $parts" + if (imbalance) "    ⚠ déséquilibre (Δ $delta W)" else ""
+    val txt = ctx.getString(R.string.pdf_balance_fmt, parts) + if (imbalance) "    ⚠ " + ctx.getString(R.string.pdf_imbalance_fmt, delta) else ""
     val tl = m.wrap(txt, style(10f, if (imbalance) C_AMBER else 0xFF444444, FontWeight.Medium), right - left - 8f)
     return Row(tl.size.height + 9f) { ds, top -> ds.drawText(tl, topLeft = Offset(left + 4f, top + 5f)) }
 }

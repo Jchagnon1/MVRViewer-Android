@@ -59,8 +59,7 @@ fun ToolbarCustomizeSheet(
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth().heightIn(max = 600.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    stringResource(R.string.toolbar_customize_help) + (
-                        ""),
+                    stringResource(R.string.toolbar_customize_help),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)

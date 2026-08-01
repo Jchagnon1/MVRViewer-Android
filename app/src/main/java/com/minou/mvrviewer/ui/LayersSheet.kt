@@ -64,8 +64,7 @@ fun LayersSheet(
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth().heightIn(max = 600.dp)) {
                 Text(stringResource(R.string.layers_title_3d), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    stringResource(R.string.layers_lod_help) + (
-                        ""),
+                    stringResource(R.string.layers_lod_help),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)

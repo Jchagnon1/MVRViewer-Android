@@ -2033,7 +2033,7 @@ fun Scene3DScreen(
                     ) * 1000.0
                     val na = scene.fixtures.getOrNull(mi)?.fixtureId ?: "?"
                     val nb = scene.fixtures.getOrNull(mj)?.fixtureId ?: "?"
-                    "N° $na → N° $nb : ${formatPlanDistanceMm(mm)}"
+                    stringResource(R.string.measure_between_fmt, na, nb, formatPlanDistanceMm(mm))
                 } else if (mi != null) stringResource(R.string.measure_tap_second_fixture)
                 else stringResource(R.string.measure_tap_fixture)
                 Surface(
@@ -2052,7 +2052,7 @@ fun Scene3DScreen(
             if (!measureMode && selected.isNotEmpty()) {
                 val label = if (selected.size == 1 && selected.first() in scene.fixtures.indices) {
                     val f = scene.fixtures[selected.first()]
-                    "N° ${f.fixtureId ?: "?"} · ${overrides.effectiveName(f)}"
+                    stringResource(R.string.fixture_id_name_fmt, f.fixtureId ?: "?", overrides.effectiveName(f))
                 } else stringResource(R.string.sel_fixtures_selected_fmt, selected.size)
                 Surface(
                     color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp),

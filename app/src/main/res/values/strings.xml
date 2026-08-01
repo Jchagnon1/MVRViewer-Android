@@ -71,10 +71,14 @@
     <string name="cfx_type_name">Nom du type</string>
     <string name="color_beige">Beige</string>
     <string name="color_black">Noir</string>
+    <string name="color_brightness">Luminosité</string>
     <string name="color_charcoal">Anthracite</string>
     <string name="color_grey">Gris</string>
+    <string name="color_hue">Teinte</string>
     <string name="color_light_grey">Gris clair</string>
     <string name="color_midnight_blue">Bleu nuit</string>
+    <string name="color_restore_default">Rétablir le défaut</string>
+    <string name="color_saturation">Saturation</string>
     <string name="color_white">Blanc</string>
     <string name="common_apply">Appliquer</string>
     <string name="common_back">Retour</string>
@@ -152,6 +156,8 @@
     <string name="facet_mode">Mode</string>
     <string name="facet_type">Type</string>
     <string name="facet_universe">Univers</string>
+    <string name="fixture_id_fmt">N° %1$s</string>
+    <string name="fixture_id_name_fmt">N° %1$s · %2$s</string>
     <string name="fx_addr_format_hint">Format : univers.adresse (1–512)</string>
     <string name="fx_addr_placeholder">univers.adresse</string>
     <string name="fx_channel_default_fmt"> · défaut %1$d</string>
@@ -182,6 +188,7 @@
     <string name="gdtf_connected">Connecté.</string>
     <string name="gdtf_connected_to_share">Connecté à GDTF Share.</string>
     <string name="gdtf_connecting">Connexion…</string>
+    <string name="gdtf_download_failed">Téléchargement échoué.</string>
     <string name="gdtf_improve_all">Améliorer tout automatiquement</string>
     <string name="gdtf_intro">Connecte-toi avec ton compte GDTF Share (gratuit, gdtf-share.com) pour remplacer les modèles 3D des projecteurs par les profils fabricants.</string>
     <string name="gdtf_login_failed">Échec de connexion.</string>
@@ -192,6 +199,7 @@
     <string name="gdtf_reconnecting">Reconnexion…</string>
     <string name="gdtf_resolved_fmt">%1$d / %2$d type(s) trouvé(s) automatiquement.</string>
     <string name="gdtf_resolving_fmt">Résolution %1$d/%2$d…</string>
+    <string name="gdtf_search_failed">Recherche impossible.</string>
     <string name="gdtf_search_hint">Fabricant ou modèle</string>
     <string name="gdtf_share_title">GDTF Share</string>
     <string name="gdtf_status_auto">modèle réel (auto)</string>
@@ -228,6 +236,7 @@
     <string name="lod_always">Toujours visible</string>
     <string name="lod_auto">Auto</string>
     <string name="lod_hide_nav">Masquer en navigation</string>
+    <string name="measure_between_fmt">N° %1$s → N° %2$s : %3$s</string>
     <string name="measure_snapped">accroché</string>
     <string name="measure_start_placed">départ posé — touchez l\'arrivée</string>
     <string name="measure_tap_again">touchez pour une nouvelle mesure</string>
@@ -279,7 +288,9 @@
     <string name="patch_duplicate_ids">N° en double : </string>
     <string name="patch_filter_hint">Filtrer (ID, GDTF, calque, DMX…)</string>
     <string name="patch_title">Patch</string>
+    <string name="pdf_balance_fmt">Équilibrage — %1$s</string>
     <string name="pdf_core_fmt">Cœur %1$d</string>
+    <string name="pdf_imbalance_fmt">déséquilibre (Δ %1$d W)</string>
     <string name="pdf_multicore_cores_fmt">Multipaire %1$d cœurs</string>
     <string name="pdf_no_cabling_data">Aucune donnée de câblage à exporter.</string>
     <string name="pdf_no_dmx_line">Aucune ligne DMX.</string>
@@ -333,6 +344,7 @@
     <string name="status_truncated"> (tronqué)</string>
     <string name="sync_audit_by_fmt">par %1$s · %2$s</string>
     <string name="sync_backend_fmt">Backend : %1$s</string>
+    <string name="sync_backend_local">Local (démo)</string>
     <string name="sync_create_account">Créer un compte</string>
     <string name="sync_display_name">Nom affiché (optionnel)</string>
     <string name="sync_downloading_fmt">Réception %1$d %%</string>
@@ -342,6 +354,7 @@
     <string name="sync_err_email_in_use">Cet e-mail est déjà utilisé.</string>
     <string name="sync_err_invalid_credentials">E-mail ou mot de passe incorrect.</string>
     <string name="sync_err_invite_invalid">Code de partage invalide ou expiré.</string>
+    <string name="sync_err_no_open_project">Aucun projet ouvert à partager.</string>
     <string name="sync_err_not_a_member">Vous n\'avez pas accès à ce projet.</string>
     <string name="sync_err_not_signed_in">Vous n\'êtes pas connecté.</string>
     <string name="sync_err_project_not_found">Projet introuvable.</string>
@@ -352,6 +365,7 @@
     <string name="sync_join">Rejoindre</string>
     <string name="sync_join_hint">Vous rejoignez l\'équipe du projet ; le fichier se télécharge ensuite.</string>
     <string name="sync_later">Plus tard</string>
+    <string name="sync_me_offline">Moi (hors ligne)</string>
     <string name="sync_new_version_fmt">Nouvelle version du fichier (v%1$d) disponible.</string>
     <string name="sync_password">Mot de passe</string>
     <string name="sync_publish">Publier</string>

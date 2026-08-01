@@ -81,7 +81,7 @@ object SceneModelLoader {
      * ([Reason.Unsupported]) : le message est traduit, la liste ne l'est pas, et
      * les tests JVM peuvent la vérifier sans dépendre d'une langue.
      */
-    val CONVERTIBLE_FORMATS = listOf("OBJ", "STL", "PLY", "glTF")
+    val CONVERTIBLE_FORMATS = listOf("OBJ", "STL", "PLY", "glTF", "FBX")
 
     enum class Format { OBJ, STL, PLY, GLTF, FBX, SKP, UNKNOWN }
 
@@ -107,8 +107,6 @@ object SceneModelLoader {
     sealed class Reason {
         /** Format inconnu ou non géré (SKP, autre). */
         object Unsupported : Reason()
-        /** FBX : le niveau 2 (module natif Assimp) n'est pas livré. */
-        object UnsupportedFbx : Reason()
         /** Au-delà du plafond de TAILLE ; `bytes` null = taille non déclarée. */
         data class TooLarge(val bytes: Long?, val maxBytes: Long) : Reason()
         object Unreadable : Reason()
@@ -283,7 +281,6 @@ object SceneModelLoader {
     fun load(cr: ContentResolver, uri: Uri, name: String?, remainingTriangles: Int): LoadResult {
         val fmt = sniff(cr, uri, name)
         when (fmt) {
-            Format.FBX -> return LoadResult.Unsupported(Reason.UnsupportedFbx)
             Format.SKP, Format.UNKNOWN -> return LoadResult.Unsupported(Reason.Unsupported)
             else -> {}
         }
@@ -346,6 +343,10 @@ object SceneModelLoader {
 
         val meshes: List<ModelMesh>
         val truncated: Boolean
+        // Unité et axe haut DÉCLARÉS PAR LE FICHIER (FBX seul les porte) : une
+        // déclaration explicite prime toujours sur l'heuristique de dimensions.
+        var declaredUnit: Float? = null
+        var declaredYUp: Boolean? = null
         when (fmt) {
             Format.OBJ -> {
                 val r = ObjParser.parse(bytes.inputStream(), cap)
@@ -359,9 +360,15 @@ object SceneModelLoader {
                 val r = PlyParser.parse(bytes, cap)
                 meshes = r.meshes; truncated = r.truncated
             }
-            // Même motif qu'au sniff (`load`) : le FBX garde sa piste « module
-            // Assimp », quelle que soit la porte d'entrée.
-            Format.FBX -> return LoadResult.Unsupported(Reason.UnsupportedFbx)
+            Format.FBX -> {
+                // Lecteur maison ([FbxParser]), binaire ET ASCII, sans NDK. Un
+                // fichier illisible lève : on le rend comme « illisible » plutôt
+                // que de laisser remonter l'exception.
+                val r = runCatching { FbxParser.parse(bytes, cap) }.getOrNull()
+                    ?: return LoadResult.Failed(Reason.Unreadable)
+                meshes = r.meshes; truncated = r.truncated
+                declaredUnit = r.unitScaleToMm; declaredYUp = r.yUp
+            }
             else -> return LoadResult.Unsupported(Reason.Unsupported)
         }
         if (truncated) {
@@ -375,10 +382,11 @@ object SceneModelLoader {
         }
         if (meshes.isEmpty()) return LoadResult.Failed(Reason.NoGeometry)
         val rawMax = meshesMaxDimension(meshes)
-        val unit = unitScaleFor(rawMax)
+        val unit = declaredUnit ?: unitScaleFor(rawMax)
         // OBJ : Y-HAUT (convention Wavefront, et export Blender par défaut).
         // STL / PLY : issus de la CAO, déjà Z-haut comme le monde MVR.
-        val yUp = fmt == Format.OBJ
+        // FBX : ce que le fichier DÉCLARE (`GlobalSettings.UpAxis`).
+        val yUp = declaredYUp ?: (fmt == Format.OBJ)
         return LoadResult.Ok(
             ImportedModel(
                 id = newId(), name = name, format = fmt.name,
@@ -400,6 +408,7 @@ object SceneModelLoader {
         Format.OBJ.name -> "obj"
         Format.STL.name -> "stl"
         Format.PLY.name -> "ply"
+        Format.FBX.name -> "fbx"
         else -> "bin"
     }
 

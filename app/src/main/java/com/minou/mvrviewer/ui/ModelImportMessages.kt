@@ -47,11 +47,6 @@ object ModelImportMessages {
     fun text(ctx: Context, reason: SceneModelLoader.Reason): String = when (reason) {
         is SceneModelLoader.Reason.Unsupported ->
             ctx.getString(R.string.model_err_unsupported_fmt, formatList(ctx))
-        is SceneModelLoader.Reason.UnsupportedFbx ->
-            ctx.getString(
-                R.string.model_err_unsupported_fbx_fmt,
-                ctx.getString(R.string.model_err_unsupported_fmt, formatList(ctx))
-            )
         is SceneModelLoader.Reason.TooLarge -> {
             val mesure = if (reason.bytes != null) megabytes(ctx, reason.bytes)
             else ctx.getString(

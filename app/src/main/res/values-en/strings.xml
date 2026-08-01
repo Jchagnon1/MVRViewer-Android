@@ -269,7 +269,6 @@
     <string name="model_err_too_large_fmt">File too large (%1$s): the cap is %2$s. Simplify the model (decimation, external textures) before importing.</string>
     <string name="model_err_too_many_triangles_fmt">%1$s: beyond the cap of %2$s triangles per model. Simplify the mesh (decimation) before importing.</string>
     <string name="model_err_unreadable">Unreadable file.</string>
-    <string name="model_err_unsupported_fbx_fmt">%1$s (FBX: add the Assimp module)</string>
     <string name="model_err_unsupported_fmt">Unsupported format. Convert it to %1$s (with Blender, for example).</string>
     <string name="model_gltf_info_fmt">glTF · ≈ %1$d triangles · detected unit: %2$s</string>
     <string name="model_info_fmt">%1$d triangles · detected unit: %2$s</string>

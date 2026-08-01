@@ -269,7 +269,6 @@
     <string name="model_err_too_large_fmt">Fichier trop volumineux (%1$s) : le plafond est de %2$s. Allégez le modèle (décimation, textures séparées) avant l\'import.</string>
     <string name="model_err_too_many_triangles_fmt">%1$s : au-delà du plafond de %2$s triangles par modèle. Allégez le maillage (décimation) avant l\'import.</string>
     <string name="model_err_unreadable">Fichier illisible.</string>
-    <string name="model_err_unsupported_fbx_fmt">%1$s (FBX : ajoutez le module Assimp)</string>
     <string name="model_err_unsupported_fmt">Format non pris en charge. Convertissez-le en %1$s (par exemple avec Blender).</string>
     <string name="model_gltf_info_fmt">glTF · ≈ %1$d triangles · unité détectée : %2$s</string>
     <string name="model_info_fmt">%1$d triangles · unité détectée : %2$s</string>

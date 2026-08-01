@@ -18,17 +18,17 @@ import androidx.compose.runtime.setValue
  * lecture/parse XML (court) → prep CPU des géométries → construction du graphe →
  * silhouettes GDTF (le plus long sur un gros show) → plan DXF (optionnel).
  */
-enum class LoadStep(val label: String, val from: Float, val to: Float) {
+enum class LoadStep(@androidx.annotation.StringRes val labelRes: Int, val from: Float, val to: Float) {
     /** Ouverture/décompression de l'archive + parse du XML de scène. */
-    READ_MVR("Lecture du fichier MVR…", 0f, 0.10f),
+    READ_MVR(com.minou.mvrviewer.R.string.load_read_mvr, 0f, 0.10f),
     /** Décodage des géométries : .3ds, .glb/glTF, textures. */
-    GEOMETRY("Chargement de la 3D…", 0.10f, 0.40f),
+    GEOMETRY(com.minou.mvrviewer.R.string.load_geometry, 0.10f, 0.40f),
     /** Assemblage du graphe, matériaux, LOD, préparation du rendu. */
-    BUILD("Construction de la scène…", 0.40f, 0.65f),
+    BUILD(com.minou.mvrviewer.R.string.load_build, 0.40f, 0.65f),
     /** Extraction/parse des .gdtf : géométries de projecteurs. */
-    GDTF("Chargement des GDTF…", 0.65f, 0.90f),
+    GDTF(com.minou.mvrviewer.R.string.load_gdtf, 0.65f, 0.90f),
     /** Préparation de la vue plan / du DXF de repère (si le projet en a un). */
-    PLAN("Préparation du plan…", 0.90f, 1.00f)
+    PLAN(com.minou.mvrviewer.R.string.load_plan, 0.90f, 1.00f)
 }
 
 /**

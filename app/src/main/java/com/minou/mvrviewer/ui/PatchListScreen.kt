@@ -44,6 +44,8 @@ import com.minou.mvrviewer.mvr.DmxAddress
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
 import com.minou.mvrviewer.sync.PowerSource
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Liste de patch — projecteurs du .mvr avec recherche/filtre (ID, nom, GDTF,
@@ -97,10 +99,10 @@ fun PatchListScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Patch", style = MaterialTheme.typography.titleMedium) },
+            title = { Text(stringResource(R.string.patch_title), style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour 3D")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_3d))
                 }
             }
         )
@@ -109,7 +111,7 @@ fun PatchListScreen(
             onValueChange = { query = it },
             singleLine = true,
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            placeholder = { Text("Filtrer (ID, GDTF, calque, DMX…)") },
+            placeholder = { Text(stringResource(R.string.patch_filter_hint)) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
         )
         Row(
@@ -117,13 +119,13 @@ fun PatchListScreen(
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FacetChip("Calque", layers, selLayers) { selLayers = it }
-            FacetChip("Type", types, selTypes) { selTypes = it }
-            FacetChip("Mode", modes, selModes) { selModes = it }
-            FacetChip("Univers", universes, selUniverses) { selUniverses = it }
+            FacetChip(stringResource(R.string.facet_layer), layers, selLayers) { selLayers = it }
+            FacetChip(stringResource(R.string.facet_type), types, selTypes) { selTypes = it }
+            FacetChip(stringResource(R.string.facet_mode), modes, selModes) { selModes = it }
+            FacetChip(stringResource(R.string.facet_universe), universes, selUniverses) { selUniverses = it }
             val active = selLayers.size + selTypes.size + selModes.size + selUniverses.size
             if (active > 0) {
-                Text("Réinit.", color = MaterialTheme.colorScheme.primary,
+                Text(stringResource(R.string.common_reset_short), color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.clickable {
                         selLayers = emptySet(); selTypes = emptySet()
@@ -132,7 +134,7 @@ fun PatchListScreen(
             }
         }
         Text(
-            "${filtered.size} / ${fixtures.size} projecteur(s) · touchez pour éditer",
+            stringResource(R.string.patch_count_hint, filtered.size, fixtures.size),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -154,7 +156,7 @@ fun PatchListScreen(
                         tint = MaterialTheme.colorScheme.onErrorContainer)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "N° en double : " + dupIds.sorted().joinToString(", ") { "#" + it },
+                        stringResource(R.string.patch_duplicate_ids) + dupIds.sorted().joinToString(", ") { "#" + it },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
@@ -223,7 +225,7 @@ private fun FixtureRow(
         val id = overrides.effectiveId(f)?.let { "#$it  " } ?: ""
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (duplicateId) {
-                Icon(Icons.Filled.Warning, contentDescription = "N° en double",
+                Icon(Icons.Filled.Warning, contentDescription = stringResource(R.string.patch_duplicate_id_cd),
                     tint = MaterialTheme.colorScheme.error, modifier = Modifier.padding(end = 6.dp))
             }
             Text(
@@ -236,7 +238,7 @@ private fun FixtureRow(
         // GDTF/mode (parité iOS). Non-custom : inchangé.
         val custom = customTypeOf(f, overrides, customResolver)
         val spec = custom?.name ?: f.gdtfSpec ?: "—"
-        val mode = custom?.let { "${maxOf(1, it.footprint)} canaux" } ?: overrides.effectiveMode(f) ?: "—"
+        val mode = custom?.let { stringResource(R.string.fx_channels_count, maxOf(1, it.footprint)) } ?: overrides.effectiveMode(f) ?: "—"
         val addr = overrides.effectiveAddress(f)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "—"
         // Puissance effective à côté du patch (outil de câblage). « ? » = à saisir ;
         // « * » = valeur saisie (bibliothèque) plutôt que GDTF.

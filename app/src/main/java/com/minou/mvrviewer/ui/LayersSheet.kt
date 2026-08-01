@@ -34,6 +34,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /** Un calque MVR tel qu'affiché dans le panneau : nom, nb d'objets, couleur. */
 data class LayerRow(val name: String, val objectCount: Int, val colorInt: Int)
@@ -60,17 +62,17 @@ fun LayersSheet(
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(16.dp), tonalElevation = 6.dp) {
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth().heightIn(max = 600.dp)) {
-                Text("Calques · Vue 3D", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.layers_title_3d), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Détail affiché pendant la navigation. N'affecte que la navigation " +
-                        "(pendant les gestes caméra) : à l'arrêt, tout redevient visible.",
+                    stringResource(R.string.layers_lod_help) + (
+                        ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
                 )
                 if (layers.isEmpty()) {
                     Text(
-                        "Ce show ne déclare aucun calque.",
+                        stringResource(R.string.layers_none),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
@@ -89,9 +91,9 @@ fun LayersSheet(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onResetAll) { Text("Tout en Auto") }
+                    TextButton(onClick = onResetAll) { Text(stringResource(R.string.layers_all_auto)) }
                     Spacer(Modifier.width(8.dp))
-                    Button(onClick = onDismiss) { Text("Terminé") }
+                    Button(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
                 }
             }
         }
@@ -111,7 +113,7 @@ private fun LayerLodRow(layer: LayerRow, mode: LayerLodMode, onSetMode: (LayerLo
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                layer.name.ifBlank { "(sans nom)" },
+                layer.name.ifBlank { stringResource(R.string.common_unnamed) },
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -130,7 +132,7 @@ private fun LayerLodRow(layer: LayerRow, mode: LayerLodMode, onSetMode: (LayerLo
                     onClick = { onSetMode(m) },
                     shape = SegmentedButtonDefaults.itemShape(index = i, count = LayerLodMode.entries.size),
                     label = {
-                        Text(m.label, style = MaterialTheme.typography.labelSmall,
+                        Text(stringResource(m.labelRes), style = MaterialTheme.typography.labelSmall,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 )

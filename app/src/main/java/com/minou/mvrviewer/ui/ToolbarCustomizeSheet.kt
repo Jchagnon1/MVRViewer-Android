@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /** Entrée du catalogue de personnalisation : un outil assignable à un bord. */
 data class ToolCatalogEntry(val id: ToolId, val label: String, val icon: ImageVector)
@@ -57,8 +59,8 @@ fun ToolbarCustomizeSheet(
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth().heightIn(max = 600.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Placez chaque outil sur un bord de l'écran ou hors des barres. " +
-                        "Tous les outils restent accessibles dans le menu ⋯.",
+                    stringResource(R.string.toolbar_customize_help) + (
+                        ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
@@ -77,9 +79,9 @@ fun ToolbarCustomizeSheet(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = { onLayout(default) }) { Text("Réinitialiser") }
+                    TextButton(onClick = { onLayout(default) }) { Text(stringResource(R.string.common_reset)) }
                     Spacer(Modifier.width(8.dp))
-                    Button(onClick = onDismiss) { Text("Terminé") }
+                    Button(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
                 }
             }
         }
@@ -105,18 +107,18 @@ private fun ToolRow(
             IconButton(
                 onClick = { onLayout(layout.reordered(entry.id, -1)) },
                 enabled = cur != null
-            ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Monter") }
+            ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.common_move_up)) }
             IconButton(
                 onClick = { onLayout(layout.reordered(entry.id, +1)) },
                 enabled = cur != null
-            ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Descendre") }
+            ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.common_move_down)) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            EdgeChip("Haut", cur == ToolbarEdge.TOP) { onLayout(layout.moved(entry.id, ToolbarEdge.TOP)) }
-            EdgeChip("Bas", cur == ToolbarEdge.BOTTOM) { onLayout(layout.moved(entry.id, ToolbarEdge.BOTTOM)) }
-            EdgeChip("Gauche", cur == ToolbarEdge.LEFT) { onLayout(layout.moved(entry.id, ToolbarEdge.LEFT)) }
-            EdgeChip("Droite", cur == ToolbarEdge.RIGHT) { onLayout(layout.moved(entry.id, ToolbarEdge.RIGHT)) }
-            EdgeChip("Aucun", cur == null) { onLayout(layout.moved(entry.id, null)) }
+            EdgeChip(stringResource(R.string.edge_top), cur == ToolbarEdge.TOP) { onLayout(layout.moved(entry.id, ToolbarEdge.TOP)) }
+            EdgeChip(stringResource(R.string.edge_bottom), cur == ToolbarEdge.BOTTOM) { onLayout(layout.moved(entry.id, ToolbarEdge.BOTTOM)) }
+            EdgeChip(stringResource(R.string.edge_left), cur == ToolbarEdge.LEFT) { onLayout(layout.moved(entry.id, ToolbarEdge.LEFT)) }
+            EdgeChip(stringResource(R.string.edge_right), cur == ToolbarEdge.RIGHT) { onLayout(layout.moved(entry.id, ToolbarEdge.RIGHT)) }
+            EdgeChip(stringResource(R.string.edge_none), cur == null) { onLayout(layout.moved(entry.id, null)) }
         }
     }
 }

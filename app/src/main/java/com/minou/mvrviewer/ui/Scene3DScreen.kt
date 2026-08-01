@@ -119,6 +119,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlin.math.sqrt
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 // Garde-fous d'instanciation (émulateur/appareil : mémoire + draw calls).
 // L'iOS gère les très gros shows par LOD ; ici on borne le TOTAL de triangles
@@ -153,9 +155,10 @@ private const val MAX_LABEL_PROJECTIONS = 4000
 private const val LABEL_CULL_PX = 220f
 
 // Presets de couleur de fond de la vue 3D (nom, ARGB) — mêmes choix qu'iOS.
-private val BG_3D_PRESETS = listOf(
-    "Noir" to 0xFF000000L, "Anthracite" to 0xFF1C1C1EL, "Bleu nuit" to 0xFF0B1026L,
-    "Gris" to 0xFF8E8E93L, "Blanc" to 0xFFFFFFFFL
+@androidx.compose.runtime.Composable
+private fun bg3dPresets(): List<Pair<String, Long>> = listOf(
+    stringResource(R.string.color_black) to 0xFF000000L, stringResource(R.string.color_charcoal) to 0xFF1C1C1EL, stringResource(R.string.color_midnight_blue) to 0xFF0B1026L,
+    stringResource(R.string.color_grey) to 0xFF8E8E93L, stringResource(R.string.color_white) to 0xFFFFFFFFL
 )
 
 /** Couleur DXF (0xRRGGBB) → ARGB pour un matériau non éclairé, en éclaircissant
@@ -459,7 +462,16 @@ fun Scene3DScreen(
     val markerMaterial = remember(materialLoader) { materialLoader.createUnlitColorInstance(0xFF2979FF.toInt()) }
     var showLocation by remember { mutableStateOf(false) }
     val gps by rememberUserLocation(showLocation)
-    var status by remember(scene) { mutableStateOf("chargement 3D…") }
+    // Chaînes de statut localisées, résolues ICI (contexte composable) puis
+    // utilisées dans des effets/coroutines qui, eux, ne peuvent pas appeler stringResource.
+    val sStatusLoading3D = stringResource(R.string.status_loading_3d)
+    val sStatusObjectsLoadingFmt = stringResource(R.string.status_objects_3d_loading_fmt)
+    val sStatusObjectsGdtfFmt = stringResource(R.string.status_objects_gdtf_fmt)
+    val sStatusObjects3DFmt = stringResource(R.string.status_objects_3d_fmt)
+    val sStatusGdtfSuffixFmt = stringResource(R.string.status_gdtf_suffix_fmt)
+    val sStatusTruncated = stringResource(R.string.status_truncated)
+    val sModelTooManyFmt = stringResource(R.string.model_too_many_fmt)
+    var status by remember(scene) { mutableStateOf(sStatusLoading3D) }
     // LOD d'interaction : les petits objets (sièges, accessoires) sont masqués
     // pendant que la caméra bouge, réaffichés à l'arrêt — divise les draw calls
     // en navigation (comme iOS), sans toucher au rendu au repos.
@@ -639,7 +651,7 @@ fun Scene3DScreen(
             }
             placed++
             if (placed % 40 == 0) {
-                status = "$placed objets 3D…"
+                status = sStatusObjectsLoadingFmt.format(placed)
                 // MÊME cadence que le statut (tous les 40 objets, jamais par
                 // objet) : l'écriture d'état est en plus filtrée par le % entier.
                 progress?.report(LoadStep.BUILD, placed.toFloat() / totalRefs)
@@ -700,7 +712,7 @@ fun Scene3DScreen(
                         }
                         nodes += take
                         placed += take
-                        status = "$placed objets 3D…"
+                        status = sStatusObjectsLoadingFmt.format(placed)
                         // Une fois par FICHIER .glb (cadence existante du statut).
                         progress?.report(LoadStep.BUILD, placed.toFloat() / totalRefs)
                     }
@@ -846,7 +858,7 @@ fun Scene3DScreen(
                         }
                     }
                     if (gdtfDone.size % 40 == 0) {
-                        status = "$placed objets · ${gdtfDone.size} proj. GDTF…"
+                        status = sStatusObjectsGdtfFmt.format(placed, gdtfDone.size)
                         progress?.report(LoadStep.GDTF, gdtfDone.size.toFloat() / gdtfTotal)
                     }
                     slice()
@@ -866,9 +878,9 @@ fun Scene3DScreen(
         if (referencePlan != null && !planPassDone) progress?.report(LoadStep.PLAN, 0f)
         buildTick++   // scène prête → le solo (s'il est actif) sera ré-appliqué
 
-        status = "$placed objets 3D" +
-            (if (gdtfDone.isNotEmpty()) " · ${gdtfDone.size} proj. GDTF" else "") +
-            if (truncated) " (tronqué)" else ""
+        status = sStatusObjects3DFmt.format(placed) +
+            (if (gdtfDone.isNotEmpty()) sStatusGdtfSuffixFmt.format(gdtfDone.size) else "") +
+            if (truncated) sStatusTruncated else ""
     }
 
     // Solo (3D) : n'afficher QUE les projecteurs soloés — le reste (décor,
@@ -1528,7 +1540,7 @@ fun Scene3DScreen(
         val loader = com.minou.mvrviewer.mvr.SceneModelLoader
         if (importedModels.size >= loader.MODEL_MAX_COUNT) {
             importingModel = false; pickedModelUri = null
-            modelMessage = "Trop de modèles importés (${loader.MODEL_MAX_COUNT} au maximum)."
+            modelMessage = sModelTooManyFmt.format(loader.MODEL_MAX_COUNT)
             return@LaunchedEffect
         }
         // Budget de triangles RESTANT (plafond cumulé). Un budget insuffisant REFUSE
@@ -1563,19 +1575,19 @@ fun Scene3DScreen(
     // bascule dédiée au menu (étiquettes, couleurs), soit ils sont déjà rendus
     // ailleurs dans le menu (navigation, synchro, presets caméra) — pas de double.
     val tools3D: List<ToolSpec> = buildList {
-        add(ToolSpec(ToolId.RECT, "Sélection rectangle", Icons.Filled.Crop,
+        add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
                 rectMode = !rectMode
                 if (rectMode) measureMode = false
                 if (!rectMode) { rectStart = null; rectEnd = null }
             }))
-        add(ToolSpec(ToolId.MEASURE, "Mesurer une distance", Icons.Filled.Straighten,
+        add(ToolSpec(ToolId.MEASURE, stringResource(R.string.tool_measure), Icons.Filled.Straighten,
             available = true, checked = measureMode, onInvoke = {
                 measureMode = !measureMode
                 if (measureMode) { rectMode = false; rectStart = null; rectEnd = null }
                 measureI = null; measureJ = null
             }))
-        add(ToolSpec(ToolId.SOLO, "Solo (sélection seule)", Icons.Filled.CenterFocusStrong,
+        add(ToolSpec(ToolId.SOLO, stringResource(R.string.tool_solo), Icons.Filled.CenterFocusStrong,
             available = selected.isNotEmpty() || soloElements.isNotEmpty(),
             checked = soloElements.isNotEmpty(), onInvoke = {
                 if (soloElements.isEmpty()) {
@@ -1583,12 +1595,12 @@ fun Scene3DScreen(
                     if (keys.isNotEmpty()) onSetSoloElements(keys)
                 } else onSetSoloElements(emptySet())
             }))
-        add(ToolSpec(ToolId.CLEAR_SEL, "Effacer la sélection", Icons.Filled.Close,
+        add(ToolSpec(ToolId.CLEAR_SEL, stringResource(R.string.tool_clear_selection), Icons.Filled.Close,
             available = selected.isNotEmpty(), checked = null, onInvoke = { selected.clear() }))
-        add(ToolSpec(ToolId.GPS, "Ma position (3D)", Icons.Filled.MyLocation,
+        add(ToolSpec(ToolId.GPS, stringResource(R.string.tool_gps_3d), Icons.Filled.MyLocation,
             available = calibration?.isCalibrated == true, checked = showLocation,
             onInvoke = { showLocation = !showLocation }))
-        add(ToolSpec(ToolId.GPS_MARKER_SIZE, "Taille du marqueur", Icons.Filled.PhotoSizeSelectSmall,
+        add(ToolSpec(ToolId.GPS_MARKER_SIZE, stringResource(R.string.tool_marker_size), Icons.Filled.PhotoSizeSelectSmall,
             available = calibration?.isCalibrated == true && showLocation, checked = null, onInvoke = {
                 options.gpsMarkerScale = when {
                     options.gpsMarkerScale <= 0.7f -> 1f
@@ -1600,7 +1612,7 @@ fun Scene3DScreen(
         // à chaque recomposition, le libellé suit l'état ; `busy` donne l'indicateur
         // « Chargement… » pendant le décodage. Présent au menu ⋯ ET dockable.
         add(ToolSpec(ToolId.IMPORT_MODEL,
-            if (importedModels.isEmpty()) "Importer un modèle 3D…" else "Modèles 3D (${importedModels.size})",
+            if (importedModels.isEmpty()) stringResource(R.string.tool_import_model) else stringResource(R.string.tool_models_fmt, importedModels.size),
             Icons.Filled.ViewInAr,
             available = true, checked = importedModels.isNotEmpty() && showModelsPanel,
             busy = importingModel || modelBusy,
@@ -1615,21 +1627,21 @@ fun Scene3DScreen(
             available = true, checked = null,
             onInvoke = { showLayers = true }, inMenu = false))
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
-        add(ToolSpec(ToolId.LABELS, "Étiquettes", Icons.Filled.Label,
+        add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,
             available = true, checked = options.showLabels,
             onInvoke = { options.showLabels = !options.showLabels }, inMenu = false))
-        add(ToolSpec(ToolId.LAYER_COLORS, "Couleurs par calque", Icons.Filled.Palette,
+        add(ToolSpec(ToolId.LAYER_COLORS, stringResource(R.string.opt_layer_colors), Icons.Filled.Palette,
             available = true, checked = options.layerColors,
             onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
         // Fond satellite AUSSI dockable en 3D (le quad satellite géo-référencé existe
         // déjà à l'écran) : parité avec la vue plan. Disponible seulement une fois la
         // position calibrée ; bascule dédiée déjà au menu (inMenu=false, pas de double).
-        add(ToolSpec(ToolId.SATELLITE, "Fond satellite", Icons.Filled.Public,
+        add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
             available = calibration?.isCalibrated == true, checked = options.showSatellite,
             onInvoke = { options.showSatellite = !options.showSatellite }, inMenu = false))
         // Taille des étiquettes : cycle petite · moyenne · grande (même action que le
         // menu « Étiquettes »). Dockable ; hors menu « Outils » (déjà dans le menu).
-        add(ToolSpec(ToolId.LABEL_SIZE, "Taille des étiquettes", Icons.Filled.FormatSize,
+        add(ToolSpec(ToolId.LABEL_SIZE, stringResource(R.string.tool_label_size), Icons.Filled.FormatSize,
             available = true, checked = null, onInvoke = {
                 options.labelSize = when {
                     options.labelSize <= 0.75f -> 1f
@@ -1638,24 +1650,24 @@ fun Scene3DScreen(
                 }
             }, inMenu = false))
         // Couleur du fond : ouvre le sélecteur (le menu garde ses presets). Dockable.
-        add(ToolSpec(ToolId.BACKGROUND, "Couleur du fond", Icons.Filled.FormatColorFill,
+        add(ToolSpec(ToolId.BACKGROUND, stringResource(R.string.menu_section_background), Icons.Filled.FormatColorFill,
             available = true, checked = null,
             onInvoke = { showBackgroundDialog = true }, inMenu = false))
         // Recentrer la caméra (« Réinitialiser la vue ») : remet le pivot au centre
         // du show et la caméra à sa position d'ensemble. Dockable ; déjà au menu
         // « Points de vue ».
-        add(ToolSpec(ToolId.CAM_RESET, "Recentrer la caméra", Icons.Filled.RestartAlt,
+        add(ToolSpec(ToolId.CAM_RESET, stringResource(R.string.tool_recenter_camera), Icons.Filled.RestartAlt,
             available = true, checked = null,
             onInvoke = { target = Float3(0f, 0f, 0f); camEye = camHome }, inMenu = false))
         // ---- Navigation / actions ponctuelles, DOCKABLES (déjà au menu, donc
         // inMenu=false pour ne pas doublonner la section « Outils »). ----
-        add(ToolSpec(ToolId.PLAN_VIEW, "Vue plan", Icons.Filled.Map,
+        add(ToolSpec(ToolId.PLAN_VIEW, stringResource(R.string.nav_view_plan), Icons.Filled.Map,
             available = true, checked = null, onInvoke = onShowPlan, inMenu = false))
-        add(ToolSpec(ToolId.PATCH, "Liste de patch", Icons.AutoMirrored.Filled.List,
+        add(ToolSpec(ToolId.PATCH, stringResource(R.string.nav_patch_list), Icons.AutoMirrored.Filled.List,
             available = true, checked = null, onInvoke = onShowPatch, inMenu = false))
-        add(ToolSpec(ToolId.UNIVERSE, "Univers DMX", Icons.Filled.GridView,
+        add(ToolSpec(ToolId.UNIVERSE, stringResource(R.string.nav_dmx_universe), Icons.Filled.GridView,
             available = true, checked = null, onInvoke = onShowUniverse, inMenu = false))
-        add(ToolSpec(ToolId.CABLING, "Câblage électrique", Icons.Filled.Bolt,
+        add(ToolSpec(ToolId.CABLING, stringResource(R.string.nav_power_cabling), Icons.Filled.Bolt,
             available = true, checked = null, onInvoke = onShowCabling, inMenu = false))
         add(ToolSpec(ToolId.GDTF_SHARE, "GDTF Share", Icons.Filled.CloudDownload,
             available = true, checked = null, onInvoke = onShowGdtfShare, inMenu = false))
@@ -1666,11 +1678,11 @@ fun Scene3DScreen(
                 available = true, checked = null, onInvoke = cb, inMenu = false))
         }
         onShareProject?.let { cb ->
-            add(ToolSpec(ToolId.SHARE_PROJECT, "Partager ce projet", Icons.Filled.Share,
+            add(ToolSpec(ToolId.SHARE_PROJECT, stringResource(R.string.nav_share_project), Icons.Filled.Share,
                 available = true, checked = null, onInvoke = cb, inMenu = false))
         }
         onShowHistory?.let { cb ->
-            add(ToolSpec(ToolId.HISTORY, "Historique des modifications", Icons.Filled.History,
+            add(ToolSpec(ToolId.HISTORY, stringResource(R.string.nav_history), Icons.Filled.History,
                 available = true, checked = null, onInvoke = cb, inMenu = false))
         }
     }
@@ -1689,8 +1701,8 @@ fun Scene3DScreen(
                 val loading = progress?.takeIf { it.active }
                 Text(
                     when {
-                        loading != null -> "${loading.step?.label.orEmpty()} ${loading.percent} %"
-                        status.isBlank() -> "Vue 3D"
+                        loading != null -> "${loading.step?.let { stringResource(it.labelRes) }.orEmpty()} ${loading.percent} %"
+                        status.isBlank() -> stringResource(R.string.nav_view_3d)
                         else -> "3D · $status"
                     },
                     style = MaterialTheme.typography.titleSmall,
@@ -1699,7 +1711,7 @@ fun Scene3DScreen(
             },
             navigationIcon = {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Projets")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.nav_projects))
                 }
             },
             actions = {
@@ -1709,7 +1721,7 @@ fun Scene3DScreen(
                 var camMenu by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { camMenu = true }) {
-                        Icon(Icons.Filled.Videocam, contentDescription = "Points de vue",
+                        Icon(Icons.Filled.Videocam, contentDescription = stringResource(R.string.cam_viewpoints),
                             tint = LocalContentColor.current)
                     }
                     DropdownMenu(expanded = camMenu, onDismissRequest = { camMenu = false }) {
@@ -1717,11 +1729,11 @@ fun Scene3DScreen(
                         fun set(x: Float, y: Float, z: Float) {
                             camEye = Float3(target.x + x, target.y + y, target.z + z); camMenu = false
                         }
-                        DropdownMenuItem(text = { Text("Dessus") }, onClick = { set(0f, r, 0.001f) })
-                        DropdownMenuItem(text = { Text("Face") }, onClick = { set(0f, 0f, r) })
-                        DropdownMenuItem(text = { Text("Côté") }, onClick = { set(r, 0f, 0f) })
-                        DropdownMenuItem(text = { Text("Isométrique") }, onClick = { set(0.7f * r, 0.7f * r, 0.7f * r) })
-                        DropdownMenuItem(text = { Text("Réinitialiser la vue") },
+                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_top)) }, onClick = { set(0f, r, 0.001f) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_front)) }, onClick = { set(0f, 0f, r) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_side)) }, onClick = { set(r, 0f, 0f) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_iso)) }, onClick = { set(0.7f * r, 0.7f * r, 0.7f * r) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_reset_view)) },
                             // Remet AUSSI le pivot au centre du show : sinon, après
                             // une recherche, on « réinitialisait » autour du
                             // projecteur trouvé.
@@ -1748,7 +1760,7 @@ fun Scene3DScreen(
                     showSatelliteToggle = calibration?.isCalibrated == true,
                     background = options.background3D,
                     backgroundDefault = BackgroundColorStore.DEFAULT_3D,
-                    backgroundPresets = BG_3D_PRESETS,
+                    backgroundPresets = bg3dPresets(),
                     onPickBackground = { options.background3D = it }
                 )
             }
@@ -1973,7 +1985,7 @@ fun Scene3DScreen(
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                placeholder = { Text("N° projecteur") },
+                placeholder = { Text(stringResource(R.string.search_fixture_id_hint)) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { doSearch3D() }),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -2022,8 +2034,8 @@ fun Scene3DScreen(
                     val na = scene.fixtures.getOrNull(mi)?.fixtureId ?: "?"
                     val nb = scene.fixtures.getOrNull(mj)?.fixtureId ?: "?"
                     "N° $na → N° $nb : ${formatPlanDistanceMm(mm)}"
-                } else if (mi != null) "Touchez le 2e projecteur"
-                else "Mesure : touchez un projecteur"
+                } else if (mi != null) stringResource(R.string.measure_tap_second_fixture)
+                else stringResource(R.string.measure_tap_fixture)
                 Surface(
                     color = MEASURE_3D_COLOR, shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
@@ -2041,7 +2053,7 @@ fun Scene3DScreen(
                 val label = if (selected.size == 1 && selected.first() in scene.fixtures.indices) {
                     val f = scene.fixtures[selected.first()]
                     "N° ${f.fixtureId ?: "?"} · ${overrides.effectiveName(f)}"
-                } else "${selected.size} projecteurs sélectionnés"
+                } else stringResource(R.string.sel_fixtures_selected_fmt, selected.size)
                 Surface(
                     color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
@@ -2080,7 +2092,7 @@ fun Scene3DScreen(
                     color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
                 ) {
-                    Text("Chargement du modèle…", color = Color.White,
+                    Text(stringResource(R.string.model_loading), color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
                 }
@@ -2139,7 +2151,7 @@ fun Scene3DScreen(
 
         if (showCustomize) {
             ToolbarCustomizeSheet(
-                title = "Barre d'outils · Vue 3D",
+                title = stringResource(R.string.toolbar_title_3d),
                 layout = toolbarLayout,
                 catalog = tools3D.toCatalog(),
                 default = ToolbarLayout.default3D,
@@ -2152,7 +2164,7 @@ fun Scene3DScreen(
         // (le menu garde ses presets ; ceci ouvre le sélecteur fin, comme iOS).
         if (showBackgroundDialog) {
             BackgroundColorDialog(
-                title = "Couleur du fond 3D",
+                title = stringResource(R.string.background_title_3d),
                 initial = options.background3D,
                 default = BackgroundColorStore.DEFAULT_3D,
                 onColorChange = { options.background3D = it },

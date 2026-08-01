@@ -38,10 +38,10 @@ class RasterPlan(
     /** Extension de fichier utilisée pour la copie persistée du bitmap. */
     val fileExt: String get() = if (kind == Kind.JPEG) "jpg" else "png"
 
-    val label: String get() = when (kind) {
-        Kind.JPEG -> "Image JPEG"
-        Kind.PNG -> "Image PNG"
-        Kind.PDF -> "PDF"
+    @get:androidx.annotation.StringRes val labelRes: Int get() = when (kind) {
+        Kind.JPEG -> com.minou.mvrviewer.R.string.raster_jpeg
+        Kind.PNG -> com.minou.mvrviewer.R.string.raster_png
+        Kind.PDF -> com.minou.mvrviewer.R.string.raster_pdf
     }
 
     /**

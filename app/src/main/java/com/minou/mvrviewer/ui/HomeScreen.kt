@@ -42,6 +42,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Écran d'accueil : ouvrir un .mvr (Storage Access Framework) + liste des
@@ -74,7 +76,7 @@ fun HomeScreen(
     ) {
         Text("MVR Viewer", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Visualiseur de plans lumière MVR / GDTF",
+            stringResource(R.string.home_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 24.dp),
@@ -91,7 +93,7 @@ fun HomeScreen(
                         modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()
                     )
                     Text(
-                        "${progress.step?.label ?: LoadStep.READ_MVR.label}  ${progress.percent} %",
+                        "${stringResource((progress.step ?: LoadStep.READ_MVR).labelRes)}  ${progress.percent} %",
                         modifier = Modifier.padding(top = 12.dp),
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -110,7 +112,7 @@ fun HomeScreen(
             else -> {
                 Button(onClick = { picker.launch(arrayOf("*/*")) }) {
                     Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Text("  Ouvrir un fichier .mvr")
+                    Text("  " + stringResource(R.string.home_open_mvr))
                 }
                 // Synchro cloud : compte + rejoindre un projet partagé.
                 if (sync != null) {
@@ -118,14 +120,14 @@ fun HomeScreen(
                     Row(modifier = Modifier.padding(top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { showAccount = true }) {
-                            Text(if (auth.isSignedIn) "Mon compte" else "Se connecter")
+                            Text(stringResource(if (auth.isSignedIn) R.string.home_my_account else R.string.home_sign_in))
                         }
-                        TextButton(onClick = { showJoin = true }) { Text("Rejoindre un projet") }
+                        TextButton(onClick = { showJoin = true }) { Text(stringResource(R.string.join_project)) }
                     }
                     // Projets partagés (cloud) : ouverts en un tap (comme iOS RootView).
                     val projects by sync.cloudProjects.collectAsState()
                     if (projects.isNotEmpty()) {
-                        Text("Projets partagés", style = MaterialTheme.typography.titleSmall,
+                        Text(stringResource(R.string.home_shared_projects), style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 20.dp, bottom = 4.dp))
                         LazyColumn(modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth().heightIn(max = 170.dp)) {
@@ -139,7 +141,7 @@ fun HomeScreen(
                                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                                         Text(p.name, style = MaterialTheme.typography.bodyMedium,
                                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${p.memberUids.size} membre(s) · v${p.mvrVersion}",
+                                        Text(stringResource(R.string.home_members_version, p.memberUids.size, p.mvrVersion),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
@@ -158,7 +160,7 @@ fun HomeScreen(
                 }
                 if (recents.isNotEmpty()) {
                     Text(
-                        "Projets récents",
+                        stringResource(R.string.home_recent_projects),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 28.dp, bottom = 4.dp)
@@ -184,7 +186,7 @@ fun HomeScreen(
                                     RecentProjects.remove(ctx, r.uri)
                                     recents = RecentProjects.list(ctx)
                                 }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Retirer",
+                                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.common_remove),
                                         modifier = Modifier.size(18.dp),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -200,7 +202,7 @@ fun HomeScreen(
                 if (hasDiag) {
                     TextButton(onClick = { shareDiag(ctx) }, modifier = Modifier.padding(top = 20.dp)) {
                         Icon(Icons.Filled.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  Envoyer le rapport de diagnostic")
+                        Text("  " + stringResource(R.string.home_send_diag))
                     }
                 }
             }
@@ -226,8 +228,8 @@ private fun shareDiag(ctx: android.content.Context) {
     val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(android.content.Intent.EXTRA_STREAM, uri)
-        putExtra(android.content.Intent.EXTRA_SUBJECT, "MVR Viewer — rapport de diagnostic")
+        putExtra(android.content.Intent.EXTRA_SUBJECT, ctx.getString(R.string.diag_subject))
         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    runCatching { ctx.startActivity(android.content.Intent.createChooser(send, "Envoyer le rapport")) }
+    runCatching { ctx.startActivity(android.content.Intent.createChooser(send, ctx.getString(R.string.diag_share))) }
 }

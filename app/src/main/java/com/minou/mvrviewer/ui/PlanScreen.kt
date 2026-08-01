@@ -90,6 +90,8 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Vue plan 2D — projection de dessus (top), comme la vue plan iOS : monde
@@ -267,6 +269,7 @@ fun PlanScreen(
     // si au moins un projecteur PRÉSENT dans la scène est non affecté dans ce mode
     // (absent de la table de couleur du mode = dessiné en gris non-câblé), on AJOUTE
     // en fin une entrée « Non câblé » de teinte CABLING_UNASSIGNED_GRAY (0xFF737373).
+    val sUnassigned = stringResource(R.string.cabling_unassigned)
     val cablingLegend: List<Pair<String, Color>> =
         remember(cabling.version, dmxCabling.version, effectiveColorMode,
                  data, socaColorByFixture, dmxColorByFixture) {
@@ -276,14 +279,14 @@ fun PlanScreen(
                     val base = cabling.distributors.filter { it.id in used }
                         .map { it.name to Color(it.colorArgb) }
                     val anyUnassigned = data.fixtures.any { it.key !in socaColorByFixture }
-                    if (anyUnassigned) base + ("Non câblé" to CABLING_UNASSIGNED_GRAY) else base
+                    if (anyUnassigned) base + (sUnassigned to CABLING_UNASSIGNED_GRAY) else base
                 }
                 PlanColorMode.DMX_LINE -> {
                     val used = dmxCabling.assignments.values.mapTo(HashSet()) { it.distributor }
                     val base = dmxCabling.distributors.filter { it.id in used }
                         .map { it.name to Color(it.colorArgb) }
                     val anyUnassigned = data.fixtures.any { it.key !in dmxColorByFixture }
-                    if (anyUnassigned) base + ("Non câblé" to CABLING_UNASSIGNED_GRAY) else base
+                    if (anyUnassigned) base + (sUnassigned to CABLING_UNASSIGNED_GRAY) else base
                 }
                 PlanColorMode.LAYER -> emptyList()
             }
@@ -434,7 +437,7 @@ fun PlanScreen(
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PDF ->
                         com.minou.mvrviewer.mvr.RasterPlanLoader.renderPdfFirstPage(cr, uri)?.let { pdf ->
                             ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                pdf.bitmap, name ?: "Plan PDF", com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
+                                pdf.bitmap, name ?: context.getString(R.string.plan_pdf_default_name), com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
                                 pdf.pageCount, pdf.pointWidth.toFloat(), pdf.pointHeight.toFloat()))
                         }
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG,
@@ -442,7 +445,7 @@ fun PlanScreen(
                         val png = fmt == com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG
                         com.minou.mvrviewer.mvr.RasterPlanLoader.loadImage(cr, uri, png)?.let { img ->
                             ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                img.bitmap, name ?: "Plan image",
+                                img.bitmap, name ?: context.getString(R.string.plan_image_default_name),
                                 if (png) com.minou.mvrviewer.mvr.RasterPlan.Kind.PNG
                                 else com.minou.mvrviewer.mvr.RasterPlan.Kind.JPEG,
                                 1, img.srcWidthPx.toFloat(), img.srcHeightPx.toFloat()))
@@ -859,6 +862,10 @@ fun PlanScreen(
     val bgDark = BackgroundColorStore.isDark(planBg)
     val inkColor = if (bgDark) Color(0xFFECECEC) else Color(0xFF222222)
     val dxfColor = if (bgDark) DXF_COLOR_DARK_BG else DXF_COLOR
+    // Chaînes localisées utilisées hors contexte composable (Canvas, lambdas).
+    val sMeasureStartPlaced = stringResource(R.string.measure_start_placed)
+    val sExportViewFmt = stringResource(R.string.plan_export_view_fmt)
+    val sPdfDocTitle = stringResource(R.string.plan_pdf_doc_title)
 
     // N11 — panneau « Personnaliser la barre d'outils… » (mode édition).
     var showCustomize by remember { mutableStateOf(false) }
@@ -875,22 +882,22 @@ fun PlanScreen(
     // (inMenu=false) car il a déjà sa bascule dédiée (avec opacité) ; idem pour les
     // extras plaçables (étiquettes/couleurs/structure/légende).
     val toolsPlan: List<ToolSpec> = buildList {
-        add(ToolSpec(ToolId.RECT, "Sélection rectangle", Icons.Filled.Crop,
+        add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
                 rectMode = !rectMode; if (rectMode) measureMode = false
             }))
-        add(ToolSpec(ToolId.MASK, "Masquer des éléments", Icons.Filled.VisibilityOff,
+        add(ToolSpec(ToolId.MASK, stringResource(R.string.tool_mask), Icons.Filled.VisibilityOff,
             available = true, checked = maskMode, onInvoke = {
                 maskMode = !maskMode
                 if (maskMode) { selected.clear(); measureMode = false; soloMode = false }
             }))
-        add(ToolSpec(ToolId.SOLO, "Solo (sélection seule)", Icons.Filled.CenterFocusStrong,
+        add(ToolSpec(ToolId.SOLO, stringResource(R.string.tool_solo), Icons.Filled.CenterFocusStrong,
             available = true, checked = soloMode, onInvoke = {
                 soloMode = !soloMode
                 if (soloMode) { selected.clear(); measureMode = false; maskMode = false }
                 else onSetSoloElements(emptySet())
             }))
-        add(ToolSpec(ToolId.MEASURE, "Mesurer une distance", Icons.Filled.Straighten,
+        add(ToolSpec(ToolId.MEASURE, stringResource(R.string.tool_measure), Icons.Filled.Straighten,
             available = true, checked = measureMode, onInvoke = {
                 measureMode = !measureMode
                 if (measureMode) {
@@ -898,33 +905,33 @@ fun PlanScreen(
                     measureA = null; measureB = null
                 } else { measureA = null; measureB = null }
             }))
-        add(ToolSpec(ToolId.SHOW_ALL, "Tout réafficher", Icons.Filled.Visibility,
+        add(ToolSpec(ToolId.SHOW_ALL, stringResource(R.string.tool_show_all), Icons.Filled.Visibility,
             available = hiddenElements.isNotEmpty(), checked = null,
             onInvoke = { onSetHiddenElements(emptySet()) }))
-        add(ToolSpec(ToolId.CLEAR_SOLO, "Vider le solo", Icons.Filled.CenterFocusWeak,
+        add(ToolSpec(ToolId.CLEAR_SOLO, stringResource(R.string.tool_clear_solo), Icons.Filled.CenterFocusWeak,
             available = soloElements.isNotEmpty(), checked = null,
             onInvoke = { onSetSoloElements(emptySet()) }))
-        add(ToolSpec(ToolId.CLEAR_SEL, "Effacer la sélection", Icons.Filled.Clear,
+        add(ToolSpec(ToolId.CLEAR_SEL, stringResource(R.string.tool_clear_selection), Icons.Filled.Clear,
             available = selected.isNotEmpty(), checked = null, onInvoke = { selected.clear() }))
-        add(ToolSpec(ToolId.GPS, "Ma position GPS", Icons.Filled.MyLocation,
+        add(ToolSpec(ToolId.GPS, stringResource(R.string.tool_gps), Icons.Filled.MyLocation,
             available = true, checked = showLocation, onInvoke = {
                 showLocation = !showLocation; if (!showLocation) calibrating = false
             }))
-        add(ToolSpec(ToolId.CALIBRATE, "Calibrer : je suis ici", Icons.Filled.Place,
+        add(ToolSpec(ToolId.CALIBRATE, stringResource(R.string.tool_calibrate), Icons.Filled.Place,
             available = showLocation, checked = calibrating, onInvoke = {
                 calibrating = !calibrating; if (calibrating) measureMode = false
             }))
-        add(ToolSpec(ToolId.SATELLITE, "Fond satellite", Icons.Filled.Public,
+        add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
             available = calibration.isCalibrated, checked = options.showSatellite,
             onInvoke = { options.showSatellite = !options.showSatellite }, inMenu = false))
-        add(ToolSpec(ToolId.EXPORT_PDF, "Export PDF", Icons.Filled.PictureAsPdf,
+        add(ToolSpec(ToolId.EXPORT_PDF, stringResource(R.string.tool_export_pdf), Icons.Filled.PictureAsPdf,
             available = true, checked = exportMode, onInvoke = { exportMode = !exportMode }))
         // POINT D'ENTRÉE UNIQUE du plan de repère (Android n'a pas d'import en 3D) :
         // le libellé dit ce que fait l'action — importer tant qu'aucun plan n'est
         // chargé, ouvrir/fermer le panneau de placement ensuite. Le ToolSpec est
         // reconstruit à chaque recomposition, donc le libellé suit l'état.
         add(ToolSpec(ToolId.DXF,
-            if (referencePlan == null) "Importer un plan (DXF, image, PDF)…" else "Plan de repère",
+            stringResource(if (referencePlan == null) R.string.tool_import_ref_plan else R.string.tool_ref_plan),
             Icons.Filled.Layers,
             available = true, checked = referencePlan != null && showDxfPanel, busy = importing,
             onInvoke = {
@@ -932,27 +939,27 @@ fun PlanScreen(
                 else showDxfPanel = !showDxfPanel
             }))
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
-        add(ToolSpec(ToolId.LABELS, "Étiquettes", Icons.Filled.Label,
+        add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,
             available = true, checked = options.showLabels,
             onInvoke = { options.showLabels = !options.showLabels }, inMenu = false))
         // Réglage des étiquettes (parité iOS catalogPlan) : ACTION ponctuelle qui
         // ouvre les réglages/champs d'étiquette existants (mêmes contrôles que le
         // menu). Dockable ; hors menu « Outils » (déjà accessible au menu).
-        add(ToolSpec(ToolId.LABEL_SETTINGS, "Réglage des étiquettes", Icons.Filled.Tune,
+        add(ToolSpec(ToolId.LABEL_SETTINGS, stringResource(R.string.tool_label_settings), Icons.Filled.Tune,
             available = true, checked = null,
             onInvoke = { showLabelSettingsDialog = true }, inMenu = false))
-        add(ToolSpec(ToolId.LAYER_COLORS, "Couleurs par calque", Icons.Filled.Palette,
+        add(ToolSpec(ToolId.LAYER_COLORS, stringResource(R.string.opt_layer_colors), Icons.Filled.Palette,
             available = true, checked = options.layerColors,
             onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
-        add(ToolSpec(ToolId.STRUCTURE, "Décor / structure", Icons.Filled.Architecture,
+        add(ToolSpec(ToolId.STRUCTURE, stringResource(R.string.opt_structure), Icons.Filled.Architecture,
             available = true, checked = options.showStructure,
             onInvoke = { options.showStructure = !options.showStructure }, inMenu = false))
-        add(ToolSpec(ToolId.LEGEND, "Légende", Icons.Filled.FormatListBulleted,
+        add(ToolSpec(ToolId.LEGEND, stringResource(R.string.opt_legend), Icons.Filled.FormatListBulleted,
             available = true, checked = options.showLegend,
             onInvoke = { options.showLegend = !options.showLegend }, inMenu = false))
         // Couleur du fond (parité iOS catalogPlan) : ouvre le sélecteur ; le menu
         // garde ses presets. Dockable ; hors menu « Outils » (déjà au menu).
-        add(ToolSpec(ToolId.BACKGROUND, "Couleur du fond", Icons.Filled.FormatColorFill,
+        add(ToolSpec(ToolId.BACKGROUND, stringResource(R.string.menu_section_background), Icons.Filled.FormatColorFill,
             available = true, checked = null,
             onInvoke = { showBackgroundDialog = true }, inMenu = false))
     }
@@ -1642,7 +1649,7 @@ fun PlanScreen(
                     // n'y a pas de second : l'utilisateur voit que c'est armé).
                     val text = if (mb != null)
                         formatPlanDistanceMm(measureDistanceMm(ma, mb))
-                    else "départ posé — touchez l'arrivée"
+                    else sMeasureStartPlaced
                     val tl = measurer.measure(
                         text,
                         style = TextStyle(fontSize = 13.sp, color = Color.White)
@@ -1672,13 +1679,13 @@ fun PlanScreen(
             modifier = Modifier.align(Alignment.TopStart).padding(top = 52.dp, start = 56.dp)
         ) {
             Text(
-                "Plan · ${scene.fixtures.size} projecteur(s)",
+                stringResource(R.string.plan_title_fmt, scene.fixtures.size),
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.bodySmall
             )
         }
         IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Vue 3D", tint = inkColor)
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.nav_view_3d), tint = inkColor)
         }
 
         // BANDEAU D'AFFECTATION (E2) : en haut, la cible visée + un bouton « Terminé ».
@@ -1715,7 +1722,7 @@ fun PlanScreen(
                     Text(
                         // + NOMBRE de projecteurs actuellement affectés à la cible
                         // (recalculé à chaque affectation/retrait via assignedToTarget).
-                        "Affectation → $targetLabel · ${assignedToTarget.size} projecteur(s)",
+                        stringResource(R.string.assign_banner_fmt, targetLabel, assignedToTarget.size),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
                     )
@@ -1725,7 +1732,7 @@ fun PlanScreen(
                         colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         )
-                    ) { Text("Terminé") }
+                    ) { Text(stringResource(R.string.common_done)) }
                 }
             }
         }
@@ -1764,7 +1771,7 @@ fun PlanScreen(
                                 }
                             }
                             if (cablingLegend.size > 12) {
-                                Text("  +${cablingLegend.size - 12} autre(s)", style = MaterialTheme.typography.labelSmall)
+                                Text("  " + stringResource(R.string.legend_more_fmt, cablingLegend.size - 12), style = MaterialTheme.typography.labelSmall)
                             }
                         } else {
                             legend.take(10).forEach { (layer, n) ->
@@ -1780,7 +1787,7 @@ fun PlanScreen(
                                 }
                             }
                             if (legend.size > 10) {
-                                Text("  +${legend.size - 10} autre(s) calque(s)", style = MaterialTheme.typography.labelSmall)
+                                Text("  " + stringResource(R.string.legend_more_layers_fmt, legend.size - 10), style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
@@ -1851,7 +1858,7 @@ fun PlanScreen(
                 },
                 background = options.background2D,
                 backgroundDefault = BackgroundColorStore.DEFAULT_2D,
-                backgroundPresets = BG_2D_PRESETS,
+                backgroundPresets = bg2dPresets(),
                 onPickBackground = { options.background2D = it }
             )
         }
@@ -1903,7 +1910,7 @@ fun PlanScreen(
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            placeholder = { Text("N° projecteur", style = MaterialTheme.typography.bodySmall) },
+            placeholder = { Text(stringResource(R.string.search_fixture_id_hint), style = MaterialTheme.typography.bodySmall) },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { doSearch() }),
@@ -1971,11 +1978,11 @@ fun PlanScreen(
                     val rast = rpPanel.raster
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            if (rast != null) "Plan ${rast.label}" else "Plan DXF · ${rpPanel.plan.unitLabel}",
+                            if (rast != null) stringResource(R.string.refplan_kind_fmt, stringResource(rast.labelRes)) else stringResource(R.string.refplan_dxf_fmt, rpPanel.plan.unitLabel),
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f))
                         androidx.compose.material3.TextButton(onClick = { onSetReferencePlan(null); showDxfPanel = false }) {
-                            Text("Retirer", color = Color(0xFFC62828))
+                            Text(stringResource(R.string.common_remove), color = Color(0xFFC62828))
                         }
                     }
                     if (rast != null) {
@@ -1985,20 +1992,20 @@ fun PlanScreen(
                         // Un PDF multi-pages n'utilise QUE la page 1 : le dire, sinon
                         // l'utilisateur croit son plan tronqué par un bug.
                         if (rast.pageCount > 1) {
-                            Text("PDF de ${rast.pageCount} pages — page 1 utilisée",
+                            Text(stringResource(R.string.refplan_pdf_pages_fmt, rast.pageCount),
                                 style = MaterialTheme.typography.bodySmall, color = Color(0xFFB26A00))
                         }
                     } else {
-                        Text("${rpPanel.plan.segmentCount} segments" + if (rpPanel.plan.truncatedSegments > 0) " (+${rpPanel.plan.truncatedSegments} tronqués)" else "",
+                        Text(stringResource(R.string.refplan_segments_fmt, rpPanel.plan.segmentCount) + if (rpPanel.plan.truncatedSegments > 0) stringResource(R.string.refplan_truncated_fmt, rpPanel.plan.truncatedSegments) else "",
                             style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666))
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Visible", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.common_visible), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                         androidx.compose.material3.Switch(checked = tf.visible, onCheckedChange = { tf.visible = it; bump() })
                     }
                     // Déplacement (mm monde) : libellé au-dessus + 4 flèches.
                     val pad = androidx.compose.foundation.layout.PaddingValues(2.dp)
-                    Text("Déplacer", style = MaterialTheme.typography.bodyMedium,
+                    Text(stringResource(R.string.common_move), style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetX -= step; bump() }) { Text("←") }
@@ -2007,12 +2014,12 @@ fun PlanScreen(
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetY -= step; bump() }) { Text("↓") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Rotation", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.common_rotation), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.rotationDeg -= 5; bump() }) { Text("−5°") }
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.rotationDeg += 5; bump() }) { Text("+5°") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Échelle", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.common_scale), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale /= 1.1; bump() }) { Text("÷") }
                         androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale *= 1.1; bump() }) { Text("×") }
                     }
@@ -2034,12 +2041,12 @@ fun PlanScreen(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(top = 6.dp)) {
-                        Text("Homothétie", style = MaterialTheme.typography.bodyMedium,
+                        Text(stringResource(R.string.common_uniform_scale), style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f))
                         androidx.compose.material3.TextButton(
                             contentPadding = pad,
                             onClick = { applyHomothety(1.0, syncSlider = true, syncText = true) }
-                        ) { Text("Réinitialiser", style = MaterialTheme.typography.labelSmall) }
+                        ) { Text(stringResource(R.string.common_reset), style = MaterialTheme.typography.labelSmall) }
                     }
                     androidx.compose.material3.Slider(
                         value = homoLog,
@@ -2076,7 +2083,7 @@ fun PlanScreen(
                         rpPanel.plan.layerCounts.entries.sortedByDescending { it.value }
                     }
                     if (dxfLayers.isNotEmpty()) {
-                        Text("Calques (${dxfLayers.size})", style = MaterialTheme.typography.bodyMedium,
+                        Text(stringResource(R.string.refplan_layers_fmt, dxfLayers.size), style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
                         androidx.compose.foundation.layout.Column(
                             Modifier.heightIn(max = 150.dp).verticalScroll(rememberScrollState())
@@ -2118,21 +2125,21 @@ fun PlanScreen(
             ) {
                 androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Export PDF", style = MaterialTheme.typography.labelLarge,
+                        Text(stringResource(R.string.tool_export_pdf), style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f))
-                        Text("${exportViews.size} vue(s)", style = MaterialTheme.typography.labelSmall,
+                        Text(stringResource(R.string.plan_export_views_fmt, exportViews.size), style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF666666))
                     }
                     OutlinedTextField(
                         value = exportName,
                         onValueChange = { exportName = it },
                         singleLine = true,
-                        label = { Text("Nom de la vue", style = MaterialTheme.typography.bodySmall) },
+                        label = { Text(stringResource(R.string.plan_export_view_name), style = MaterialTheme.typography.bodySmall) },
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
                     )
                     androidx.compose.material3.Button(
                         onClick = {
-                            val n = exportName.trim().ifEmpty { "Vue ${exportViews.size + 1}" }
+                            val n = exportName.trim().ifEmpty { String.format(sExportViewFmt, exportViews.size + 1) }
                             captureCurrentView(n)?.let {
                                 exportViews.add(it)
                                 exportName = ""
@@ -2142,7 +2149,7 @@ fun PlanScreen(
                             }
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-                    ) { Text("Ajouter cette vue") }
+                    ) { Text(stringResource(R.string.plan_export_add_view)) }
 
                     if (exportViews.isNotEmpty()) {
                         androidx.compose.foundation.layout.Column(
@@ -2163,17 +2170,17 @@ fun PlanScreen(
                                             if (i > 0) { exportViews.add(i - 1, exportViews.removeAt(i)); exportFile = null }
                                         },
                                         modifier = Modifier.size(26.dp)
-                                    ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Monter") }
+                                    ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.common_move_up)) }
                                     IconButton(
                                         onClick = {
                                             if (i < exportViews.size - 1) { exportViews.add(i + 1, exportViews.removeAt(i)); exportFile = null }
                                         },
                                         modifier = Modifier.size(26.dp)
-                                    ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Descendre") }
+                                    ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.common_move_down)) }
                                     IconButton(
                                         onClick = { exportViews.removeAt(i); exportFile = null },
                                         modifier = Modifier.size(26.dp)
-                                    ) { Icon(Icons.Filled.Delete, contentDescription = "Supprimer", tint = Color(0xFFC62828)) }
+                                    ) { Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete), tint = Color(0xFFC62828)) }
                                 }
                             }
                         }
@@ -2193,7 +2200,7 @@ fun PlanScreen(
                                     satellite = satellite,
                                     legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
                                         .toList().sortedByDescending { it.second },
-                                    documentTitle = "Plan"
+                                    documentTitle = sPdfDocTitle
                                 )
                                 exportScope.launch {
                                     val f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -2207,22 +2214,22 @@ fun PlanScreen(
                         ) {
                             if (exportBusy) androidx.compose.material3.CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            else Text("Générer", style = MaterialTheme.typography.labelMedium)
+                            else Text(stringResource(R.string.common_generate), style = MaterialTheme.typography.labelMedium)
                         }
                         val ready = exportFile
                         androidx.compose.material3.OutlinedButton(
                             enabled = ready != null,
                             onClick = { ready?.let { sharePlanPdf(ctxPlan, it) } },
                             modifier = Modifier.weight(1f)
-                        ) { Text("Envoyer", style = MaterialTheme.typography.labelMedium) }
+                        ) { Text(stringResource(R.string.common_send), style = MaterialTheme.typography.labelMedium) }
                         androidx.compose.material3.OutlinedButton(
                             enabled = ready != null,
                             onClick = { ready?.let { printPlanPdf(ctxPlan, it) } },
                             modifier = Modifier.weight(1f)
-                        ) { Text("Imprimer", style = MaterialTheme.typography.labelMedium) }
+                        ) { Text(stringResource(R.string.common_print), style = MaterialTheme.typography.labelMedium) }
                     }
                     if (exportFile != null) {
-                        Text("PDF prêt · ${exportViews.size} page(s)",
+                        Text(stringResource(R.string.plan_export_ready_fmt, exportViews.size),
                             style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
                     }
                 }
@@ -2233,7 +2240,7 @@ fun PlanScreen(
         renamingIndex?.let { idx ->
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { renamingIndex = null },
-                title = { Text("Renommer la vue") },
+                title = { Text(stringResource(R.string.plan_export_rename_view)) },
                 text = {
                     OutlinedTextField(
                         value = renamingText, onValueChange = { renamingText = it },
@@ -2253,10 +2260,10 @@ fun PlanScreen(
                             exportFile = null
                         }
                         renamingIndex = null
-                    }) { Text("Renommer") }
+                    }) { Text(stringResource(R.string.common_rename)) }
                 },
                 dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { renamingIndex = null }) { Text("Annuler") }
+                    androidx.compose.material3.TextButton(onClick = { renamingIndex = null }) { Text(stringResource(R.string.common_cancel)) }
                 }
             )
         }
@@ -2269,9 +2276,9 @@ fun PlanScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
             ) {
                 Text(
-                    if (gps == null) "En attente du GPS…"
-                    else if (calibration.anchors.isEmpty()) "Touchez VOTRE position sur le plan (1er point)"
-                    else "Touchez un 2e point (oriente + met à l'échelle)",
+                    if (gps == null) stringResource(R.string.calib_waiting_gps)
+                    else if (calibration.anchors.isEmpty()) stringResource(R.string.calib_tap_first)
+                    else stringResource(R.string.calib_tap_second),
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -2289,11 +2296,11 @@ fun PlanScreen(
             ) {
                 Text(
                     when {
-                        ma == null -> "Mesure : touchez le point de départ"
-                        mb == null -> "Touchez le point d'arrivée"
+                        ma == null -> stringResource(R.string.measure_tap_start)
+                        mb == null -> stringResource(R.string.measure_tap_end)
                         else -> formatPlanDistanceMm(measureDistanceMm(ma, mb)) +
-                            (if (ma.snapped && mb.snapped) " · accroché" else "") +
-                            " — touchez pour une nouvelle mesure"
+                            (if (ma.snapped && mb.snapped) " · " + stringResource(R.string.measure_snapped) else "") +
+                            " — " + stringResource(R.string.measure_tap_again)
                     },
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodyMedium
@@ -2328,7 +2335,7 @@ fun PlanScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
             ) {
                 Text(
-                    "${selected.size} projecteurs sélectionnés",
+                    stringResource(R.string.sel_fixtures_selected_fmt, selected.size),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.titleSmall
                 )
@@ -2340,7 +2347,7 @@ fun PlanScreen(
         // qui persiste globalement (par appareil).
         if (showCustomize) {
             ToolbarCustomizeSheet(
-                title = "Barre d'outils · Vue plan",
+                title = stringResource(R.string.toolbar_title_plan),
                 layout = toolbarLayout,
                 catalog = toolsPlan.toCatalog(),
                 default = ToolbarLayout.defaultPlan,
@@ -2352,7 +2359,7 @@ fun PlanScreen(
         // N11 — sélecteur de couleur du fond ouvert par l'outil BACKGROUND docké.
         if (showBackgroundDialog) {
             BackgroundColorDialog(
-                title = "Couleur du fond 2D",
+                title = stringResource(R.string.background_title_2d),
                 initial = options.background2D,
                 default = BackgroundColorStore.DEFAULT_2D,
                 onColorChange = { options.background2D = it },
@@ -2395,24 +2402,24 @@ private fun assignHaptic(view: android.view.View, assigned: Boolean) {
 @Composable
 private fun LabelSettingsDialog(options: SceneOptions, onDismiss: () -> Unit) {
     val sizeName = when {
-        options.labelSize <= 0.75f -> "petite"
-        options.labelSize >= 1.3f -> "grande"
-        else -> "moyenne"
+        options.labelSize <= 0.75f -> stringResource(R.string.size_small)
+        options.labelSize >= 1.3f -> stringResource(R.string.size_large)
+        else -> stringResource(R.string.size_medium)
     }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Réglage des étiquettes") },
+        title = { Text(stringResource(R.string.tool_label_settings)) },
         text = {
             androidx.compose.foundation.layout.Column(
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = options.showLabels, onCheckedChange = { options.showLabels = it })
-                    Text("Afficher les étiquettes")
+                    Text(stringResource(R.string.opt_show_labels))
                 }
                 if (options.showLabels) {
                     androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    Text("Contenu", style = MaterialTheme.typography.labelMedium,
+                    Text(stringResource(R.string.opt_label_content), style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp))
                     LabelContent.entries.forEach { c ->
                         val on = c in options.labelFields
@@ -2422,7 +2429,7 @@ private fun LabelSettingsDialog(options: SceneOptions, onDismiss: () -> Unit) {
                                     if (on) options.labelFields - c else options.labelFields + c
                                 if (on) options.labelDetached = options.labelDetached - c
                             })
-                            Text(c.label)
+                            Text(stringResource(c.labelRes))
                         }
                         if (on) {
                             val loose = c in options.labelDetached
@@ -2434,7 +2441,7 @@ private fun LabelSettingsDialog(options: SceneOptions, onDismiss: () -> Unit) {
                                     options.labelDetached =
                                         if (loose) options.labelDetached - c else options.labelDetached + c
                                 })
-                                Text("Bloc séparé", style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.opt_label_detached_cap), style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -2445,12 +2452,12 @@ private fun LabelSettingsDialog(options: SceneOptions, onDismiss: () -> Unit) {
                             options.labelSize >= 1.3f -> 0.7f
                             else -> 1.4f
                         }
-                    }) { Text("Taille : $sizeName") }
+                    }) { Text(stringResource(R.string.opt_size_fmt, sizeName)) }
                 }
             }
         },
         confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Fermer") }
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
         }
     )
 }
@@ -2492,9 +2499,10 @@ private val DXF_COLOR = Color(0xB3384B66)         // bleu-gris (sous-couche, fon
 private val DXF_COLOR_DARK_BG = Color(0xB39FC0E4) // bleu-gris clair (fond sombre)
 
 // Presets de couleur de fond de la vue plan (nom, ARGB) — mêmes choix qu'iOS.
-private val BG_2D_PRESETS = listOf(
-    "Blanc" to 0xFFFFFFFFL, "Gris clair" to 0xFFE9E9ECL, "Beige" to 0xFFF2ECDDL,
-    "Anthracite" to 0xFF1C1C1EL, "Noir" to 0xFF000000L
+@androidx.compose.runtime.Composable
+private fun bg2dPresets(): List<Pair<String, Long>> = listOf(
+    stringResource(R.string.color_white) to 0xFFFFFFFFL, stringResource(R.string.color_light_grey) to 0xFFE9E9ECL, stringResource(R.string.color_beige) to 0xFFF2ECDDL,
+    stringResource(R.string.color_charcoal) to 0xFF1C1C1EL, stringResource(R.string.color_black) to 0xFF000000L
 )
 
 // ---------------------------------------------------------------------------

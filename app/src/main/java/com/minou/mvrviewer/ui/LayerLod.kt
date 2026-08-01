@@ -13,13 +13,13 @@ package com.minou.mvrviewer.ui
  *
  * Libellés FIGÉS (identiques iOS/Android) — ne pas les reformuler.
  */
-enum class LayerLodMode(val label: String, val stored: String) {
+enum class LayerLodMode(@androidx.annotation.StringRes val labelRes: Int, val stored: String) {
     /** Comportement actuel : le LOD décide seul. DÉFAUT de tous les calques. */
-    AUTO("Auto", ""),
+    AUTO(com.minou.mvrviewer.R.string.lod_auto, ""),
     /** Jamais dégradé ni masqué par le LOD pendant la navigation. */
-    ALWAYS("Toujours visible", "always"),
+    ALWAYS(com.minou.mvrviewer.R.string.lod_always, "always"),
     /** Toujours masqué pendant le geste ; réapparaît à l'arrêt. */
-    HIDE_NAV("Masquer en navigation", "hideNav");
+    HIDE_NAV(com.minou.mvrviewer.R.string.lod_hide_nav, "hideNav");
 
     companion object {
         /** Décode une valeur persistée ; inconnue ou absente → [AUTO]. */

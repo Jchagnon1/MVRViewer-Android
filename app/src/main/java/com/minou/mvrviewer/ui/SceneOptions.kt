@@ -47,6 +47,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Réglages d'affichage partagés entre les vues d'un même show (fond, couleurs
@@ -62,9 +64,9 @@ import androidx.compose.ui.unit.dp
  * ces champs (résolveur → null). Ils apparaissent AUTOMATIQUEMENT dans le picker
  * (boucle `LabelContent.entries`).
  */
-enum class LabelContent(val label: String) {
-    ID("N°"), DMX("Adresse DMX"), MODE("Mode"), NAME("Nom"),
-    SOCAPEX("Socapex"), DMX_LINE("Ligne DMX")
+enum class LabelContent(@androidx.annotation.StringRes val labelRes: Int) {
+    ID(R.string.label_field_id), DMX(R.string.label_field_dmx), MODE(R.string.label_field_mode), NAME(R.string.label_field_name),
+    SOCAPEX(R.string.label_field_socapex), DMX_LINE(R.string.label_field_dmx_line)
 }
 
 /**
@@ -76,8 +78,8 @@ enum class LabelContent(val label: String) {
  * projecteur par la couleur de SON distributeur câblage. Non affecté = gris neutre.
  * Libellés/ordre alignés iOS (CablingColorMode : off / soca / dmx).
  */
-enum class PlanColorMode(val label: String) {
-    LAYER("Calque"), SOCAPEX("Socapex"), DMX_LINE("Ligne DMX")
+enum class PlanColorMode(@androidx.annotation.StringRes val labelRes: Int) {
+    LAYER(R.string.facet_layer), SOCAPEX(R.string.label_field_socapex), DMX_LINE(R.string.label_field_dmx_line)
 }
 
 /**
@@ -227,25 +229,25 @@ fun SceneOptionsMenu(
     var open by remember { mutableStateOf(false) }
     var showCustom by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
-        Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = tint)
+        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_options), tint = tint)
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        onShow3D?.let { nav("Vue 3D", Icons.Filled.ViewInAr) { open = false; it() } }
-        onShowPlan?.let { nav("Vue plan", Icons.Filled.Map) { open = false; it() } }
-        onShowPatch?.let { nav("Liste de patch", Icons.AutoMirrored.Filled.List) { open = false; it() } }
-        onShowUniverse?.let { nav("Univers DMX", Icons.Filled.GridView) { open = false; it() } }
-        onShowCabling?.let { nav("Câblage électrique", Icons.Filled.Bolt) { open = false; it() } }
-        onShowGdtfShare?.let { nav("GDTF Share (modèles 3D)", Icons.Filled.CloudDownload) { open = false; it() } }
+        onShow3D?.let { nav(stringResource(R.string.nav_view_3d), Icons.Filled.ViewInAr) { open = false; it() } }
+        onShowPlan?.let { nav(stringResource(R.string.nav_view_plan), Icons.Filled.Map) { open = false; it() } }
+        onShowPatch?.let { nav(stringResource(R.string.nav_patch_list), Icons.AutoMirrored.Filled.List) { open = false; it() } }
+        onShowUniverse?.let { nav(stringResource(R.string.nav_dmx_universe), Icons.Filled.GridView) { open = false; it() } }
+        onShowCabling?.let { nav(stringResource(R.string.nav_power_cabling), Icons.Filled.Bolt) { open = false; it() } }
+        onShowGdtfShare?.let { nav(stringResource(R.string.nav_gdtf_share_models), Icons.Filled.CloudDownload) { open = false; it() } }
         // ---- Outils de la vue (N10) : mêmes actions que la barre flottante,
         // accessibles ici. Les bascules gardent le menu ouvert ; les actions le
         // referment. Rendus dans l'ordre fourni par l'écran.
         if (tools.isNotEmpty() || onCustomizeToolbar != null || onShowLayers != null) {
             HorizontalDivider()
-            Text("Outils", style = MaterialTheme.typography.labelSmall,
+            Text(stringResource(R.string.menu_section_tools), style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             // Panneau des calques (réglage du LOD d'interaction par calque).
-            onShowLayers?.let { nav("Calques…", Icons.Filled.Layers) { open = false; it() } }
+            onShowLayers?.let { nav(stringResource(R.string.nav_layers), Icons.Filled.Layers) { open = false; it() } }
             tools.forEach { t ->
                 when (t) {
                     is MenuTool.Toggle -> toolToggle(t.label, t.icon, t.checked) { t.onToggle() }
@@ -255,23 +257,23 @@ fun SceneOptionsMenu(
             // N11 — accès au panneau de personnalisation des barres (les outils
             // ci-dessus restent TOUJOURS ici, qu'ils soient dans une barre ou non).
             onCustomizeToolbar?.let {
-                nav("Personnaliser la barre d'outils…", Icons.Filled.Tune) { open = false; it() }
+                nav(stringResource(R.string.nav_customize_toolbar), Icons.Filled.Tune) { open = false; it() }
             }
         }
         // ---- Synchro cloud (compte / partage / historique / rejoindre) ----
         if (onShowAccount != null || onShareProject != null || onShowHistory != null || onJoinProject != null) {
             HorizontalDivider()
-            Text("Synchro", style = MaterialTheme.typography.labelSmall,
+            Text(stringResource(R.string.menu_section_sync), style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
-            onShowAccount?.let { nav("Compte", Icons.Filled.AccountCircle) { open = false; it() } }
-            onShareProject?.let { nav("Partager ce projet", Icons.Filled.Share) { open = false; it() } }
-            onShowHistory?.let { nav("Historique des modifications", Icons.Filled.History) { open = false; it() } }
-            onJoinProject?.let { nav("Rejoindre un projet", Icons.Filled.GroupAdd) { open = false; it() } }
+            onShowAccount?.let { nav(stringResource(R.string.nav_account), Icons.Filled.AccountCircle) { open = false; it() } }
+            onShareProject?.let { nav(stringResource(R.string.nav_share_project), Icons.Filled.Share) { open = false; it() } }
+            onShowHistory?.let { nav(stringResource(R.string.nav_history), Icons.Filled.History) { open = false; it() } }
+            onJoinProject?.let { nav(stringResource(R.string.join_project), Icons.Filled.GroupAdd) { open = false; it() } }
         }
         if (background != null && onPickBackground != null) {
             HorizontalDivider()
-            Text("Couleur du fond", style = MaterialTheme.typography.labelSmall,
+            Text(stringResource(R.string.menu_section_background), style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             backgroundPresets.forEach { (name, argb) ->
@@ -287,11 +289,11 @@ fun SceneOptionsMenu(
                     onClick = { onPickBackground(c) }
                 )
             }
-            nav("Personnalisée…", Icons.Filled.Colorize) { open = false; showCustom = true }
+            nav(stringResource(R.string.nav_custom_color), Icons.Filled.Colorize) { open = false; showCustom = true }
         }
         if (showSatelliteToggle) {
             HorizontalDivider()
-            check("Fond satellite (carte)", options.showSatellite) { options.showSatellite = !options.showSatellite }
+            check(stringResource(R.string.opt_satellite_map), options.showSatellite) { options.showSatellite = !options.showSatellite }
             if (options.showSatellite) {
                 // Opacité : curseur compact dans le menu (le glissé horizontal ne
                 // gêne pas le défilement vertical du menu).
@@ -313,20 +315,20 @@ fun SceneOptionsMenu(
             }
         }
         HorizontalDivider()
-        check("Couleurs par calque", options.layerColors) { options.layerColors = !options.layerColors }
+        check(stringResource(R.string.opt_layer_colors), options.layerColors) { options.layerColors = !options.layerColors }
         // Mode de coloration CÂBLAGE (phase 4), vue plan uniquement : nav qui cycle
         // entre les modes réellement disponibles (Calque toujours ; Socapex / Ligne
         // DMX seulement si un câblage de ce type existe). Ne détourne PAS layerColors.
         if (showColorModeSelector) {
-            nav("Coloration : ${options.planColorMode.label}", Icons.Filled.Colorize) {
+            nav(stringResource(R.string.opt_coloring_fmt, stringResource(options.planColorMode.labelRes)), Icons.Filled.Colorize) {
                 options.planColorMode =
                     nextPlanColorMode(options.planColorMode, colorModeHasSoca, colorModeHasDmx)
             }
         }
-        if (showStructureToggle) check("Décor / structure", options.showStructure) { options.showStructure = !options.showStructure }
-        if (showLegendToggle) check("Légende", options.showLegend) { options.showLegend = !options.showLegend }
+        if (showStructureToggle) check(stringResource(R.string.opt_structure), options.showStructure) { options.showStructure = !options.showStructure }
+        if (showLegendToggle) check(stringResource(R.string.opt_legend), options.showLegend) { options.showLegend = !options.showLegend }
         if (showLabelsToggle) {
-            check("Étiquettes", options.showLabels) { options.showLabels = !options.showLabels }
+            check(stringResource(R.string.opt_labels), options.showLabels) { options.showLabels = !options.showLabels }
             if (options.showLabels) {
                 // Contenu de l'étiquette : CASES À COCHER (plusieurs champs), et
                 // pour chaque champ retenu, le choix « groupé / détaché ». Un
@@ -335,7 +337,7 @@ fun SceneOptionsMenu(
                 // le patch en dessous.
                 LabelContent.entries.forEach { c ->
                     val on = c in options.labelFields
-                    check("  ${c.label}", on) {
+                    check("  " + stringResource(c.labelRes), on) {
                         options.labelFields =
                             if (on) options.labelFields - c else options.labelFields + c
                         // Un champ retiré ne doit pas laisser derrière lui un
@@ -344,7 +346,7 @@ fun SceneOptionsMenu(
                     }
                     if (on) {
                         val loose = c in options.labelDetached
-                        check("      ↳ bloc séparé", loose) {
+                        check("      ↳ " + stringResource(R.string.opt_label_detached), loose) {
                             options.labelDetached =
                                 if (loose) options.labelDetached - c else options.labelDetached + c
                         }
@@ -353,18 +355,18 @@ fun SceneOptionsMenu(
                 // Sélection GROUPÉE d'étiquettes : plusieurs actives à la fois,
                 // qu'un seul glissé déplace toutes du même vecteur.
                 onSelectLabelsOfSelection?.let {
-                    nav("  Étiquettes de la sélection", Icons.Filled.SelectAll) { open = false; it() }
+                    nav("  " + stringResource(R.string.opt_labels_of_selection), Icons.Filled.SelectAll) { open = false; it() }
                 }
                 onSelectLabelsSameType?.let {
-                    nav("  Étiquettes du même type (ce calque)", Icons.Filled.SelectAll) { open = false; it() }
+                    nav("  " + stringResource(R.string.opt_labels_same_type), Icons.Filled.SelectAll) { open = false; it() }
                 }
                 // Taille (cycle S · M · L).
                 val sizeName = when {
-                    options.labelSize <= 0.75f -> "petite"
-                    options.labelSize >= 1.3f -> "grande"
-                    else -> "moyenne"
+                    options.labelSize <= 0.75f -> stringResource(R.string.size_small)
+                    options.labelSize >= 1.3f -> stringResource(R.string.size_large)
+                    else -> stringResource(R.string.size_medium)
                 }
-                nav("  Taille : $sizeName", Icons.Filled.Check) {
+                nav("  " + stringResource(R.string.opt_size_fmt, sizeName), Icons.Filled.Check) {
                     options.labelSize = when {
                         options.labelSize <= 0.75f -> 1f
                         options.labelSize >= 1.3f -> 0.7f
@@ -373,11 +375,11 @@ fun SceneOptionsMenu(
                 }
                 // Hauteur / écart (cycle).
                 val offName = when {
-                    options.labelOffset <= 0.6f -> "proche"
-                    options.labelOffset >= 1.6f -> "loin"
-                    else -> "normal"
+                    options.labelOffset <= 0.6f -> stringResource(R.string.gap_near)
+                    options.labelOffset >= 1.6f -> stringResource(R.string.gap_far)
+                    else -> stringResource(R.string.gap_normal)
                 }
-                nav("  Écart : $offName", Icons.Filled.Check) {
+                nav("  " + stringResource(R.string.opt_gap_fmt, offName), Icons.Filled.Check) {
                     options.labelOffset = when {
                         options.labelOffset <= 0.6f -> 1f
                         options.labelOffset >= 1.6f -> 0.5f
@@ -387,11 +389,11 @@ fun SceneOptionsMenu(
                 // Filet OPTIONNEL (décoché par défaut) : par défaut les étiquettes
                 // affichées restent visibles à tout zoom ; cochée, celle-ci rebranche
                 // le masquage sous un certain dézoom, utile sur un très gros show.
-                check("  Masquer si trop dézoomé", options.hideLabelsWhenZoomedOut) {
+                check("  " + stringResource(R.string.opt_hide_when_zoomed_out), options.hideLabelsWhenZoomedOut) {
                     options.hideLabelsWhenZoomedOut = !options.hideLabelsWhenZoomedOut
                 }
                 onResetLabelOffsets?.let {
-                    nav("  Replacer les étiquettes", Icons.Filled.Refresh) { open = false; it() }
+                    nav("  " + stringResource(R.string.opt_reset_label_offsets), Icons.Filled.Refresh) { open = false; it() }
                 }
             }
         }
@@ -399,7 +401,7 @@ fun SceneOptionsMenu(
 
     if (showCustom && background != null && onPickBackground != null) {
         BackgroundColorDialog(
-            title = "Couleur du fond",
+            title = stringResource(R.string.menu_section_background),
             initial = background,
             default = backgroundDefault,
             onColorChange = onPickBackground,

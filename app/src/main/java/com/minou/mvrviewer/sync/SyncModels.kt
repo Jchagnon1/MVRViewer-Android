@@ -311,6 +311,8 @@ sealed class SyncException(
     object NotAMember : SyncException("Vous n'avez pas accès à ce projet.", com.minou.mvrviewer.R.string.sync_err_not_a_member)
     object BlobMissing : SyncException("Fichier absent du cloud.", com.minou.mvrviewer.R.string.sync_err_blob_missing)
     object BackendUnavailable : SyncException("Service de synchronisation indisponible.", com.minou.mvrviewer.R.string.sync_err_backend_unavailable)
+    object SignUpFailed : SyncException("Création de compte impossible.", com.minou.mvrviewer.R.string.sync_err_signup_failed)
+    object AuthFailed : SyncException("Erreur d'authentification.", com.minou.mvrviewer.R.string.sync_err_auth_failed)
     class Message(msg: String) : SyncException(msg)
 }
 

@@ -43,19 +43,28 @@ object GdtfShareClient {
     @Volatile var loggedIn = false; private set
     private var cachedList: List<GdtfShareEntry>? = null
 
-    class ShareException(message: String) : Exception(message)
+    /**
+     * Panne remontée à l'écran. Elle ne porte PAS de texte mais une CLÉ de
+     * ressource + ses arguments : le client n'a pas de `Context` et n'a donc pas
+     * à choisir une langue — c'est [gdtfShareMessage], à l'affichage, qui met en
+     * mots dans la langue du téléphone.
+     */
+    class ShareException(
+        @androidx.annotation.StringRes val messageRes: Int,
+        vararg val args: Any
+    ) : Exception()
 
     /** Traduit les pannes réseau en message clair (au lieu de « Unable to resolve host… »). */
     private inline fun <T> netCall(block: () -> T): T = try {
         block()
     } catch (e: java.net.UnknownHostException) {
-        throw ShareException("Impossible de joindre gdtf-share.com. Vérifie ta connexion Internet.")
+        throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_unreachable)
     } catch (e: java.net.ConnectException) {
-        throw ShareException("Connexion à gdtf-share.com impossible. Vérifie ta connexion Internet.")
+        throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_connect)
     } catch (e: java.net.SocketTimeoutException) {
-        throw ShareException("gdtf-share.com ne répond pas (délai dépassé). Réessaie.")
+        throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_timeout)
     } catch (e: javax.net.ssl.SSLException) {
-        throw ShareException("Connexion sécurisée à gdtf-share.com impossible. Réessaie.")
+        throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_tls)
     }
 
     suspend fun login(user: String, password: String) = withContext(Dispatchers.IO) {
@@ -69,9 +78,13 @@ object GdtfShareClient {
             conn.disconnect()
             if (code !in 200..299) {
                 // L'API renvoie 401 + {"result":false,"error":"…"} sur mauvais identifiants.
+                // Le texte du serveur (non traduisible) est cité tel quel ; sinon on
+                // ne dispose que du code HTTP, et la phrase entière est localisée.
                 val msg = runCatching { JSONObject(body).optString("error") }.getOrNull()
-                    ?.takeIf { it.isNotBlank() } ?: "code $code"
-                throw ShareException("Identifiants refusés par GDTF Share : $msg")
+                    ?.takeIf { it.isNotBlank() }
+                throw if (msg != null)
+                    ShareException(com.minou.mvrviewer.R.string.gdtf_err_credentials_fmt, msg)
+                else ShareException(com.minou.mvrviewer.R.string.gdtf_err_credentials_code_fmt, code)
             }
             loggedIn = true
             cachedList = null
@@ -98,13 +111,13 @@ object GdtfShareClient {
 
     suspend fun fixtureList(): List<GdtfShareEntry> = withContext(Dispatchers.IO) {
         cachedList?.let { return@withContext it }
-        if (!loggedIn) throw ShareException("Non connecté à GDTF Share.")
+        if (!loggedIn) throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_not_connected)
         netCall {
             val conn = open("getList.php", "GET")
             val code = conn.responseCode
             val body = readBody(conn)
             conn.disconnect()
-            if (code !in 200..299) throw ShareException("getList.php a échoué (${code}).")
+            if (code !in 200..299) throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_list_failed_fmt, code)
             val entries = parseList(body)
             cachedList = entries
             entries
@@ -121,11 +134,11 @@ object GdtfShareClient {
     }
 
     suspend fun download(rid: Int): ByteArray = withContext(Dispatchers.IO) {
-        if (!loggedIn) throw ShareException("Non connecté à GDTF Share.")
+        if (!loggedIn) throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_not_connected)
         netCall {
             val conn = open("downloadFile.php?rid=$rid", "GET")
             val code = conn.responseCode
-            if (code !in 200..299) { conn.disconnect(); throw ShareException("Téléchargement échoué (rid $rid, code $code).") }
+            if (code !in 200..299) { conn.disconnect(); throw ShareException(com.minou.mvrviewer.R.string.gdtf_err_download_failed_fmt, rid, code) }
             val bytes = conn.inputStream.use { it.readBytes() }
             conn.disconnect()
             bytes
@@ -218,3 +231,10 @@ object GdtfShareClient {
         return out
     }
 }
+
+/**
+ * Message AFFICHABLE d'une panne GDTF Share, dans la langue du téléphone
+ * (null si l'erreur ne vient pas du client Share — l'appelant garde son repli).
+ */
+fun Throwable.gdtfShareMessage(ctx: android.content.Context): String? =
+    (this as? GdtfShareClient.ShareException)?.let { ctx.getString(it.messageRes, *it.args) }

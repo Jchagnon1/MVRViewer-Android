@@ -96,10 +96,21 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                     // URI périmée (permission perdue, fichier déplacé) → retirée des récents.
                     runCatching { RecentProjects.remove(getApplication(), uri.toString()) }
                     progress.finish()   // plus de chargement en cours
-                    UiState.Error(it.message ?: getApplication<Application>().getString(R.string.err_unknown))
+                    UiState.Error(errorText(it))
                 }
             )
         }
+    }
+
+    /**
+     * Texte AFFICHABLE d'un échec d'ouverture. Un `MvrParseException` porte une
+     * clé de ressource (son `message` reste technique, pour le journal) : c'est
+     * ici, à l'affichage, que l'on choisit la langue.
+     */
+    private fun errorText(t: Throwable): String {
+        val ctx = getApplication<Application>()
+        (t as? com.minou.mvrviewer.mvr.MvrParseException)?.messageRes?.let { return ctx.getString(it) }
+        return t.message ?: ctx.getString(R.string.err_unknown)
     }
 
     /**
@@ -128,7 +139,7 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                 },
                 onFailure = {
                     progress.finish()
-                    UiState.Error(it.message ?: getApplication<Application>().getString(R.string.err_unknown))
+                    UiState.Error(errorText(it))
                 }
             )
         }

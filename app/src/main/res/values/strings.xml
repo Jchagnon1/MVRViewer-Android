@@ -172,7 +172,6 @@
     <string name="fx_modes_unavailable">Modes indisponibles</string>
     <string name="fx_new_custom_type">Nouveau type custom…</string>
     <string name="fx_power_confirm">C\'est bon</string>
-    <string name="fx_power_consensus_fmt">consensus · %1$d vote(s)</string>
     <string name="fx_power_from_gdtf">d\'après le GDTF · aucun vote</string>
     <string name="fx_power_my_value">Ma valeur (W)</string>
     <string name="fx_power_none">aucune valeur — votez la puissance max</string>
@@ -189,6 +188,15 @@
     <string name="gdtf_connected_to_share">Connecté à GDTF Share.</string>
     <string name="gdtf_connecting">Connexion…</string>
     <string name="gdtf_download_failed">Téléchargement échoué.</string>
+    <string name="gdtf_err_connect">Connexion à gdtf-share.com impossible. Vérifie ta connexion Internet.</string>
+    <string name="gdtf_err_credentials_code_fmt">Identifiants refusés par GDTF Share : code %1$d</string>
+    <string name="gdtf_err_credentials_fmt">Identifiants refusés par GDTF Share : %1$s</string>
+    <string name="gdtf_err_download_failed_fmt">Téléchargement échoué (rid %1$d, code %2$d).</string>
+    <string name="gdtf_err_list_failed_fmt">getList.php a échoué (%1$d).</string>
+    <string name="gdtf_err_not_connected">Non connecté à GDTF Share.</string>
+    <string name="gdtf_err_timeout">gdtf-share.com ne répond pas (délai dépassé). Réessaie.</string>
+    <string name="gdtf_err_tls">Connexion sécurisée à gdtf-share.com impossible. Réessaie.</string>
+    <string name="gdtf_err_unreachable">Impossible de joindre gdtf-share.com. Vérifie ta connexion Internet.</string>
     <string name="gdtf_improve_all">Améliorer tout automatiquement</string>
     <string name="gdtf_intro">Connecte-toi avec ton compte GDTF Share (gratuit, gdtf-share.com) pour remplacer les modèles 3D des projecteurs par les profils fabricants.</string>
     <string name="gdtf_login_failed">Échec de connexion.</string>
@@ -249,11 +257,26 @@
     <string name="menu_section_sync">Synchro</string>
     <string name="menu_section_tools">Outils</string>
     <string name="model_add">Ajouter un modèle…</string>
+    <string name="model_err_budget_exceeded_fmt">%1$s : il ne reste que %2$s sur le plafond cumulé de %3$s triangles pour les modèles importés. Retirez un modèle avant d\'en ajouter un autre, ou allégez le maillage.</string>
+    <string name="model_err_budget_full_fmt">Plafond cumulé de %1$s triangles atteint pour les modèles importés. Retirez un modèle avant d\'en ajouter un autre.</string>
+    <string name="model_err_count_at_least_fmt">Plus de %1$s</string>
+    <string name="model_err_count_estimated_fmt">Environ %1$s triangles (estimés d\'après la taille du fichier)</string>
+    <string name="model_err_empty">Fichier vide.</string>
+    <string name="model_err_format_or"> ou </string>
+    <string name="model_err_megabytes_fmt">%1$d Mo</string>
+    <string name="model_err_no_geometry">Aucune géométrie lisible dans ce fichier.</string>
+    <string name="model_err_size_more_than_fmt">plus de %1$s</string>
+    <string name="model_err_too_large_fmt">Fichier trop volumineux (%1$s) : le plafond est de %2$s. Allégez le modèle (décimation, textures séparées) avant l\'import.</string>
+    <string name="model_err_too_many_triangles_fmt">%1$s : au-delà du plafond de %2$s triangles par modèle. Allégez le maillage (décimation) avant l\'import.</string>
+    <string name="model_err_unreadable">Fichier illisible.</string>
+    <string name="model_err_unsupported_fbx_fmt">%1$s (FBX : ajoutez le module Assimp)</string>
+    <string name="model_err_unsupported_fmt">Format non pris en charge. Convertissez-le en %1$s (par exemple avec Blender).</string>
     <string name="model_gltf_info_fmt">glTF · ≈ %1$d triangles · unité détectée : %2$s</string>
     <string name="model_info_fmt">%1$d triangles · unité détectée : %2$s</string>
     <string name="model_loading">Chargement du modèle…</string>
     <string name="model_reset_placement">Réinitialiser le placement</string>
     <string name="model_too_many_fmt">Trop de modèles importés (%1$d au maximum).</string>
+    <string name="mvr_err_no_scene_xml">GeneralSceneDescription.xml introuvable dans le .mvr.</string>
     <string name="nav_account">Compte</string>
     <string name="nav_custom_color">Personnalisée…</string>
     <string name="nav_customize_toolbar">Personnaliser la barre d\'outils…</string>
@@ -316,12 +339,10 @@
     <string name="plan_pdf_default_name">Plan PDF</string>
     <string name="plan_pdf_doc_title">Plan</string>
     <string name="plan_title_fmt">Plan · %1$d projecteur(s)</string>
-    <string name="power_fixtures_status_fmt">%1$d projecteur(s) · %2$s</string>
     <string name="power_no_type">Aucun type de projecteur (spec GDTF) dans ce show.</string>
     <string name="power_tab_hint">Réglez la conso par TYPE : votre valeur profite à tous les projecteurs de ce type et alimente la bibliothèque partagée. Le câblage se met à jour aussitôt.</string>
     <string name="power_to_enter">à saisir</string>
     <string name="power_watts_gdtf_fmt">%1$d W · GDTF</string>
-    <string name="power_watts_votes_fmt">%1$d W · %2$d vote(s)</string>
     <string name="raster_jpeg">Image JPEG</string>
     <string name="raster_pdf">PDF</string>
     <string name="raster_png">Image PNG</string>
@@ -349,6 +370,7 @@
     <string name="sync_display_name">Nom affiché (optionnel)</string>
     <string name="sync_downloading_fmt">Réception %1$d %%</string>
     <string name="sync_email">E-mail</string>
+    <string name="sync_err_auth_failed">Erreur d\'authentification.</string>
     <string name="sync_err_backend_unavailable">Service de synchronisation indisponible.</string>
     <string name="sync_err_blob_missing">Fichier absent du cloud.</string>
     <string name="sync_err_email_in_use">Cet e-mail est déjà utilisé.</string>
@@ -358,6 +380,7 @@
     <string name="sync_err_not_a_member">Vous n\'avez pas accès à ce projet.</string>
     <string name="sync_err_not_signed_in">Vous n\'êtes pas connecté.</string>
     <string name="sync_err_project_not_found">Projet introuvable.</string>
+    <string name="sync_err_signup_failed">Création de compte impossible.</string>
     <string name="sync_err_weak_password">Mot de passe trop court (6 caractères minimum).</string>
     <string name="sync_error">Erreur sync</string>
     <string name="sync_have_account">J\'ai déjà un compte</string>
@@ -424,4 +447,24 @@
     <string name="universe_overlap">chevauchement</string>
     <string name="universe_title_fmt">Univers %1$d</string>
     <string name="universe_used_fmt">%1$d/512 canaux</string>
+
+    <!--
+      PLURIELS — ces trois libellés accordaient déjà leur pluriel AVANT la
+      traduction (« 1 vote » / « 2 votes ») : les passer en « vote(s) » était une
+      RÉGRESSION du français. Les quantity strings rendent l'accord correct dans
+      les deux langues (en français, CLDR range 0 ET 1 dans « one », ce qui
+      reproduit exactement l'ancien `if (n > 1) "s" else ""`).
+    -->
+    <plurals name="fx_power_consensus">
+        <item quantity="one">consensus · %1$d vote</item>
+        <item quantity="other">consensus · %1$d votes</item>
+    </plurals>
+    <plurals name="power_fixtures_status">
+        <item quantity="one">%1$d projecteur · %2$s</item>
+        <item quantity="other">%1$d projecteurs · %2$s</item>
+    </plurals>
+    <plurals name="power_watts_votes">
+        <item quantity="one">%1$d W · %2$d vote</item>
+        <item quantity="other">%1$d W · %2$d votes</item>
+    </plurals>
 </resources>

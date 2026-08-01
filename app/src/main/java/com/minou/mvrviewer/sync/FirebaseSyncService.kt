@@ -48,7 +48,7 @@ class FirebaseSyncService(context: Context) : SyncService {
     override suspend fun signUp(email: String, password: String, displayName: String): AccountInfo {
         try {
             val result = auth.createUserWithEmailAndPassword(email, password).await()
-            val user = result.user ?: throw SyncException.Message("Création de compte impossible.")
+            val user = result.user ?: throw SyncException.SignUpFailed
             val name = displayName.ifBlank { email }
             // Profil + doc utilisateur : NON bloquants (ne pas retarder la connexion).
             user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(name).build())
@@ -297,6 +297,6 @@ class FirebaseSyncService(context: Context) : SyncService {
         is FirebaseAuthUserCollisionException -> SyncException.EmailInUse
         is FirebaseAuthInvalidCredentialsException -> SyncException.InvalidCredentials
         is FirebaseAuthInvalidUserException -> SyncException.InvalidCredentials
-        else -> SyncException.Message(e.localizedMessage ?: "Erreur d'authentification.")
+        else -> e.localizedMessage?.let { SyncException.Message(it) } ?: SyncException.AuthFailed
     }
 }

@@ -84,6 +84,7 @@ import com.minou.mvrviewer.sync.PowerSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.minou.mvrviewer.R
 
@@ -885,7 +886,8 @@ private fun PowerTypeRow(
     val statusText = when (resolution.source) {
         PowerSource.LIBRARY -> {
             val n = votes ?: 1
-            stringResource(R.string.power_watts_votes_fmt, effWatts ?: 0, n)
+            // Accord porté par le NOMBRE DE VOTES (pas par les watts).
+            pluralStringResource(R.plurals.power_watts_votes, n, effWatts ?: 0, n)
         }
         PowerSource.GDTF -> stringResource(R.string.power_watts_gdtf_fmt, effWatts ?: 0)
         PowerSource.NONE -> stringResource(R.string.power_to_enter)
@@ -902,7 +904,7 @@ private fun PowerTypeRow(
                     Text(typeName, style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold, maxLines = 2)
                     Text(
-                        stringResource(R.string.power_fixtures_status_fmt, count, statusText),
+                        pluralStringResource(R.plurals.power_fixtures_status, count, count, statusText),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (resolution.source == PowerSource.LIBRARY)
                             MaterialTheme.colorScheme.primary

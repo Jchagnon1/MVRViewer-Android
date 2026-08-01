@@ -17,7 +17,7 @@
     <string name="cabling_clear_circuit_q">Clear the circuit?</string>
     <string name="cabling_dist_circuit_fmt">%1$s · circuit %2$d</string>
     <string name="cabling_edit_dist_fmt">Edit « %1$s »</string>
-    <string name="cabling_empty_hint">Add a Socapex or a PC16 line to start cabling.</string>
+    <string name="cabling_empty_hint">Add a Socapex or a single 16 A line to start cabling.</string>
     <string name="cabling_export_dmx">DMX cabling</string>
     <string name="cabling_export_elec_doc">Power distribution</string>
     <string name="cabling_export_elec_menu">Power distribution</string>
@@ -26,7 +26,7 @@
     <string name="cabling_export_pdf_cd">Export the cabling as PDF</string>
     <string name="cabling_export_plans">Marked-up plans</string>
     <string name="cabling_filter_hint">Filter (ID, name, type…)</string>
-    <string name="cabling_line_pc16">PC16 line</string>
+    <string name="cabling_line_pc16">Single 16 A line</string>
     <string name="cabling_no_fixture">no fixture</string>
     <string name="cabling_pdf_failed">PDF export failed</string>
     <string name="cabling_pdf_plan_dmx">DMX markup</string>
@@ -138,7 +138,7 @@
     <string name="dmx_over_512">exceeds 512 channels (one line = one universe)</string>
     <string name="dmx_patch_fmt"> · patch %1$s</string>
     <string name="dmx_reduce_warning">Reducing removes the fixtures cabled on the deleted cores.</string>
-    <string name="dmx_simple_line">Single DMX</string>
+    <string name="dmx_simple_line">Single DMX line</string>
     <string name="dmx_single_line_label">Single DMX line</string>
     <string name="dmx_the_core_fmt">core %1$d</string>
     <string name="dmx_the_line">the line</string>
@@ -156,8 +156,8 @@
     <string name="facet_mode">Mode</string>
     <string name="facet_type">Type</string>
     <string name="facet_universe">Universe</string>
-    <string name="fixture_id_fmt">ID %1$s</string>
-    <string name="fixture_id_name_fmt">ID %1$s · %2$s</string>
+    <string name="fixture_id_fmt">#%1$s</string>
+    <string name="fixture_id_name_fmt">#%1$s · %2$s</string>
     <string name="fx_addr_format_hint">Format: universe.address (1–512)</string>
     <string name="fx_addr_placeholder">universe.address</string>
     <string name="fx_channel_default_fmt"> · default %1$d</string>
@@ -172,7 +172,6 @@
     <string name="fx_modes_unavailable">Modes unavailable</string>
     <string name="fx_new_custom_type">New custom type…</string>
     <string name="fx_power_confirm">Looks right</string>
-    <string name="fx_power_consensus_fmt">consensus · %1$d vote(s)</string>
     <string name="fx_power_from_gdtf">from the GDTF · no vote</string>
     <string name="fx_power_my_value">My value (W)</string>
     <string name="fx_power_none">no value — vote for the max power</string>
@@ -189,6 +188,15 @@
     <string name="gdtf_connected_to_share">Connected to GDTF Share.</string>
     <string name="gdtf_connecting">Connecting…</string>
     <string name="gdtf_download_failed">Download failed.</string>
+    <string name="gdtf_err_connect">Could not connect to gdtf-share.com. Check your Internet connection.</string>
+    <string name="gdtf_err_credentials_code_fmt">Credentials rejected by GDTF Share: code %1$d</string>
+    <string name="gdtf_err_credentials_fmt">Credentials rejected by GDTF Share: %1$s</string>
+    <string name="gdtf_err_download_failed_fmt">Download failed (rid %1$d, code %2$d).</string>
+    <string name="gdtf_err_list_failed_fmt">getList.php failed (%1$d).</string>
+    <string name="gdtf_err_not_connected">Not signed in to GDTF Share.</string>
+    <string name="gdtf_err_timeout">gdtf-share.com is not responding (timed out). Try again.</string>
+    <string name="gdtf_err_tls">Secure connection to gdtf-share.com failed. Try again.</string>
+    <string name="gdtf_err_unreachable">Could not reach gdtf-share.com. Check your Internet connection.</string>
     <string name="gdtf_improve_all">Improve everything automatically</string>
     <string name="gdtf_intro">Sign in with your GDTF Share account (free, gdtf-share.com) to replace fixture 3D models with the manufacturers\' profiles.</string>
     <string name="gdtf_login_failed">Sign-in failed.</string>
@@ -236,7 +244,7 @@
     <string name="lod_always">Always visible</string>
     <string name="lod_auto">Auto</string>
     <string name="lod_hide_nav">Hide while navigating</string>
-    <string name="measure_between_fmt">ID %1$s → ID %2$s: %3$s</string>
+    <string name="measure_between_fmt">#%1$s → #%2$s: %3$s</string>
     <string name="measure_snapped">snapped</string>
     <string name="measure_start_placed">start point set — tap the end point</string>
     <string name="measure_tap_again">tap for a new measurement</string>
@@ -249,11 +257,26 @@
     <string name="menu_section_sync">Sync</string>
     <string name="menu_section_tools">Tools</string>
     <string name="model_add">Add a model…</string>
+    <string name="model_err_budget_exceeded_fmt">%1$s: only %2$s left of the combined %3$s-triangle cap for imported models. Remove a model before adding another, or simplify the mesh.</string>
+    <string name="model_err_budget_full_fmt">Combined cap of %1$s triangles reached for imported models. Remove a model before adding another.</string>
+    <string name="model_err_count_at_least_fmt">More than %1$s</string>
+    <string name="model_err_count_estimated_fmt">About %1$s triangles (estimated from the file size)</string>
+    <string name="model_err_empty">Empty file.</string>
+    <string name="model_err_format_or"> or </string>
+    <string name="model_err_megabytes_fmt">%1$d MB</string>
+    <string name="model_err_no_geometry">No readable geometry in this file.</string>
+    <string name="model_err_size_more_than_fmt">more than %1$s</string>
+    <string name="model_err_too_large_fmt">File too large (%1$s): the cap is %2$s. Simplify the model (decimation, external textures) before importing.</string>
+    <string name="model_err_too_many_triangles_fmt">%1$s: beyond the cap of %2$s triangles per model. Simplify the mesh (decimation) before importing.</string>
+    <string name="model_err_unreadable">Unreadable file.</string>
+    <string name="model_err_unsupported_fbx_fmt">%1$s (FBX: add the Assimp module)</string>
+    <string name="model_err_unsupported_fmt">Unsupported format. Convert it to %1$s (with Blender, for example).</string>
     <string name="model_gltf_info_fmt">glTF · ≈ %1$d triangles · detected unit: %2$s</string>
     <string name="model_info_fmt">%1$d triangles · detected unit: %2$s</string>
     <string name="model_loading">Loading the model…</string>
     <string name="model_reset_placement">Reset the placement</string>
     <string name="model_too_many_fmt">Too many imported models (%1$d maximum).</string>
+    <string name="mvr_err_no_scene_xml">GeneralSceneDescription.xml not found in the .mvr file.</string>
     <string name="nav_account">Account</string>
     <string name="nav_custom_color">Custom…</string>
     <string name="nav_customize_toolbar">Customize the toolbar…</string>
@@ -300,7 +323,7 @@
     <string name="pdf_scale_fmt">Scale ≈ 1:%1$d</string>
     <string name="pdf_share_chooser">Send the PDF</string>
     <string name="pdf_socapex_circuits_fmt">Socapex %1$d circuits</string>
-    <string name="pdf_solo_pc16">Single PC16 line</string>
+    <string name="pdf_solo_pc16">Single 16 A line</string>
     <string name="pdf_total_distributor">Distributor total</string>
     <string name="pdf_total_line">Line total</string>
     <string name="pdf_unknown_channels">\? channels</string>
@@ -316,12 +339,10 @@
     <string name="plan_pdf_default_name">PDF plan</string>
     <string name="plan_pdf_doc_title">Plan</string>
     <string name="plan_title_fmt">Plan · %1$d fixture(s)</string>
-    <string name="power_fixtures_status_fmt">%1$d fixture(s) · %2$s</string>
     <string name="power_no_type">No fixture type (GDTF spec) in this show.</string>
     <string name="power_tab_hint">Set power draw by TYPE: your value applies to every fixture of that type and feeds the shared library. The cabling updates immediately.</string>
     <string name="power_to_enter">to be entered</string>
     <string name="power_watts_gdtf_fmt">%1$d W · GDTF</string>
-    <string name="power_watts_votes_fmt">%1$d W · %2$d vote(s)</string>
     <string name="raster_jpeg">JPEG image</string>
     <string name="raster_pdf">PDF</string>
     <string name="raster_png">PNG image</string>
@@ -349,6 +370,7 @@
     <string name="sync_display_name">Display name (optional)</string>
     <string name="sync_downloading_fmt">Downloading %1$d %%</string>
     <string name="sync_email">E-mail</string>
+    <string name="sync_err_auth_failed">Authentication error.</string>
     <string name="sync_err_backend_unavailable">Sync service unavailable.</string>
     <string name="sync_err_blob_missing">File missing from the cloud.</string>
     <string name="sync_err_email_in_use">This e-mail is already in use.</string>
@@ -358,6 +380,7 @@
     <string name="sync_err_not_a_member">You do not have access to this project.</string>
     <string name="sync_err_not_signed_in">You are not signed in.</string>
     <string name="sync_err_project_not_found">Project not found.</string>
+    <string name="sync_err_signup_failed">Could not create the account.</string>
     <string name="sync_err_weak_password">Password too short (6 characters minimum).</string>
     <string name="sync_error">Sync error</string>
     <string name="sync_have_account">I already have an account</string>
@@ -387,10 +410,10 @@
     <string name="sync_syncing">Syncing…</string>
     <string name="sync_undo_change">Undo this change</string>
     <string name="sync_uploading_fmt">Uploading %1$d %%</string>
-    <string name="tool_calibrate">Calibrate: I am here</string>
+    <string name="tool_calibrate">Calibrate (I am here)</string>
     <string name="tool_clear_selection">Clear selection</string>
-    <string name="tool_clear_solo">Clear solo</string>
-    <string name="tool_export_pdf">PDF export</string>
+    <string name="tool_clear_solo">Clear the solo</string>
+    <string name="tool_export_pdf">PDF export mode</string>
     <string name="tool_gps">My GPS position</string>
     <string name="tool_gps_3d">My position (3D)</string>
     <string name="tool_import_model">Import a 3D model…</string>
@@ -402,11 +425,11 @@
     <string name="tool_measure">Measure a distance</string>
     <string name="tool_models_fmt">3D models (%1$d)</string>
     <string name="tool_recenter_camera">Recentre the camera</string>
-    <string name="tool_rect_select">Rectangle select</string>
+    <string name="tool_rect_select">Box selection</string>
     <string name="tool_ref_plan">Reference plan</string>
     <string name="tool_satellite">Satellite background</string>
     <string name="tool_show_all">Show everything again</string>
-    <string name="tool_solo">Solo (selection only)</string>
+    <string name="tool_solo">Isolate (solo)</string>
     <string name="toolbar_customize_help">Dock each tool to a screen edge, or leave it out of the bars. Every tool stays available in the ⋯ menu.</string>
     <string name="toolbar_title_3d">Toolbar · 3D view</string>
     <string name="toolbar_title_plan">Toolbar · Plan view</string>
@@ -424,4 +447,17 @@
     <string name="universe_overlap">overlap</string>
     <string name="universe_title_fmt">Universe %1$d</string>
     <string name="universe_used_fmt">%1$d/512 channels</string>
+
+    <plurals name="fx_power_consensus">
+        <item quantity="one">consensus · %1$d vote</item>
+        <item quantity="other">consensus · %1$d votes</item>
+    </plurals>
+    <plurals name="power_fixtures_status">
+        <item quantity="one">%1$d fixture · %2$s</item>
+        <item quantity="other">%1$d fixtures · %2$s</item>
+    </plurals>
+    <plurals name="power_watts_votes">
+        <item quantity="one">%1$d W · %2$d vote</item>
+        <item quantity="other">%1$d W · %2$d votes</item>
+    </plurals>
 </resources>

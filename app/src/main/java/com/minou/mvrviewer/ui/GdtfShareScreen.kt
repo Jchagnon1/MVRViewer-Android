@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.GdtfShareClient
+import com.minou.mvrviewer.mvr.gdtfShareMessage
 import com.minou.mvrviewer.mvr.GdtfShareEntry
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
@@ -187,7 +188,7 @@ fun GdtfShareScreen(
                                     com.minou.mvrviewer.mvr.GdtfCredentialStore.save(ctx, user.trim(), pass)
                                     loggedIn = true; status = sGdtfConnected
                                 },
-                                onFailure = { status = it.message ?: sGdtfLoginFailed }
+                                onFailure = { status = it.gdtfShareMessage(ctx) ?: sGdtfLoginFailed }
                             )
                             busy = false
                         }
@@ -311,7 +312,7 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
         prefetched.clear(); modelAvail.clear(); checking.clear()
         runCatching { GdtfShareClient.search(query) }.fold(
             onSuccess = { results = it; error = null },
-            onFailure = { error = it.message ?: searchCtx.getString(R.string.gdtf_search_failed) }
+            onFailure = { error = it.gdtfShareMessage(searchCtx) ?: searchCtx.getString(R.string.gdtf_search_failed) }
         )
         loading = false
     }

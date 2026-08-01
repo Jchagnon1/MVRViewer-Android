@@ -72,24 +72,61 @@ object SceneModelLoader {
     const val GLTF_BYTES_PER_TRIANGLE = 32
 
     /**
-     * Message de refus — LITTÉRAL. Jamais de « fichier illisible » générique :
-     * l'utilisateur doit savoir quoi faire. NE CITER QUE des formats qu'ANDROID
-     * SAIT LIRE : pas d'USDZ ici (c'est le message iOS), sinon on conseille de
-     * convertir un .usdz… en .usdz.
+     * Formats CITÉS par le message de refus. Jamais de « fichier illisible »
+     * générique : l'utilisateur doit savoir quoi faire. NE CITER QUE des formats
+     * qu'ANDROID SAIT LIRE : pas d'USDZ ici (c'est le message iOS), sinon on
+     * conseille de convertir un .usdz… en .usdz.
+     *
+     * C'est cette LISTE, et non un littéral, qui alimente la chaîne affichée
+     * ([Reason.Unsupported]) : le message est traduit, la liste ne l'est pas, et
+     * les tests JVM peuvent la vérifier sans dépendre d'une langue.
      */
-    const val UNSUPPORTED_MSG =
-        "Format non pris en charge. Convertissez-le en OBJ, STL, PLY ou glTF (par exemple avec Blender)."
-    /** Complément propre au FBX : le niveau 2 (module natif) n'est pas livré. */
-    const val UNSUPPORTED_FBX_MSG = "$UNSUPPORTED_MSG (FBX : ajoutez le module Assimp)"
+    val CONVERTIBLE_FORMATS = listOf("OBJ", "STL", "PLY", "glTF")
 
     enum class Format { OBJ, STL, PLY, GLTF, FBX, SKP, UNKNOWN }
 
+    /**
+     * Quantité de triangles telle qu'on peut l'ANNONCER — jamais un décompte
+     * exact quand on ne l'a pas : un glTF n'est décodé qu'au rendu (estimation
+     * d'après la taille) et un parseur arrêté au plafond ne sait dire que
+     * « plus de N ».
+     */
+    sealed class TriangleCount {
+        /** Estimation dérivée de la taille du fichier (glTF/GLB). */
+        data class Estimated(val triangles: Int) : TriangleCount()
+        /** Décompte MINORÉ : le parseur s'est arrêté au plafond. */
+        data class AtLeast(val triangles: Int) : TriangleCount()
+    }
+
+    /**
+     * MOTIF de refus, CHIFFRÉ et SANS TEXTE — la mise en mots (et donc la
+     * traduction) se fait à l'AFFICHAGE, via `ModelImportMessages`. Le décodeur
+     * reste ainsi pur (testable en JVM, aucun `Context`) tout en gardant des
+     * messages localisés côté écran.
+     */
+    sealed class Reason {
+        /** Format inconnu ou non géré (SKP, autre). */
+        object Unsupported : Reason()
+        /** FBX : le niveau 2 (module natif Assimp) n'est pas livré. */
+        object UnsupportedFbx : Reason()
+        /** Au-delà du plafond de TAILLE ; `bytes` null = taille non déclarée. */
+        data class TooLarge(val bytes: Long?, val maxBytes: Long) : Reason()
+        object Unreadable : Reason()
+        object Empty : Reason()
+        object NoGeometry : Reason()
+        data class TooManyTriangles(val count: TriangleCount, val maxTriangles: Int) : Reason()
+        data class BudgetExceeded(
+            val count: TriangleCount, val remaining: Int, val totalTriangles: Int
+        ) : Reason()
+        data class BudgetFull(val totalTriangles: Int) : Reason()
+    }
+
     sealed class LoadResult {
         class Ok(val model: ImportedModel) : LoadResult()
-        /** Format connu mais non géré (FBX/SKP/…) — message de conversion. */
-        class Unsupported(val message: String) : LoadResult()
+        /** Format connu mais non géré (FBX/SKP/…) — motif de conversion. */
+        class Unsupported(val reason: Reason) : LoadResult()
         /** Format géré mais fichier illisible / trop gros / vide. */
-        class Failed(val message: String) : LoadResult()
+        class Failed(val reason: Reason) : LoadResult()
     }
 
     /** Nom d'affichage du document choisi (« praticable.obj »), ou null. */
@@ -161,41 +198,21 @@ object SceneModelLoader {
     internal fun unitScaleFor(rawMax: Float): Float =
         if (rawMax > 0f && rawMax < 100f) 1000f else 1f
 
-    // ---- Messages CHIFFRÉS de refus (repris mot pour mot de l'iOS) ----
-
-    /** « 4,2 M » — virgule décimale française, comme `ModelImportError.millions`. */
-    internal fun millions(count: Long): String =
-        String.format(java.util.Locale.FRANCE, "%.1f M", count / 1_000_000.0)
-
-    internal fun megabytes(bytes: Long): String =
-        String.format(java.util.Locale.FRANCE, "%d Mo", bytes / (1024 * 1024))
+    // ---- Motifs CHIFFRÉS de refus (mêmes cas que l'iOS, mis en mots à l'écran) ----
 
     /** Fichier au-delà du plafond de TAILLE (`bytes` null = taille non déclarée). */
-    internal fun tooLargeMsg(bytes: Long?): String {
-        val mesure = if (bytes != null) megabytes(bytes) else "plus de ${megabytes(MODEL_MAX_BYTES)}"
-        return "Fichier trop volumineux ($mesure) : le plafond est de " +
-            "${megabytes(MODEL_MAX_BYTES)}. Allégez le modèle (décimation, textures séparées) " +
-            "avant l'import."
-    }
+    internal fun tooLarge(bytes: Long?): Reason = Reason.TooLarge(bytes, MODEL_MAX_BYTES)
 
-    /**
-     * Modèle au-delà du plafond de triangles PAR MODÈLE.
-     * @param countLabel le décompte affiché, « Plus de 1,5 M triangles ».
-     */
-    internal fun tooManyTrianglesMsg(countLabel: String): String =
-        "$countLabel : au-delà du plafond de ${millions(MODEL_MAX_TRIANGLES.toLong())} triangles " +
-            "par modèle. Allégez le maillage (décimation) avant l'import."
+    /** Modèle au-delà du plafond de triangles PAR MODÈLE. */
+    internal fun tooManyTriangles(count: TriangleCount): Reason =
+        Reason.TooManyTriangles(count, MODEL_MAX_TRIANGLES)
 
     /** Modèle qui tiendrait seul, mais pas dans le budget CUMULÉ restant. */
-    internal fun budgetExceededMsg(countLabel: String, remaining: Int): String =
-        "$countLabel : il ne reste que ${millions(remaining.toLong())} sur le plafond cumulé de " +
-            "${millions(MODEL_TOTAL_TRIANGLES.toLong())} triangles pour les modèles importés. " +
-            "Retirez un modèle avant d'en ajouter un autre, ou allégez le maillage."
+    internal fun budgetExceeded(count: TriangleCount, remaining: Int): Reason =
+        Reason.BudgetExceeded(count, remaining, MODEL_TOTAL_TRIANGLES)
 
     /** Budget cumulé ENTIÈREMENT consommé : plus rien ne peut entrer. */
-    internal fun budgetFullMsg(): String =
-        "Plafond cumulé de ${millions(MODEL_TOTAL_TRIANGLES.toLong())} triangles atteint pour les " +
-            "modèles importés. Retirez un modèle avant d'en ajouter un autre."
+    internal fun budgetFull(): Reason = Reason.BudgetFull(MODEL_TOTAL_TRIANGLES)
 
     // ---- Chargement ----
 
@@ -266,21 +283,21 @@ object SceneModelLoader {
     fun load(cr: ContentResolver, uri: Uri, name: String?, remainingTriangles: Int): LoadResult {
         val fmt = sniff(cr, uri, name)
         when (fmt) {
-            Format.FBX -> return LoadResult.Unsupported(UNSUPPORTED_FBX_MSG)
-            Format.SKP, Format.UNKNOWN -> return LoadResult.Unsupported(UNSUPPORTED_MSG)
+            Format.FBX -> return LoadResult.Unsupported(Reason.UnsupportedFbx)
+            Format.SKP, Format.UNKNOWN -> return LoadResult.Unsupported(Reason.Unsupported)
             else -> {}
         }
         // Refus AVANT toute lecture quand la taille est déclarée (patron iOS).
         val declared = declaredSize(cr, uri)
-        if (declared != null && declared > MODEL_MAX_BYTES) return LoadResult.Failed(tooLargeMsg(declared))
+        if (declared != null && declared > MODEL_MAX_BYTES) return LoadResult.Failed(tooLarge(declared))
         val read = runCatching {
             cr.openInputStream(uri)?.use {
                 if (declared != null) readSized(it, declared.toInt(), MODEL_MAX_BYTES)
                 else readBounded(it, MODEL_MAX_BYTES)
             }
-        }.getOrNull() ?: return LoadResult.Failed("Fichier illisible.")
-        if (read.tooBig) return LoadResult.Failed(tooLargeMsg(null))
-        val bytes = read.bytes ?: return LoadResult.Failed("Fichier illisible.")
+        }.getOrNull() ?: return LoadResult.Failed(Reason.Unreadable)
+        if (read.tooBig) return LoadResult.Failed(tooLarge(null))
+        val bytes = read.bytes ?: return LoadResult.Failed(Reason.Unreadable)
         return parseBytes(bytes, fmt, name ?: "Modèle", remainingTriangles)
     }
 
@@ -292,8 +309,8 @@ object SceneModelLoader {
      * PURE (aucun appel Android) → testable en JVM.
      */
     fun parseBytes(bytes: ByteArray, fmt: Format, name: String, remainingTriangles: Int): LoadResult {
-        if (bytes.isEmpty()) return LoadResult.Failed("Fichier vide.")
-        if (bytes.size > MODEL_MAX_BYTES) return LoadResult.Failed(tooLargeMsg(bytes.size.toLong()))
+        if (bytes.isEmpty()) return LoadResult.Failed(Reason.Empty)
+        if (bytes.size > MODEL_MAX_BYTES) return LoadResult.Failed(tooLarge(bytes.size.toLong()))
         val remaining = remainingTriangles.coerceAtLeast(0)
 
         if (fmt == Format.GLTF) {
@@ -305,11 +322,10 @@ object SceneModelLoader {
             // décodage à l'import, on lui impute son ESTIMATION conservatrice
             // (cf. [GLTF_BYTES_PER_TRIANGLE]).
             val estimated = estimatedGltfTriangles(bytes.size)
-            val label = "Environ ${millions(estimated.toLong())} triangles " +
-                "(estimés d'après la taille du fichier)"
-            if (estimated > MODEL_MAX_TRIANGLES) return LoadResult.Failed(tooManyTrianglesMsg(label))
+            val count = TriangleCount.Estimated(estimated)
+            if (estimated > MODEL_MAX_TRIANGLES) return LoadResult.Failed(tooManyTriangles(count))
             if (estimated > remaining) return LoadResult.Failed(
-                if (remaining <= 0) budgetFullMsg() else budgetExceededMsg(label, remaining)
+                if (remaining <= 0) budgetFull() else budgetExceeded(count, remaining)
             )
             return LoadResult.Ok(
                 ImportedModel(
@@ -326,7 +342,7 @@ object SceneModelLoader {
         // troncature, c'est que le fichier dépasse → on REFUSE (comportement iOS),
         // on ne rend pas un modèle amputé qui passerait pour un import réussi.
         val cap = minOf(MODEL_MAX_TRIANGLES, remaining)
-        if (cap <= 0) return LoadResult.Failed(budgetFullMsg())
+        if (cap <= 0) return LoadResult.Failed(budgetFull())
 
         val meshes: List<ModelMesh>
         val truncated: Boolean
@@ -343,20 +359,21 @@ object SceneModelLoader {
                 val r = PlyParser.parse(bytes, cap)
                 meshes = r.meshes; truncated = r.truncated
             }
-            else -> return LoadResult.Unsupported(UNSUPPORTED_MSG)
+            // Même motif qu'au sniff (`load`) : le FBX garde sa piste « module
+            // Assimp », quelle que soit la porte d'entrée.
+            Format.FBX -> return LoadResult.Unsupported(Reason.UnsupportedFbx)
+            else -> return LoadResult.Unsupported(Reason.Unsupported)
         }
         if (truncated) {
             // Le maillage construit est jeté ici même : rien n'est rattaché à la
             // scène, rien n'est écrit sur disque.
-            val label = "Plus de ${millions(cap.toLong())}"
+            val count = TriangleCount.AtLeast(cap)
             return LoadResult.Failed(
-                if (cap < MODEL_MAX_TRIANGLES) budgetExceededMsg(label, remaining)
-                else tooManyTrianglesMsg(label)
+                if (cap < MODEL_MAX_TRIANGLES) budgetExceeded(count, remaining)
+                else tooManyTriangles(count)
             )
         }
-        if (meshes.isEmpty()) return LoadResult.Failed(
-            "Aucune géométrie lisible dans ce fichier."
-        )
+        if (meshes.isEmpty()) return LoadResult.Failed(Reason.NoGeometry)
         val rawMax = meshesMaxDimension(meshes)
         val unit = unitScaleFor(rawMax)
         // OBJ : Y-HAUT (convention Wavefront, et export Blender par défaut).

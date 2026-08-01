@@ -14,7 +14,10 @@ object MvrParser {
 
     fun parse(mvrBytes: ByteArray): MvrScene {
         val xml = extractEntry(mvrBytes, "GeneralSceneDescription.xml")
-            ?: throw MvrParseException("GeneralSceneDescription.xml introuvable dans le .mvr.")
+            ?: throw MvrParseException(
+                "GeneralSceneDescription.xml not found in the .mvr archive",
+                com.minou.mvrviewer.R.string.mvr_err_no_scene_xml
+            )
         return parseSceneXml(xml)
     }
 

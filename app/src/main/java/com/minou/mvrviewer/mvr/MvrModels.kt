@@ -79,7 +79,15 @@ data class MvrScene(
     val fixtures: List<MvrSceneObject> get() = allObjects.filter { it.isFixture }
 }
 
-class MvrParseException(message: String) : Exception(message)
+/**
+ * Échec de lecture d'un .mvr. `message` reste TECHNIQUE (journal, rapport de
+ * diagnostic) ; [messageRes] porte la phrase AFFICHABLE, localisée à l'écran —
+ * le parseur n'a pas de `Context` et n'a donc pas à choisir une langue.
+ */
+class MvrParseException(
+    message: String,
+    @androidx.annotation.StringRes val messageRes: Int? = null
+) : Exception(message)
 
 /** Adresse DMX « univers.adresse » — portage de DMXAddressFormatter (iOS). */
 object DmxAddress {

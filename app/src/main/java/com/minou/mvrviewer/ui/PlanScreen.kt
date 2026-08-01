@@ -437,7 +437,12 @@ fun PlanScreen(
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PDF ->
                         com.minou.mvrviewer.mvr.RasterPlanLoader.renderPdfFirstPage(cr, uri)?.let { pdf ->
                             ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                pdf.bitmap, name ?: context.getString(R.string.plan_pdf_default_name), com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
+                                // Le nom part dans le MANIFESTE du projet : on n'y met
+                                // JAMAIS une chaîne traduite (sinon un téléphone anglais et
+                                // un français n'enregistrent pas la même valeur). Vide =
+                                // « pas de nom de fichier », le libellé se choisit à
+                                // l'affichage (RasterPlan.displayName).
+                                pdf.bitmap, name.orEmpty(), com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
                                 pdf.pageCount, pdf.pointWidth.toFloat(), pdf.pointHeight.toFloat()))
                         }
                     com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG,
@@ -445,7 +450,7 @@ fun PlanScreen(
                         val png = fmt == com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG
                         com.minou.mvrviewer.mvr.RasterPlanLoader.loadImage(cr, uri, png)?.let { img ->
                             ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                img.bitmap, name ?: context.getString(R.string.plan_image_default_name),
+                                img.bitmap, name.orEmpty(),
                                 if (png) com.minou.mvrviewer.mvr.RasterPlan.Kind.PNG
                                 else com.minou.mvrviewer.mvr.RasterPlan.Kind.JPEG,
                                 1, img.srcWidthPx.toFloat(), img.srcHeightPx.toFloat()))

@@ -42,6 +42,7 @@ import com.minou.mvrviewer.mvr.MvrSceneObject
 import com.minou.mvrviewer.sync.PowerSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.minou.mvrviewer.R
 
@@ -462,7 +463,10 @@ fun FixtureDetailSheet(
                             when (resolution.source) {
                                 PowerSource.LIBRARY -> {
                                     val n = votes ?: 1
-                                    stringResource(R.string.fx_power_consensus_fmt, n)
+                                    // Pluriel ACCORDÉ (« 1 vote » / « 2 votes »), pas un
+                                    // « vote(s) » figé — c'est ce qu'affichait l'app avant
+                                    // la traduction, et l'anglais l'exige tout autant.
+                                    pluralStringResource(R.plurals.fx_power_consensus, n, n)
                                 }
                                 PowerSource.GDTF -> stringResource(R.string.fx_power_from_gdtf)
                                 PowerSource.NONE -> stringResource(R.string.fx_power_none)

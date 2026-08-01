@@ -1562,8 +1562,12 @@ fun Scene3DScreen(
                 showModelsPanel = true
                 modelMessage = null
             }
-            is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Unsupported -> modelMessage = res.message
-            is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Failed -> modelMessage = res.message
+            // Le décodeur ne rend qu'un MOTIF chiffré : la phrase (donc la langue)
+            // se décide ici, à l'affichage.
+            is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Unsupported ->
+                modelMessage = ModelImportMessages.text(modelCtx, res.reason)
+            is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Failed ->
+                modelMessage = ModelImportMessages.text(modelCtx, res.reason)
         }
     }
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue 3D : UNE seule liste consommée

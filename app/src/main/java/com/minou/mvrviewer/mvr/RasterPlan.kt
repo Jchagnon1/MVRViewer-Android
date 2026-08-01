@@ -18,7 +18,15 @@ class RasterPlan(
     val bitmap: Bitmap,
     val widthMm: Float,
     val heightMm: Float,
-    /** Nom du fichier d'origine (affiché dans le panneau de placement). */
+    /**
+     * Nom du FICHIER d'origine, tel que le fournisseur de documents l'a donné —
+     * et VIDE quand il n'en donne aucun.
+     *
+     * Cette valeur est ÉCRITE DANS LE MANIFESTE du projet : elle ne doit donc
+     * JAMAIS dépendre de la langue du téléphone (sinon un même projet
+     * s'enregistrerait « Plan PDF » ici et « PDF plan » là). Le libellé de repli
+     * affiché quand elle est vide se choisit à l'AFFICHAGE, via [displayName].
+     */
     val sourceName: String,
     val kind: Kind,
     /** Nombre de pages du PDF source (1 pour une image) — sert à prévenir l'utilisateur. */
@@ -42,6 +50,17 @@ class RasterPlan(
         Kind.JPEG -> com.minou.mvrviewer.R.string.raster_jpeg
         Kind.PNG -> com.minou.mvrviewer.R.string.raster_png
         Kind.PDF -> com.minou.mvrviewer.R.string.raster_pdf
+    }
+
+    /**
+     * Nom AFFICHABLE : celui du fichier s'il en a un, sinon un libellé générique
+     * traduit. Le repli est calculé ici, à l'affichage — jamais enregistré.
+     */
+    fun displayName(ctx: android.content.Context): String = sourceName.ifBlank {
+        ctx.getString(
+            if (kind == Kind.PDF) com.minou.mvrviewer.R.string.plan_pdf_default_name
+            else com.minou.mvrviewer.R.string.plan_image_default_name
+        )
     }
 
     /**

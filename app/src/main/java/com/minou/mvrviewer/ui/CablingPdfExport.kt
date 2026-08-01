@@ -29,6 +29,8 @@ import com.minou.mvrviewer.sync.PowerCablingDTO
 import com.minou.mvrviewer.mvr.ReferencePlan
 import com.minou.mvrviewer.mvr.SatelliteOverlay
 import java.io.File
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * EXPORT PDF DE CÂBLAGE (phase 5).
@@ -99,11 +101,11 @@ internal fun buildCablingPdf(
     // 1) Tableaux ÉLEC / DMX : d'abord en LIGNES (mesurées), puis paginés → on
     //    connaît le nombre de pages AVANT le rendu, donc le pied « N/total » est juste.
     val elecPages = if (CablingPdfPart.ELEC in parts)
-        paginate(buildElecRows(cablingDto, settings, wattsOf, labelOf, specOf, m, left, right), contentH)
+        paginate(buildElecRows(ctx, cablingDto, settings, wattsOf, labelOf, specOf, m, left, right), contentH)
             .ifEmpty { listOf(emptyList()) }
     else emptyList()
     val dmxPages = if (CablingPdfPart.DMX in parts)
-        paginate(buildDmxRows(dmxDto, channelsOf, universeOf, addressOf, modeOf, labelOf, specOf, m, left, right), contentH)
+        paginate(buildDmxRows(ctx, dmxDto, channelsOf, universeOf, addressOf, modeOf, labelOf, specOf, m, left, right), contentH)
             .ifEmpty { listOf(emptyList()) }
     else emptyList()
     val planViews = if (CablingPdfPart.PLANS in parts && planSrc != null)
@@ -114,21 +116,21 @@ internal fun buildCablingPdf(
     var pageNo = 0
     for (rows in elecPages) {
         pageNo++
-        renderTablePage(doc, m, "Distribution électrique", "Aucun distributeur électrique.",
+        renderTablePage(ctx, doc, m, ctx.getString(R.string.cabling_export_elec_doc), ctx.getString(R.string.pdf_no_elec_dist),
             rows, pageNo, total, documentTitle, left, right, contentTop, contentBottom)
     }
     for (rows in dmxPages) {
         pageNo++
-        renderTablePage(doc, m, "Câblage DMX", "Aucune ligne DMX.",
+        renderTablePage(ctx, doc, m, ctx.getString(R.string.cabling_export_dmx), ctx.getString(R.string.pdf_no_dmx_line),
             rows, pageNo, total, documentTitle, left, right, contentTop, contentBottom)
     }
     if (planViews.isNotEmpty() && planSrc != null) {
-        renderPlanPagesInto(doc, planSrc, planViews, m, pageOffset = pageNo, totalPages = total)
+        renderPlanPagesInto(ctx, doc, planSrc, planViews, m, pageOffset = pageNo, totalPages = total)
         pageNo += planViews.size
     }
     // Garde-fou : jamais un PDF à 0 page (ex. « Plans repérés » sans géométrie plan).
     if (pageNo == 0) {
-        renderTablePage(doc, m, documentTitle, "Aucune donnée de câblage à exporter.",
+        renderTablePage(ctx, doc, m, documentTitle, ctx.getString(R.string.pdf_no_cabling_data),
             emptyList(), 1, 1, documentTitle, left, right, contentTop, contentBottom)
     }
     return writePdfToCache(ctx, doc, documentTitle, fallbackName = "cablage")
@@ -220,6 +222,7 @@ private fun paginate(rows: List<Row>, contentH: Float): List<List<Row>> {
 
 /** Rend une page tableau (fond blanc, titre de section, lignes, pied). */
 private fun renderTablePage(
+    ctx: android.content.Context,
     doc: android.graphics.pdf.PdfDocument,
     m: TextMeasurer,
     sectionTitle: String,
@@ -247,7 +250,7 @@ private fun renderTablePage(
             var y = contentTop
             for (r in rows) { r.draw(this, y); y += r.height }
         }
-        val foot = m.measure("$docTitle · page $pageNo/$total", style(8f, C_MUTE))
+        val foot = m.measure("$docTitle · " + ctx.getString(R.string.pdf_page_fmt, pageNo, total), style(8f, C_MUTE))
         drawText(foot, topLeft = Offset(left, contentBottom + 6f))
     }
     doc.finishPage(page)
@@ -258,6 +261,7 @@ private fun renderTablePage(
 // ---------------------------------------------------------------------------
 
 private fun buildElecRows(
+    ctx: android.content.Context,
     dto: PowerCablingDTO,
     settings: CablingSettings,
     wattsOf: (String) -> Int?,
@@ -268,7 +272,7 @@ private fun buildElecRows(
     val rows = ArrayList<Row>()
     dto.distributors.forEachIndexed { di, dist ->
         if (di > 0) rows.add(separatorRow(left, right))
-        val type = if (dist.kind == DistributorKind.SOCA) "Socapex ${dist.circuitCount} circuits" else "Ligne solo PC16"
+        val type = if (dist.kind == DistributorKind.SOCA) ctx.getString(R.string.pdf_socapex_circuits_fmt, dist.circuitCount) else ctx.getString(R.string.pdf_solo_pc16)
         rows.add(distHeaderRow(m, left, right, dist.name, type, dist.colorArgb))
 
         val circuitLoads = PowerCablingCalc.circuitLoads(dist, dto.assignments, settings, wattsOf)
@@ -276,13 +280,13 @@ private fun buildElecRows(
         val usedPhases = (1..dist.circuitCount).map { dist.phaseOf(it) }.toSortedSet()
 
         for (phase in usedPhases) {
-            rows.add(phaseHeaderRow(m, left, right, "Phase L$phase"))
+            rows.add(phaseHeaderRow(m, left, right, ctx.getString(R.string.cabling_phase_fmt, phase)))
             for (cl in circuitLoads.filter { it.phase == phase }) {
                 rows.add(circuitHeaderRow(m, left, right, cl, settings.circuitLimitW))
                 if (cl.unknownCount > 0)
-                    rows.add(noteRow(m, left, right, "⚠ ${cl.unknownCount} projecteur(s) à conso inconnue (comptés 0 W)"))
+                    rows.add(noteRow(m, left, right, "⚠ " + ctx.getString(R.string.pdf_unknown_watts_fmt, cl.unknownCount)))
                 if (cl.fixtures.isEmpty())
-                    rows.add(fixtureLineRow(m, left, right, "— aucun projecteur", C_MUTE))
+                    rows.add(fixtureLineRow(m, left, right, "— " + ctx.getString(R.string.cabling_no_fixture), C_MUTE))
                 else for (u in cl.fixtures) {
                     val w = wattsOf(u)
                     // Colonnes alignées : ID | type GDTF | W (à droite). Ambre si conso inconnue.
@@ -303,7 +307,7 @@ private fun buildElecRows(
         if (usedPhases.size >= 2)
             rows.add(phaseBalanceRow(m, left, right, phaseLoads, usedPhases))
         val total = PowerCablingCalc.distributorTotalW(dist, dto.assignments, settings, wattsOf)
-        rows.add(totalRow(m, left, right, "Total distributeur", "$total W"))
+        rows.add(totalRow(m, left, right, ctx.getString(R.string.pdf_total_distributor), "$total W"))
     }
     return rows
 }
@@ -313,6 +317,7 @@ private fun buildElecRows(
 // ---------------------------------------------------------------------------
 
 private fun buildDmxRows(
+    ctx: android.content.Context,
     dto: DmxCablingDTO,
     channelsOf: (String) -> Int?,
     universeOf: (String) -> Int?,
@@ -325,19 +330,19 @@ private fun buildDmxRows(
     val rows = ArrayList<Row>()
     dto.distributors.forEachIndexed { di, dist ->
         if (di > 0) rows.add(separatorRow(left, right))
-        val type = if (dist.kind == DmxDistributorKind.MULTI) "Multipaire ${dist.coreCount} cœurs" else "Ligne DMX simple"
+        val type = if (dist.kind == DmxDistributorKind.MULTI) ctx.getString(R.string.pdf_multicore_cores_fmt, dist.coreCount) else ctx.getString(R.string.dmx_single_line_label)
         rows.add(distHeaderRow(m, left, right, dist.name, type, dist.colorArgb))
 
         val coreLoads = DmxCablingCalc.coreLoads(dist, dto.assignments, channelsOf, universeOf)
         for (cl in coreLoads) {
-            val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) "Cœur ${cl.core}" else "Ligne"
+            val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) ctx.getString(R.string.pdf_core_fmt, cl.core) else ctx.getString(R.string.dmx_line)
             rows.add(coreHeaderRow(m, left, right, coreLabel, cl))
             if (cl.unknownCount > 0)
-                rows.add(noteRow(m, left, right, "⚠ ${cl.unknownCount} projecteur(s) à empreinte inconnue (comptés 0 canal)"))
+                rows.add(noteRow(m, left, right, "⚠ " + ctx.getString(R.string.pdf_unknown_footprint_fmt, cl.unknownCount)))
             if (cl.mixedUniverse)
-                rows.add(noteRow(m, left, right, "⚠ univers de patch mélangés : ${cl.universes.joinToString(", ")}"))
+                rows.add(noteRow(m, left, right, "⚠ " + ctx.getString(R.string.dmx_mixed_universes_fmt, cl.universes.joinToString(", "))))
             if (cl.fixtures.isEmpty())
-                rows.add(fixtureLineRow(m, left, right, "— aucun projecteur", C_MUTE))
+                rows.add(fixtureLineRow(m, left, right, "— " + ctx.getString(R.string.cabling_no_fixture), C_MUTE))
             else for (u in cl.fixtures) {
                 val ch = channelsOf(u)
                 val addr = addressOf(u) ?: "—"   // déjà formaté « Univers.Adresse »
@@ -349,13 +354,13 @@ private fun buildDmxRows(
                     fixtureId = labelOf(u) ?: u,
                     gdtfType = specOf(u) ?: "—",
                     detail = "$addr · $mode",
-                    value = if (ch == null) "? canaux" else "$ch canaux",
+                    value = if (ch == null) ctx.getString(R.string.pdf_unknown_channels) else ctx.getString(R.string.fx_channels_count, ch),
                     unknown = ch == null
                 ))
             }
         }
         val total = DmxCablingCalc.distributorTotalChannels(dist, dto.assignments, channelsOf)
-        rows.add(totalRow(m, left, right, "Total ligne", "$total canaux"))
+        rows.add(totalRow(m, left, right, ctx.getString(R.string.pdf_total_line), ctx.getString(R.string.fx_channels_count, total)))
     }
     return rows
 }

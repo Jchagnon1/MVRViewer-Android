@@ -16,6 +16,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import java.io.File
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * EXPORT PDF « EN CONSTRUCTION ».
@@ -143,7 +145,7 @@ internal fun buildPlanPdf(
 ): File {
     val measurer = pdfTextMeasurer(ctx)
     val doc = android.graphics.pdf.PdfDocument()
-    renderPlanPagesInto(doc, src, views, measurer, pageOffset = 0, totalPages = views.size)
+    renderPlanPagesInto(ctx, doc, src, views, measurer, pageOffset = 0, totalPages = views.size)
     return writePdfToCache(ctx, doc, src.documentTitle, fallbackName = "plan")
 }
 
@@ -187,6 +189,7 @@ internal fun writePdfToCache(
  * document entier (pour le pied « page N/total »).
  */
 internal fun renderPlanPagesInto(
+    ctx: android.content.Context,
     doc: android.graphics.pdf.PdfDocument,
     src: PlanExportSource,
     views: List<PlanViewCapture>,
@@ -221,7 +224,7 @@ internal fun renderPlanPagesInto(
             androidx.compose.ui.graphics.Canvas(page.canvas),
             Size(PAGE_W.toFloat(), PAGE_H.toFloat())
         ) {
-            drawPdfPage(src, v, pageNo, totalPages, measurer, paths)
+            drawPdfPage(ctx, src, v, pageNo, totalPages, measurer, paths)
         }
         doc.finishPage(page)
     }
@@ -237,6 +240,7 @@ private class PdfPagePaths(
 
 /** Une page : cartouche + plan cadré comme à l'écran + légende. */
 private fun DrawScope.drawPdfPage(
+    ctx: android.content.Context,
     src: PlanExportSource,
     v: PlanViewCapture,
     pageNo: Int, pageCount: Int,
@@ -329,21 +333,21 @@ private fun DrawScope.drawPdfPage(
 
     // ---- Cartouche ----
     val title = measurer.measure(
-        v.name.ifBlank { "Vue $pageNo" },
+        v.name.ifBlank { ctx.getString(R.string.plan_export_view_fmt, pageNo) },
         style = TextStyle(fontSize = 15.sp, color = Color(0xFF111111), fontWeight = FontWeight.SemiBold)
     )
     drawText(title, topLeft = Offset(left, MARGIN + 4f))
     // Échelle : 1 pt = 25,4/72 mm de papier → rapport plan/papier.
     val ratio = if (pxPerMm > 0f) (72f / 25.4f) / pxPerMm else 0f
-    val scaleText = if (ratio > 0f) "Échelle ≈ 1:${Math.round(ratio)}" else ""
+    val scaleText = if (ratio > 0f) ctx.getString(R.string.pdf_scale_fmt, Math.round(ratio)) else ""
     val sub = measurer.measure(
-        scaleText + "   ·   " + scaleBarLabel(niceScaleBarMm(pxPerMm)) + " (barre)",
+        scaleText + "   ·   " + scaleBarLabel(niceScaleBarMm(pxPerMm)) + " (" + ctx.getString(R.string.pdf_scale_bar) + ")",
         style = TextStyle(fontSize = 9.sp, color = Color(0xFF666666))
     )
     drawText(sub, topLeft = Offset(right - sub.size.width, MARGIN + 10f))
 
     val foot = measurer.measure(
-        "${src.documentTitle}   ·   page $pageNo/$pageCount",
+        "${src.documentTitle}   ·   " + ctx.getString(R.string.pdf_page_fmt, pageNo, pageCount),
         style = TextStyle(fontSize = 8.sp, color = Color(0xFF888888))
     )
     drawText(foot, topLeft = Offset(left, bottom + 6f))
@@ -415,7 +419,7 @@ internal fun sharePlanPdf(ctx: android.content.Context, file: File) {
         putExtra(android.content.Intent.EXTRA_SUBJECT, file.nameWithoutExtension)
         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    runCatching { ctx.startActivity(android.content.Intent.createChooser(send, "Envoyer le PDF")) }
+    runCatching { ctx.startActivity(android.content.Intent.createChooser(send, ctx.getString(R.string.pdf_share_chooser))) }
 }
 
 /** Impression par le service système (aperçu, choix d'imprimante, PDF virtuel). */

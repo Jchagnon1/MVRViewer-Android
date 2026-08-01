@@ -53,6 +53,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Modèles GDTF téléchargés depuis GDTF Share, PAR SPEC MVR, appliqués par-dessus
@@ -113,14 +115,22 @@ fun GdtfShareScreen(
     var status by remember { mutableStateOf("") }
     var searchSpec by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    // Messages de statut résolus ICI : les coroutines ci-dessous ne peuvent pas
+    // appeler stringResource.
+    val sGdtfReconnecting = stringResource(R.string.gdtf_reconnecting)
+    val sGdtfConnected = stringResource(R.string.gdtf_connected)
+    val sGdtfConnecting = stringResource(R.string.gdtf_connecting)
+    val sGdtfLoginFailed = stringResource(R.string.gdtf_login_failed)
+    val sGdtfResolvingFmt = stringResource(R.string.gdtf_resolving_fmt)
+    val sGdtfResolvedFmt = stringResource(R.string.gdtf_resolved_fmt)
 
     // Reconnexion automatique depuis les identifiants enregistrés (le compte
     // reste connecté d'un lancement à l'autre — plus besoin de se reconnecter).
     LaunchedEffect(Unit) {
         if (!loggedIn && com.minou.mvrviewer.mvr.GdtfCredentialStore.username(ctx) != null) {
-            busy = true; status = "Reconnexion…"
+            busy = true; status = sGdtfReconnecting
             loggedIn = GdtfShareClient.ensureLoggedIn(ctx)
-            status = if (loggedIn) "Connecté." else ""
+            status = if (loggedIn) sGdtfConnected else ""
             busy = false
         }
     }
@@ -144,50 +154,50 @@ fun GdtfShareScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("GDTF Share", style = MaterialTheme.typography.titleMedium) },
+            title = { Text(stringResource(R.string.gdtf_share_title), style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour 3D")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_3d))
                 }
             }
         )
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
             if (!loggedIn) {
                 Text(
-                    "Connecte-toi avec ton compte GDTF Share (gratuit, gdtf-share.com) pour " +
-                        "remplacer les modèles 3D des projecteurs par les profils fabricants.",
+                    stringResource(R.string.gdtf_intro) + (
+                        ""),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
                 OutlinedTextField(
-                    value = user, onValueChange = { user = it }, label = { Text("Identifiant / email") },
+                    value = user, onValueChange = { user = it }, label = { Text(stringResource(R.string.gdtf_username)) },
                     singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                 )
                 OutlinedTextField(
-                    value = pass, onValueChange = { pass = it }, label = { Text("Mot de passe") },
+                    value = pass, onValueChange = { pass = it }, label = { Text(stringResource(R.string.sync_password)) },
                     singleLine = true, visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                 )
                 Button(
                     onClick = {
                         scope.launch {
-                            busy = true; status = "Connexion…"
+                            busy = true; status = sGdtfConnecting
                             runCatching { GdtfShareClient.login(user.trim(), pass) }.fold(
                                 onSuccess = {
                                     // Identifiants mémorisés (chiffrés) pour rester connecté.
                                     com.minou.mvrviewer.mvr.GdtfCredentialStore.save(ctx, user.trim(), pass)
-                                    loggedIn = true; status = "Connecté."
+                                    loggedIn = true; status = sGdtfConnected
                                 },
-                                onFailure = { status = it.message ?: "Échec de connexion." }
+                                onFailure = { status = it.message ?: sGdtfLoginFailed }
                             )
                             busy = false
                         }
                     },
                     enabled = !busy && user.isNotBlank() && pass.isNotBlank(),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("Se connecter") }
+                ) { Text(stringResource(R.string.home_sign_in)) }
             } else {
-                Text("Connecté à GDTF Share.", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.gdtf_connected_to_share), style = MaterialTheme.typography.titleSmall)
                 // 1) Résolution automatique de tout.
                 Button(
                     onClick = {
@@ -196,7 +206,7 @@ fun GdtfShareScreen(
                             val specs = specSummaries.map { it.first }.toSet()
                             var done = 0; var applied = 0
                             for (spec in specs) {
-                                status = "Résolution ${done + 1}/${specs.size}…"
+                                status = sGdtfResolvingFmt.format(done + 1, specs.size)
                                 val bytes = withContext(Dispatchers.IO) {
                                     val cands = if (spec.endsWith(".gdtf", true)) listOf(spec) else listOf("$spec.gdtf", spec)
                                     val embedded = cands.firstNotNullOfOrNull { MvrParser.extractEntry(mvrBytes, it) }
@@ -207,15 +217,15 @@ fun GdtfShareScreen(
                                 if (bytes != null) { overrides.set(spec, bytes); applied++ }
                                 done++
                             }
-                            status = "$applied / ${specs.size} type(s) trouvé(s) automatiquement."
+                            status = sGdtfResolvedFmt.format(applied, specs.size)
                             busy = false
                         }
                     },
                     enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-                ) { Text("Améliorer tout automatiquement") }
+                ) { Text(stringResource(R.string.gdtf_improve_all)) }
 
                 Text(
-                    "…ou choisis toi-même le modèle pour chaque type (utile quand l'auto ne trouve pas) :",
+                    stringResource(R.string.gdtf_manual_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
@@ -232,7 +242,7 @@ fun GdtfShareScreen(
                         Column(Modifier.weight(1f)) {
                             Text(spec, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                             Text(
-                                "$count projecteur(s) · ${statusLabel(spec, overrides)}",
+                                stringResource(R.string.gdtf_type_status_fmt, count, stringResource(statusLabelRes(spec, overrides))),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -245,7 +255,7 @@ fun GdtfShareScreen(
                 OutlinedButton(
                     onClick = { GdtfShareClient.logout(); com.minou.mvrviewer.mvr.GdtfCredentialStore.clear(ctx); loggedIn = false; status = "" },
                     enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-                ) { Text("Se déconnecter") }
+                ) { Text(stringResource(R.string.sync_sign_out)) }
             }
 
             if (busy) {
@@ -260,10 +270,11 @@ fun GdtfShareScreen(
     }
 }
 
-private fun statusLabel(spec: String, overrides: GdtfOverrides): String = when {
-    spec in overrides.manualSpecs -> "choisi à la main"
-    overrides.map.containsKey(spec) -> "modèle réel (auto)"
-    else -> "formes génériques"
+@androidx.annotation.StringRes
+private fun statusLabelRes(spec: String, overrides: GdtfOverrides): Int = when {
+    spec in overrides.manualSpecs -> R.string.gdtf_status_manual
+    overrides.map.containsKey(spec) -> R.string.gdtf_status_auto
+    else -> R.string.gdtf_status_generic
 }
 
 /**
@@ -310,13 +321,13 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
             title = { Text(spec, style = MaterialTheme.typography.titleSmall, maxLines = 1) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                 }
             }
         )
         OutlinedTextField(
             value = query, onValueChange = { query = it },
-            label = { Text("Fabricant ou modèle") }, singleLine = true,
+            label = { Text(stringResource(R.string.gdtf_search_hint)) }, singleLine = true,
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
         )
@@ -369,9 +380,9 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
                         Modifier.width(28.dp), contentAlignment = Alignment.Center
                     ) {
                         when (modelAvail[entry.rid]) {
-                            true -> Icon(Icons.Filled.ViewInAr, "Modèle 3D disponible",
+                            true -> Icon(Icons.Filled.ViewInAr, stringResource(R.string.gdtf_model_available),
                                 tint = Color(0xFF2E7D32), modifier = Modifier.width(22.dp))
-                            false -> Icon(Icons.Outlined.ViewInAr, "Pas de modèle 3D (formes génériques)",
+                            false -> Icon(Icons.Outlined.ViewInAr, stringResource(R.string.gdtf_model_missing),
                                 tint = Color(0xFFEF6C00), modifier = Modifier.width(22.dp))
                             null -> CircularProgressIndicator(Modifier.width(16.dp), strokeWidth = 2.dp)
                         }
@@ -380,7 +391,7 @@ private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArra
                         Text("${entry.manufacturer} — ${entry.fixture}",
                             style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                         entry.rating?.let {
-                            Text("Note : ${"%.1f".format(it)}/5",
+                            Text(stringResource(R.string.gdtf_rating_fmt, "%.1f".format(it)),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

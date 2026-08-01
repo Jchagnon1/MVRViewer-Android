@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Charge un .mvr choisi par l'utilisateur : lit les octets et parse HORS du
@@ -76,7 +78,7 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     val bytes = getApplication<Application>().contentResolver
                         .openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("Lecture du fichier impossible.")
+                        ?: throw IllegalStateException(getApplication<Application>().getString(R.string.err_unreadable_file))
                     // Octets lus : la moitié de l'étape « Lecture du fichier MVR… »
                     // est faite, le parse du XML de scène est l'autre moitié.
                     progress.report(LoadStep.READ_MVR, 0.5f)
@@ -94,7 +96,7 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                     // URI périmée (permission perdue, fichier déplacé) → retirée des récents.
                     runCatching { RecentProjects.remove(getApplication(), uri.toString()) }
                     progress.finish()   // plus de chargement en cours
-                    UiState.Error(it.message ?: "Erreur inconnue.")
+                    UiState.Error(it.message ?: getApplication<Application>().getString(R.string.err_unknown))
                 }
             )
         }
@@ -126,7 +128,7 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                 },
                 onFailure = {
                     progress.finish()
-                    UiState.Error(it.message ?: "Erreur inconnue.")
+                    UiState.Error(it.message ?: getApplication<Application>().getString(R.string.err_unknown))
                 }
             )
         }

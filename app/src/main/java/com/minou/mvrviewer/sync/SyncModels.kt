@@ -291,16 +291,31 @@ sealed class RemoteEvent {
     data class Audit(val entries: List<AuditEntry>) : RemoteEvent()
 }
 
-/** Erreurs de synchronisation (miroir de `SyncError`), avec message FR. */
-sealed class SyncException(message: String) : Exception(message) {
-    object NotSignedIn : SyncException("Vous n'êtes pas connecté.")
-    object InvalidCredentials : SyncException("E-mail ou mot de passe incorrect.")
-    object EmailInUse : SyncException("Cet e-mail est déjà utilisé.")
-    object WeakPassword : SyncException("Mot de passe trop court (6 caractères minimum).")
-    object ProjectNotFound : SyncException("Projet introuvable.")
-    object InviteInvalidOrExpired : SyncException("Code de partage invalide ou expiré.")
-    object NotAMember : SyncException("Vous n'avez pas accès à ce projet.")
-    object BlobMissing : SyncException("Fichier absent du cloud.")
-    object BackendUnavailable : SyncException("Service de synchronisation indisponible.")
+/**
+ * Erreurs de synchronisation (miroir de `SyncError`).
+ *
+ * Chaque cas porte une CLÉ DE RESSOURCE ([messageRes]) : c'est elle qui est
+ * affichée à l'utilisateur (via [syncMessage]), dans la langue du téléphone. Le
+ * `message` de l'exception reste en français — il ne sert qu'aux journaux.
+ */
+sealed class SyncException(
+    message: String,
+    @androidx.annotation.StringRes val messageRes: Int? = null
+) : Exception(message) {
+    object NotSignedIn : SyncException("Vous n'êtes pas connecté.", com.minou.mvrviewer.R.string.sync_err_not_signed_in)
+    object InvalidCredentials : SyncException("E-mail ou mot de passe incorrect.", com.minou.mvrviewer.R.string.sync_err_invalid_credentials)
+    object EmailInUse : SyncException("Cet e-mail est déjà utilisé.", com.minou.mvrviewer.R.string.sync_err_email_in_use)
+    object WeakPassword : SyncException("Mot de passe trop court (6 caractères minimum).", com.minou.mvrviewer.R.string.sync_err_weak_password)
+    object ProjectNotFound : SyncException("Projet introuvable.", com.minou.mvrviewer.R.string.sync_err_project_not_found)
+    object InviteInvalidOrExpired : SyncException("Code de partage invalide ou expiré.", com.minou.mvrviewer.R.string.sync_err_invite_invalid)
+    object NotAMember : SyncException("Vous n'avez pas accès à ce projet.", com.minou.mvrviewer.R.string.sync_err_not_a_member)
+    object BlobMissing : SyncException("Fichier absent du cloud.", com.minou.mvrviewer.R.string.sync_err_blob_missing)
+    object BackendUnavailable : SyncException("Service de synchronisation indisponible.", com.minou.mvrviewer.R.string.sync_err_backend_unavailable)
     class Message(msg: String) : SyncException(msg)
+}
+
+/** Message AFFICHABLE d'une erreur de synchro, dans la langue du téléphone. */
+fun Throwable.syncMessage(ctx: android.content.Context): String {
+    val res = (this as? SyncException)?.messageRes
+    return if (res != null) ctx.getString(res) else message ?: ctx.getString(com.minou.mvrviewer.R.string.err_unknown)
 }

@@ -208,10 +208,13 @@ internal fun renderPlanPagesInto(
         )
         val paths = pathCache.getOrPut(v.hiddenElements) {
             val wf = src.wire
+            val struct = if (wf == null || wf.isEmpty) null else buildStructurePaths(wf, v.hiddenElements)
             PdfPagePaths(
-                struct = if (wf == null || wf.isEmpty) null else buildStructurePaths(wf, v.hiddenElements),
+                struct = struct,
                 fixtures = src.fixWire?.let { buildFixturePaths(src.data, it, v.hiddenElements) },
-                dots = dotsPath(structureDots(wf, v.hiddenElements)),
+                // Comme à l'écran : les instances écartées par le budget de tracé
+                // gardent un point sur la page.
+                dots = dotsPath(structureDots(wf, v.hiddenElements) + (struct?.overflowDots ?: emptyList())),
                 // Repli « un point par objet » quand aucun fil de fer n'existe :
                 // il doit lui aussi respecter le masquage de la vue capturée.
                 fallback = dotsPath(src.data.structure.filterIndexed { i, _ ->

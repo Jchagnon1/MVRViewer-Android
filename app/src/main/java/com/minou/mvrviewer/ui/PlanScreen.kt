@@ -521,9 +521,12 @@ fun PlanScreen(
             buildStructurePaths(wf, effectiveHidden)
         }
     }
-    // Structures sans fil de fer (géométrie .glb) → un point ; et le repli
-    // « un point par objet » utilisé pendant les gestes.
-    val structDots = remember(wire, effectiveHidden) { dotsPath(structureDots(wire, effectiveHidden)) }
+    // Structures sans fil de fer (type non extractible) → un point ; plus celles
+    // que le budget de tracé a écartées ; et le repli « un point par objet »
+    // utilisé pendant les gestes.
+    val structDots = remember(wire, effectiveHidden, structPaths) {
+        dotsPath(structureDots(wire, effectiveHidden) + (structPaths?.overflowDots ?: emptyList()))
+    }
     val fallbackDots = remember(data, effectiveHidden) {
         dotsPath(data.structure.filterIndexed { i, _ ->
             data.structureKeys.getOrNull(i)?.let { it !in effectiveHidden } ?: true
@@ -2654,7 +2657,13 @@ internal class DxfPaths(
 internal class StructPaths(
     val byLayer: Map<String, List<PathTile>>,
     val edges: Int,
-    val tileSize: Float
+    val tileSize: Float,
+    /**
+     * Centres (repère plan) des instances que le budget mémoire a écartées du
+     * fil de fer. Elles gardent un POINT : un objet écarté par un garde-fou ne
+     * doit jamais disparaître sans laisser de trace.
+     */
+    val overflowDots: List<Pair<Float, Float>> = emptyList()
 ) {
     val light: Boolean get() = edges < 40_000
 }
@@ -2682,12 +2691,17 @@ internal fun buildStructurePaths(
     val tileSize = if (!ext.isFinite() || ext <= 0f) 1f else (ext / 32f).coerceAtLeast(1e-3f)
 
     val buckets = HashMap<String, TileBucket>()
+    val overflow = ArrayList<Pair<Float, Float>>()
     var count = 0
     for (inst in wf.instances) {
         if (inst.id in hidden) continue
         val edges = wf.edgesByKey[inst.key] ?: continue
         val world = inst.world
-        if (count > MAX_STRUCT_PATH_SEGMENTS) break   // garde-fou mémoire
+        // Garde-fou mémoire. On CONTINUE la boucle (au lieu de la rompre) pour
+        // donner un point à chaque instance restante : depuis que le fil de fer
+        // sait lire les .glb, un très gros show peut dépasser ce budget, et une
+        // sortie sèche ferait disparaître de l'écran toute la fin de la liste.
+        if (count > MAX_STRUCT_PATH_SEGMENTS) { overflow.add(inst.cx to inst.cy); continue }
         // Un tracé par calque, découpé en tuiles : chaque instance atterrit dans
         // la tuile de son centre (inst.cx/cy sont déjà en repère plan).
         val tile = buckets.getOrPut(inst.layer) { TileBucket(tileSize) }.tileAt(inst.cx, inst.cy)
@@ -2706,7 +2720,7 @@ internal fun buildStructurePaths(
             tile.segs += 1
         }
     }
-    return StructPaths(buckets.mapValues { it.value.toList() }, count, tileSize)
+    return StructPaths(buckets.mapValues { it.value.toList() }, count, tileSize, overflow)
 }
 
 /**

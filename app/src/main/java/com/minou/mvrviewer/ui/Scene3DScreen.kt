@@ -2211,7 +2211,15 @@ private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
                         tds.add(RenderRef(world, g.fileName, layer))
                     g.fileName.endsWith(".glb", ignoreCase = true) ||
                         g.fileName.endsWith(".gltf", ignoreCase = true) ->
-                        glb.add(RenderRef(world * GLB_SCALE, g.fileName, layer))
+                        // glTF est Y-HAUT (le format l'impose), le monde MVR est
+                        // Z-haut → Rx(+90°), EXACTEMENT comme le décodage des
+                        // modèles GDTF (cf. `RX90 * scaleMat(s)` plus haut) et
+                        // comme l'import de modèles (`if (m.yUp) RX90`). Sans
+                        // cette rotation, chaque pièce du décor tournait de 90°
+                        // sur elle-même : les arches devenaient un gril à plat et
+                        // les praticables des panneaux DEBOUT — d'où le « plancher
+                        // manquant » (on voyait la sous-structure au travers).
+                        glb.add(RenderRef(world * GLB_SCALE * RX90, g.fileName, layer))
                 }
             }
             is MvrGeometryRef.Symbol -> {

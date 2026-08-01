@@ -425,11 +425,14 @@ object ProjectStore {
                 val fname = "model_${m.id}.${SceneModelLoader.extensionFor(m.format)}"
                 if (!runCatching { File(d, fname).writeBytes(bytes) }.isSuccess) continue
                 m.file = fname
-                // Les octets bruts ne servent plus qu'au glTF, décodé par Filament
-                // à CHAQUE reconstruction. Pour OBJ/STL/PLY, la géométrie est déjà
-                // dans `meshes` → on relâche plusieurs Mo.
-                if (m.format != SceneModelLoader.Format.GLTF.name) m.sourceBytes = null
             }
+            // Les octets bruts ne servent plus qu'au glTF, décodé par Filament à
+            // CHAQUE reconstruction. Pour OBJ/STL/PLY, la géométrie est déjà dans
+            // `meshes` → on relâche plusieurs Mo. Test hors du `if (file == null)`
+            // ci-dessus, sinon un modèle DÉJÀ sur disque (cas de la RÉOUVERTURE de
+            // projet, où loadImportedModels reconstruit les maillages) garderait ses
+            // octets en RAM en plus de son maillage — la fuite corrigée ici.
+            if (m.file != null && m.format != SceneModelLoader.Format.GLTF.name) m.sourceBytes = null
             m.file?.let { keep.add(it) }
         }
         runCatching {
@@ -468,12 +471,19 @@ object ProjectStore {
             val o = arr.optJSONObject(i) ?: continue
             val fname = o.optString("file").takeIf { it.isNotBlank() } ?: continue
             val file = File(d, fname)
-            if (!file.exists() || file.length() > SceneModelLoader.MODEL_MAX_BYTES) continue
+            if (!file.exists()) continue
+            // Un modèle REFUSÉ par les plafonds actuels (fichier écrit par une
+            // version antérieure, plus permissive) est ABANDONNÉ, et sa copie dans
+            // le projet SUPPRIMÉE : on ne garde pas des mégaoctets pour un modèle
+            // qui ne s'affichera jamais (même exigence qu'à l'import, où le refus
+            // intervient avant toute recopie).
+            if (file.length() > SceneModelLoader.MODEL_MAX_BYTES) { file.delete(); continue }
             val fmt = runCatching { SceneModelLoader.Format.valueOf(o.optString("format")) }.getOrNull() ?: continue
             val bytes = runCatching { file.readBytes() }.getOrNull() ?: continue
             val remaining = SceneModelLoader.MODEL_TOTAL_TRIANGLES - totalTris
             val res = SceneModelLoader.parseBytes(bytes, fmt, o.optString("name", "Modèle"), remaining)
-            val parsed = (res as? SceneModelLoader.LoadResult.Ok)?.model ?: continue
+            val parsed = (res as? SceneModelLoader.LoadResult.Ok)?.model
+            if (parsed == null) { runCatching { file.delete() }; continue }
             totalTris += parsed.triangles
             // L'unité et l'orientation PERSISTÉES priment sur celles recalculées :
             // l'heuristique pourrait évoluer, le modèle de l'utilisateur ne doit
@@ -486,8 +496,13 @@ object ProjectStore {
                 unitScaleToMm = o.optDouble("unitScale", parsed.unitScaleToMm.toDouble()).toFloat(),
                 yUp = o.optBoolean("yUp", parsed.yUp),
                 sizeMm = o.optDouble("sizeMm", parsed.sizeMm.toDouble()).toFloat(),
-                truncated = parsed.truncated,
-                sourceBytes = parsed.sourceBytes, file = fname
+                // OCTETS SOURCE : relâchés DÈS ICI pour tout ce qui n'est pas du
+                // glTF. Le fichier est déjà sur disque et le maillage est construit
+                // → les garder ferait vivre en RAM, à chaque réouverture de projet,
+                // le fichier ENTIER en plus de sa géométrie. Seul le glTF les
+                // conserve : Filament les redécode à chaque reconstruction.
+                sourceBytes = if (fmt == SceneModelLoader.Format.GLTF) parsed.sourceBytes else null,
+                file = fname
             )
             out.add(m)
         }

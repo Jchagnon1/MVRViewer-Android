@@ -1531,8 +1531,10 @@ fun Scene3DScreen(
             modelMessage = "Trop de modèles importés (${loader.MODEL_MAX_COUNT} au maximum)."
             return@LaunchedEffect
         }
-        // Budget de triangles RESTANT (plafond cumulé) : un budget épuisé ne fait
-        // pas échouer l'import, il le tronque en prévenant.
+        // Budget de triangles RESTANT (plafond cumulé). Un budget insuffisant REFUSE
+        // l'import avec un message chiffré (comportement iOS) : rien n'est rattaché
+        // à la scène, rien n'est recopié dans le projet. Les glTF y comptent aussi,
+        // via l'estimation dérivée de leur taille.
         val used = importedModels.sumOf { it.triangles }
         val res = withContext(Dispatchers.IO) {
             val cr = modelCtx.contentResolver
@@ -1546,8 +1548,7 @@ fun Scene3DScreen(
                 onSetImportedModels(importedModels + res.model)
                 selectedModelId = res.model.id
                 showModelsPanel = true
-                modelMessage = if (res.model.truncated)
-                    "Modèle simplifié : ${res.model.triangles} triangles conservés." else null
+                modelMessage = null
             }
             is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Unsupported -> modelMessage = res.message
             is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Failed -> modelMessage = res.message

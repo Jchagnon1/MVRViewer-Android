@@ -107,8 +107,9 @@ class ImportedModel(
     val yUp: Boolean,
     /** Plus grande dimension du modèle en mm (pas de déplacement adapté au panneau). */
     val sizeMm: Float,
-    /** Vrai si le modèle a été SIMPLIFIÉ pour tenir dans les plafonds. */
-    val truncated: Boolean,
+    // PAS de champ « tronqué » : un modèle qui dépasse les plafonds est REFUSÉ à
+    // l'import (message chiffré, comportement iOS), il n'entre jamais amputé dans
+    // la liste. Il n'existe donc aucun modèle « partiellement importé » à signaler.
     /**
      * Octets du fichier source. Conservés jusqu'à l'écriture sur disque, puis
      * relâchés — SAUF pour le glTF, dont Filament a besoin à chaque

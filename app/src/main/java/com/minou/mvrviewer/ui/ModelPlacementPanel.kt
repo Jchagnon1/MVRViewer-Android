@@ -101,8 +101,11 @@ fun ModelPlacementPanel(
                                 maxLines = 1, overflow = TextOverflow.Ellipsis
                             )
                             Text(
+                                // glTF : le décompte est une ESTIMATION (Filament ne
+                                // décode qu'au rendu) — on le dit, mais on l'affiche,
+                                // car c'est lui qui consomme le budget cumulé.
                                 if (m.format == SceneModelLoader.Format.GLTF.name)
-                                    "glTF · unité détectée : mètre"
+                                    "glTF · ≈ ${m.triangles} triangles · unité détectée : mètre"
                                 else "${m.triangles} triangles · unité détectée : " +
                                     if (m.unitScaleToMm > 1f) "mètre" else "millimètre",
                                 style = MaterialTheme.typography.labelSmall, color = Color(0xFF888888),
@@ -123,13 +126,9 @@ fun ModelPlacementPanel(
 
             val model = sel ?: return@Column
             val tf = model.transform
-            // Avertissement de TRONCATURE : jamais de simplification muette.
-            if (model.truncated) {
-                Text(
-                    "Modèle simplifié : ${model.triangles} triangles conservés (plafond atteint).",
-                    style = MaterialTheme.typography.bodySmall, color = Color(0xFFB26A00)
-                )
-            }
+            // Plus de bandeau « modèle simplifié » : un modèle au-delà des plafonds
+            // est REFUSÉ à l'import avec un message chiffré, il n'arrive donc jamais
+            // tronqué jusqu'ici (harmonisation avec iOS).
 
             // Pas de déplacement ADAPTATIF à la taille du modèle (comme le plan
             // DXF, où il vaut 5 % de la largeur) — un praticable de 2 m et une

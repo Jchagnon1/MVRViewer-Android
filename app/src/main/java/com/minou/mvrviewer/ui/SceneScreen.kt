@@ -146,6 +146,17 @@ fun SceneScreen(
     // solo est un filtre d'affichage PERSONNEL (une « vue »), pas une modification
     // du show — contrairement au masquage qui, lui, est une décision partagée.
     var soloElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    // Modèles 3D importés (chantier #3) : DÉCOR posé par-dessus le show. Hissé ici
+    // (comme le plan de repère) pour survivre aux bascules 3D ↔ plan, et persisté
+    // LOCALEMENT avec le projet — volontairement HORS synchro cloud, même décision
+    // que le plan de repère MATRICIEL du chantier #2 (cf. isRasterPlan /
+    // manifestTransform plus bas) et que layerLod / labelOffsets.
+    var importedModels by remember(projectKey) {
+        mutableStateOf<List<com.minou.mvrviewer.mvr.ImportedModel>>(emptyList())
+    }
+    // Le placement d'un modèle est un objet MUTABLE non observable : cette version
+    // s'incrémente à chaque réglage et sert de clé de reconstruction à la 3D.
+    var importedModelsVersion by remember(projectKey) { mutableIntStateOf(0) }
     // CIBLE D'AFFECTATION « sur le plan » (E2) : hissée ici car PlanScreen est recréé à
     // chaque bascule CABLING ↔ PLAN — un état local ne survivrait pas au passage par le
     // câblage. Non nulle = la vue plan est en mode affectation vers ce circuit / départ.
@@ -170,6 +181,12 @@ fun SceneScreen(
         if (lod.isNotEmpty()) {
             layerLod = lod.mapValues { (_, v) -> LayerLodMode.fromStored(v) }
                 .filterValues { it != LayerLodMode.AUTO }
+        }
+        // Modèles 3D importés : octets relus + RE-PARSÉS, plafonds re-vérifiés.
+        val ims = withContext(Dispatchers.IO) { ProjectStore.loadImportedModels(ctx, projectKey) }
+        if (ims.isNotEmpty() && importedModels.isEmpty()) {
+            importedModels = ims
+            importedModelsVersion++
         }
         restored = true
     }
@@ -782,6 +799,22 @@ fun SceneScreen(
             // R7 : la transformée du plan est mutée EN PLACE ; cette version dit à
             // la 3D quand refaire le quad matriciel (homothétie/décalage immédiats).
             refPlanTransformVersion = refPlanTransformVersion,
+            // Décor 3D importé (chantier #3) : LOCAL SEUL — ni section de synchro,
+            // ni entrée d'audit (même décision que le plan de repère image).
+            importedModels = importedModels,
+            importedModelsVersion = importedModelsVersion,
+            onSetImportedModels = { list ->
+                importedModels = list
+                importedModelsVersion++
+                // Écriture des OCTETS + du manifeste : hors thread principal.
+                scope.launch(Dispatchers.IO) { ProjectStore.saveImportedModels(ctx, projectKey, list) }
+            },
+            onImportedModelsTouched = {
+                importedModelsVersion++
+                // Réglage fait juste avant de quitter l'écran → fil du processus
+                // (le JSON est figé ici même, sur le thread appelant).
+                ProjectStore.saveImportedModelsAsync(ctx, projectKey, importedModels)
+            },
             hiddenLayers = hiddenLayers,
             calibration = calibration,
             satellite = satellite,

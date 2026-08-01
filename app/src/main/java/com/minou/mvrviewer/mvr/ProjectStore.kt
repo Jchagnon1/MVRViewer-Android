@@ -374,6 +374,149 @@ object ProjectStore {
     fun loadCustomFixtures(ctx: Context, key: String): String? =
         readManifest(ctx, key).optJSONObject("customFixtures")?.toString()
 
+    // ---- Modèles 3D importés dans la scène (chantier #3) ----
+    //
+    // LOCAL SEUL, décision assumée et documentée : aucune section de synchro,
+    // aucun DTO, aucun champ de manifeste partagé, aucune entrée d'audit. C'est
+    // EXACTEMENT le précédent du plan de repère MATRICIEL du chantier #2 (cf.
+    // SceneScreen.isRasterPlan / manifestTransform, et le `if (isRasterPlan())
+    // return` en tête de commitTransform), et celui de `layerLod` / `labelOffsets`
+    // ci-dessus : un décor importé est un fichier de l'appareil, pas une donnée de
+    // show que l'équipe attend.
+    //
+    // Sur disque : model_<id>.<ext> (octets bruts, re-parsés au rechargement) +
+    // la clé de manifeste « importedModels ».
+
+    /** Sérialisation SNAPSHOT (pure) — appelée sur le thread appelant pour figer
+     *  les transformées MUTABLES avant une écriture différée. */
+    private fun importedModelsJson(models: List<ImportedModel>): JSONArray {
+        val arr = JSONArray()
+        for (m in models) {
+            val f = m.file ?: continue
+            arr.put(
+                JSONObject()
+                    .put("id", m.id).put("file", f).put("name", m.name).put("format", m.format)
+                    .put("unitScale", m.unitScaleToMm.toDouble()).put("yUp", m.yUp)
+                    .put("sizeMm", m.sizeMm.toDouble())
+                    .put("transform", modelTransformJson(m.transform))
+            )
+        }
+        return arr
+    }
+
+    private fun putImportedModels(ctx: Context, key: String, arr: JSONArray) = synchronized(manifestLock) {
+        val m = readManifest(ctx, key)
+        if (arr.length() == 0) m.remove("importedModels") else m.put("importedModels", arr)
+        writeManifest(ctx, key, m)
+    }
+
+    /**
+     * Écrit les OCTETS des modèles pas encore persistés, purge les fichiers
+     * orphelins (modèle retiré — patron `removeReferencePlan` : supprimer le
+     * fichier PUIS mettre la clé à jour) et réécrit la section du manifeste.
+     * À appeler hors thread principal.
+     */
+    fun saveImportedModels(ctx: Context, key: String, models: List<ImportedModel>) = synchronized(manifestLock) {
+        val d = dir(ctx, key)
+        val keep = HashSet<String>()
+        for (m in models) {
+            if (m.file == null) {
+                val bytes = m.sourceBytes ?: continue
+                val fname = "model_${m.id}.${SceneModelLoader.extensionFor(m.format)}"
+                if (!runCatching { File(d, fname).writeBytes(bytes) }.isSuccess) continue
+                m.file = fname
+                // Les octets bruts ne servent plus qu'au glTF, décodé par Filament
+                // à CHAQUE reconstruction. Pour OBJ/STL/PLY, la géométrie est déjà
+                // dans `meshes` → on relâche plusieurs Mo.
+                if (m.format != SceneModelLoader.Format.GLTF.name) m.sourceBytes = null
+            }
+            m.file?.let { keep.add(it) }
+        }
+        runCatching {
+            d.listFiles { f -> f.name.startsWith("model_") }?.forEach {
+                if (it.name !in keep) it.delete()
+            }
+        }
+        putImportedModels(ctx, key, importedModelsJson(models))
+    }
+
+    /**
+     * Enregistrement DIFFÉRÉ du PLACEMENT (le panneau mute la transformée à chaque
+     * appui, souvent juste avant de quitter l'écran → même cas que
+     * `saveLabelOffsetsAsync`, donc le fil du processus et non une coroutine du
+     * composable). Le JSON est figé ICI, sur le thread appelant, pour ne pas lire
+     * une transformée en cours de modification depuis le fil d'écriture.
+     */
+    fun saveImportedModelsAsync(ctx: Context, key: String, models: List<ImportedModel>) {
+        val appCtx = ctx.applicationContext
+        val arr = importedModelsJson(models)
+        writer.execute { putImportedModels(appCtx, key, arr) }
+    }
+
+    /**
+     * Recharge les modèles importés : octets relus puis RE-PARSÉS, avec les
+     * plafonds RE-VÉRIFIÉS (patron `loadRaster` — un fichier écrit par une version
+     * antérieure peut violer les bornes actuelles). À appeler hors thread principal.
+     */
+    fun loadImportedModels(ctx: Context, key: String): List<ImportedModel> {
+        val arr = readManifest(ctx, key).optJSONArray("importedModels") ?: return emptyList()
+        val d = dir(ctx, key)
+        val out = ArrayList<ImportedModel>()
+        var totalTris = 0
+        for (i in 0 until arr.length()) {
+            if (out.size >= SceneModelLoader.MODEL_MAX_COUNT) break
+            val o = arr.optJSONObject(i) ?: continue
+            val fname = o.optString("file").takeIf { it.isNotBlank() } ?: continue
+            val file = File(d, fname)
+            if (!file.exists() || file.length() > SceneModelLoader.MODEL_MAX_BYTES) continue
+            val fmt = runCatching { SceneModelLoader.Format.valueOf(o.optString("format")) }.getOrNull() ?: continue
+            val bytes = runCatching { file.readBytes() }.getOrNull() ?: continue
+            val remaining = SceneModelLoader.MODEL_TOTAL_TRIANGLES - totalTris
+            val res = SceneModelLoader.parseBytes(bytes, fmt, o.optString("name", "Modèle"), remaining)
+            val parsed = (res as? SceneModelLoader.LoadResult.Ok)?.model ?: continue
+            totalTris += parsed.triangles
+            // L'unité et l'orientation PERSISTÉES priment sur celles recalculées :
+            // l'heuristique pourrait évoluer, le modèle de l'utilisateur ne doit
+            // jamais changer de taille tout seul entre deux versions.
+            val m = ImportedModel(
+                id = o.optString("id").ifBlank { parsed.id },
+                name = parsed.name, format = parsed.format, meshes = parsed.meshes,
+                transform = modelTransformFrom(o.optJSONObject("transform")),
+                triangles = parsed.triangles,
+                unitScaleToMm = o.optDouble("unitScale", parsed.unitScaleToMm.toDouble()).toFloat(),
+                yUp = o.optBoolean("yUp", parsed.yUp),
+                sizeMm = o.optDouble("sizeMm", parsed.sizeMm.toDouble()).toFloat(),
+                truncated = parsed.truncated,
+                sourceBytes = parsed.sourceBytes, file = fname
+            )
+            out.add(m)
+        }
+        return out
+    }
+
+    // RETRAIT d'un modèle : il n'y a pas de fonction dédiée, et c'est voulu —
+    // `saveImportedModels` appelée avec la liste AMPUTÉE supprime le fichier
+    // orphelin PUIS réécrit la clé du manifeste, dans cet ordre (patron
+    // `removeReferencePlan`). Un seul chemin d'écriture, donc pas de divergence
+    // possible entre le disque et le manifeste.
+
+    // Toute clé NOUVELLE doit avoir un défaut qui reproduit l'ancien comportement
+    // quand elle est absente (même consigne que `transformJson` du plan de repère).
+    private fun modelTransformJson(t: SceneModelTransform) = JSONObject()
+        .put("offsetX", t.offsetX).put("offsetY", t.offsetY).put("offsetZ", t.offsetZ)
+        .put("rotationDeg", t.rotationDeg).put("scale", t.scale)
+        .put("homothety", t.homothety).put("visible", t.visible)
+
+    private fun modelTransformFrom(o: JSONObject?): SceneModelTransform {
+        if (o == null) return SceneModelTransform()
+        return SceneModelTransform(
+            offsetX = o.optDouble("offsetX", 0.0), offsetY = o.optDouble("offsetY", 0.0),
+            offsetZ = o.optDouble("offsetZ", 0.0), rotationDeg = o.optDouble("rotationDeg", 0.0),
+            scale = o.optDouble("scale", 1.0), homothety = o.optDouble("homothety", 1.0),
+            visible = o.optBoolean("visible", true)
+        )
+    }
+
     // ---- Modèles GDTF Share appliqués (octets sur disque + mapping) ----
 
     fun saveOverrides(ctx: Context, key: String, map: Map<String, ByteArray>, manual: Set<String>) = synchronized(manifestLock) {

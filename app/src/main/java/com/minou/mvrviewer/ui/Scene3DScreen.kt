@@ -2,6 +2,7 @@ package com.minou.mvrviewer.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -310,6 +312,22 @@ fun Scene3DScreen(
      * matriciel ET traits DXF (R7).
      */
     refPlanTransformVersion: Int = 0,
+    // ---- Modèles 3D importés (chantier #3) : DÉCOR, jamais des projecteurs ----
+    // Ils vivent dans leur PROPRE racine (importedRoot), peuplée par son propre
+    // effet : le rebuild MVR/GDTF ne les touche pas, et ils ne consomment pas le
+    // budget de nœuds/triangles du show.
+    importedModels: List<com.minou.mvrviewer.mvr.ImportedModel> = emptyList(),
+    /**
+     * VERSION du placement des modèles importés. MÊME contrainte que
+     * [refPlanTransformVersion] : `SceneModelTransform` est muté EN PLACE (la
+     * liste, elle, ne change pas), donc sans ce compteur un réglage ne se verrait
+     * JAMAIS en 3D.
+     */
+    importedModelsVersion: Int = 0,
+    /** Remplace la liste (ajout / retrait) : persiste les octets + le manifeste. */
+    onSetImportedModels: (List<com.minou.mvrviewer.mvr.ImportedModel>) -> Unit = {},
+    /** Un placement a été modifié : bump de version + sauvegarde différée. */
+    onImportedModelsTouched: () -> Unit = {},
     hiddenLayers: Set<String> = emptySet(),
     calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
@@ -421,6 +439,19 @@ fun Scene3DScreen(
     // mais placé par la transformée du plan et non par la géo-référence.
     val rasterRoot = rememberNode(engine)
     val rasterGpu = remember { SatGpu() }
+    // Décor 3D IMPORTÉ par l'utilisateur (OBJ / STL / PLY / glTF) : racine DÉDIÉE,
+    // à côté de rasterRoot/dxfRoot. Séparée de geometryRoot pour trois raisons de
+    // NON-RÉGRESSION : (1) le rebuild MVR/GDTF fait clearChildNodes()+destroy() sur
+    // TOUT geometryRoot et détruirait les modèles importés ; (2) le budget de nœuds
+    // du show reste intact ; (3) le LOD d'interaction ne les voit pas.
+    val importedRoot = rememberNode(engine)
+    // Cache de matériaux couleur du décor importé, RÉUTILISÉ d'une reconstruction à
+    // l'autre (patron dxfMatByColor) : le MaterialLoader ne libère qu'au dispose,
+    // le recréer à chaque réglage fuirait une MaterialInstance par couleur.
+    val importedMatByColor = remember(materialLoader) { HashMap<Int, MaterialInstance>() }
+    // FilamentAsset des modèles glTF importés : ModelNode.destroy() NE libère PAS
+    // l'asset — même protocole que `glbAssets` (destroyModel puis destroyAsset).
+    val importedAssets = remember { ArrayList<FilamentAsset>() }
     // Marqueur « ma position » (GPS) en 3D : nœud dédié, mis à jour SANS
     // reconstruire la scène (même principe non destructif que le quad satellite /
     // le plan DXF). Bleu, non éclairé → toujours visible.
@@ -845,8 +876,12 @@ fun Scene3DScreen(
     // VISIBILITÉ (aucune reconstruction). Re-déclenché quand le solo change OU
     // quand la scène vient d'être (re)construite (buildTick) : un solo hérité de
     // la vue plan est ainsi ré-appliqué dès que la scène est prête.
-    LaunchedEffect(soloElements, buildTick) {
+    LaunchedEffect(soloElements, buildTick, importedModelsVersion) {
         applySolo3D(geometryRoot, lod, soloElements)
+        // Le décor IMPORTÉ suit la même règle que celui du show : masqué en solo,
+        // rendu au repos (cohérence — sinon un praticable importé resterait seul à
+        // l'écran avec les projecteurs isolés).
+        runCatching { importedRoot.childNodes.forEach { it.isVisible = soloElements.isEmpty() } }
     }
 
     // LOD par calque (#1) : recalcule les listes plates consommées par onFrame.
@@ -1059,6 +1094,100 @@ fun Scene3DScreen(
         val geom = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
             .vertices(quad).primitivesIndices(listOf(listOf(0, 1, 2, 0, 2, 3))).build(engine)
         rasterRoot.addChildNode(GeometryNode(engine, geom, listOf(mat)))
+    }
+
+    // ---- DÉCOR 3D IMPORTÉ (chantier #3) ------------------------------------
+    // Effet INDÉPENDANT de la construction du show : sur une liste vide il sort
+    // immédiatement, donc un MVR sans modèle importé se charge EXACTEMENT comme
+    // avant (invariant de non-régression).
+    // Clé = (liste, VERSION) : la transformée étant mutée en place, seule la
+    // version signale un changement de placement.
+    var modelBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(importedModels, importedModelsVersion) {
+        // Purge : détacher d'un coup (clearChildNodes = un seul recalcul de Set)
+        // puis détruire chaque nœud, puis libérer les assets glTF.
+        val oldNodes = importedRoot.childNodes.toList()
+        runCatching { importedRoot.clearChildNodes() }
+        oldNodes.forEachIndexed { i, n ->
+            runCatching { n.destroy() }
+            if (i and 63 == 0) yield()
+        }
+        importedAssets.forEach { asset ->
+            runCatching { modelLoader.destroyModel(asset) }
+            runCatching { modelLoader.assetLoader.destroyAsset(asset) }
+        }
+        importedAssets.clear()
+        if (importedModels.isEmpty()) { modelBusy = false; return@LaunchedEffect }
+
+        modelBusy = true
+        val convM = conversionMatrix(center)
+        // Solo actif : le décor importé est masqué comme celui du show (cohérence
+        // avec applySolo3D). Lu à l'entrée de l'effet ; l'effet solo re-synchronise.
+        val visibleNow = soloElements.isEmpty()
+        var lastYieldM = System.nanoTime()
+        suspend fun sliceM() {
+            val now = System.nanoTime()
+            if (now - lastYieldM > 16_000_000L) { yield(); lastYieldM = System.nanoTime() }
+        }
+        val pendingModels = HashSet<io.github.sceneview.node.Node>(64)
+        suspend fun flushModels() {
+            if (pendingModels.isEmpty()) return
+            runCatching { importedRoot.addChildNodes(HashSet(pendingModels)) }
+            pendingModels.clear()
+            sliceM()
+        }
+        var placedNodes = 0
+        for (m in importedModels) {
+            if (placedNodes >= com.minou.mvrviewer.mvr.SceneModelLoader.MODEL_MAX_NODES) break
+            val tf = m.transform
+            if (!tf.visible) continue
+            // MVR (mm, Z-haut) : T · Rz · S, puis conversion en repère Filament.
+            // RX90 seulement si la source est Y-haut (glTF, OBJ) — sinon le modèle
+            // arriverait couché.
+            val local = translateMat(tf.offsetX.toFloat(), tf.offsetY.toFloat(), tf.offsetZ.toFloat()) *
+                rotZMat(tf.rotationDeg) *
+                scaleMat((tf.effScale * m.unitScaleToMm).toFloat())
+            val world = convM * local * (if (m.yUp) RX90 else IDENTITY4)
+            if (m.format == com.minou.mvrviewer.mvr.SceneModelLoader.Format.GLTF.name) {
+                val data = m.sourceBytes ?: continue
+                val instances = runCatching {
+                    modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), 1)
+                }.getOrNull() ?: continue
+                instances.firstOrNull()?.asset?.let { importedAssets.add(it) }
+                instances.firstOrNull()?.let { inst ->
+                    val node = io.github.sceneview.node.ModelNode(inst)
+                    node.transform = world
+                    node.isVisible = visibleNow
+                    pendingModels.add(node); placedNodes++
+                }
+            } else {
+                for (mesh in m.meshes) {
+                    if (placedNodes >= com.minou.mvrviewer.mvr.SceneModelLoader.MODEL_MAX_NODES) break
+                    // Conversion buffers plats → sommets Filament HORS thread
+                    // principal : c'est le seul coût CPU notable, et il reste borné
+                    // à UN maillage à la fois.
+                    val prepared = withContext(Dispatchers.Default) { meshVertices(mesh) }
+                    val geom = runCatching {
+                        Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+                            .vertices(prepared.first).primitivesIndices(listOf(prepared.second)).build(engine)
+                    }.getOrNull() ?: continue
+                    val mat = importedMatByColor.getOrPut(mesh.color) {
+                        materialLoader.createColorInstance(mesh.color)
+                    }
+                    val node = GeometryNode(engine, geom, listOf(mat))
+                    node.transform = world
+                    node.isVisible = visibleNow
+                    pendingModels.add(node); placedNodes++
+                    if (pendingModels.size >= 50) flushModels()
+                    sliceM()
+                }
+            }
+        }
+        flushModels()
+        // NB : AUCUNE inscription au LOD d'interaction. Règle du gros décor .glb —
+        // un décor importé explicitement par l'utilisateur ne doit jamais
+        // disparaître en navigation.
+        modelBusy = false
     }
 
     // Marqueur GPS : reconstruit à chaque relevé (peu fréquent) tant que
@@ -1380,6 +1509,50 @@ fun Scene3DScreen(
     // menu a déjà ses presets + « Personnalisée… », mais un bouton dans une barre
     // doit pouvoir ouvrir le sélecteur directement.
     var showBackgroundDialog by remember { mutableStateOf(false) }
+
+    // ---- Import d'un modèle 3D de décor (chantier #3) ----
+    // Sélecteur en « */* » : les formats 3D n'ont pas de type MIME fiable (même
+    // raison que le DXF). Le routage se fait sur les OCTETS DE TÊTE, hors thread
+    // principal, dans SceneModelLoader.
+    val modelCtx = androidx.compose.ui.platform.LocalContext.current
+    var showModelsPanel by remember { mutableStateOf(false) }
+    var importingModel by remember { mutableStateOf(false) }
+    var pickedModelUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var modelMessage by remember { mutableStateOf<String?>(null) }
+    var selectedModelId by remember { mutableStateOf<String?>(null) }
+    val modelImportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) { pickedModelUri = uri; importingModel = true } }
+    LaunchedEffect(pickedModelUri) {
+        val uri = pickedModelUri ?: return@LaunchedEffect
+        val loader = com.minou.mvrviewer.mvr.SceneModelLoader
+        if (importedModels.size >= loader.MODEL_MAX_COUNT) {
+            importingModel = false; pickedModelUri = null
+            modelMessage = "Trop de modèles importés (${loader.MODEL_MAX_COUNT} au maximum)."
+            return@LaunchedEffect
+        }
+        // Budget de triangles RESTANT (plafond cumulé) : un budget épuisé ne fait
+        // pas échouer l'import, il le tronque en prévenant.
+        val used = importedModels.sumOf { it.triangles }
+        val res = withContext(Dispatchers.IO) {
+            val cr = modelCtx.contentResolver
+            val nm = loader.displayName(cr, uri)
+            loader.load(cr, uri, nm, loader.MODEL_TOTAL_TRIANGLES - used)
+        }
+        importingModel = false
+        pickedModelUri = null
+        when (res) {
+            is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Ok -> {
+                onSetImportedModels(importedModels + res.model)
+                selectedModelId = res.model.id
+                showModelsPanel = true
+                modelMessage = if (res.model.truncated)
+                    "Modèle simplifié : ${res.model.triangles} triangles conservés." else null
+            }
+            is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Unsupported -> modelMessage = res.message
+            is com.minou.mvrviewer.mvr.SceneModelLoader.LoadResult.Failed -> modelMessage = res.message
+        }
+    }
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue 3D : UNE seule liste consommée
     // à la fois par la barre flottante / les 4 barres ancrables (AnchoredToolbars)
     // ET par la section « Outils » du menu (toMenuTools). Les 6 premiers forment la
@@ -1421,6 +1594,18 @@ fun Scene3DScreen(
                     options.gpsMarkerScale >= 1.5f -> 0.6f
                     else -> 1.6f
                 }
+            }))
+        // Importer un modèle 3D de décor (chantier #3). Le ToolSpec étant reconstruit
+        // à chaque recomposition, le libellé suit l'état ; `busy` donne l'indicateur
+        // « Chargement… » pendant le décodage. Présent au menu ⋯ ET dockable.
+        add(ToolSpec(ToolId.IMPORT_MODEL,
+            if (importedModels.isEmpty()) "Importer un modèle 3D…" else "Modèles 3D (${importedModels.size})",
+            Icons.Filled.ViewInAr,
+            available = true, checked = importedModels.isNotEmpty() && showModelsPanel,
+            busy = importingModel || modelBusy,
+            onInvoke = {
+                if (importedModels.isEmpty()) modelImportLauncher.launch(arrayOf("*/*"))
+                else showModelsPanel = !showModelsPanel
             }))
         // Panneau des calques : dockable en barre ; l'entrée de menu dédiée
         // (« Calques… ») est rendue par SceneOptionsMenu → inMenu=false ici pour
@@ -1634,6 +1819,9 @@ fun Scene3DScreen(
             ) {
                 Node(apply = { addChildNode(satRoot) })
                 Node(apply = { addChildNode(rasterRoot) })
+                // Décor importé : une racine par « couche », peuplée par son propre
+                // effet, indépendante de la reconstruction MVR.
+                Node(apply = { addChildNode(importedRoot) })
                 Node(apply = { addChildNode(geometryRoot) })
                 Node(apply = { addChildNode(dxfRoot) })
                 Node(apply = { addChildNode(markerRoot) })
@@ -1865,6 +2053,48 @@ fun Scene3DScreen(
                 }
             }
 
+            // ---- Décor 3D importé : panneau de placement + messages ----
+            if (showModelsPanel && importedModels.isNotEmpty()) {
+                ModelPlacementPanel(
+                    models = importedModels,
+                    selectedId = selectedModelId,
+                    onSelect = { selectedModelId = it },
+                    onRemove = { m ->
+                        val rest = importedModels.filter { it.id != m.id }
+                        if (selectedModelId == m.id) selectedModelId = rest.firstOrNull()?.id
+                        onSetImportedModels(rest)
+                        if (rest.isEmpty()) showModelsPanel = false
+                    },
+                    onAdd = { modelImportLauncher.launch(arrayOf("*/*")) },
+                    // Double piège : bump de version (sinon rien ne bouge en 3D) ET
+                    // sauvegarde différée (sinon rien n'est persisté).
+                    onChanged = onImportedModelsTouched,
+                    onClose = { showModelsPanel = false },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+                )
+            }
+            // Chargement d'un modèle : état explicite, jamais un gel silencieux.
+            if (importingModel || modelBusy) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
+                ) {
+                    Text("Chargement du modèle…", color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                }
+            }
+            modelMessage?.let { msg ->
+                Surface(
+                    color = Color(0xFF5D4037), shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp, start = 16.dp, end = 16.dp)
+                        .clickable { modelMessage = null }
+                ) {
+                    Text(msg, color = Color.White, style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                }
+            }
+
             // LIBÉRATION À LA SORTIE — correctif du GEL confirmé par le journal de
             // Stéphane (Samsung A55, gros show Vega) : en quittant/fermant la vue 3D,
             // SceneView DÉTRUIT les nœuds UN PAR UN (TransformManager.nDestroy natif)
@@ -1881,6 +2111,7 @@ fun Scene3DScreen(
                     runCatching { dxfRoot.clearChildNodes() }
                     runCatching { satRoot.clearChildNodes() }
                     runCatching { rasterRoot.clearChildNodes() }
+                    runCatching { importedRoot.clearChildNodes() }
                 }
             }
         }
@@ -2159,6 +2390,47 @@ private fun scaleMat(s: Float): Mat4 = Mat4(
     Float4(s, 0f, 0f, 0f), Float4(0f, s, 0f, 0f),
     Float4(0f, 0f, s, 0f), Float4(0f, 0f, 0f, 1f)
 )
+
+/** Identité (col-majeur) — repli quand aucune rotation d'axe n'est nécessaire. */
+private val IDENTITY4 = Mat4(
+    Float4(1f, 0f, 0f, 0f), Float4(0f, 1f, 0f, 0f),
+    Float4(0f, 0f, 1f, 0f), Float4(0f, 0f, 0f, 1f)
+)
+
+/** Translation (col-majeur) — en mm dans le repère MONDE MVR. */
+private fun translateMat(x: Float, y: Float, z: Float): Mat4 = Mat4(
+    Float4(1f, 0f, 0f, 0f), Float4(0f, 1f, 0f, 0f),
+    Float4(0f, 0f, 1f, 0f), Float4(x, y, z, 1f)
+)
+
+/** Rotation autour de la VERTICALE du monde MVR (axe Z), col-majeur. */
+private fun rotZMat(deg: Double): Mat4 {
+    val r = Math.toRadians(deg)
+    val c = kotlin.math.cos(r).toFloat(); val s = kotlin.math.sin(r).toFloat()
+    return Mat4(
+        Float4(c, s, 0f, 0f), Float4(-s, c, 0f, 0f),
+        Float4(0f, 0f, 1f, 0f), Float4(0f, 0f, 0f, 1f)
+    )
+}
+
+/**
+ * Buffers plats d'un [com.minou.mvrviewer.mvr.ModelMesh] → sommets Filament +
+ * indices. PUR CPU (aucun appel Engine) : à exécuter hors thread principal, un
+ * maillage à la fois, pour que le pic mémoire reste borné.
+ */
+private fun meshVertices(m: com.minou.mvrviewer.mvr.ModelMesh): Pair<List<Geometry.Vertex>, List<Int>> {
+    val vc = m.vertexCount
+    val verts = ArrayList<Geometry.Vertex>(vc)
+    for (v in 0 until vc) {
+        verts.add(
+            Geometry.Vertex(
+                position = Float3(m.verts[v * 3], m.verts[v * 3 + 1], m.verts[v * 3 + 2]),
+                normal = Float3(m.normals[v * 3], m.normals[v * 3 + 1], m.normals[v * 3 + 2])
+            )
+        )
+    }
+    return verts to m.indices.toList()
+}
 
 /** Rotation +90° autour de X (glTF Y-haut → repère GDTF Z-haut), col-majeur. */
 private val RX90 = Mat4(

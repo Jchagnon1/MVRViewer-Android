@@ -55,6 +55,8 @@ import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Empreinte d'un projecteur dans un univers : où elle commence, combien de canaux
@@ -116,17 +118,17 @@ fun DmxUniverseScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Univers $selectedUniverse", style = MaterialTheme.typography.titleMedium) },
+            title = { Text(stringResource(R.string.universe_title_fmt, selectedUniverse), style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour 3D")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_3d))
                 }
             },
             actions = {
                 if (universes.size > 1 || universes.isNotEmpty()) {
                     Box {
                         TextButton(onClick = { universeMenu = true }) {
-                            Text("Univers $selectedUniverse")
+                            Text(stringResource(R.string.universe_title_fmt, selectedUniverse))
                             Icon(Icons.Filled.UnfoldMore, contentDescription = null, modifier = Modifier.size(18.dp))
                         }
                         DropdownMenu(expanded = universeMenu, onDismissRequest = { universeMenu = false }) {
@@ -135,7 +137,7 @@ fun DmxUniverseScreen(
                                 val check = if (u == selectedUniverse) "  ✓" else ""
                                 val warn = if (conf > 0) "  ⚠" else ""
                                 DropdownMenuItem(
-                                    text = { Text("Univers $u$warn$check") },
+                                    text = { Text(stringResource(R.string.universe_title_fmt, u) + warn + check) },
                                     onClick = { selectedUniverse = u; infoChannel = null; universeMenu = false }
                                 )
                             }
@@ -149,12 +151,12 @@ fun DmxUniverseScreen(
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
-                    Text("Analyse du patch…", modifier = Modifier.padding(top = 12.dp),
+                    Text(stringResource(R.string.universe_analysing), modifier = Modifier.padding(top = 12.dp),
                         style = MaterialTheme.typography.bodyMedium)
                 }
             }
             universes.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Aucun projecteur patché\n(aucune adresse DMX à afficher).",
+                Text(stringResource(R.string.universe_empty),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -210,12 +212,12 @@ private fun SummaryBar(count: Int, used: Int, conflicts: Int) {
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-        Text("$count proj.", style = MaterialTheme.typography.labelLarge)
-        Text("$used/512 canaux", style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.universe_fixtures_fmt, count), style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.universe_used_fmt, used), style = MaterialTheme.typography.labelLarge)
         if (conflicts == 0) {
-            Text("aucun conflit", style = MaterialTheme.typography.labelLarge, color = Color(0xFF2E7D32))
+            Text(stringResource(R.string.universe_no_conflict), style = MaterialTheme.typography.labelLarge, color = Color(0xFF2E7D32))
         } else {
-            Text("⚠ $conflicts canal(aux) en conflit",
+            Text("⚠ " + stringResource(R.string.universe_conflicts_fmt, conflicts),
                 style = MaterialTheme.typography.labelLarge, color = Color(0xFFC62828))
         }
     }
@@ -292,17 +294,17 @@ private fun ChannelInspector(
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Canal $ch", style = MaterialTheme.typography.titleSmall)
-                if (conflict) Text("  ⚠ chevauchement", style = MaterialTheme.typography.labelSmall,
+                Text(stringResource(R.string.universe_channel_fmt, ch), style = MaterialTheme.typography.titleSmall)
+                if (conflict) Text("  ⚠ " + stringResource(R.string.universe_overlap), style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFC62828))
                 Box(Modifier.weight(1f))
                 IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Fermer",
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.common_close),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (list.isEmpty()) {
-                Text("Canal libre.", style = MaterialTheme.typography.bodySmall,
+                Text(stringResource(R.string.universe_channel_free), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 list.forEach { p ->
@@ -337,7 +339,7 @@ private fun FixtureLegend(
     onSelect: (DmxPatch) -> Unit
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text("Projecteurs — univers $universe", style = MaterialTheme.typography.titleSmall,
+        Text(stringResource(R.string.universe_fixtures_title_fmt, universe), style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
         inUniverse.forEach { p ->
             val conflict = (maxOf(1, p.start)..minOf(512, p.end)).any { conflicts.contains(it) }
@@ -359,7 +361,7 @@ private fun FixtureLegend(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(p.rangeLabel, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
-                    Text("${p.count} canal(aux)", style = MaterialTheme.typography.labelSmall,
+                    Text(stringResource(R.string.universe_channels_count_fmt, p.count), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

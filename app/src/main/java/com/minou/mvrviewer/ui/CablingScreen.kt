@@ -84,6 +84,8 @@ import com.minou.mvrviewer.sync.PowerSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /** Un projecteur affectable + sa conso résolue (pour la liste et le sélecteur). */
 private data class CableFixture(
@@ -160,6 +162,16 @@ fun CablingScreen(
     val exportScope = rememberCoroutineScope()
     var exportMenu by remember { mutableStateOf(false) }
     var exportBusy by remember { mutableStateOf(false) }
+    // Titres/messages d'export résolus ICI (contexte composable) : runExport et les
+    // coroutines qu'il lance ne peuvent pas appeler stringResource.
+    val sPdfCablingTitle = stringResource(R.string.cabling_pdf_title)
+    val sPdfPlanSoca = stringResource(R.string.cabling_pdf_plan_soca)
+    val sPdfPlanDmx = stringResource(R.string.cabling_pdf_plan_dmx)
+    val sPdfFail = stringResource(R.string.cabling_pdf_failed)
+    val sPdfFull = stringResource(R.string.cabling_export_full)
+    val sPdfElec = stringResource(R.string.cabling_export_elec_doc)
+    val sPdfDmx = stringResource(R.string.cabling_export_dmx)
+    val sPdfPlans = stringResource(R.string.cabling_export_plans)
     // Lance la génération HORS thread principal puis partage le PDF. Les données
     // sont figées sur le thread principal (DTO, cartes uuid→libellé/conso), puis
     // les calculs/empreintes viennent EXCLUSIVEMENT des fonctions déjà à l'écran
@@ -219,14 +231,14 @@ fun CablingScreen(
                             satellite = sat,
                             legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
                                 .toList().sortedByDescending { it.second },
-                            documentTitle = "Câblage"
+                            documentTitle = sPdfCablingTitle
                         )
                         // ANNEAU 2e dimension (E3) : la page Socapex porte l'anneau
                         // DMX, la page DMX porte l'anneau Socapex.
-                        socaView = cablingPlanView("Repérage Socapex", data, PlanColorMode.SOCAPEX,
+                        socaView = cablingPlanView(sPdfPlanSoca, data, PlanColorMode.SOCAPEX,
                             coloring.socaColor, coloring.socaLegend, coloring.cablingText, sat, hidden, refPlan,
                             cablingRingColor = coloring.dmxColor)
-                        dmxView = cablingPlanView("Repérage DMX", data, PlanColorMode.DMX_LINE,
+                        dmxView = cablingPlanView(sPdfPlanDmx, data, PlanColorMode.DMX_LINE,
                             coloring.dmxColor, coloring.dmxLegend, coloring.cablingText, sat, hidden, refPlan,
                             cablingRingColor = coloring.socaColor)
                     }
@@ -239,21 +251,21 @@ fun CablingScreen(
             }
             exportBusy = false
             if (file != null) sharePlanPdf(ctxCabling, file)
-            else android.widget.Toast.makeText(ctxCabling, "Échec de l'export PDF", android.widget.Toast.LENGTH_SHORT).show()
+            else android.widget.Toast.makeText(ctxCabling, sPdfFail, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Câblage", style = MaterialTheme.typography.titleMedium) },
+            title = { Text(stringResource(R.string.cabling_pdf_title), style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour 3D")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_3d))
                 }
             },
             actions = {
                 if (tab == 0) IconButton(onClick = { showSettings = true }) {
-                    Icon(Icons.Filled.Settings, contentDescription = "Réglages du câblage")
+                    Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.cabling_settings_title))
                 }
                 // Menu d'export PDF : dossier complet + 3 exports séparés.
                 Box {
@@ -264,30 +276,30 @@ fun CablingScreen(
                         )
                     } else {
                         IconButton(onClick = { exportMenu = true }) {
-                            Icon(Icons.Filled.Share, contentDescription = "Exporter le câblage en PDF")
+                            Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.cabling_export_pdf_cd))
                         }
                     }
                     DropdownMenu(expanded = exportMenu, onDismissRequest = { exportMenu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Dossier câblage complet") },
+                            text = { Text(stringResource(R.string.cabling_export_full_menu)) },
                             onClick = {
                                 exportMenu = false
                                 runExport(setOf(CablingPdfPart.ELEC, CablingPdfPart.DMX, CablingPdfPart.PLANS),
-                                    "Câblage complet")
+                                    sPdfFull)
                             }
                         )
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Distribution élec") },
-                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.ELEC), "Distribution électrique") }
+                            text = { Text(stringResource(R.string.cabling_export_elec_menu)) },
+                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.ELEC), sPdfElec) }
                         )
                         DropdownMenuItem(
-                            text = { Text("Câblage DMX") },
-                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.DMX), "Câblage DMX") }
+                            text = { Text(stringResource(R.string.cabling_export_dmx)) },
+                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.DMX), sPdfDmx) }
                         )
                         DropdownMenuItem(
-                            text = { Text("Plans repérés") },
-                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.PLANS), "Plans repérés") }
+                            text = { Text(stringResource(R.string.cabling_export_plans)) },
+                            onClick = { exportMenu = false; runExport(setOf(CablingPdfPart.PLANS), sPdfPlans) }
                         )
                     }
                 }
@@ -297,9 +309,9 @@ fun CablingScreen(
         // multipaires), et le réglage des PUISSANCES par type — pour corriger une
         // conso sans sortir de l'écran de câblage.
         TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Élec") })
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.cabling_tab_elec)) })
             Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("DMX") })
-            Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Puissances") })
+            Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text(stringResource(R.string.cabling_tab_power)) })
         }
 
         if (tab == 1) {
@@ -320,17 +332,17 @@ fun CablingScreen(
         ) {
             FilledTonalButton(onClick = { cabling.addDistributor(DistributorKind.SOCA) }) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp)); Text("Socapex")
+                Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.label_field_socapex))
             }
             FilledTonalButton(onClick = { cabling.addDistributor(DistributorKind.SOLO) }) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp)); Text("Ligne PC16")
+                Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.cabling_line_pc16))
             }
         }
         // Compteur d'affectation (aide : ce qui reste à câbler).
         val assignedCount = cabling.assignments.size
         Text(
-            "$assignedCount / ${fixtures.size} projecteur(s) câblé(s)",
+            stringResource(R.string.cabling_assigned_fmt, assignedCount, fixtures.size),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
@@ -338,8 +350,8 @@ fun CablingScreen(
         // Récapitulatif des réglages persistés (touchez l'engrenage pour changer).
         val s = cabling.settings
         Text(
-            "${s.voltage} V · circuit ${s.circuitLimitW} W · " +
-                (if (s.phaseLimitW > 0) "phase ${s.phaseLimitW} W" else "phase non limitée"),
+            stringResource(R.string.cabling_settings_summary_fmt, s.voltage, s.circuitLimitW) + (
+                if (s.phaseLimitW > 0) stringResource(R.string.cabling_phase_limit_fmt, s.phaseLimitW) else stringResource(R.string.cabling_phase_unlimited)),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.clickable { showSettings = true }
@@ -350,7 +362,7 @@ fun CablingScreen(
         if (cabling.distributors.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    "Ajoutez une Socapex ou une ligne PC16 pour commencer à câbler.",
+                    stringResource(R.string.cabling_empty_hint),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(32.dp)
@@ -436,15 +448,15 @@ private fun DistributorCard(
                 Column(Modifier.weight(1f)) {
                     Text(dist.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        (if (dist.kind == DistributorKind.SOCA) "Socapex" else "Ligne PC16") +
-                            " · total $total W",
+                        stringResource(if (dist.kind == DistributorKind.SOCA) R.string.label_field_socapex else R.string.cabling_line_pc16) + (
+                            stringResource(R.string.cabling_total_fmt, total)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Modifier") }
+                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.common_edit)) }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Supprimer",
+                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete),
                         tint = MaterialTheme.colorScheme.error)
                 }
             }
@@ -479,7 +491,7 @@ private fun DistributorCard(
             // Circuits GROUPÉS PAR PHASE.
             for (phase in usedPhases.sorted()) {
                 Text(
-                    "Phase L$phase",
+                    stringResource(R.string.cabling_phase_fmt, phase),
                     style = MaterialTheme.typography.labelMedium,
                     color = color,
                     fontWeight = FontWeight.Bold,
@@ -516,12 +528,12 @@ private fun CircuitRow(
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Circuit $circuit",
+                stringResource(R.string.cabling_circuit_fmt, circuit),
                 style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
             )
             if (load.unknownCount > 0) {
-                Icon(Icons.Filled.Warning, contentDescription = "Conso inconnue",
+                Icon(Icons.Filled.Warning, contentDescription = stringResource(R.string.cabling_unknown_power_cd),
                     tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
             }
@@ -532,28 +544,28 @@ private fun CircuitRow(
                 fontWeight = if (over) FontWeight.Bold else FontWeight.Normal
             )
             IconButton(onClick = { onAssign(circuit) }) {
-                Icon(Icons.Filled.Add, contentDescription = "Affecter des projecteurs")
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.cabling_assign_fixtures_cd))
             }
             // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
             // affectation vers CE circuit. Conserve l'affectation par la liste (bouton +).
             IconButton(onClick = {
                 onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.SOCA, dist.id, circuit))
             }) {
-                Icon(Icons.Filled.Map, contentDescription = "Sélectionner sur le plan")
+                Icon(Icons.Filled.Map, contentDescription = stringResource(R.string.cabling_select_on_plan_cd))
             }
             // VIDER LE CIRCUIT : retire toutes les affectations de CE circuit (pas
             // les autres). Une ligne PC16 (SOLO) n'ayant qu'un circuit, le même
             // bouton la vide entièrement. Masqué si le circuit est déjà vide.
             if (fx.isNotEmpty()) {
                 IconButton(onClick = { confirmClear = true }) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Vider le circuit",
+                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.cabling_clear_circuit_cd),
                         tint = MaterialTheme.colorScheme.error)
                 }
             }
         }
         // Projecteurs affectés à ce circuit (chips à retirer d'un tap).
         if (fx.isEmpty()) {
-            Text("  — aucun projecteur", style = MaterialTheme.typography.bodySmall,
+            Text("  — " + stringResource(R.string.cabling_no_fixture), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             FlowRow(
@@ -566,7 +578,7 @@ private fun CircuitRow(
                         onClick = { cabling.unassign(a.fixture) },
                         label = { Text(fixtureLabel[a.fixture] ?: a.fixture, maxLines = 1) },
                         trailingIcon = {
-                            Icon(Icons.Filled.Close, contentDescription = "Retirer",
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.common_remove),
                                 modifier = Modifier.size(16.dp))
                         }
                     )
@@ -580,14 +592,14 @@ private fun CircuitRow(
             onDismissRequest = { confirmClear = false },
             confirmButton = {
                 TextButton(onClick = { cabling.clearCircuit(dist.id, circuit); confirmClear = false }) {
-                    Text("Vider")
+                    Text(stringResource(R.string.common_clear))
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Annuler") } },
-            title = { Text("Vider le circuit ?") },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.common_cancel)) } },
+            title = { Text(stringResource(R.string.cabling_clear_circuit_q)) },
             text = {
-                Text("Retirer les ${fx.size} projecteur(s) du circuit $circuit de « ${dist.name} » ? " +
-                    "Les autres circuits ne sont pas touchés.")
+                Text(stringResource(R.string.cabling_clear_circuit_msg_fmt, fx.size, circuit, dist.name) + (
+                    stringResource(R.string.cabling_clear_circuit_msg2)))
             }
         )
     }
@@ -613,16 +625,16 @@ private fun FixturePickerDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = { onConfirm(sel.toSet()) }, enabled = sel.isNotEmpty()) {
-            Text("Affecter (${sel.size})")
+            Text(stringResource(R.string.cabling_assign_fmt, sel.size))
         } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
-        title = { Text("${dist.name} · circuit $circuit") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
+        title = { Text(stringResource(R.string.cabling_dist_circuit_fmt, dist.name, circuit)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    placeholder = { Text("Filtrer (N°, nom, type…)") },
+                    placeholder = { Text(stringResource(R.string.cabling_filter_hint)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -650,10 +662,10 @@ private fun FixturePickerDialog(
                                     color = if (elsewhere) MaterialTheme.colorScheme.onSurfaceVariant
                                     else MaterialTheme.colorScheme.onSurface
                                 )
-                                val consoTxt = f.watts?.let { "$it W" } ?: "conso inconnue"
+                                val consoTxt = f.watts?.let { "$it W" } ?: stringResource(R.string.cabling_unknown_power)
                                 val whereTxt = when {
-                                    here -> " · déjà sur ce circuit"
-                                    elsewhere -> " · déjà câblé ailleurs → déplacer"
+                                    here -> " · " + stringResource(R.string.cabling_already_here)
+                                    elsewhere -> " · " + stringResource(R.string.cabling_already_elsewhere)
                                     else -> ""
                                 }
                                 Text(
@@ -683,16 +695,16 @@ private fun DistributorEditDialog(
         confirmButton = { TextButton(onClick = {
             if (name.isNotBlank()) cabling.rename(dist.id, name.trim()); onDismiss()
         }) { Text("OK") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
-        title = { Text("Modifier « ${dist.name} »") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) } },
+        title = { Text(stringResource(R.string.cabling_edit_dist_fmt, dist.name)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = name, onValueChange = { name = it }, singleLine = true,
-                    label = { Text("Nom") }, modifier = Modifier.fillMaxWidth()
+                    label = { Text(stringResource(R.string.label_field_name)) }, modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("Couleur", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.common_color), style = MaterialTheme.typography.labelMedium)
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -710,13 +722,13 @@ private fun DistributorEditDialog(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Text("Phase de chaque circuit", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.cabling_phase_per_circuit), style = MaterialTheme.typography.labelMedium)
                 for (c in 1..dist.circuitCount) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                     ) {
-                        Text("Circuit $c", modifier = Modifier.weight(1f),
+                        Text(stringResource(R.string.cabling_circuit_fmt, c), modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium)
                         listOf(1, 2, 3).forEach { p ->
                             val on = dist.phaseOf(c) == p
@@ -757,27 +769,27 @@ private fun CablingSettingsDialog(
                 phaseLimitW = phaseLimit.toIntOrNull()?.coerceAtLeast(0) ?: 0
             ))
             onDismiss()
-        }) { Text("Appliquer") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
-        title = { Text("Réglages du câblage") },
+        }) { Text(stringResource(R.string.common_apply)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
+        title = { Text(stringResource(R.string.cabling_settings_title)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = voltage, onValueChange = { voltage = it.filter(Char::isDigit) },
-                    label = { Text("Tension (V)") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                    label = { Text(stringResource(R.string.cabling_voltage)) }, singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = circuitLimit, onValueChange = { circuitLimit = it.filter(Char::isDigit) },
-                    label = { Text("Limite par circuit (W)") }, singleLine = true,
+                    label = { Text(stringResource(R.string.cabling_circuit_limit)) }, singleLine = true,
                     supportingText = { Text("16 A × 230 V = 3680 W") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = phaseLimit, onValueChange = { phaseLimit = it.filter(Char::isDigit) },
-                    label = { Text("Arrivée par phase (W)") }, singleLine = true,
-                    supportingText = { Text("0 = non définie (aucune alerte phase)") },
+                    label = { Text(stringResource(R.string.cabling_phase_supply)) }, singleLine = true,
+                    supportingText = { Text(stringResource(R.string.cabling_phase_supply_hint)) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -813,7 +825,7 @@ private fun PowerTypesPanel(
     if (types.isEmpty()) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                "Aucun type de projecteur (spec GDTF) dans ce show.",
+                stringResource(R.string.power_no_type),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(32.dp)
@@ -824,8 +836,8 @@ private fun PowerTypesPanel(
 
     Column(modifier) {
         Text(
-            "Réglez la conso par TYPE : votre valeur profite à tous les projecteurs " +
-                "de ce type et alimente la bibliothèque partagée. Le câblage se met à jour aussitôt.",
+            stringResource(R.string.power_tab_hint) + (
+                ""),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -874,10 +886,10 @@ private fun PowerTypeRow(
     val statusText = when (resolution.source) {
         PowerSource.LIBRARY -> {
             val n = votes ?: 1
-            "$effWatts W · $n vote${if (n > 1) "s" else ""}"
+            stringResource(R.string.power_watts_votes_fmt, effWatts ?: 0, n)
         }
-        PowerSource.GDTF -> "$effWatts W · GDTF"
-        PowerSource.NONE -> "à saisir"
+        PowerSource.GDTF -> stringResource(R.string.power_watts_gdtf_fmt, effWatts ?: 0)
+        PowerSource.NONE -> stringResource(R.string.power_to_enter)
     }
 
     Card(
@@ -891,7 +903,7 @@ private fun PowerTypeRow(
                     Text(typeName, style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold, maxLines = 2)
                     Text(
-                        "$count projecteur${if (count > 1) "s" else ""} · $statusText",
+                        stringResource(R.string.power_fixtures_status_fmt, count, statusText),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (resolution.source == PowerSource.LIBRARY)
                             MaterialTheme.colorScheme.primary
@@ -904,7 +916,7 @@ private fun PowerTypeRow(
                 OutlinedTextField(
                     value = myValue,
                     onValueChange = { new -> myValue = new.filter { it.isDigit() } },
-                    label = { Text("Ma valeur (W)") },
+                    label = { Text(stringResource(R.string.fx_power_my_value)) },
                     placeholder = { effWatts?.let { Text("$it") } },
                     singleLine = true,
                     isError = !typedOk,

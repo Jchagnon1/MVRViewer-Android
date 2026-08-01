@@ -42,6 +42,8 @@ import com.minou.mvrviewer.mvr.MvrSceneObject
 import com.minou.mvrviewer.sync.PowerSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Modification de patch d'un projecteur (ID / adresse DMX / mode / nom / spec de
@@ -266,7 +268,7 @@ fun FixtureDetailSheet(
             // Nom d'affichage renommable — synchronisé par la MÊME section de patch.
             OutlinedTextField(
                 value = nameText, onValueChange = { nameText = it },
-                label = { Text("Nom") }, singleLine = true,
+                label = { Text(stringResource(R.string.label_field_name)) }, singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
             )
 
@@ -279,13 +281,13 @@ fun FixtureDetailSheet(
                 OutlinedTextField(
                     value = addr,
                     onValueChange = { addr = sanitizeDmxAddress(it) },
-                    label = { Text("Adresse DMX") },
-                    placeholder = { Text("univers.adresse") },
+                    label = { Text(stringResource(R.string.label_field_dmx)) },
+                    placeholder = { Text(stringResource(R.string.fx_addr_placeholder)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     isError = !isPlausibleDmxAddress(addr),
                     supportingText = if (!isPlausibleDmxAddress(addr)) {
-                        { Text("Format : univers.adresse (1–512)") }
+                        { Text(stringResource(R.string.fx_addr_format_hint)) }
                     } else null,
                     modifier = Modifier.weight(1f)
                 )
@@ -295,21 +297,21 @@ fun FixtureDetailSheet(
             // Assigner un TYPE custom = donner à ce projecteur la spec « custom:<id> »
             // (portée par la section patch, déjà synchronisée). GÉOMÉTRIE = baseGdtfSpec,
             // empreinte/canaux = ceux du type. « Standard » revient au GDTF d'origine.
-            Text("Type de rendu", style = MaterialTheme.typography.labelLarge,
+            Text(stringResource(R.string.fx_render_type), style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             OutlinedButton(onClick = { typeMenu = true }) {
-                Text(customType?.let { "${it.name}  ·  ${maxOf(1, it.footprint)} canaux (custom)" }
-                    ?: "Standard : ${fixture.gdtfSpec ?: "—"}")
+                Text(customType?.let { stringResource(R.string.fx_custom_type_fmt, it.name, maxOf(1, it.footprint)) }
+                    ?: stringResource(R.string.fx_standard_fmt, fixture.gdtfSpec ?: "—"))
             }
             DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
                 DropdownMenuItem(
-                    text = { Text("Standard : ${fixture.gdtfSpec ?: "—"}") },
+                    text = { Text(stringResource(R.string.fx_standard_fmt, fixture.gdtfSpec ?: "—")) },
                     onClick = { overrides.assignSpec(fixture, null); typeMenu = false }
                 )
                 if (customLibrary.types.isNotEmpty()) HorizontalDivider()
                 customLibrary.types.forEach { t ->
                     DropdownMenuItem(
-                        text = { Text("${t.name}  ·  ${maxOf(1, t.footprint)} canaux") },
+                        text = { Text(stringResource(R.string.fx_type_channels_fmt, t.name, maxOf(1, t.footprint))) },
                         onClick = {
                             overrides.assignSpec(fixture, com.minou.mvrviewer.sync.customFixtureSpec(t.id))
                             typeMenu = false
@@ -318,18 +320,18 @@ fun FixtureDetailSheet(
                 }
                 HorizontalDivider()
                 DropdownMenuItem(
-                    text = { Text("＋ Nouveau type custom…") },
+                    text = { Text("＋ " + stringResource(R.string.fx_new_custom_type)) },
                     onClick = { editorInitial = null; showEditor = true; typeMenu = false }
                 )
                 customType?.let { ct ->
                     DropdownMenuItem(
-                        text = { Text("✎ Éditer « ${ct.name} »") },
+                        text = { Text("✎ " + stringResource(R.string.fx_edit_type_fmt, ct.name)) },
                         onClick = { editorInitial = ct; showEditor = true; typeMenu = false }
                     )
                     // Dupliquer (parité iOS) : nouvel id + nom « (copie) », puis on
                     // assigne la copie à ce projecteur (miroir immédiat du résolveur).
                     DropdownMenuItem(
-                        text = { Text("⧉ Dupliquer « ${ct.name} »") },
+                        text = { Text("⧉ " + stringResource(R.string.fx_duplicate_type_fmt, ct.name)) },
                         onClick = {
                             typeMenu = false
                             customLibrary.duplicate(ct.id)?.let { copy ->
@@ -346,20 +348,20 @@ fun FixtureDetailSheet(
             // Choix du mode — MASQUÉ pour un type custom (l'empreinte et les noms de
             // canaux viennent du type, pas d'un mode GDTF).
             if (customType == null) {
-            Text("Mode", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+            Text(stringResource(R.string.facet_mode), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             OutlinedButton(onClick = { modeMenu = true }, enabled = modes.isNotEmpty()) {
                 Text(
                     when {
-                        modes.isEmpty() -> "Modes indisponibles"
-                        selectedMode != null -> "${selectedMode.name}  ·  ${selectedMode.footprint} canaux"
-                        else -> "Choisir…"
+                        modes.isEmpty() -> stringResource(R.string.fx_modes_unavailable)
+                        selectedMode != null -> stringResource(R.string.fx_type_channels_fmt, selectedMode.name, selectedMode.footprint)
+                        else -> stringResource(R.string.common_choose)
                     }
                 )
             }
             DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
                 modes.forEach { m ->
                     DropdownMenuItem(
-                        text = { Text("${m.name}  ·  ${m.footprint} canaux") },
+                        text = { Text(stringResource(R.string.fx_type_channels_fmt, m.name, m.footprint)) },
                         onClick = { modeName = m.name; modeMenu = false }
                     )
                 }
@@ -368,18 +370,18 @@ fun FixtureDetailSheet(
             // Détail des canaux du mode sélectionné.
             if (selectedMode != null && selectedMode.channels.isNotEmpty()) {
                 Text(
-                    "Canaux (${selectedMode.channels.size})",
+                    stringResource(R.string.fx_channels_title_fmt, selectedMode.channels.size),
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
                 )
                 HorizontalDivider()
                 LazyColumn(Modifier.heightIn(max = 260.dp)) {
                     items(selectedMode.channels) { ch ->
-                        val addrOff = ch.offsets.joinToString("+") { it.toString() }.ifEmpty { "virtuel" }
+                        val addrOff = ch.offsets.joinToString("+") { it.toString() }.ifEmpty { stringResource(R.string.fx_channel_virtual) }
                         Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                             Text(ch.attribute, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "offset $addrOff" + (ch.defaultValue?.let { " · défaut $it" } ?: "") +
+                                stringResource(R.string.fx_channel_offset_fmt, addrOff) + (ch.defaultValue?.let { stringResource(R.string.fx_channel_default_fmt, it) } ?: "") +
                                     (ch.geometry?.let { " · $it" } ?: ""),
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -406,7 +408,7 @@ fun FixtureDetailSheet(
             }
             } else {
                 // Canaux RÉÉCRITS du type custom (empreinte = footprint du type).
-                Text("Canaux custom (${maxOf(1, customType.footprint)})",
+                Text(stringResource(R.string.fx_custom_channels_title_fmt, maxOf(1, customType.footprint)),
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
                 HorizontalDivider()
@@ -440,7 +442,7 @@ fun FixtureDetailSheet(
                 val wattsOk = wattsText.isBlank() || (wattsInt != null && wattsInt > 0)
                 val votes = power.consensusVotes(fixture.gdtfSpec)
                 val effWatts = resolution.watts
-                Text("Consommation", style = MaterialTheme.typography.labelLarge,
+                Text(stringResource(R.string.fx_power_section), style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
 
                 // Consensus + confiance + bouton « ✓ C'est bon ».
@@ -451,7 +453,7 @@ fun FixtureDetailSheet(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (effWatts != null) "$effWatts W" else "À saisir",
+                            if (effWatts != null) "$effWatts W" else stringResource(R.string.fx_power_to_enter),
                             style = MaterialTheme.typography.titleMedium,
                             color = if (effWatts != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant
@@ -460,10 +462,10 @@ fun FixtureDetailSheet(
                             when (resolution.source) {
                                 PowerSource.LIBRARY -> {
                                     val n = votes ?: 1
-                                    "consensus · $n vote${if (n > 1) "s" else ""}"
+                                    stringResource(R.string.fx_power_consensus_fmt, n)
                                 }
-                                PowerSource.GDTF -> "d'après le GDTF · aucun vote"
-                                PowerSource.NONE -> "aucune valeur — votez la puissance max"
+                                PowerSource.GDTF -> stringResource(R.string.fx_power_from_gdtf)
+                                PowerSource.NONE -> stringResource(R.string.fx_power_none)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -476,20 +478,20 @@ fun FixtureDetailSheet(
                                 power.set(spec, effWatts)
                                 wattsText = effWatts.toString()
                             }
-                        }) { Text("✓ C'est bon") }
+                        }) { Text("✓ " + stringResource(R.string.fx_power_confirm)) }
                     }
                 }
 
                 OutlinedTextField(
                     value = wattsText,
                     onValueChange = { new -> wattsText = new.filter { it.isDigit() } },
-                    label = { Text("Ma valeur (W)") },
+                    label = { Text(stringResource(R.string.fx_power_my_value)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = !wattsOk,
                     supportingText = {
                         Text(
-                            "Votez une autre valeur si besoin ; le consensus se recalcule.",
+                            stringResource(R.string.fx_power_vote_hint),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
@@ -521,7 +523,7 @@ fun FixtureDetailSheet(
                     onDismiss()
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-            ) { Text("Enregistrer") }
+            ) { Text(stringResource(R.string.common_save)) }
         }
     }
 

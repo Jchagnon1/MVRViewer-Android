@@ -49,6 +49,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * ÉDITEUR RAPIDE de type custom (projecteurs custom V1) : nom → GDTF de base
@@ -97,23 +99,23 @@ fun CustomFixtureEditorSheet(
                 .verticalScroll(rememberScrollState())
         ) {
             Text(
-                if (initial == null) "Nouveau type custom" else "Éditer le type",
+                stringResource(if (initial == null) R.string.cfx_new_title else R.string.cfx_edit_title),
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
             OutlinedTextField(
                 value = name, onValueChange = { name = it },
-                label = { Text("Nom du type") }, singleLine = true,
+                label = { Text(stringResource(R.string.cfx_type_name)) }, singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
             )
 
             // GDTF de base (fournit la géométrie 3D).
-            Text("GDTF de base (géométrie 3D)", style = MaterialTheme.typography.labelLarge,
+            Text(stringResource(R.string.cfx_base_gdtf), style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(bottom = 4.dp))
             Box {
                 OutlinedButton(onClick = { specMenu = true }, enabled = specChoices.isNotEmpty()) {
-                    Text(baseSpec ?: if (specChoices.isEmpty()) "Aucun GDTF dans la scène" else "Choisir…")
+                    Text(baseSpec ?: stringResource(if (specChoices.isEmpty()) R.string.cfx_no_gdtf else R.string.common_choose))
                 }
                 DropdownMenu(expanded = specMenu, onDismissRequest = { specMenu = false }) {
                     specChoices.forEach { s ->
@@ -137,10 +139,10 @@ fun CustomFixtureEditorSheet(
                 },
                 enabled = baseSpec != null && !busy,
                 modifier = Modifier.padding(top = 8.dp)
-            ) { Text(if (busy) "Lecture du GDTF…" else "Pré-remplir depuis le mode GDTF") }
+            ) { Text(stringResource(if (busy) R.string.cfx_reading_gdtf else R.string.cfx_prefill_from_gdtf)) }
 
             // Liste de canaux : renommer / réordonner / supprimer.
-            Text("Canaux (${channels.size})", style = MaterialTheme.typography.labelLarge,
+            Text(stringResource(R.string.fx_channels_title_fmt, channels.size), style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             HorizontalDivider()
             channels.forEachIndexed { i, ch ->
@@ -153,16 +155,16 @@ fun CustomFixtureEditorSheet(
                         color = MaterialTheme.colorScheme.primary)
                     OutlinedTextField(
                         value = ch, onValueChange = { channels[i] = it },
-                        singleLine = true, label = { Text("Canal ${i + 1}") },
+                        singleLine = true, label = { Text(stringResource(R.string.cfx_channel_fmt, i + 1)) },
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = { if (i > 0) { val t = channels[i - 1]; channels[i - 1] = channels[i]; channels[i] = t } },
                         enabled = i > 0) {
-                        Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Monter")
+                        Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.common_move_up))
                     }
                     IconButton(onClick = { if (i < channels.size - 1) { val t = channels[i + 1]; channels[i + 1] = channels[i]; channels[i] = t } },
                         enabled = i < channels.size - 1) {
-                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Descendre")
+                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.common_move_down))
                     }
                     IconButton(onClick = {
                         channels.removeAt(i)
@@ -170,7 +172,7 @@ fun CustomFixtureEditorSheet(
                         // à une valeur différente (repli lisible).
                         if (footprintText.trim().toIntOrNull() == channels.size + 1) footprintText = channels.size.toString()
                     }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Supprimer")
+                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete))
                     }
                 }
             }
@@ -179,18 +181,18 @@ fun CustomFixtureEditorSheet(
                 modifier = Modifier.padding(top = 8.dp)
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null)
-                Spacer(Modifier.width(6.dp)); Text("Ajouter un canal")
+                Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.cfx_add_channel))
             }
 
             // Footprint réglable (nb de canaux occupés ; défaut = nb de canaux).
             OutlinedTextField(
                 value = footprintText,
                 onValueChange = { new -> footprintText = new.filter { it.isDigit() } },
-                label = { Text("Empreinte DMX (nb de canaux)") },
+                label = { Text(stringResource(R.string.cfx_footprint)) },
                 placeholder = { Text(channels.size.coerceAtLeast(1).toString()) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                supportingText = { Text("Défaut : nb de canaux. Réglable ≥ 1.") },
+                supportingText = { Text(stringResource(R.string.cfx_footprint_hint)) },
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
             )
 
@@ -201,7 +203,7 @@ fun CustomFixtureEditorSheet(
             ) {
                 if (onDelete != null) {
                     TextButton(onClick = { onDelete(id) }) {
-                        Text("Supprimer", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.common_delete), color = MaterialTheme.colorScheme.error)
                     }
                 }
                 Spacer(Modifier.weight(1f))
@@ -218,7 +220,7 @@ fun CustomFixtureEditorSheet(
                             )
                         )
                     }
-                ) { Text("Enregistrer le type") }
+                ) { Text(stringResource(R.string.cfx_save_type)) }
             }
         }
     }

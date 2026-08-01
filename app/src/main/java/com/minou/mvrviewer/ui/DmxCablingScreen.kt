@@ -68,6 +68,8 @@ import com.minou.mvrviewer.sync.DmxCablingCalc
 import com.minou.mvrviewer.sync.DmxDistributor
 import com.minou.mvrviewer.sync.DmxDistributorKind
 import com.minou.mvrviewer.sync.defaultDmxCores
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * ONGLET CÂBLAGE DMX (phase 3) — même principe que la Socapex (phase 2) mais pour
@@ -121,16 +123,16 @@ fun DmxCablingPanel(
         ) {
             FilledTonalButton(onClick = { dmx.addDistributor(DmxDistributorKind.SIMPLE) }) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp)); Text("DMX simple")
+                Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.dmx_simple_line))
             }
             FilledTonalButton(onClick = { showAddMulti = true }) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp)); Text("Multipaire")
+                Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.dmx_multicore))
             }
         }
         val assignedCount = dmx.assignments.size
         Text(
-            "$assignedCount / ${fixtures.size} projecteur(s) câblé(s) en DMX",
+            stringResource(R.string.dmx_assigned_fmt, assignedCount, fixtures.size),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
@@ -141,13 +143,13 @@ fun DmxCablingPanel(
             resolved == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
-                    Text("Analyse des empreintes DMX…", modifier = Modifier.padding(top = 12.dp),
+                    Text(stringResource(R.string.dmx_analysing), modifier = Modifier.padding(top = 12.dp),
                         style = MaterialTheme.typography.bodyMedium)
                 }
             }
             dmx.distributors.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    "Ajoutez une ligne DMX simple ou une multipaire pour commencer à câbler le DMX.",
+                    stringResource(R.string.dmx_empty_hint),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(32.dp)
@@ -233,16 +235,16 @@ private fun DmxDistributorCard(
                 Column(Modifier.weight(1f)) {
                     Text(dist.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     val kindTxt = if (dist.kind == DmxDistributorKind.MULTI)
-                        "Multipaire · ${dist.coreCount} paires" else "Ligne DMX simple"
+                        stringResource(R.string.dmx_multicore_cores_fmt, dist.coreCount) else stringResource(R.string.dmx_single_line_label)
                     Text(
-                        "$kindTxt · total $total canaux",
+                        stringResource(R.string.dmx_total_channels_fmt, kindTxt, total),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Modifier") }
+                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.common_edit)) }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Supprimer",
+                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete),
                         tint = MaterialTheme.colorScheme.error)
                 }
             }
@@ -270,7 +272,7 @@ private fun DmxCoreRow(
 ) {
     val load = DmxCablingCalc.coreLoad(dist, core, dmx.assignments.values.toList(), channelsOf, universeOf)
     // Libellé du départ : « Départ k » pour une multipaire, « Ligne » pour une simple.
-    val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) "Paire $core" else "Ligne"
+    val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) stringResource(R.string.dmx_core_fmt, core) else stringResource(R.string.dmx_line)
     // Affectations de CE départ (réutilisées pour les chips ET le bouton « Vider »).
     val fx = dmx.assignments.values.filter { it.distributor == dist.id && it.core == core }
     // Confirmation « Vider le départ ? » locale à la ligne (n'affecte que ce départ).
@@ -280,7 +282,7 @@ private fun DmxCoreRow(
             Text(coreLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
                 color = color, modifier = Modifier.weight(1f))
             if (load.unknownCount > 0) {
-                Icon(Icons.Filled.Warning, contentDescription = "Empreinte inconnue",
+                Icon(Icons.Filled.Warning, contentDescription = stringResource(R.string.dmx_unknown_footprint_cd),
                     tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
             }
@@ -292,35 +294,35 @@ private fun DmxCoreRow(
                 fontWeight = if (load.over512) FontWeight.Bold else FontWeight.Normal
             )
             IconButton(onClick = { onAssign(core) }) {
-                Icon(Icons.Filled.Add, contentDescription = "Affecter des projecteurs")
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.cabling_assign_fixtures_cd))
             }
             // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
             // affectation vers CE départ. Conserve l'affectation par la liste (bouton +).
             IconButton(onClick = {
                 onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.DMX, dist.id, core))
             }) {
-                Icon(Icons.Filled.Map, contentDescription = "Sélectionner sur le plan")
+                Icon(Icons.Filled.Map, contentDescription = stringResource(R.string.cabling_select_on_plan_cd))
             }
             // VIDER LE DÉPART : retire toutes les affectations de CE départ (pas les
             // autres). Masqué si le départ est déjà vide.
             if (fx.isNotEmpty()) {
                 IconButton(onClick = { confirmClear = true }) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Vider le départ",
+                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.dmx_clear_core_cd),
                         tint = MaterialTheme.colorScheme.error)
                 }
             }
         }
         // Alertes DISCRÈTES (sans blocage) : dépassement de 512, univers mélangés.
         if (load.over512) {
-            Text("⚠ dépasse 512 canaux (un départ = un univers)",
+            Text("⚠ " + stringResource(R.string.dmx_over_512),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
         }
         if (load.mixedUniverse) {
-            Text("⚠ univers de patch mélangés : ${load.universes.joinToString(", ")}",
+            Text("⚠ " + stringResource(R.string.dmx_mixed_universes_fmt, load.universes.joinToString(", ")),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
         }
         if (fx.isEmpty()) {
-            Text("  — aucun projecteur", style = MaterialTheme.typography.bodySmall,
+            Text("  — " + stringResource(R.string.cabling_no_fixture), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             FlowRow(
@@ -333,7 +335,7 @@ private fun DmxCoreRow(
                         onClick = { dmx.unassign(a.fixture) },
                         label = { Text(fixtureLabel[a.fixture] ?: a.fixture, maxLines = 1) },
                         trailingIcon = {
-                            Icon(Icons.Filled.Close, contentDescription = "Retirer", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.common_remove), modifier = Modifier.size(16.dp))
                         }
                     )
                 }
@@ -342,19 +344,19 @@ private fun DmxCoreRow(
     }
 
     if (confirmClear) {
-        val departLabel = if (dist.kind == DmxDistributorKind.MULTI) "la paire $core" else "la ligne"
+        val departLabel = if (dist.kind == DmxDistributorKind.MULTI) stringResource(R.string.dmx_the_core_fmt, core) else stringResource(R.string.dmx_the_line)
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             confirmButton = {
                 TextButton(onClick = { dmx.clearCore(dist.id, core); confirmClear = false }) {
-                    Text("Vider")
+                    Text(stringResource(R.string.common_clear))
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Annuler") } },
-            title = { Text("Vider le départ ?") },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.common_cancel)) } },
+            title = { Text(stringResource(R.string.dmx_clear_core_q)) },
             text = {
-                Text("Retirer les ${fx.size} projecteur(s) de $departLabel de « ${dist.name} » ? " +
-                    "Les autres départs ne sont pas touchés.")
+                Text(stringResource(R.string.dmx_clear_core_msg_fmt, fx.size, departLabel, dist.name) + (
+                    stringResource(R.string.dmx_clear_core_msg2)))
             }
         )
     }
@@ -377,20 +379,20 @@ private fun DmxFixturePickerDialog(
         q.isEmpty() || it.label.contains(q, true) || (it.spec?.contains(q, true) == true) ||
             (it.address?.contains(q, true) == true)
     }
-    val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) "paire $core" else "ligne"
+    val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) stringResource(R.string.dmx_core_lc_fmt, core) else stringResource(R.string.dmx_line_lc)
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = { onConfirm(sel.toSet()) }, enabled = sel.isNotEmpty()) {
-            Text("Affecter (${sel.size})")
+            Text(stringResource(R.string.cabling_assign_fmt, sel.size))
         } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
-        title = { Text("${dist.name} · $coreLabel") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
+        title = { Text(stringResource(R.string.dmx_dist_core_fmt, dist.name, coreLabel)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    placeholder = { Text("Filtrer (N°, nom, type, patch…)") },
+                    placeholder = { Text(stringResource(R.string.dmx_filter_hint)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -417,11 +419,11 @@ private fun DmxFixturePickerDialog(
                                     color = if (elsewhere) MaterialTheme.colorScheme.onSurfaceVariant
                                     else MaterialTheme.colorScheme.onSurface
                                 )
-                                val empreinte = f.channels?.let { "$it canaux" } ?: "empreinte inconnue"
-                                val patch = f.address?.let { " · patch $it" } ?: ""
+                                val empreinte = f.channels?.let { stringResource(R.string.fx_channels_count, it) } ?: stringResource(R.string.dmx_unknown_footprint)
+                                val patch = f.address?.let { stringResource(R.string.dmx_patch_fmt, it) } ?: ""
                                 val whereTxt = when {
-                                    here -> " · déjà sur ce départ"
-                                    elsewhere -> " · déjà câblé ailleurs → déplacer"
+                                    here -> " · " + stringResource(R.string.dmx_already_here)
+                                    elsewhere -> " · " + stringResource(R.string.cabling_already_elsewhere)
                                     else -> ""
                                 }
                                 Text(
@@ -451,16 +453,16 @@ private fun DmxDistributorEditDialog(
         confirmButton = { TextButton(onClick = {
             if (name.isNotBlank()) dmx.rename(dist.id, name.trim()); onDismiss()
         }) { Text("OK") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
-        title = { Text("Modifier « ${dist.name} »") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) } },
+        title = { Text(stringResource(R.string.cabling_edit_dist_fmt, dist.name)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = name, onValueChange = { name = it }, singleLine = true,
-                    label = { Text("Nom") }, modifier = Modifier.fillMaxWidth()
+                    label = { Text(stringResource(R.string.label_field_name)) }, modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("Couleur", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.common_color), style = MaterialTheme.typography.labelMedium)
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -480,22 +482,22 @@ private fun DmxDistributorEditDialog(
                 // Nombre de paires : seulement pour une multipaire.
                 if (dist.kind == DmxDistributorKind.MULTI) {
                     Spacer(Modifier.height(12.dp))
-                    Text("Nombre de paires", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.dmx_core_count), style = MaterialTheme.typography.labelMedium)
                     Row(verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(top = 4.dp)) {
                         OutlinedButton(
                             onClick = { dmx.setCores(dist.id, dist.coreCount - 1) },
                             enabled = dist.coreCount > 1,
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                        ) { Icon(Icons.Filled.Remove, contentDescription = "Une paire de moins", modifier = Modifier.size(18.dp)) }
+                        ) { Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.dmx_one_core_less), modifier = Modifier.size(18.dp)) }
                         Text("${dist.coreCount}", modifier = Modifier.padding(horizontal = 16.dp),
                             style = MaterialTheme.typography.titleMedium)
                         OutlinedButton(
                             onClick = { dmx.setCores(dist.id, dist.coreCount + 1) },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                        ) { Icon(Icons.Filled.Add, contentDescription = "Une paire de plus", modifier = Modifier.size(18.dp)) }
+                        ) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.dmx_one_core_more), modifier = Modifier.size(18.dp)) }
                     }
-                    Text("Réduire retire les projecteurs câblés sur les paires supprimées.",
+                    Text(stringResource(R.string.dmx_reduce_warning),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp))
@@ -511,24 +513,24 @@ private fun AddMultiDialog(onConfirm: (Int) -> Unit, onDismiss: () -> Unit) {
     var cores by remember { mutableStateOf(defaultDmxCores(DmxDistributorKind.MULTI)) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = { onConfirm(cores) }) { Text("Créer") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
-        title = { Text("Nouvelle multipaire DMX") },
+        confirmButton = { TextButton(onClick = { onConfirm(cores) }) { Text(stringResource(R.string.common_create)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
+        title = { Text(stringResource(R.string.dmx_new_multicore)) },
         text = {
             Column {
-                Text("Combien de paires ?", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.dmx_how_many_cores), style = MaterialTheme.typography.bodyMedium)
                 Row(verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 8.dp)) {
                     OutlinedButton(
                         onClick = { if (cores > 1) cores-- }, enabled = cores > 1,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                    ) { Icon(Icons.Filled.Remove, contentDescription = "Moins", modifier = Modifier.size(18.dp)) }
+                    ) { Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.common_minus), modifier = Modifier.size(18.dp)) }
                     Text("$cores", modifier = Modifier.padding(horizontal = 16.dp),
                         style = MaterialTheme.typography.titleMedium)
                     OutlinedButton(
                         onClick = { cores++ },
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                    ) { Icon(Icons.Filled.Add, contentDescription = "Plus", modifier = Modifier.size(18.dp)) }
+                    ) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.common_plus), modifier = Modifier.size(18.dp)) }
                 }
             }
         }

@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.ImportedModel
 import com.minou.mvrviewer.mvr.SceneModelLoader
 import kotlin.math.max
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * PANNEAU DE PLACEMENT DES MODÈLES 3D IMPORTÉS (chantier #3).
@@ -78,10 +80,10 @@ fun ModelPlacementPanel(
         Column(modifier = Modifier.padding(10.dp)) {
             val pad = PaddingValues(2.dp)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Modèles 3D (${models.size})",
+                Text(stringResource(R.string.tool_models_fmt, models.size),
                     style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                 TextButton(contentPadding = pad, onClick = onClose) {
-                    Text("Fermer", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.common_close), style = MaterialTheme.typography.labelSmall)
                 }
             }
 
@@ -105,15 +107,15 @@ fun ModelPlacementPanel(
                                 // décode qu'au rendu) — on le dit, mais on l'affiche,
                                 // car c'est lui qui consomme le budget cumulé.
                                 if (m.format == SceneModelLoader.Format.GLTF.name)
-                                    "glTF · ≈ ${m.triangles} triangles · unité détectée : mètre"
-                                else "${m.triangles} triangles · unité détectée : " +
-                                    if (m.unitScaleToMm > 1f) "mètre" else "millimètre",
+                                    stringResource(R.string.model_gltf_info_fmt, m.triangles, stringResource(R.string.unit_metre))
+                                else stringResource(R.string.model_info_fmt, m.triangles,
+                                    stringResource(if (m.unitScaleToMm > 1f) R.string.unit_metre else R.string.unit_millimetre)),
                                 style = MaterialTheme.typography.labelSmall, color = Color(0xFF888888),
                                 maxLines = 1, overflow = TextOverflow.Ellipsis
                             )
                         }
                         IconButton(onClick = { onRemove(m) }, modifier = Modifier.size(30.dp)) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Retirer",
+                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_remove),
                                 tint = Color(0xFFC62828), modifier = Modifier.size(18.dp))
                         }
                     }
@@ -121,7 +123,7 @@ fun ModelPlacementPanel(
             }
             TextButton(contentPadding = pad, onClick = onAdd) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Text(" Ajouter un modèle…", style = MaterialTheme.typography.labelSmall)
+                Text(" " + stringResource(R.string.model_add), style = MaterialTheme.typography.labelSmall)
             }
 
             val model = sel ?: return@Column
@@ -137,10 +139,10 @@ fun ModelPlacementPanel(
 
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Visible", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.common_visible), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 Switch(checked = tf.visible, onCheckedChange = { tf.visible = it; onChanged() })
             }
-            Text("Déplacer", style = MaterialTheme.typography.bodyMedium,
+            Text(stringResource(R.string.common_move), style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
@@ -154,7 +156,7 @@ fun ModelPlacementPanel(
             }
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Hauteur", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.common_height), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
                 OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
                     onClick = { tf.offsetZ -= step; onChanged() }) { Text("−") }
                 OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
@@ -162,7 +164,7 @@ fun ModelPlacementPanel(
             }
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Rotation", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.common_rotation), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
                 OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
                     onClick = { tf.rotationDeg -= 5; onChanged() }) { Text("−5°") }
                 OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
@@ -170,7 +172,7 @@ fun ModelPlacementPanel(
             }
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Échelle", modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.common_scale), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
                 OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
                     onClick = { tf.scale /= 1.1; onChanged() }) { Text("÷") }
                 OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
@@ -191,10 +193,10 @@ fun ModelPlacementPanel(
                 onChanged()
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
-                Text("Homothétie", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.common_uniform_scale), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 TextButton(contentPadding = pad,
                     onClick = { applyHomothety(1.0, syncSlider = true, syncText = true) }) {
-                    Text("Réinitialiser", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.common_reset), style = MaterialTheme.typography.labelSmall)
                 }
             }
             Slider(
@@ -231,7 +233,7 @@ fun ModelPlacementPanel(
                     homoLog = homothetySlider(1.0); homoText = formatHomothety(1.0)
                     onChanged()
                 }
-            ) { Text("Réinitialiser le placement", style = MaterialTheme.typography.labelSmall) }
+            ) { Text(stringResource(R.string.model_reset_placement), style = MaterialTheme.typography.labelSmall) }
         }
     }
 }

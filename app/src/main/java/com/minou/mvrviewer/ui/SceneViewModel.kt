@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
+import com.minou.mvrviewer.mvr.SceneModelLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -35,6 +36,19 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = mutableStateOf<UiState>(UiState.Home)
     val state: State<UiState> = _state
+
+    /**
+     * OBJET 3D ouvert SEUL depuis l'accueil : l'URI du modèle à importer dans
+     * la scène (vide) qui vient d'être ouverte. Consommé une fois par la vue 3D.
+     *
+     * Miroir du chemin iOS (RootView.openModel) : aucun .mvr n'est fabriqué —
+     * une scène VIDE suffit, et tout le visualiseur (navigation, vue plan,
+     * plan de repère, panneau de placement) est réutilisé tel quel.
+     */
+    private val _pendingModelUri = mutableStateOf<Uri?>(null)
+    val pendingModelUri: State<Uri?> = _pendingModelUri
+
+    fun consumePendingModelUri() { _pendingModelUri.value = null }
 
     /**
      * Avancement NOMMÉ du chargement (lot A #4), partagé par l'accueil (lecture
@@ -73,6 +87,18 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = UiState.Loading(name)
         progress.restart()
         progress.report(LoadStep.READ_MVR, 0f)
+        // AIGUILLAGE PAR FORMAT (même geste pour l'utilisateur, comme iOS) : un
+        // OBJET 3D choisi ici n'est pas un show — le passer à MvrParser échouait
+        // en « fichier illisible ». On ouvre alors une scène VIDE et on importe
+        // le modèle dedans.
+        val modelFormat = runCatching {
+            SceneModelLoader.sniff(getApplication<Application>().contentResolver, uri, name)
+        }.getOrNull()
+        if (modelFormat != null && modelFormat != SceneModelLoader.Format.UNKNOWN
+            && modelFormat != SceneModelLoader.Format.SKP) {
+            openModelAlone(uri, name)
+            return
+        }
         loadJob = viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
@@ -96,6 +122,40 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                     // URI périmée (permission perdue, fichier déplacé) → retirée des récents.
                     runCatching { RecentProjects.remove(getApplication(), uri.toString()) }
                     progress.finish()   // plus de chargement en cours
+                    UiState.Error(errorText(it))
+                }
+            )
+        }
+    }
+
+    /**
+     * Ouvre un OBJET 3D SEUL : scène VIDE + import du modèle par la vue 3D.
+     *
+     * Volontairement PAS inscrit dans les projets récents : la réouverture
+     * depuis les récents repasse par le funnel .mvr, qui ne saurait pas relire
+     * un objet 3D. Mieux vaut ne rien promettre que promettre à faux (même
+     * décision qu'iOS).
+     */
+    private fun openModelAlone(uri: Uri, name: String) {
+        loadJob = viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver
+                        .openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException(
+                            getApplication<Application>().getString(R.string.err_unreadable_file))
+                }
+            }
+            _state.value = result.fold(
+                onSuccess = { bytes ->
+                    progress.report(LoadStep.READ_MVR, 1f)
+                    // Les OCTETS DU MODÈLE donnent la clé de projet : rouvrir le
+                    // même objet retrouve son placement.
+                    _pendingModelUri.value = uri
+                    UiState.Loaded(MvrScene(emptyList(), emptyMap()), name, bytes)
+                },
+                onFailure = {
+                    progress.finish()
                     UiState.Error(errorText(it))
                 }
             )

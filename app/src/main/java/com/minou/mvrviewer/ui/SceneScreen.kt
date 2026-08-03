@@ -54,6 +54,9 @@ fun SceneScreen(
     modifier: Modifier = Modifier,
     sync: SyncViewModel? = null,
     onReopenBytes: (ByteArray, String) -> Unit = { _, _ -> },
+    /// Objet 3D à importer dès l'ouverture (fichier 3D choisi à l'accueil).
+    initialModelUri: android.net.Uri? = null,
+    onInitialModelConsumed: () -> Unit = {},
     // Avancement NOMMÉ du chargement (#4) : la vue 3D poursuit la progression
     // commencée à l'accueil (lecture/parse) jusqu'à 100 %.
     progress: LoadProgress? = null
@@ -308,10 +311,12 @@ fun SceneScreen(
                 withContext(Dispatchers.IO) { ProjectStore.saveRefPlanHiddenLayers(ctx, projectKey, remoteHidden) }
                 m.showSatellite?.let { lastSatellitePushed = it; options.showSatellite = it }
                 m.refPlanTransform?.let { t ->
-                    // HOMOTHÉTIE = réglage LOCAL : on la PRÉSERVE telle quelle,
-                    // sinon un simple écho distant la remettrait à 1 et le plan
-                    // changerait de taille sous les yeux de son propriétaire.
-                    val nt = LocalMapper.toTransform(t, referencePlan?.transform?.homothety ?: 1.0)
+                    // HOMOTHÉTIE + BASCULE (tilt) = réglages LOCAUX : on les
+                    // PRÉSERVE tels quels, sinon un simple écho distant les
+                    // remettrait à leur défaut sous les yeux de son propriétaire.
+                    val nt = LocalMapper.toTransform(
+                        t, referencePlan?.transform?.homothety ?: 1.0, referencePlan?.transform?.tiltDeg ?: 0.0
+                    )
                     lastTransformSig = transformSig(nt)
                     sharedTransform = nt.copy()
                     referencePlan?.let { rp ->
@@ -788,6 +793,8 @@ fun SceneScreen(
         SceneMode.THREE_D -> Scene3DScreen(
             scene = scene,
             mvrBytes = mvrBytes,
+            initialModelUri = initialModelUri,
+            onInitialModelConsumed = onInitialModelConsumed,
             options = options,
             gdtfOverrides = gdtfOverrides,
             // Overrides de patch : sert au NOM effectif des étiquettes 3D, de la

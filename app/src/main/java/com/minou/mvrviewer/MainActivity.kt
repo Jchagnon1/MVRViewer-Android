@@ -111,6 +111,10 @@ private fun App(
                 onClose = { sync.detach(); vm.reset() },
                 sync = sync,
                 onReopenBytes = { bytes, name -> vm.openBytes(bytes, name) },
+                // OBJET 3D ouvert seul depuis l'accueil : la scène est vide, la
+                // vue 3D importe ce modèle au premier affichage.
+                initialModelUri = vm.pendingModelUri.value,
+                onInitialModelConsumed = { vm.consumePendingModelUri() },
                 // La suite du chargement (3D, GDTF, plan) continue d'alimenter la
                 // MÊME progression : le pourcentage est global, pas par écran.
                 progress = vm.progress

@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardActions
@@ -2016,20 +2017,25 @@ fun PlanScreen(
                     Text(stringResource(R.string.common_move), style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetX -= step; bump() }) { Text("←") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetX += step; bump() }) { Text("→") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetY += step; bump() }) { Text("↑") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.offsetY -= step; bump() }) { Text("↓") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetX -= step; bump() }) { Text("←") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetX += step; bump() }) { Text("→") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetY += step; bump() }) { Text("↑") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetY -= step; bump() }) { Text("↓") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(stringResource(R.string.common_rotation), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.rotationDeg -= 5; bump() }) { Text("−5°") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.rotationDeg += 5; bump() }) { Text("+5°") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.rotationDeg -= 5; bump() }) { Text("−5°") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.rotationDeg += 5; bump() }) { Text("+5°") }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(stringResource(R.string.common_rotation_vertical), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.tiltDeg = (tf.tiltDeg - 5).coerceIn(-90.0, 90.0); bump() }) { Text("−5°") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.tiltDeg = (tf.tiltDeg + 5).coerceIn(-90.0, 90.0); bump() }) { Text("+5°") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(stringResource(R.string.common_scale), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale /= 1.1; bump() }) { Text("÷") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f), onClick = { tf.scale *= 1.1; bump() }) { Text("×") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.scale /= 1.1; bump() }) { Text("÷") }
+                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.scale *= 1.1; bump() }) { Text("×") }
                     }
 
                     // ---- HOMOTHÉTIE (mise à l'échelle PROPORTIONNELLE) ----
@@ -2052,7 +2058,7 @@ fun PlanScreen(
                         Text(stringResource(R.string.common_uniform_scale), style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f))
                         androidx.compose.material3.TextButton(
-                            contentPadding = pad,
+                            contentPadding = pad, colors = panelTextButtonColors(),
                             onClick = { applyHomothety(1.0, syncSlider = true, syncText = true) }
                         ) { Text(stringResource(R.string.common_reset), style = MaterialTheme.typography.labelSmall) }
                     }
@@ -2178,13 +2184,13 @@ fun PlanScreen(
                                             if (i > 0) { exportViews.add(i - 1, exportViews.removeAt(i)); exportFile = null }
                                         },
                                         modifier = Modifier.size(26.dp)
-                                    ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.common_move_up)) }
+                                    ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.common_move_up), tint = Color(0xFF111111)) }
                                     IconButton(
                                         onClick = {
                                             if (i < exportViews.size - 1) { exportViews.add(i + 1, exportViews.removeAt(i)); exportFile = null }
                                         },
                                         modifier = Modifier.size(26.dp)
-                                    ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.common_move_down)) }
+                                    ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.common_move_down), tint = Color(0xFF111111)) }
                                     IconButton(
                                         onClick = { exportViews.removeAt(i); exportFile = null },
                                         modifier = Modifier.size(26.dp)
@@ -2226,12 +2232,12 @@ fun PlanScreen(
                         }
                         val ready = exportFile
                         androidx.compose.material3.OutlinedButton(
-                            enabled = ready != null,
+                            enabled = ready != null, colors = panelButtonColors(),
                             onClick = { ready?.let { sharePlanPdf(ctxPlan, it) } },
                             modifier = Modifier.weight(1f)
                         ) { Text(stringResource(R.string.common_send), style = MaterialTheme.typography.labelMedium) }
                         androidx.compose.material3.OutlinedButton(
-                            enabled = ready != null,
+                            enabled = ready != null, colors = panelButtonColors(),
                             onClick = { ready?.let { printPlanPdf(ctxPlan, it) } },
                             modifier = Modifier.weight(1f)
                         ) { Text(stringResource(R.string.common_print), style = MaterialTheme.typography.labelMedium) }
@@ -3200,3 +3206,20 @@ internal fun planData(scene: MvrScene, overrides: PatchOverrides = PatchOverride
     val cx = (minX + maxX) / 2f; val cy = (minY + maxY) / 2f
     return PlanData(fixtures, structure, structureKeys, cx, cy, max(maxX - minX, 1f), max(maxY - minY, 1f))
 }
+
+/**
+ * Couleurs EXPLICITES des boutons des panneaux à fond BLANC forcé (plan de
+ * repère, export PDF) — même pièges/fix que [panelButtonColors] dans
+ * `ModelPlacementPanel.kt` : les boutons Material3 tirent leur `contentColor`
+ * ambiant du `colorScheme` de l'app (SOMBRE), pas de la `Surface` blanche qui
+ * les héberge → libellés clairs sur fond blanc, boutons VIDES en thème sombre.
+ */
+@Composable
+private fun panelButtonColors() = ButtonDefaults.outlinedButtonColors(
+    contentColor = Color(0xFF111111)
+)
+
+@Composable
+private fun panelTextButtonColors() = ButtonDefaults.textButtonColors(
+    contentColor = Color(0xFF1E88E5)
+)

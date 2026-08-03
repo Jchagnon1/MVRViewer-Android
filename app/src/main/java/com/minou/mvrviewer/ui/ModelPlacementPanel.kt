@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -82,7 +83,7 @@ fun ModelPlacementPanel(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.tool_models_fmt, models.size),
                     style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                TextButton(contentPadding = pad, onClick = onClose) {
+                TextButton(contentPadding = pad, colors = panelTextButtonColors(), onClick = onClose) {
                     Text(stringResource(R.string.common_close), style = MaterialTheme.typography.labelSmall)
                 }
             }
@@ -121,7 +122,7 @@ fun ModelPlacementPanel(
                     }
                 }
             }
-            TextButton(contentPadding = pad, onClick = onAdd) {
+            TextButton(contentPadding = pad, colors = panelTextButtonColors(), onClick = onAdd) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                 Text(" " + stringResource(R.string.model_add), style = MaterialTheme.typography.labelSmall)
             }
@@ -145,37 +146,45 @@ fun ModelPlacementPanel(
             Text(stringResource(R.string.common_move), style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.offsetX -= step; onChanged() }) { Text("←") }
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.offsetX += step; onChanged() }) { Text("→") }
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.offsetY += step; onChanged() }) { Text("↑") }
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.offsetY -= step; onChanged() }) { Text("↓") }
             }
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(stringResource(R.string.common_height), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.offsetZ -= step; onChanged() }) { Text("−") }
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.offsetZ += step; onChanged() }) { Text("+") }
             }
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(stringResource(R.string.common_rotation), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.rotationDeg -= 5; onChanged() }) { Text("−5°") }
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.rotationDeg += 5; onChanged() }) { Text("+5°") }
             }
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(stringResource(R.string.common_rotation_vertical), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
+                    onClick = { tf.tiltDeg = (tf.tiltDeg - 5).coerceIn(-90.0, 90.0); onChanged() }) { Text("−5°") }
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
+                    onClick = { tf.tiltDeg = (tf.tiltDeg + 5).coerceIn(-90.0, 90.0); onChanged() }) { Text("+5°") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(stringResource(R.string.common_scale), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.scale /= 1.1; onChanged() }) { Text("÷") }
-                OutlinedButton(contentPadding = pad, modifier = Modifier.weight(1f),
+                OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f),
                     onClick = { tf.scale *= 1.1; onChanged() }) { Text("×") }
             }
 
@@ -194,7 +203,7 @@ fun ModelPlacementPanel(
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                 Text(stringResource(R.string.common_uniform_scale), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                TextButton(contentPadding = pad,
+                TextButton(contentPadding = pad, colors = panelTextButtonColors(),
                     onClick = { applyHomothety(1.0, syncSlider = true, syncText = true) }) {
                     Text(stringResource(R.string.common_reset), style = MaterialTheme.typography.labelSmall)
                 }
@@ -227,7 +236,7 @@ fun ModelPlacementPanel(
                 )
             }
             TextButton(
-                contentPadding = pad,
+                contentPadding = pad, colors = panelTextButtonColors(),
                 onClick = {
                     tf.reset()
                     homoLog = homothetySlider(1.0); homoText = formatHomothety(1.0)
@@ -237,3 +246,22 @@ fun ModelPlacementPanel(
         }
     }
 }
+
+/**
+ * Couleurs EXPLICITES des boutons du panneau.
+ *
+ * ⚠️ Le panneau force un fond BLANC (`Surface(color = Color.White)`) alors que
+ * les boutons Material3 tirent leurs couleurs du `colorScheme` de l'app —
+ * SOMBRE. Résultat en thème sombre : libellés clairs sur fond blanc, donc des
+ * boutons VIDES et apparemment morts (retour testeur, capture à l'appui). Le
+ * `contentColor` de la Surface ne les couvre pas : un bouton impose le sien.
+ */
+@Composable
+private fun panelButtonColors() = ButtonDefaults.outlinedButtonColors(
+    contentColor = Color(0xFF111111)
+)
+
+@Composable
+private fun panelTextButtonColors() = ButtonDefaults.textButtonColors(
+    contentColor = Color(0xFF1E88E5)
+)

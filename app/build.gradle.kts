@@ -15,8 +15,8 @@ android {
         applicationId = "com.minou.mvrviewer"
         minSdk = 28  // requis par SceneView/Filament (vue 3D)
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.4"
+        versionCode = 17
+        versionName = "1.7"
         vectorDrawables { useSupportLibrary = true }
     }
 

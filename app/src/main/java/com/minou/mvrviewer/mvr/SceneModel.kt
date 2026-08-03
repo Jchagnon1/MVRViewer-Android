@@ -30,6 +30,8 @@ class SceneModelTransform(
     var offsetZ: Double = 0.0,
     /** Rotation autour de la verticale (Z), en degrés. */
     var rotationDeg: Double = 0.0,
+    /** Bascule autour de l'axe horizontal (X), en degrés [-90, 90]. */
+    var tiltDeg: Double = 0.0,
     /** Échelle de placement (rattrape l'unité / le cadrage initial). */
     var scale: Double = 1.0,
     /**
@@ -44,12 +46,12 @@ class SceneModelTransform(
     /** Échelle RÉELLEMENT appliquée : la SEULE valeur que doit lire le rendu. */
     val effScale: Double get() = scale * homothety
 
-    fun copy() = SceneModelTransform(offsetX, offsetY, offsetZ, rotationDeg, scale, homothety, visible)
+    fun copy() = SceneModelTransform(offsetX, offsetY, offsetZ, rotationDeg, tiltDeg, scale, homothety, visible)
 
     /** Remet les valeurs par défaut (bouton « Réinitialiser » du panneau). */
     fun reset() {
         offsetX = 0.0; offsetY = 0.0; offsetZ = 0.0
-        rotationDeg = 0.0; scale = 1.0; homothety = 1.0; visible = true
+        rotationDeg = 0.0; tiltDeg = 0.0; scale = 1.0; homothety = 1.0; visible = true
     }
 }
 

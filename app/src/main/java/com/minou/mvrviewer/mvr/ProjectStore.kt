@@ -194,13 +194,13 @@ object ProjectStore {
     private fun transformJson(t: ReferencePlanTransform) = JSONObject()
         .put("offsetX", t.offsetX).put("offsetY", t.offsetY).put("rotationDeg", t.rotationDeg)
         .put("scale", t.scale).put("heightZ", t.heightZ).put("visible", t.visible)
-        .put("homothety", t.homothety)
+        .put("homothety", t.homothety).put("tiltDeg", t.tiltDeg)
 
     private fun transformFrom(o: JSONObject) = ReferencePlanTransform(
         offsetX = o.optDouble("offsetX", 0.0), offsetY = o.optDouble("offsetY", 0.0),
         rotationDeg = o.optDouble("rotationDeg", 0.0), scale = o.optDouble("scale", 1.0),
         heightZ = o.optDouble("heightZ", 0.0), visible = o.optBoolean("visible", true),
-        homothety = o.optDouble("homothety", 1.0)
+        tiltDeg = o.optDouble("tiltDeg", 0.0), homothety = o.optDouble("homothety", 1.0)
     )
 
     // ---- Calibration GPS ----
@@ -519,7 +519,7 @@ object ProjectStore {
     // quand elle est absente (même consigne que `transformJson` du plan de repère).
     private fun modelTransformJson(t: SceneModelTransform) = JSONObject()
         .put("offsetX", t.offsetX).put("offsetY", t.offsetY).put("offsetZ", t.offsetZ)
-        .put("rotationDeg", t.rotationDeg).put("scale", t.scale)
+        .put("rotationDeg", t.rotationDeg).put("tiltDeg", t.tiltDeg).put("scale", t.scale)
         .put("homothety", t.homothety).put("visible", t.visible)
 
     private fun modelTransformFrom(o: JSONObject?): SceneModelTransform {
@@ -527,6 +527,7 @@ object ProjectStore {
         return SceneModelTransform(
             offsetX = o.optDouble("offsetX", 0.0), offsetY = o.optDouble("offsetY", 0.0),
             offsetZ = o.optDouble("offsetZ", 0.0), rotationDeg = o.optDouble("rotationDeg", 0.0),
+            tiltDeg = o.optDouble("tiltDeg", 0.0),
             scale = o.optDouble("scale", 1.0), homothety = o.optDouble("homothety", 1.0),
             visible = o.optBoolean("visible", true)
         )

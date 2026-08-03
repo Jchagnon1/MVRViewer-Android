@@ -28,13 +28,15 @@ object LocalMapper {
     )
 
     /**
-     * DTO distant → transformée locale. `localHomothety` est l'homothétie
-     * COURANTE de ce poste : elle est PRÉSERVÉE telle quelle (le distant n'en
-     * transporte pas), sinon le moindre écho la remettrait à 1.
+     * DTO distant → transformée locale. `localHomothety` et `localTiltDeg` sont
+     * l'homothétie/bascule COURANTES de ce poste : PRÉSERVÉES telles quelles (le
+     * distant n'en transporte pas — champs LOCAUX, cf. `AuditCoding`), sinon le
+     * moindre écho les remettrait à leur défaut.
      */
-    fun toTransform(d: RefPlanTransformDTO, localHomothety: Double = 1.0) = ReferencePlanTransform(
+    fun toTransform(d: RefPlanTransformDTO, localHomothety: Double = 1.0, localTiltDeg: Double = 0.0) = ReferencePlanTransform(
         offsetX = d.offsetX, offsetY = d.offsetY, rotationDeg = d.rotationDeg,
         scale = d.scale, heightZ = d.heightZ, visible = d.visible,
+        tiltDeg = if (localTiltDeg.isFinite()) localTiltDeg else 0.0,
         homothety = if (localHomothety.isFinite() && localHomothety > 0.0) localHomothety else 1.0
     )
 

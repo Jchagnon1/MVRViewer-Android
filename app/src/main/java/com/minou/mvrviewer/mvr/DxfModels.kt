@@ -68,6 +68,13 @@ class ReferencePlanTransform(
     var heightZ: Double = 0.0,
     var visible: Boolean = true,
     /**
+     * Bascule autour de l'axe HORIZONTAL (X), en degrés [-90, 90] — permet de
+     * caler le plan sur une surface en pente. LOCAL À CHAQUE PLATEFORME, comme
+     * iOS : absent de `RefPlanTransformDTO`/`AuditCoding` (format fixé à 6
+     * champs, cf. mémoire), donc jamais synchronisé entre iOS et Android.
+     */
+    var tiltDeg: Double = 0.0,
+    /**
      * HOMOTHÉTIE — facteur de mise à l'échelle PROPORTIONNELLE réglé par
      * l'utilisateur (curseur + valeur éditable), distinct de `scale` qui, lui,
      * rattrape l'unité du fichier / le cadrage initial. Les deux se MULTIPLIENT
@@ -86,16 +93,27 @@ class ReferencePlanTransform(
      */
     val effScale: Double get() = scale * homothety
 
-    /** Point DXF (mm local) → point monde MVR (mm, X/Y au sol). */
+    /**
+     * Point DXF (mm local) → point monde MVR (mm, X/Y au sol). La bascule
+     * (tilt) raccourcit l'empreinte au sol le long de Y AVANT la rotation à
+     * plat — même ordre que [worldZ] et que `referencePlanMatrix` (iOS).
+     */
     fun worldXY(x: Float, y: Float): Pair<Float, Float> {
         val s = effScale
         val r = Math.toRadians(rotationDeg)
         val c = cos(r); val sn = sin(r)
-        val sx = x * s; val sy = y * s
+        val ty = cos(Math.toRadians(tiltDeg))
+        val sx = x * s; val sy = y * s * ty
         return (offsetX + (sx * c - sy * sn)).toFloat() to (offsetY + (sx * sn + sy * c)).toFloat()
     }
 
-    fun copy() = ReferencePlanTransform(offsetX, offsetY, rotationDeg, scale, heightZ, visible, homothety)
+    /** Hauteur (mm monde) d'un point DXF une fois la bascule appliquée. */
+    fun worldZ(y: Float): Float {
+        val s = effScale
+        return (heightZ + y * s * sin(Math.toRadians(tiltDeg))).toFloat()
+    }
+
+    fun copy() = ReferencePlanTransform(offsetX, offsetY, rotationDeg, scale, heightZ, visible, tiltDeg, homothety)
 }
 
 /**

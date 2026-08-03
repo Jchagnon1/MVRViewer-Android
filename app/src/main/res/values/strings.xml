@@ -104,7 +104,8 @@
     <string name="common_rename">Renommer</string>
     <string name="common_reset">Réinitialiser</string>
     <string name="common_reset_short">Réinit.</string>
-    <string name="common_rotation">Rotation</string>
+    <string name="common_rotation">Rotation (à plat)</string>
+    <string name="common_rotation_vertical">Rotation verticale</string>
     <string name="common_save">Enregistrer</string>
     <string name="common_scale">Échelle</string>
     <string name="common_send">Envoyer</string>
@@ -223,6 +224,7 @@
     <string name="home_shared_projects">Projets partagés</string>
     <string name="home_sign_in">Se connecter</string>
     <string name="home_subtitle">Visualiseur de plans lumière MVR / GDTF</string>
+    <string name="home_open_formats_fmt">MVR, ou objet 3D : %1$s</string>
     <string name="join_project">Rejoindre un projet</string>
     <string name="label_field_dmx">Adresse DMX</string>
     <string name="label_field_dmx_line">Ligne DMX</string>
@@ -417,6 +419,8 @@
     <string name="tool_gps_3d">Ma position (3D)</string>
     <string name="tool_import_model">Importer un modèle 3D…</string>
     <string name="tool_import_ref_plan">Importer un plan (DXF, image, PDF)…</string>
+    <string name="model_import_formats_title">Formats pris en charge</string>
+    <string name="model_import_formats_choose">Choisir un fichier…</string>
     <string name="tool_label_settings">Réglage des étiquettes</string>
     <string name="tool_label_size">Taille des étiquettes</string>
     <string name="tool_marker_size">Taille du marqueur</string>

@@ -83,6 +83,13 @@ object SceneModelLoader {
      */
     val CONVERTIBLE_FORMATS = listOf("OBJ", "STL", "PLY", "glTF", "FBX")
 
+    /**
+     * Formats RÉELLEMENT lus, affichés avant l'import (liste statique, jamais
+     * traduite — mêmes extensions techniques qu'`ImportedModel.supportedSummary`
+     * côté iOS, réduites à ce qu'Android sait décoder).
+     */
+    const val SUPPORTED_SUMMARY = "glTF/GLB, OBJ, FBX, STL, PLY"
+
     enum class Format { OBJ, STL, PLY, GLTF, FBX, SKP, UNKNOWN }
 
     /**

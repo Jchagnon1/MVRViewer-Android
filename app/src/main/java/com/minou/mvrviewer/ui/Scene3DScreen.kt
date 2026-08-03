@@ -298,6 +298,10 @@ private class SatGpu {
 fun Scene3DScreen(
     scene: MvrScene,
     mvrBytes: ByteArray,
+    /// Objet 3D à importer DÈS l'ouverture : cas « fichier 3D choisi à
+    /// l'accueil » (la scène est alors vide). Consommé une seule fois.
+    initialModelUri: android.net.Uri? = null,
+    onInitialModelConsumed: () -> Unit = {},
     options: SceneOptions,
     gdtfOverrides: GdtfOverrides,
     // Overrides de patch — NOM d'AFFICHAGE effectif (renommage) dans les étiquettes
@@ -925,8 +929,12 @@ fun Scene3DScreen(
             val tf = rp.transform
             val s = tf.effScale; val r = Math.toRadians(tf.rotationDeg)
             val cc = kotlin.math.cos(r); val sn = kotlin.math.sin(r)
+            // Bascule (tilt) : raccourcit l'empreinte au sol le long de Y AVANT la
+            // rotation à plat, et fait varier la hauteur du trait avec Y — même
+            // ordre que `ReferencePlanTransform.worldXY`/`worldZ`.
+            val tiltR = Math.toRadians(tf.tiltDeg)
+            val tiltCos = kotlin.math.cos(tiltR); val tiltSin = kotlin.math.sin(tiltR)
             val ox = tf.offsetX; val oy = tf.offsetY; val hz = tf.heightZ.toFloat()
-            val fy = (hz - cz) / 1000f      // hauteur Filament (sol), constante
             val hw = 0.03f                  // demi-largeur du trait (m) → ~6 cm
             val up = Float3(0f, 1f, 0f)
             // Sommets/index groupés PAR COULEUR d'entité → un maillage par couleur.
@@ -939,29 +947,34 @@ fun Scene3DScreen(
                 if (n < 2) continue
                 val verts = vByColor.getOrPut(pl.color) { ArrayList() }
                 val idx = iByColor.getOrPut(pl.color) { ArrayList() }
-                // Sommets projetés en Filament (plan XZ), une fois par polyligne.
+                // Sommets projetés en Filament (plan XZ) + hauteur (Y Filament),
+                // une fois par polyligne.
                 val fxz = FloatArray(n * 2)
+                val fy = FloatArray(n)
                 for (k in 0 until n) {
-                    val sx = pts[k * 2] * s; val sy = pts[k * 2 + 1] * s
+                    val sx = pts[k * 2] * s; val sy0 = pts[k * 2 + 1] * s
+                    val sy = sy0 * tiltCos
                     val wx = ox + (sx * cc - sy * sn)   // monde mm X
                     val wy = oy + (sx * sn + sy * cc)   // monde mm Y
+                    val wz = hz + sy0 * tiltSin          // monde mm Z (bascule)
                     fxz[k * 2] = (wx.toFloat() - cx) / 1000f
                     fxz[k * 2 + 1] = -(wy.toFloat() - cy) / 1000f
+                    fy[k] = (wz.toFloat() - cz) / 1000f
                 }
                 val segCount = (n - 1) + if (pl.closed && n > 2) 1 else 0
                 for (e in 0 until segCount) {
                     val a = e; val b = (e + 1) % n
-                    val ax = fxz[a * 2]; val az = fxz[a * 2 + 1]
-                    val bx = fxz[b * 2]; val bz = fxz[b * 2 + 1]
+                    val ax = fxz[a * 2]; val az = fxz[a * 2 + 1]; val ay = fy[a]
+                    val bx = fxz[b * 2]; val bz = fxz[b * 2 + 1]; val by = fy[b]
                     val dx = bx - ax; val dz = bz - az
                     val len = sqrt(dx * dx + dz * dz)
                     if (len < 1e-6f) continue
                     val px = -dz / len * hw; val pz = dx / len * hw
                     val base = verts.size
-                    verts.add(Geometry.Vertex(position = Float3(ax + px, fy, az + pz), normal = up)) // 0 A1
-                    verts.add(Geometry.Vertex(position = Float3(ax - px, fy, az - pz), normal = up)) // 1 A2
-                    verts.add(Geometry.Vertex(position = Float3(bx + px, fy, bz + pz), normal = up)) // 2 B1
-                    verts.add(Geometry.Vertex(position = Float3(bx - px, fy, bz - pz), normal = up)) // 3 B2
+                    verts.add(Geometry.Vertex(position = Float3(ax + px, ay, az + pz), normal = up)) // 0 A1
+                    verts.add(Geometry.Vertex(position = Float3(ax - px, ay, az - pz), normal = up)) // 1 A2
+                    verts.add(Geometry.Vertex(position = Float3(bx + px, by, bz + pz), normal = up)) // 2 B1
+                    verts.add(Geometry.Vertex(position = Float3(bx - px, by, bz - pz), normal = up)) // 3 B2
                     // 2 triangles + leurs inverses (visible des deux côtés).
                     idx.add(base); idx.add(base + 1); idx.add(base + 3)
                     idx.add(base); idx.add(base + 3); idx.add(base + 2)
@@ -1153,11 +1166,12 @@ fun Scene3DScreen(
             if (placedNodes >= com.minou.mvrviewer.mvr.SceneModelLoader.MODEL_MAX_NODES) break
             val tf = m.transform
             if (!tf.visible) continue
-            // MVR (mm, Z-haut) : T · Rz · S, puis conversion en repère Filament.
-            // RX90 seulement si la source est Y-haut (glTF, OBJ) — sinon le modèle
-            // arriverait couché.
+            // MVR (mm, Z-haut) : T · Rz · Rx(tilt) · S, puis conversion en repère
+            // Filament. RX90 seulement si la source est Y-haut (glTF, OBJ) — sinon
+            // le modèle arriverait couché.
             val local = translateMat(tf.offsetX.toFloat(), tf.offsetY.toFloat(), tf.offsetZ.toFloat()) *
                 rotZMat(tf.rotationDeg) *
+                rotXMat(tf.tiltDeg) *
                 scaleMat((tf.effScale * m.unitScaleToMm).toFloat())
             val world = convM * local * (if (m.yUp) RX90 else IDENTITY4)
             if (m.format == com.minou.mvrviewer.mvr.SceneModelLoader.Format.GLTF.name) {
@@ -1532,9 +1546,21 @@ fun Scene3DScreen(
     var pickedModelUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var modelMessage by remember { mutableStateOf<String?>(null) }
     var selectedModelId by remember { mutableStateOf<String?>(null) }
+    // Avant de choisir un fichier : rappel des formats lus, pour que l'échec
+    // d'un format non pris en charge (SKP, DAE…) ne surprenne pas l'utilisateur.
+    var showModelImportFormats by remember { mutableStateOf(false) }
     val modelImportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) { pickedModelUri = uri; importingModel = true } }
+    // Objet 3D ouvert seul : on déclenche l'import EXACTEMENT comme si
+    // l'utilisateur l'avait choisi depuis le menu — même décodeur, mêmes
+    // plafonds, même persistance. Rien de parallèle à maintenir.
+    LaunchedEffect(initialModelUri) {
+        val uri = initialModelUri ?: return@LaunchedEffect
+        pickedModelUri = uri
+        importingModel = true
+        onInitialModelConsumed()
+    }
     LaunchedEffect(pickedModelUri) {
         val uri = pickedModelUri ?: return@LaunchedEffect
         val loader = com.minou.mvrviewer.mvr.SceneModelLoader
@@ -1621,7 +1647,7 @@ fun Scene3DScreen(
             available = true, checked = importedModels.isNotEmpty() && showModelsPanel,
             busy = importingModel || modelBusy,
             onInvoke = {
-                if (importedModels.isEmpty()) modelImportLauncher.launch(arrayOf("*/*"))
+                if (importedModels.isEmpty()) showModelImportFormats = true
                 else showModelsPanel = !showModelsPanel
             }))
         // Panneau des calques : dockable en barre ; l'entrée de menu dédiée
@@ -2082,12 +2108,30 @@ fun Scene3DScreen(
                         onSetImportedModels(rest)
                         if (rest.isEmpty()) showModelsPanel = false
                     },
-                    onAdd = { modelImportLauncher.launch(arrayOf("*/*")) },
+                    onAdd = { showModelImportFormats = true },
                     // Double piège : bump de version (sinon rien ne bouge en 3D) ET
                     // sauvegarde différée (sinon rien n'est persisté).
                     onChanged = onImportedModelsTouched,
                     onClose = { showModelsPanel = false },
                     modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+                )
+            }
+            if (showModelImportFormats) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showModelImportFormats = false },
+                    title = { Text(stringResource(R.string.model_import_formats_title)) },
+                    text = { Text(com.minou.mvrviewer.mvr.SceneModelLoader.SUPPORTED_SUMMARY) },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            showModelImportFormats = false
+                            modelImportLauncher.launch(arrayOf("*/*"))
+                        }) { Text(stringResource(R.string.model_import_formats_choose)) }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = { showModelImportFormats = false }) {
+                            Text(stringResource(R.string.common_cancel))
+                        }
+                    }
                 )
             }
             // Chargement d'un modèle : état explicite, jamais un gel silencieux.
@@ -2435,6 +2479,16 @@ private fun rotZMat(deg: Double): Mat4 {
     return Mat4(
         Float4(c, s, 0f, 0f), Float4(-s, c, 0f, 0f),
         Float4(0f, 0f, 1f, 0f), Float4(0f, 0f, 0f, 1f)
+    )
+}
+
+/** Bascule autour de l'HORIZONTALE du monde MVR (axe X — le « tilt »), col-majeur. */
+private fun rotXMat(deg: Double): Mat4 {
+    val r = Math.toRadians(deg)
+    val c = kotlin.math.cos(r).toFloat(); val s = kotlin.math.sin(r).toFloat()
+    return Mat4(
+        Float4(1f, 0f, 0f, 0f), Float4(0f, c, s, 0f),
+        Float4(0f, -s, c, 0f), Float4(0f, 0f, 0f, 1f)
     )
 }
 

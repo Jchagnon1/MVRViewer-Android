@@ -104,7 +104,8 @@
     <string name="common_rename">Rename</string>
     <string name="common_reset">Reset</string>
     <string name="common_reset_short">Reset</string>
-    <string name="common_rotation">Rotation</string>
+    <string name="common_rotation">Rotation (flat)</string>
+    <string name="common_rotation_vertical">Vertical rotation</string>
     <string name="common_save">Save</string>
     <string name="common_scale">Scale</string>
     <string name="common_send">Send</string>
@@ -223,6 +224,7 @@
     <string name="home_shared_projects">Shared projects</string>
     <string name="home_sign_in">Sign in</string>
     <string name="home_subtitle">MVR / GDTF lighting plan viewer</string>
+    <string name="home_open_formats_fmt">MVR, or 3D object: %1$s</string>
     <string name="join_project">Join a project</string>
     <string name="label_field_dmx">DMX address</string>
     <string name="label_field_dmx_line">DMX line</string>
@@ -417,6 +419,8 @@
     <string name="tool_gps_3d">My position (3D)</string>
     <string name="tool_import_model">Import a 3D model…</string>
     <string name="tool_import_ref_plan">Import a plan (DXF, image, PDF)…</string>
+    <string name="model_import_formats_title">Supported formats</string>
+    <string name="model_import_formats_choose">Choose a file…</string>
     <string name="tool_label_settings">Label settings</string>
     <string name="tool_label_size">Label size</string>
     <string name="tool_marker_size">Marker size</string>

@@ -114,6 +114,16 @@ fun HomeScreen(
                     Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp))
                     Text("  " + stringResource(R.string.home_open_mvr))
                 }
+                // Le même bouton ouvre AUSSI un objet 3D seul (SceneViewModel.open
+                // détecte le format aux octets de tête) — le dire, sans ajouter de
+                // friction sur l'action la plus fréquente.
+                Text(
+                    stringResource(R.string.home_open_formats_fmt, com.minou.mvrviewer.mvr.SceneModelLoader.SUPPORTED_SUMMARY),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                    textAlign = TextAlign.Center
+                )
                 // Synchro cloud : compte + rejoindre un projet partagé.
                 if (sync != null) {
                     val auth by sync.auth.collectAsState()

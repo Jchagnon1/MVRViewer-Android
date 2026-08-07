@@ -86,14 +86,6 @@ data class MvrScene(
     val fixtures: List<MvrSceneObject> get() = allObjects.filter { it.isFixture }
 
     /**
-     * CLASSES Vectorworks présentes (nom + nombre d'objets), triées par effectif
-     * décroissant puis par nom. Pendant exact de `layers` pour le panneau de
-     * visibilité. Les objets sans classe n'y figurent pas — rien à activer.
-     *
-     * ⚠️ Parcourt TOUS les objets : à mémoïser côté UI, jamais à appeler dans
-     * une recomposition.
-     */
-    /**
      * Scène PRIVÉE des objets dont la classe est masquée.
      *
      * Filtrer À LA SOURCE, et pas dans chaque moteur de rendu : la vue 3D et la
@@ -118,6 +110,14 @@ data class MvrScene(
         )
     }
 
+    /**
+     * CLASSES Vectorworks présentes (nom + nombre d'objets), triées par effectif
+     * décroissant puis par nom. Pendant exact de `layers` pour le panneau de
+     * visibilité. Les objets sans classe n'y figurent pas — rien à activer.
+     *
+     * ⚠️ Parcourt TOUS les objets : à mémoïser côté UI, jamais à appeler dans
+     * une recomposition.
+     */
     fun classCounts(): List<Pair<String, Int>> {
         val counts = HashMap<String, Int>()
         for (layer in layers) {

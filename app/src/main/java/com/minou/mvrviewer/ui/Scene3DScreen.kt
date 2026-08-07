@@ -1952,7 +1952,7 @@ fun Scene3DScreen(
                         if (p != null &&
                             p.x >= -LABEL_CULL_PX && p.x <= vw + LABEL_CULL_PX &&
                             p.y >= -LABEL_CULL_PX && p.y <= vh + LABEL_CULL_PX) {
-                            drawFixtureLabel(textMeasurer, lines, p, options.labelSize)
+                            drawFixtureLabel(textMeasurer, lines, p, options.labelSize, options.labelOffset)
                             drawn++
                         }
                         i++
@@ -2101,6 +2101,10 @@ fun Scene3DScreen(
 
             // ---- Décor 3D importé : panneau de placement + messages ----
             if (showModelsPanel && importedModels.isNotEmpty()) {
+                MovablePanel(
+                    id = PanelLayoutStore.PanelID.IMPORTED_MODELS_3D,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+                ) {
                 ModelPlacementPanel(
                     models = importedModels,
                     selectedId = selectedModelId,
@@ -2115,9 +2119,9 @@ fun Scene3DScreen(
                     // Double piège : bump de version (sinon rien ne bouge en 3D) ET
                     // sauvegarde différée (sinon rien n'est persisté).
                     onChanged = onImportedModelsTouched,
-                    onClose = { showModelsPanel = false },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+                    onClose = { showModelsPanel = false }
                 )
+                }
             }
             if (showModelImportFormats) {
                 androidx.compose.material3.AlertDialog(
@@ -2707,13 +2711,16 @@ private val SEL_CUBE_EDGES = arrayOf(
  * du point écran `anchor` (la projection du projecteur). Style proche de la 3D
  * iOS : petit cadre à fond sombre semi-opaque, texte blanc lisible sur tout fond,
  * 1re ligne (le N°) en gras et légèrement plus grande. Un fin trait relie le cadre
- * au projecteur. `sizeScale` = options.labelSize (0.7 / 1.0 / 1.4).
+ * au projecteur. `sizeScale` = options.labelSize (0.7 / 1.0 / 1.4) ;
+ * `offsetScale` = options.labelOffset — il était IGNORÉ (gap figé), le
+ * réglage « écart au projecteur » n'avait donc aucun effet en 3D.
  */
 private fun DrawScope.drawFixtureLabel(
     measurer: TextMeasurer,
     lines: List<String>,
     anchor: Offset,
-    sizeScale: Float
+    sizeScale: Float,
+    offsetScale: Float = 1f
 ) {
     if (lines.isEmpty()) return
     val fontPx = 12f * sizeScale
@@ -2729,7 +2736,7 @@ private fun DrawScope.drawFixtureLabel(
     val w = layout.size.width.toFloat(); val h = layout.size.height.toFloat()
     val padX = 6f * sizeScale; val padY = 3f * sizeScale
     val boxW = w + padX * 2f; val boxH = h + padY * 2f
-    val gap = 12f * sizeScale
+    val gap = 12f * sizeScale * offsetScale
     val left = anchor.x - boxW / 2f
     val top = anchor.y - gap - boxH
     val radius = CornerRadius(5f * sizeScale, 5f * sizeScale)

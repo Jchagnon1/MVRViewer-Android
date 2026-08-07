@@ -140,7 +140,10 @@ private fun ToolbarButton(s: ToolSpec) {
     if (checked != null) {
         // La bascule flippe son propre état dans onInvoke → on ignore la valeur
         // passée par onCheckedChange (checked reflète déjà l'état réel).
-        FilledIconToggleButton(checked = checked, onCheckedChange = { s.onInvoke() }) {
+        // Outil ACTIF = surface d'identité : jaune plein, glyphe NOIR
+        // (blanc sur jaune = 1,6:1, illisible — cf. theme/Color.kt).
+        FilledIconToggleButton(checked = checked, onCheckedChange = { s.onInvoke() },
+                               colors = com.minou.mvrviewer.ui.theme.accentToggleColors()) {
             ButtonContent(s)
         }
     } else {

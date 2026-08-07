@@ -110,7 +110,10 @@ fun HomeScreen(
                 )
             }
             else -> {
-                Button(onClick = { picker.launch(arrayOf("*/*")) }) {
+                // ACTION PRINCIPALE = surface d'identité : jaune franc,
+                // contenu noir (cf. theme/Color.kt — jamais de blanc sur jaune).
+                Button(onClick = { picker.launch(arrayOf("*/*")) },
+                       colors = com.minou.mvrviewer.ui.theme.accentButtonColors()) {
                     Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp))
                     Text("  " + stringResource(R.string.home_open_mvr))
                 }

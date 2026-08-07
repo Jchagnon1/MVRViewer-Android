@@ -61,8 +61,10 @@ fun SceneScreen(
     // commencée à l'accueil (lecture/parse) jusqu'à 100 %.
     progress: LoadProgress? = null
 ) {
-    var mode by remember { mutableStateOf(SceneMode.THREE_D) }
     val ctx = LocalContext.current
+    // Vue SEMÉE depuis l'état persisté : on rouvre l'app sur la vue qu'on
+    // avait sous les yeux en la quittant (parité ViewStateStore iOS).
+    var mode by remember { mutableStateOf(ViewStateStore.mode(ctx)) }
     // Fil d'Ariane pour le journal de diagnostic : on saura dans quelle vue
     // l'appli était juste avant un plantage/gel (ex. « vue plan »).
     LaunchedEffect(mode) { com.minou.mvrviewer.CrashReporter.note("vue affichée : $mode ($fileName)") }
@@ -72,6 +74,11 @@ fun SceneScreen(
         SceneOptions().apply {
             background3D = BackgroundColorStore.scene3D(ctx)
             background2D = BackgroundColorStore.plan2D(ctx)
+            // Réglages d'affichage retrouvés à la réouverture — semés ICI,
+            // de façon SYNCHRONE : une restauration différée (LaunchedEffect)
+            // serait écrasée par les effets d'écriture ci-dessous, qui
+            // partiraient avec les défauts.
+            ViewStateStore.seed(ctx, this)
         }
     }
     // Persistance DÉBOUNCÉE : le sélecteur personnalisé émet une couleur à chaque
@@ -83,6 +90,20 @@ fun SceneScreen(
     }
     LaunchedEffect(options.background2D) {
         kotlinx.coroutines.delay(400); BackgroundColorStore.setPlan2D(ctx, options.background2D)
+    }
+    // ÉTAT DE VUE persisté à CHAQUE changement (pas à la mise en arrière-plan :
+    // une app tuée doit quand même retrouver son écran). Un seul effet qui lit
+    // tous les champs suivis : chaque changement le relance, l'écriture est
+    // débouncée pour absorber les rafales (curseur d'opacité satellite).
+    LaunchedEffect(mode) { if (mode == SceneMode.THREE_D || mode == SceneMode.PLAN) {
+        withContext(Dispatchers.IO) { ViewStateStore.setMode(ctx, mode) } } }
+    LaunchedEffect(options.layerColors, options.showLabels, options.showStructure,
+                   options.showLegend, options.hideLabelsWhenZoomedOut,
+                   options.labelFields, options.labelDetached,
+                   options.labelSize, options.labelOffset,
+                   options.satelliteOpacity, options.gpsMarkerScale) {
+        kotlinx.coroutines.delay(400)
+        withContext(Dispatchers.IO) { ViewStateStore.save(ctx, options) }
     }
     // N11 — dispositions des barres d'outils ancrables (vue 3D / vue plan). Semées
     // depuis le store GLOBAL persisté (par appareil, hors projet/cloud), ré-écrites
@@ -967,7 +988,12 @@ fun SceneScreen(
             modifier = modifier
         )
         SceneMode.PATCH -> PatchListScreen(
-            scene = scene,
+            // La liste de patch REFLÈTE le masquage par classes, comme iOS.
+            // Univers/Câblage/GDTF Share restent volontairement sur la scène
+            // COMPLÈTE : ils référencent des instances (affectations soca,
+            // lignes DMX) — masquer une classe ne doit pas faire disparaître
+            // des affectations existantes.
+            scene = visibleScene,
             mvrBytes = mvrBytes,
             overrides = overrides,
             power = power,

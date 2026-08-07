@@ -1981,10 +1981,15 @@ fun PlanScreen(
             val tf = rpPanel.transform
             val step = max(200.0, rpPanel.plan.width * 0.05)
             fun bump() { dxfVersion++ }
+            MovablePanel(
+                id = PanelLayoutStore.PanelID.REF_PLAN_PLACEMENT_PLAN,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+            ) {
             Surface(
                 color = Color.White, contentColor = Color(0xFF111111),
-                shape = RoundedCornerShape(12.dp), shadowElevation = 8.dp,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp).width(230.dp)
+                shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+                shadowElevation = 8.dp,
+                modifier = Modifier.width(230.dp)
             ) {
                 androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
                     val rast = rpPanel.raster
@@ -2128,17 +2133,22 @@ fun PlanScreen(
                     }
                 }
             }
+            }
         }
         // ---- Panneau d'export PDF « en construction » ----
         // Volontairement à part des modes de toucher : composer le document ne
         // s'approprie aucun geste, on continue de cadrer le plan librement entre
         // deux ajouts de page.
         if (exportMode) {
+            MovablePanel(
+                id = PanelLayoutStore.PanelID.EXPORT_PLAN,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+            ) {
             Surface(
                 color = Color.White, contentColor = Color(0xFF111111),
-                shape = RoundedCornerShape(12.dp), shadowElevation = 8.dp,
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(bottom = 76.dp, end = 12.dp).width(268.dp)
+                shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+                shadowElevation = 8.dp,
+                modifier = Modifier.width(268.dp)
             ) {
                 androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2250,6 +2260,7 @@ fun PlanScreen(
                             style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
                     }
                 }
+            }
             }
         }
 
@@ -2384,9 +2395,19 @@ fun PlanScreen(
             )
         }
 
-        // N11 — réglages/champs d'étiquette ouverts par l'outil LABEL_SETTINGS docké.
+        // N11 — réglages/champs d'étiquette ouverts par l'outil LABEL_SETTINGS
+        // docké. PANNEAU FLOTTANT, plus un AlertDialog : la règle iOS « une
+        // fenêtre ne cache jamais ce qu'elle règle » vaut ici aussi — cocher un
+        // champ doit se voir immédiatement sur les étiquettes du plan derrière,
+        // et le dialogue modal voilait précisément ce qu'on réglait.
         if (showLabelSettingsDialog) {
-            LabelSettingsDialog(options = options, onDismiss = { showLabelSettingsDialog = false })
+            MovablePanel(
+                id = PanelLayoutStore.PanelID.LABELS_PLAN,
+                modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp)
+            ) {
+                LabelSettingsPanel(options = options,
+                                   onDismiss = { showLabelSettingsDialog = false })
+            }
         }
     }
 }
@@ -2417,18 +2438,34 @@ private fun assignHaptic(view: android.view.View, assigned: Boolean) {
  * dupliqué, les deux points d'accès restent cohérents.
  */
 @Composable
-private fun LabelSettingsDialog(options: SceneOptions, onDismiss: () -> Unit) {
+private fun LabelSettingsPanel(options: SceneOptions, onDismiss: () -> Unit) {
     val sizeName = when {
         options.labelSize <= 0.75f -> stringResource(R.string.size_small)
         options.labelSize >= 1.3f -> stringResource(R.string.size_large)
         else -> stringResource(R.string.size_medium)
     }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.tool_label_settings)) },
-        text = {
+    // PANNEAU FLOTTANT (plus un AlertDialog) : le plan reste visible ET
+    // manipulable derrière — on voit chaque champ apparaître sur les
+    // étiquettes en le cochant. Hauteur BORNÉE (grille dense oblige) : le
+    // panneau ne doit pas manger la vue qu'il règle (règle DESIGN_UI §2).
+    Surface(
+        color = Color.White, contentColor = Color(0xFF111111),
+        shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+        shadowElevation = 8.dp,
+        modifier = Modifier.width(250.dp)
+    ) {
+        androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.tool_label_settings),
+                    style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                androidx.compose.material3.TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_close))
+                }
+            }
             androidx.compose.foundation.layout.Column(
-                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                modifier = Modifier.fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = options.showLabels, onCheckedChange = { options.showLabels = it })
@@ -2472,11 +2509,8 @@ private fun LabelSettingsDialog(options: SceneOptions, onDismiss: () -> Unit) {
                     }) { Text(stringResource(R.string.opt_size_fmt, sizeName)) }
                 }
             }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
         }
-    )
+    }
 }
 
 /** Couleur d'affichage d'une entité DXF (0xRRGGBB) adaptée au fond : sur fond

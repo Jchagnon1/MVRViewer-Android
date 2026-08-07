@@ -62,7 +62,14 @@ data class MvrSceneObject(
     val gdtfMode: String?,
     val fixtureId: String?,
     val addresses: List<String>,
-    val layerName: String
+    val layerName: String,
+    /**
+     * Nom de la CLASSE Vectorworks (`<Classing>` résolu). Beaucoup d'exports
+     * enveloppent le vrai contenu dans des objets nommés génériquement
+     * « Géométrie » : c'est alors CE champ, pas `name`, qui porte l'information
+     * exploitable (« 00 STAGE - MOTHER GRILL », « 02 LIGHT - WASH »…).
+     */
+    val className: String? = null
 ) {
     val isFixture: Boolean get() = kind == MvrObjectKind.FIXTURE
 }
@@ -77,6 +84,53 @@ data class MvrScene(
 ) {
     val allObjects: List<MvrSceneObject> get() = layers.flatMap { it.objects }
     val fixtures: List<MvrSceneObject> get() = allObjects.filter { it.isFixture }
+
+    /**
+     * CLASSES Vectorworks présentes (nom + nombre d'objets), triées par effectif
+     * décroissant puis par nom. Pendant exact de `layers` pour le panneau de
+     * visibilité. Les objets sans classe n'y figurent pas — rien à activer.
+     *
+     * ⚠️ Parcourt TOUS les objets : à mémoïser côté UI, jamais à appeler dans
+     * une recomposition.
+     */
+    /**
+     * Scène PRIVÉE des objets dont la classe est masquée.
+     *
+     * Filtrer À LA SOURCE, et pas dans chaque moteur de rendu : la vue 3D et la
+     * vue plan partent toutes deux de la scène, donc elles héritent du masquage
+     * sans qu'on aille plumber un index de classes dans la boucle de
+     * construction 3D (groupée par FICHIER, pas par objet, et sensible aux
+     * performances — elle a un historique d'ANR). Un seul point de filtrage,
+     * donc aucun oubli possible.
+     *
+     * Un objet SANS classe n'est jamais masqué par ce filtre.
+     */
+    fun hidingClasses(hidden: Set<String>): MvrScene {
+        if (hidden.isEmpty()) return this
+        return MvrScene(
+            layers.map { layer ->
+                MvrLayer(layer.name, layer.objects.filter { o ->
+                    val c = o.className
+                    c.isNullOrEmpty() || c !in hidden
+                })
+            },
+            symdefs
+        )
+    }
+
+    fun classCounts(): List<Pair<String, Int>> {
+        val counts = HashMap<String, Int>()
+        for (layer in layers) {
+            for (o in layer.objects) {
+                val c = o.className
+                if (c.isNullOrEmpty()) continue
+                counts[c] = (counts[c] ?: 0) + 1
+            }
+        }
+        return counts.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .map { it.key to it.value }
+    }
 }
 
 /**

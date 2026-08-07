@@ -236,6 +236,13 @@
     <string name="layers_lod_help">Détail affiché pendant la navigation. N\'affecte que la navigation (pendant les gestes caméra) : à l\'arrêt, tout redevient visible.</string>
     <string name="layers_none">Ce show ne déclare aucun calque.</string>
     <string name="layers_title_3d">Calques · Vue 3D</string>
+    <string name="layers_hide_all">Tout masquer</string>
+    <string name="layers_show_all">Tout afficher</string>
+    <string name="classes_title">Classes</string>
+    <string name="classes_help">Classes Vectorworks du fichier. Une classe traverse les calques : les deux filtres se cumulent.</string>
+    <string name="classes_none">Ce fichier ne déclare aucune classe Vectorworks.</string>
+    <string name="classes_objects_fmt">%1$d objets</string>
+    <string name="tool_classes">Classes…</string>
     <string name="legend_more_fmt">+%1$d autre(s)</string>
     <string name="legend_more_layers_fmt">+%1$d autre(s) calque(s)</string>
     <string name="load_build">Construction de la scène…</string>

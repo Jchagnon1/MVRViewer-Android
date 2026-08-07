@@ -122,6 +122,8 @@ fun PlanScreen(
      */
     onTransformTouched: () -> Unit = {},
     hiddenLayers: Set<String> = emptySet(),
+    /** Ouvre le panneau « Classes… ». null = ce fichier n'a aucune classe. */
+    onShowClasses: (() -> Unit)? = null,
     onToggleLayer: (String) -> Unit = {},
     /**
      * Éléments MVR masqués, par IDENTITÉ D'INSTANCE (cf. mvrInstanceKey) —
@@ -1809,6 +1811,7 @@ fun PlanScreen(
                 onShow3D = onBack, onShowPatch = onShowPatch,
                 onShowAccount = onShowAccount, onShareProject = onShareProject,
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
+                onShowClasses = onShowClasses,
                 // Outils de la vue plan exposés DANS le menu (N10) : dérivés de la
                 // MÊME description unifiée que les barres (toolsPlan) → plus de
                 // duplication. Mêmes actions, mêmes bascules, mêmes conditions.

@@ -135,6 +135,13 @@ object MvrParser {
         var gdtfMode: String? = null
         var fixtureId: String? = null
         var addresses = mutableListOf<String>()
+        var objClassingUuid: String? = null
+
+        // <Class name uuid/> vit dans <AUXData>, qui vient APRÈS <Layers> :
+        // au moment où un <Classing> est lu, la <Class> visée n'a pas forcément
+        // encore été rencontrée. On mémorise donc l'UUID par objet et on résout
+        // en SECONDE PASSE, une fois tout le document parcouru.
+        val classNames = HashMap<String, String>()
 
         var symdefUuid: String? = null
         var symdefItems = mutableListOf<MvrGeometryRef>()
@@ -176,12 +183,18 @@ object MvrParser {
                         geometryRefs = mutableListOf()
                         gdtfSpec = null; gdtfMode = null; fixtureId = null
                         addresses = mutableListOf()
+                        objClassingUuid = null
+                    }
+                    "Class" -> {
+                        val cn = parser.getAttributeValue(null, "name")
+                        val cu = parser.getAttributeValue(null, "uuid")
+                        if (cn != null && cu != null) classNames[cu] = cn
                     }
                     "Matrix" -> {
                         collecting = true; text.setLength(0)
                         matrixTargetItem = pendingGeomFile != null || pendingSymbolUuid != null
                     }
-                    "GDTFSpec", "GDTFMode", "FixtureID", "Address" -> {
+                    "GDTFSpec", "GDTFMode", "FixtureID", "Address", "Classing" -> {
                         collecting = true; text.setLength(0)
                     }
                     "Geometry3D" -> {
@@ -210,6 +223,10 @@ object MvrParser {
                         collecting = false
                         val a = text.toString().trim(); if (a.isNotEmpty()) addresses.add(a)
                     }
+                    "Classing" -> {
+                        collecting = false
+                        val c = text.toString().trim(); if (c.isNotEmpty()) objClassingUuid = c
+                    }
                     "Geometry3D" -> {
                         pendingGeomFile?.let { appendRef(MvrGeometryRef.File(it, pendingItemMatrix ?: Mat4.IDENTITY)) }
                         pendingGeomFile = null; pendingItemMatrix = null
@@ -232,12 +249,17 @@ object MvrParser {
                                     geometryRefs = geometryRefs.toList(),
                                     gdtfSpec = gdtfSpec, gdtfMode = gdtfMode,
                                     fixtureId = fixtureId, addresses = addresses.toList(),
-                                    layerName = layerName ?: "Layer"
+                                    layerName = layerName ?: "Layer",
+                                    // TRANSITOIREMENT l'UUID de la classe, pas son nom :
+                                    // il est remplacé par le nom en seconde passe, plus
+                                    // bas. Rien de ce champ ne sort d'ici sans résolution.
+                                    className = objClassingUuid
                                 )
                             )
                         }
                         objName = null; objUuid = null; objKind = null; objTransform = null
                         geometryRefs = mutableListOf(); gdtfSpec = null; gdtfMode = null
+                        objClassingUuid = null
                     }
                     "Layer" -> {
                         layers.add(MvrLayer(layerName ?: "Layer", layerObjects.toList()))
@@ -247,7 +269,17 @@ object MvrParser {
             }
             event = parser.next()
         }
-        return MvrScene(layers.toList(), symdefs)
+        // SECONDE PASSE : UUID de classe → nom de classe. Obligatoire, cf. la
+        // déclaration de `classNames`. Un UUID inconnu retombe à `null` — on ne
+        // laisse JAMAIS filtrer un UUID brut là où l'UI attend un nom lisible.
+        if (classNames.isEmpty()) return MvrScene(layers.toList(), symdefs)
+        val resolved = layers.map { layer ->
+            MvrLayer(layer.name, layer.objects.map { o ->
+                val uuid = o.className
+                if (uuid == null) o else o.copy(className = classNames[uuid])
+            })
+        }
+        return MvrScene(resolved, symdefs)
     }
 
     /**

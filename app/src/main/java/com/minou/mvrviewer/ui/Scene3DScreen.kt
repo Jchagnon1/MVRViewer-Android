@@ -302,6 +302,8 @@ fun Scene3DScreen(
     /// l'accueil » (la scène est alors vide). Consommé une seule fois.
     initialModelUri: android.net.Uri? = null,
     onInitialModelConsumed: () -> Unit = {},
+    /** Ouvre le panneau « Classes… ». null = ce fichier n'a aucune classe. */
+    onShowClasses: (() -> Unit)? = null,
     options: SceneOptions,
     gdtfOverrides: GdtfOverrides,
     // Overrides de patch — NOM d'AFFICHAGE effectif (renommage) dans les étiquettes
@@ -1784,6 +1786,7 @@ fun Scene3DScreen(
                     onCustomizeToolbar = { showCustomize = true },
                     // Panneau des calques (LOD d'interaction par calque).
                     onShowLayers = { showLayers = true },
+                    onShowClasses = onShowClasses,
                     // Étiquettes de projecteurs aussi en 3D : même bascule + mêmes
                     // champs/taille que le plan (SceneOptions partagé).
                     showLabelsToggle = true,

@@ -179,6 +179,12 @@ fun SceneOptionsMenu(
      * calque. null → entrée masquée (vues sans panneau de calques).
      */
     onShowLayers: (() -> Unit)? = null,
+    /**
+     * Panneau « Classes… » — visibilité par CLASSE Vectorworks. null → entrée
+     * masquée, ce qui couvre les (nombreux) fichiers sans aucune classe : une
+     * entrée qui ouvre une liste vide ne rend service à personne.
+     */
+    onShowClasses: (() -> Unit)? = null,
     // Synchro cloud : entrées de menu (au lieu d'un bouton flottant séparé).
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
@@ -241,13 +247,16 @@ fun SceneOptionsMenu(
         // ---- Outils de la vue (N10) : mêmes actions que la barre flottante,
         // accessibles ici. Les bascules gardent le menu ouvert ; les actions le
         // referment. Rendus dans l'ordre fourni par l'écran.
-        if (tools.isNotEmpty() || onCustomizeToolbar != null || onShowLayers != null) {
+        if (tools.isNotEmpty() || onCustomizeToolbar != null || onShowLayers != null || onShowClasses != null) {
             HorizontalDivider()
             Text(stringResource(R.string.menu_section_tools), style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             // Panneau des calques (réglage du LOD d'interaction par calque).
             onShowLayers?.let { nav(stringResource(R.string.nav_layers), Icons.Filled.Layers) { open = false; it() } }
+            // Visibilité par CLASSE Vectorworks, juste sous les calques : les deux
+            // filtres se cumulent, ils se lisent donc côte à côte.
+            onShowClasses?.let { nav(stringResource(R.string.tool_classes), Icons.Filled.Layers) { open = false; it() } }
             tools.forEach { t ->
                 when (t) {
                     is MenuTool.Toggle -> toolToggle(t.label, t.icon, t.checked) { t.onToggle() }

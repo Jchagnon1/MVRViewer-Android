@@ -276,6 +276,28 @@ object ProjectStore {
         writeManifest(ctx, key, m)
     }
 
+    /**
+     * CLASSES Vectorworks masquées — réglage d'AFFICHAGE LOCAL, hors synchro,
+     * comme le LOD par calque juste au-dessus. Absent d'un projet existant =
+     * aucune classe masquée, donc ouverture inchangée.
+     *
+     * Un masquage vaut jusqu'à ce qu'on le lève, pas jusqu'à ce qu'on ferme le
+     * projet.
+     */
+    fun saveHiddenClasses(ctx: Context, key: String, classes: Set<String>) = synchronized(manifestLock) {
+        val m = readManifest(ctx, key)
+        if (classes.isEmpty()) m.remove("hiddenClasses")
+        else m.put("hiddenClasses", JSONArray(classes.sorted()))
+        writeManifest(ctx, key, m)
+    }
+
+    fun loadHiddenClasses(ctx: Context, key: String): Set<String> {
+        val arr = readManifest(ctx, key).optJSONArray("hiddenClasses") ?: return emptySet()
+        val out = HashSet<String>(arr.length())
+        for (i in 0 until arr.length()) arr.optString(i)?.takeIf { it.isNotBlank() }?.let { out.add(it) }
+        return out
+    }
+
     /** (calque → valeur persistée) ; vide si jamais réglé. */
     fun loadLayerLod(ctx: Context, key: String): Map<String, String> {
         val o = readManifest(ctx, key).optJSONObject("layerLod") ?: return emptyMap()

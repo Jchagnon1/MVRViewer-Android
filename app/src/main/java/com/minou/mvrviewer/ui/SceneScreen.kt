@@ -136,6 +136,19 @@ fun SceneScreen(
     // pour survivre aux bascules 3D ↔ plan — PlanScreen est détruit à chaque
     // aller-retour, un état local se perdrait à la première visite en 3D.
     var hiddenElements by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    // CLASSES Vectorworks masquées — filtre SÉPARÉ et cumulatif avec les calques
+    // (une classe traverse les calques). Réglage d'AFFICHAGE LOCAL, persisté par
+    // projet, volontairement HORS synchro (comme le LOD par calque).
+    var hiddenClasses by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
+    var showClasses by remember { mutableStateOf(false) }
+    // Liste des classes + effectifs : `classCounts()` parcourt TOUS les objets
+    // (11 000+ sur un gros show) — mémoïsé par scène, jamais recalculé au fil des
+    // recompositions.
+    val classRows = remember(scene) { scene.classCounts() }
+    // Scène RÉELLEMENT rendue : privée des classes masquées. Filtrer ici, à la
+    // source, fait hériter du masquage la vue 3D ET la vue plan sans toucher à
+    // leurs moteurs de rendu (cf. MvrScene.hidingClasses).
+    val visibleScene = remember(scene, hiddenClasses) { scene.hidingClasses(hiddenClasses) }
     // LOD d'interaction par calque MVR (#1) : réglage d'AFFICHAGE 3D, persisté
     // LOCALEMENT avec le projet. Volontairement HORS synchro cloud (la fluidité
     // dépend de l'appareil) : aucun DTO ni contrat de synchro n'est touché.
@@ -185,6 +198,9 @@ fun SceneScreen(
             layerLod = lod.mapValues { (_, v) -> LayerLodMode.fromStored(v) }
                 .filterValues { it != LayerLodMode.AUTO }
         }
+        // Classes masquées : même contrat que le LOD (local, hors synchro).
+        val hc = withContext(Dispatchers.IO) { ProjectStore.loadHiddenClasses(ctx, projectKey) }
+        if (hc.isNotEmpty()) hiddenClasses = hc
         // Modèles 3D importés : octets relus + RE-PARSÉS, plafonds re-vérifiés.
         val ims = withContext(Dispatchers.IO) { ProjectStore.loadImportedModels(ctx, projectKey) }
         if (ims.isNotEmpty() && importedModels.isEmpty()) {
@@ -200,6 +216,12 @@ fun SceneScreen(
         withContext(Dispatchers.IO) {
             ProjectStore.saveLayerLod(ctx, projectKey, layerLod.mapValues { (_, m) -> m.stored })
         }
+    }
+    // Idem pour les classes masquées : un seul point d'écriture, pour tous les
+    // endroits qui touchent l'état partagé (bascule par ligne, « Tout masquer »).
+    LaunchedEffect(hiddenClasses) {
+        if (!restored) return@LaunchedEffect
+        withContext(Dispatchers.IO) { ProjectStore.saveHiddenClasses(ctx, projectKey, hiddenClasses) }
     }
     // Sauvegarde des modèles GDTF appliqués quand ils changent (action utilisateur).
     LaunchedEffect(gdtfOverrides.version) {
@@ -791,8 +813,9 @@ fun SceneScreen(
     Box(modifier = Modifier.fillMaxSize()) {
     when (mode) {
         SceneMode.THREE_D -> Scene3DScreen(
-            scene = scene,
+            scene = visibleScene,
             mvrBytes = mvrBytes,
+            onShowClasses = if (classRows.isEmpty()) null else ({ showClasses = true }),
             initialModelUri = initialModelUri,
             onInitialModelConsumed = onInitialModelConsumed,
             options = options,
@@ -856,8 +879,9 @@ fun SceneScreen(
             modifier = modifier
         )
         SceneMode.PLAN -> PlanScreen(
-            scene = scene,
+            scene = visibleScene,
             mvrBytes = mvrBytes,
+            onShowClasses = if (classRows.isEmpty()) null else ({ showClasses = true }),
             options = options,
             hiddenElements = hiddenElements,
             onSetHiddenElements = { hiddenElements = it },
@@ -994,6 +1018,24 @@ fun SceneScreen(
             modifier = modifier
         )
     } // when(mode)
+
+        // Panneau des CLASSES — rendu ICI, hors du `when(mode)` : le filtre vaut
+        // pour la 3D ET pour le plan, il doit donc rester ouvert quel que soit le
+        // mode (et survivre à une bascule entre les deux).
+        if (showClasses) {
+            ClassesSheet(
+                classes = classRows,
+                hidden = hiddenClasses,
+                onToggle = { name ->
+                    hiddenClasses =
+                        if (name in hiddenClasses) hiddenClasses - name else hiddenClasses + name
+                },
+                onSetAll = { hideAll ->
+                    hiddenClasses = if (hideAll) classRows.map { it.first }.toSet() else emptySet()
+                },
+                onDismiss = { showClasses = false }
+            )
+        }
 
         // ---- Superposition de synchro (visible/cliquable au-dessus de la SurfaceView) ----
         if (sync != null) {

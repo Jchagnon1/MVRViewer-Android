@@ -93,8 +93,24 @@ object PlanWireframe {
             countByKey[k] = (countByKey[k] ?: 0) + 1
             repByKey.putIfAbsent(k, o)
         }
-        // 2. Types les plus fréquents d'abord (budget), comme iOS.
-        val keptKeys = countByKey.entries.sortedByDescending { it.value }
+        // 2. Élection des types détaillés — EFFECTIF D'ABORD, clé en départage
+        //    STABLE. Même décision qu'iOS, après avoir ESSAYÉ « rigging
+        //    d'abord » : sur Golden Coast, l'heuristique matchait 2 257 types
+        //    sur 2 791 (les classes contiennent presque toutes « structure »/
+        //    « grill »/« tower »), donc elle ne discriminait plus rien et
+        //    prenait leurs places aux types les plus nombreux — beaucoup plus
+        //    de carrés de repli à l'écran (retour testeur). Le plafond est un
+        //    jeu à somme nulle : privilégier les types nombreux couvre le plus
+        //    d'objets.
+        //    Le départage par clé, lui, est INDISPENSABLE : ~99 % des types
+        //    n'ont qu'une instance, donc tous à égalité, et l'ordre d'itération
+        //    d'un HashMap n'est pas spécifié — les élus changeaient d'une
+        //    ouverture à l'autre SUR LE MÊME FICHIER.
+        val keptKeys = countByKey.entries
+            .sortedWith(
+                compareByDescending<Map.Entry<String, Int>> { it.value }
+                    .thenBy { it.key }
+            )
             .take(MAX_TYPES).map { it.key }.toHashSet()
 
         // 3. Extraire tous les fichiers de géométrie référencés par les types retenus.

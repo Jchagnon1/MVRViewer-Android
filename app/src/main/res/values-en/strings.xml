@@ -236,6 +236,13 @@
     <string name="layers_lod_help">Level of detail shown while navigating. Affects navigation only (during camera gestures): everything reappears once you stop.</string>
     <string name="layers_none">This show declares no layers.</string>
     <string name="layers_title_3d">Layers · 3D view</string>
+    <string name="layers_hide_all">Hide all</string>
+    <string name="layers_show_all">Show all</string>
+    <string name="classes_title">Classes</string>
+    <string name="classes_help">Vectorworks classes in this file. A class spans layers: both filters combine.</string>
+    <string name="classes_none">This file declares no Vectorworks class.</string>
+    <string name="classes_objects_fmt">%1$d objects</string>
+    <string name="tool_classes">Classes…</string>
     <string name="legend_more_fmt">+%1$d more</string>
     <string name="legend_more_layers_fmt">+%1$d more layer(s)</string>
     <string name="load_build">Building the scene…</string>

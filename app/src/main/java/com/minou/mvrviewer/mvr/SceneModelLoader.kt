@@ -36,11 +36,17 @@ object SceneModelLoader {
      * Taille maximale d'un fichier accepté (au-delà : refus explicite).
      * ALIGNÉ SUR iOS (`ImportedModelDecoder.maxFileBytes`). Vérifié d'abord sur la
      * taille DÉCLARÉE par le fournisseur de documents, donc sans lire le fichier :
-     * on ne charge pas 256 Mo pour les refuser ensuite.
+     * on ne charge pas 512 Mo pour les refuser ensuite.
      */
-    const val MODEL_MAX_BYTES = 256L * 1024 * 1024
-    /** Plafond de triangles d'UN modèle — aligné sur iOS (`maxTriangles`). */
-    const val MODEL_MAX_TRIANGLES = 1_500_000
+    const val MODEL_MAX_BYTES = 512L * 1024 * 1024
+    /**
+     * Plafond de triangles d'UN modèle — aligné sur iOS (`maxTriangles`).
+     * DÉCISION UTILISATEUR (2026-08-08) : « allons à 10 M et on réduira si ça
+     * plante ». Les appareils Android ont moins de marge mémoire que les iPad :
+     * si le terrain remonte des morts subites ou des ANR au chargement d'un
+     * gros décor, REDESCENDRE ce chiffre en premier.
+     */
+    const val MODEL_MAX_TRIANGLES = 10_000_000
     /**
      * Plafond de triangles de TOUS les modèles importés, cumulés. Gardé (iOS n'a
      * que le plafond par modèle) parce que le décor partage la mémoire GPU avec le

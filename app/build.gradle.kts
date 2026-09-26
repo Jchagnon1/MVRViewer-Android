@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.storage)
+    implementation(libs.billing.ktx)
     debugImplementation(libs.androidx.ui.tooling)
     // Tests unitaires JVM (calcul du zoom caméra, cf. DistanceZoomTest).
     testImplementation("junit:junit:4.13.2")

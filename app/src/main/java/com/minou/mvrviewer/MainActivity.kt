@@ -36,6 +36,12 @@ class MainActivity : ComponentActivity() {
         // Journal de diagnostic (plantages + gels) le plus tôt possible, pour
         // capturer même un problème au tout démarrage. Cf. CrashReporter.
         CrashReporter.install(this)
+        // Accès Pro (achat intégré). Crochet de test DEBUG :
+        //   adb shell am start -n com.minou.mvrviewer/.MainActivity --ez MVR_PRO true
+        val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val proOverride = if (isDebuggable && intent.hasExtra("MVR_PRO"))
+            intent.getBooleanExtra("MVR_PRO", false) else null
+        com.minou.mvrviewer.ui.ProAccess.init(this, proOverride)
         enableEdgeToEdge()
         incomingUri.value = uriFrom(intent)
         setContent {
@@ -46,6 +52,8 @@ class MainActivity : ComponentActivity() {
                         incomingUri = incomingUri.value,
                         onUriConsumed = { incomingUri.value = null }
                     )
+                    // Paywall posé UNE fois, par-dessus tout écran.
+                    com.minou.mvrviewer.ui.ProPaywallHost()
                 }
             }
         }

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeout
+import java.util.Date
 
 /**
  * Adaptateur RÉEL — PORTAGE de FirebaseSyncService iOS. Firebase Auth + Firestore
@@ -80,6 +81,28 @@ class FirebaseSyncService(context: Context) : SyncService {
 
     override suspend fun signOut() {
         auth.signOut()
+    }
+
+    /**
+     * Licence par compte : `entitlements/{uid}` — posée par l'administrateur
+     * dans la console Firebase, JAMAIS écrite par l'app (la règle Firestore ne
+     * doit autoriser que la lecture de son propre document). Source par
+     * DÉFAUT : le cache hors ligne convient (la licence change rarement ; une
+     * relecture serveur suit dès que le réseau revient). Toute erreur → false ;
+     * seule une annulation de la coroutine appelante remonte telle quelle (ce
+     * n'est pas une erreur métier, et son résultat ne serait pas appliqué).
+     */
+    override suspend fun fetchProGrant(): Boolean {
+        val uid = auth.currentUser?.uid ?: return false
+        return try {
+            val snap = db.collection("entitlements").document(uid).get().await()
+            val pro = snap.getBoolean("pro") == true
+            val expires = snap.getTimestamp("expires")
+            pro && (expires == null || expires.toDate().after(Date()))
+        } catch (e: Exception) {
+            if (e is CancellationException && e !is TimeoutCancellationException) throw e
+            false
+        }
     }
 
     /**

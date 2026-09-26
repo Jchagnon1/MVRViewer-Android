@@ -20,10 +20,17 @@ import com.android.billingclient.api.QueryPurchasesParams
  * ACCÈS « PRO » — parité exacte avec `ProAccess.swift` iOS.
  *
  * UNE app : GRATUIT = tout LIRE ; PRO = tout ce qui ÉCRIT dans le projet.
- * Déblocage par ACHAT UNIQUE (produit in-app Play Billing, MÊME identifiant
- * que l'App Store). RÈGLE D'INTERFACE : un utilisateur gratuit VOIT les
- * commandes d'édition ; les toucher ouvre le paywall via [gate] — jamais un
- * bouton qui disparaît.
+ * Deux chemins de déblocage, [isPro] = l'un OU l'autre :
+ *  - ACHAT UNIQUE ([purchased] : produit in-app Play Billing, MÊME identifiant
+ *    que l'App Store) ;
+ *  - LICENCE PAR COMPTE ([grantedByAccount]) : posée par l'ADMINISTRATEUR dans
+ *    la console Firebase (`entitlements/{uid}`, cf. `SyncService.fetchProGrant`),
+ *    JAMAIS par l'utilisateur ; relue par le SyncViewModel à chaque connexion et
+ *    par « Restaurer un achat » ([restore] → [grantRefresher]) ; retirée à la
+ *    déconnexion. Le paywall n'en parle pas — c'est le canal du propriétaire et
+ *    de ses testeurs tant que le produit n'est pas en ligne.
+ * RÈGLE D'INTERFACE : un utilisateur gratuit VOIT les commandes d'édition ; les
+ * toucher ouvre le paywall via [gate] — jamais un bouton qui disparaît.
  *
  * Singleton `object`, comme [ToolbarLayoutStore] : l'état Pro est global à
  * l'appareil, et Compose l'observe par les `mutableStateOf`. Initialisé une
@@ -34,11 +41,19 @@ object ProAccess {
     const val PRODUCT_ID = "com.minou.mvrviewer.pro"
     private const val PREFS = "mvrviewer.display"
     private const val KEY_ENTITLED = "pro.entitled"
+    private const val KEY_GRANT = "pro.grant"
 
-    /** Vrai si l'achat est vérifié. Semé du cache local pour ne pas
-     *  clignoter au lancement, puis confirmé par Play Billing. */
-    var isPro by mutableStateOf(false)
+    /** ACHAT Play vérifié. Semé du cache local pour ne pas clignoter au
+     *  lancement, puis confirmé par Play Billing. */
+    var purchased by mutableStateOf(false)
         private set
+    /** LICENCE PAR COMPTE (admin, Firestore). Semée du cache local, puis
+     *  relue à chaque connexion — cf. [setAccountGrant]. */
+    var grantedByAccount by mutableStateOf(false)
+        private set
+    /** Vrai si Pro par l'un OU l'autre chemin (ou forcé en DEBUG/tests).
+     *  Propriété calculée sur des états Compose : l'observation fonctionne. */
+    val isPro: Boolean get() = debugOverride ?: (purchased || grantedByAccount)
     /** Prix formaté par Google Play (« 29,99 € ») — jamais codé en dur. */
     var price by mutableStateOf<String?>(null)
         private set
@@ -54,15 +69,19 @@ object ProAccess {
     private var client: BillingClient? = null
     private var productDetails: ProductDetails? = null
     /** Crochet de test : `adb shell am start … --ez MVR_PRO true|false`
-     *  (DEBUG uniquement, cf. MainActivity). */
-    private var debugOverride: Boolean? = null
+     *  (DEBUG uniquement, cf. MainActivity). État Compose pour que [isPro]
+     *  reste observable quel que soit le chemin qui le fait changer. */
+    private var debugOverride by mutableStateOf<Boolean?>(null)
+    /** Branché par le SyncViewModel : relit la licence par compte. Appelé au
+     *  début de [restore] — « Restaurer un achat » couvre aussi la licence. */
+    var grantRefresher: (() -> Unit)? = null
 
-    /** TESTS UNITAIRES (JVM, sans Activity ni Play) : force l'état. Les tests
-     *  qui exercent une MUTATION gardée doivent se déclarer Pro, sinon la
-     *  garde refuse — c'est précisément ce qu'elle doit faire en production. */
+    /** TESTS UNITAIRES (JVM, sans Activity ni Play) : force l'état ; `null`
+     *  rend la main aux états réels (achat / licence). Les tests qui exercent
+     *  une MUTATION gardée doivent se déclarer Pro, sinon la garde refuse —
+     *  c'est précisément ce qu'elle doit faire en production. */
     fun forceForTests(pro: Boolean?) {
         debugOverride = pro
-        isPro = pro ?: false
     }
 
     fun init(ctx: Context, debugOverride: Boolean? = null) {
@@ -70,7 +89,9 @@ object ProAccess {
         val app = ctx.applicationContext
         appContext = app
         this.debugOverride = debugOverride
-        isPro = debugOverride ?: prefs(app).getBoolean(KEY_ENTITLED, false)
+        val p = prefs(app)
+        purchased = p.getBoolean(KEY_ENTITLED, false)
+        grantedByAccount = p.getBoolean(KEY_GRANT, false)
         if (debugOverride != null) return
         connect()
     }
@@ -91,6 +112,20 @@ object ProAccess {
         paywallReason = reason
         showPaywall = true
         return false
+    }
+
+    // MARK: - Licence par compte
+
+    /**
+     * Applique la LICENCE PAR COMPTE lue par `SyncService.fetchProGrant` —
+     * appelée par le SyncViewModel après chaque connexion réussie (et avec
+     * `false` à la déconnexion). Persistée pour ne pas clignoter au lancement
+     * (session restaurée, puis licence relue). Nul-sûr sans [init] (tests JVM).
+     */
+    fun setAccountGrant(granted: Boolean) {
+        grantedByAccount = granted
+        appContext?.let { prefs(it).edit().putBoolean(KEY_GRANT, granted).apply() }
+        if (granted) showPaywall = false
     }
 
     // MARK: - Play Billing
@@ -199,7 +234,7 @@ object ProAccess {
                 ) {}
             }
         }
-        isPro = entitled
+        purchased = entitled
         prefs(app).edit().putBoolean(KEY_ENTITLED, entitled).apply()
         if (entitled) showPaywall = false
     }
@@ -230,9 +265,11 @@ object ProAccess {
     }
 
     /** « Restaurer un achat » : les achats Google Play suivent le compte,
-     *  il suffit de les relire. */
+     *  il suffit de les relire — et on relit AUSSI la licence par compte
+     *  ([grantRefresher], branché par le SyncViewModel). */
     fun restore() {
         lastError = null
+        grantRefresher?.invoke()
         ensureConnected { refresh() }
     }
 }

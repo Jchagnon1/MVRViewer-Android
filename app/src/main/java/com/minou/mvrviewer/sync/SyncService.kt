@@ -34,6 +34,14 @@ interface SyncService {
      */
     suspend fun deleteAccount(password: String)
 
+    /**
+     * Licence Pro attribuée au COMPTE connecté par l'administrateur (document
+     * Firestore `entitlements/{uid}`, champ `pro: true`, optionnellement
+     * `expires` Timestamp dans le futur) ; false si absent, hors ligne ou
+     * déconnecté ; ne lève jamais.
+     */
+    suspend fun fetchProGrant(): Boolean
+
     // — Projets / réunion —
     suspend fun createProject(contentKey: String, name: String): CloudProject
     suspend fun listProjects(): List<CloudProject>

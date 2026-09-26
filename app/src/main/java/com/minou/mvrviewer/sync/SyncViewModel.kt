@@ -85,13 +85,40 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private var observeJob: Job? = null
 
+    // Licence Pro PAR COMPTE (posée par l'admin, cf. SyncService.fetchProGrant) :
+    // relue après CHAQUE connexion réussie et par « Restaurer un achat »
+    // (crochet ProAccess.grantRefresher), retirée à la déconnexion.
+    private val grantRefresher: () -> Unit = { refreshProGrant() }
+
+    init {
+        com.minou.mvrviewer.ui.ProAccess.grantRefresher = grantRefresher
+    }
+
     // MARK: - Auth
 
     fun restoreSessionIfPossible() {
         viewModelScope.launch {
             val acc = runCatching { service.restoreSession() }.getOrNull() ?: return@launch
             _auth.value = AuthState.SignedIn(acc)
+            refreshProGrant()
             refreshProjects()
+        }
+    }
+
+    /**
+     * Relit la licence par compte pour la session courante et l'applique à
+     * [com.minou.mvrviewer.ui.ProAccess]. No-op si déconnecté. Dans
+     * [viewModelScope] (ne retarde pas la connexion) ; garde de course : si la
+     * session a changé pendant la lecture (déconnexion, autre compte), le
+     * résultat n'est pas appliqué. `fetchProGrant` ne lève jamais.
+     */
+    private fun refreshProGrant() {
+        val uid = _auth.value.accountOrNull?.uid ?: return
+        viewModelScope.launch {
+            val granted = service.fetchProGrant()
+            if (_auth.value.accountOrNull?.uid == uid) {
+                com.minou.mvrviewer.ui.ProAccess.setAccountGrant(granted)
+            }
         }
     }
 
@@ -100,6 +127,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val acc = service.signIn(email, password)
             _auth.value = AuthState.SignedIn(acc)
+            refreshProGrant()
             refreshProjects()
             reattachAfterAuth()
         } catch (e: Exception) {
@@ -113,6 +141,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val acc = service.signUp(email, password, displayName)
             _auth.value = AuthState.SignedIn(acc)
+            refreshProGrant()
             refreshProjects()
             reattachAfterAuth()
         } catch (e: Exception) {
@@ -128,6 +157,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _auth.value = AuthState.SignedOut
             _currentProject.value = null
             _cloudProjects.value = emptyList()
+            com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
         }
     }
 
@@ -174,6 +204,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         _auth.value = AuthState.SignedOut
         _currentProject.value = null
         _cloudProjects.value = emptyList()
+        com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
     }
 
     private suspend fun refreshProjects() {
@@ -466,5 +497,9 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         super.onCleared()
         stopObserving()
+        // Ne pas laisser le singleton ProAccess retenir ce ViewModel.
+        if (com.minou.mvrviewer.ui.ProAccess.grantRefresher === grantRefresher) {
+            com.minou.mvrviewer.ui.ProAccess.grantRefresher = null
+        }
     }
 }

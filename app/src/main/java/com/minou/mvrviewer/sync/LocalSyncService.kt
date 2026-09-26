@@ -47,6 +47,13 @@ class LocalSyncService private constructor(
     private val lock = Mutex()
     private var currentUser: AccountInfo? = null
 
+    /**
+     * Crochet de test / démo : uids titulaires d'une LICENCE PRO PAR COMPTE —
+     * l'équivalent local du document Firestore `entitlements/{uid}` que
+     * l'administrateur pose dans la console (cf. [fetchProGrant]).
+     */
+    val proGrants: MutableSet<String> = mutableSetOf()
+
     /** Diffusion en process pour observe() : (projectId, event). */
     private val bus = MutableSharedFlow<Pair<String, RemoteEvent>>(extraBufferCapacity = 128)
 
@@ -136,6 +143,11 @@ class LocalSyncService private constructor(
     override suspend fun signOut() = lock.withLock {
         currentUser = null
         session.clear()
+    }
+
+    override suspend fun fetchProGrant(): Boolean = lock.withLock {
+        val uid = currentUser?.uid ?: return false
+        uid in proGrants
     }
 
     /**

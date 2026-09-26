@@ -287,6 +287,20 @@ private class SatGpu {
 }
 
 /**
+ * Ressources GPU des TEXTURES `.3ds` de la build courante (une Texture + une
+ * MaterialInstance PAR NOM D'IMAGE, partagées par toutes les instances qui la
+ * référencent — les 215 arbres d'un export Vectorworks = 1 texture). Libérées à
+ * la reconstruction, au même endroit que les FilamentAsset .glb : sinon chaque
+ * « appliquer un modèle GDTF » fuirait ~10 Mo de VRAM par image (bug déjà connu
+ * du projet pour les .glb). Les Bitmap décodés, eux, restent dans le cache de
+ * prep CPU (réutilisés au retour plan→3D).
+ */
+private class TdsGpu {
+    val textures = ArrayList<com.google.android.filament.Texture>()
+    val materials = ArrayList<MaterialInstance>()
+}
+
+/**
  * Vue 3D : structure/décor en VRAIE géométrie `.3ds` (couleurs matériaux
  * incluses), projecteurs en cubes colorés par calque. Les références Symbol →
  * Symdef sont résolues récursivement (transforms composées), et les géométries
@@ -443,6 +457,9 @@ fun Scene3DScreen(
     // LIBÉRÉES à la reconstruction (changement d'image ou d'opacité) : sinon
     // chaque rebuild fuyait une texture GPU (l'image fait ~1–3 Mo).
     val satGpu = remember { SatGpu() }
+    // Textures + matériaux texturés des .3ds de la build courante (cf. TdsGpu) :
+    // libérés à chaque reconstruction, juste après les FilamentAsset .glb.
+    val tdsGpu = remember { TdsGpu() }
     // Plan de repère MATRICIEL (image / PDF) posé au sol : même patron que le
     // quad satellite (quad texturé + ressources GPU libérées à chaque rebuild),
     // mais placé par la transformée du plan et non par la géo-référence.
@@ -545,6 +562,17 @@ fun Scene3DScreen(
             runCatching { modelLoader.assetLoader.destroyAsset(asset) }
         }
         glbAssets.clear()
+        // Puis les textures/matériaux texturés des .3ds de la build précédente
+        // (même protocole que satGpu : destroyMaterialInstance PUIS destroyTexture,
+        // idempotent via runCatching — les nœuds qui les référençaient sont déjà
+        // détruits ci-dessus). Via MaterialLoader, PAS engine : createInstance
+        // enregistre l'instance dans la liste privée du loader, que seul
+        // MaterialLoader.destroyMaterialInstance retire (sinon elle y reste,
+        // détruite, à chaque reconstruction).
+        tdsGpu.materials.forEach { m -> runCatching { materialLoader.destroyMaterialInstance(m) } }
+        tdsGpu.materials.clear()
+        tdsGpu.textures.forEach { t -> runCatching { engine.destroyTexture(t) } }
+        tdsGpu.textures.clear()
         // NB : on ne masque PLUS la géométrie pendant la construction. Tout
         // révéler d'un coup à la fin concentrait le tout premier rendu de la
         // scène complète (des milliers de nœuds) dans UNE seule trame → gros
@@ -612,18 +640,28 @@ fun Scene3DScreen(
                     .mapTo(HashSet()) { it.substringAfterLast('/') }
                 val images = if (imageNames.isEmpty()) emptyMap()
                              else MvrParser.extractEntries(mvrBytes, imageNames)
+                // Textures des .3ds (0xA300) : noms référencés par les sous-meshes
+                // → octets dans le zip (résolution tolérante GlbImageIndex) →
+                // Bitmap + drapeau « a de la transparence », HORS thread principal.
+                // Mis en cache avec le reste de la prep (retour plan→3D).
+                val tdsTexNames = HashSet<String>()
+                for (list in md.values) for (m in list) for (t in m.textures) if (t != null) tdsTexNames.add(t)
+                val tdsTex = decodeTdsTextures(tdsTexNames, images)
                 Prepared3DHolder().also {
                     it.refs = r; it.meshDataByFile = md; it.maxDimByFile = dim; it.imageBytes = images
+                    it.tdsTextures = tdsTex
                 }
             }
             holder.refs = prep.refs; holder.meshDataByFile = prep.meshDataByFile
             holder.maxDimByFile = prep.maxDimByFile; holder.imageBytes = prep.imageBytes
+            holder.tdsTextures = prep.tdsTextures
         }
         progress?.report(LoadStep.GEOMETRY, 1f)
         val refs = holder.refs!!
         val meshDataByFile = holder.meshDataByFile!!
         val maxDimByFile = holder.maxDimByFile!!
         val imageBytes = holder.imageBytes ?: emptyMap()
+        val tdsTextures = holder.tdsTextures ?: emptyMap()
         // Dénominateur d'avancement de l'étape « Construction de la scène… » :
         // nombre total de références rendables (3ds + glb) à placer.
         val totalRefs = (refs.tds.size + refs.glb.size).coerceAtLeast(1)
@@ -631,6 +669,46 @@ fun Scene3DScreen(
         // 2) Thread moteur : budget global de nœuds/triangles partagé 3ds+glb.
         val builtCache = HashMap<String, List<BuiltMesh>>()
         fun material(color: Int) = buildMaterialCache.getOrPut(color) { materialLoader.createColorInstance(color) }
+        // Matériau TEXTURÉ d'un sous-mesh .3ds, mémoïsé PAR NOM D'IMAGE (un échec
+        // est mémoïsé aussi → jamais deux tentatives GPU pour la même image) :
+        // Texture GPU (sRGB + mipmaps, ImageTexture) + matériau ÉCLAIRÉ SceneView
+        // opaque_textured / transparent_textured (paramètre « texture »). Avec de
+        // la transparence (feuillage découpé) : mélange alpha + DES DEUX CÔTÉS
+        // (un plan de feuillage vu de dos serait sinon éliminé par le culling,
+        // parité forceDoubleSidedTransparency des .glb). Échelle/décalage UV
+        // (0xA354…) : appliqués aux UV des sommets dans prepareMeshData (ces
+        // matériaux n'exposent pas de transformée UV). Sampler REPEAT (wrap) +
+        // filtrage trilinéaire (la texture a ses mipmaps). Mémoïsé par IMAGE
+        // DÉCODÉE (identité) : deux orthographes du même fichier dans les .3ds
+        // pointent le même DecodedTexture → une seule texture GPU.
+        val texturedByImage = java.util.IdentityHashMap<DecodedTexture, MaterialInstance?>()
+        fun texturedMaterial(name: String): MaterialInstance? {
+            val dt = tdsTextures[name] ?: return null
+            if (texturedByImage.containsKey(dt)) return texturedByImage[dt]
+            val built: MaterialInstance? = run {
+                val tex = runCatching {
+                    io.github.sceneview.texture.ImageTexture.Builder().bitmap(dt.bitmap).build(engine)
+                }.getOrNull() ?: return@run null
+                tdsGpu.textures.add(tex)
+                val mat = runCatching {
+                    materialLoader.createTextureInstance(tex, isOpaque = !dt.hasTransparency)
+                }.getOrNull() ?: return@run null
+                tdsGpu.materials.add(mat)
+                val sampler = com.google.android.filament.TextureSampler(
+                    com.google.android.filament.TextureSampler.MinFilter.LINEAR_MIPMAP_LINEAR,
+                    com.google.android.filament.TextureSampler.MagFilter.LINEAR,
+                    com.google.android.filament.TextureSampler.WrapMode.REPEAT
+                )
+                runCatching { mat.setParameter("texture", tex, sampler) }
+                if (dt.hasTransparency) {
+                    runCatching { mat.setDoubleSided(true) }
+                    runCatching { mat.setCullingMode(com.google.android.filament.Material.CullingMode.NONE) }
+                }
+                mat
+            }
+            texturedByImage[dt] = built
+            return built
+        }
         var nodes = 0
         var triangles = 0L
         var placed = 0
@@ -642,11 +720,16 @@ fun Scene3DScreen(
             if (nodes >= sceneNodeBudget || triangles >= MAX_TRIANGLES) { truncated = true; break }
             val md = meshDataByFile[r.fileName]
             if (md.isNullOrEmpty()) continue
-            val built = builtCache.getOrPut(r.fileName) { md.map { BuiltMesh(it.toGeometry(engine), it.colors, it.triangles) } }
+            val built = builtCache.getOrPut(r.fileName) { md.map { BuiltMesh(it.toGeometry(engine), it.colors, it.triangles, it.textures) } }
             // Petit objet (siège, accessoire) → candidat au LOD d'interaction.
             val small = (maxDimByFile[r.fileName] ?: Float.MAX_VALUE) < LOD_SMALL_MM
             for (bm in built) {
-                val node = GeometryNode(engine, bm.geometry, bm.colors.map(::material))
+                // Sous-mesh texturé → matériau image partagé ; sinon (pas de
+                // texture, image absente du MVR ou illisible) → couleur diffuse.
+                val mats = bm.colors.indices.map { i ->
+                    bm.textures.getOrNull(i)?.let { texturedMaterial(it) } ?: material(bm.colors[i])
+                }
+                val node = GeometryNode(engine, bm.geometry, mats)
                 node.transform = r.world
                 enqueueAdd(node)
                 // Suivi par le LOD AVEC son calque : en « Auto » seul le petit
@@ -1025,7 +1108,7 @@ fun Scene3DScreen(
         satRoot.childNodes.toList().forEach {
             satRoot.removeChildNode(it); runCatching { it.destroy() }
         }
-        satGpu.material?.let { m -> runCatching { engine.destroyMaterialInstance(m) } }; satGpu.material = null
+        satGpu.material?.let { m -> runCatching { materialLoader.destroyMaterialInstance(m) } }; satGpu.material = null
         satGpu.texture?.let { t -> runCatching { engine.destroyTexture(t) } }; satGpu.texture = null
         val sat = satellite
         if (!options.showSatellite || sat == null || sat.bitmap.width <= 0) return@LaunchedEffect
@@ -2345,7 +2428,18 @@ private fun forceDoubleSidedTransparency(instances: List<com.google.android.fila
     }
 }
 
-private class BuiltMesh(val geometry: Geometry, val colors: List<Int>, val triangles: Int)
+/**
+ * Géométrie uploadée + un matériau par sous-mesh : `colors` (couleur diffuse) et
+ * `textures` (nom de l'image .3ds, ou null) sont PARALLÈLES. Par défaut aucune
+ * texture (modèles GDTF .3ds : leurs images ne sont pas dans le MVR) → même rendu
+ * couleur qu'avant.
+ */
+private class BuiltMesh(
+    val geometry: Geometry,
+    val colors: List<Int>,
+    val triangles: Int,
+    val textures: List<String?> = List(colors.size) { null }
+)
 
 /**
  * Données de mesh PRÊTES au moteur, calculées HORS THREAD PRINCIPAL (normales,
@@ -2357,12 +2451,20 @@ private class MeshData(
     val verts: List<Geometry.Vertex>,
     val prims: List<List<Int>>,
     val colors: List<Int>,
-    val triangles: Int
+    val triangles: Int,
+    /** Nom de fichier image (0xA300) par sous-mesh, parallèle à `colors` ; null sans texture. */
+    val textures: List<String?>
 )
 
 private fun MeshData.toGeometry(engine: Engine): Geometry =
     Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
         .vertices(verts).primitivesIndices(prims).build(engine)
+
+/**
+ * Image de texture .3ds décodée (hors thread principal) : Bitmap ARGB_8888 +
+ * « au moins un pixel d'alpha < 255 » (→ matériau transparent, double face).
+ */
+private class DecodedTexture(val bitmap: android.graphics.Bitmap, val hasTransparency: Boolean)
 
 /** Cache de préparation CPU d'une scène (survit aux bascules 3D↔plan). */
 private class Prepared3DHolder {
@@ -2370,7 +2472,88 @@ private class Prepared3DHolder {
     var meshDataByFile: Map<String, List<MeshData>>? = null
     var maxDimByFile: Map<String, Float>? = null
     var imageBytes: Map<String, ByteArray>? = null
+    /** Textures .3ds décodées, clé = nom de fichier tel qu'écrit dans le .3ds (0xA300). */
+    var tdsTextures: Map<String, DecodedTexture>? = null
     val ready: Boolean get() = refs != null
+}
+
+// Bornes du décodage des textures .3ds (un MVR Vectorworks en a ~15 ; le cache
+// de prep les garde en mémoire, et chaque Bitmap devient une texture GPU
+// mipmappée) : budget TOTAL en pixels — ARGB_8888 = 4 o/px, donc 48 Mpx ≈
+// 192 Mio de Bitmap — plutôt qu'un simple nombre d'images (32 images de 2048²
+// feraient 512 Mio). Une image est d'abord bornée à MAX_TDS_TEXTURE_SIDE (une
+// toile de fond 3400 px n'a pas besoin de plus de 2048 px), puis sous-
+// échantillonnée (puissances de 2) tant que le budget restant ne la contient
+// pas ; en dessous de MIN_TDS_TEXTURE_SIDE ou budget épuisé, elle est sautée
+// (repli couleur diffuse).
+private const val MAX_TDS_TEXTURE_PIXELS = 48_000_000L
+private const val MAX_TDS_TEXTURE_SIDE = 2048
+private const val MIN_TDS_TEXTURE_SIDE = 64
+
+/**
+ * Décode les images référencées par les matériaux .3ds (noms 0xA300) depuis les
+ * images du MVR — résolution tolérante nom de base/casse via GlbImageIndex —
+ * en Bitmap ARGB_8888, et détecte la transparence (alpha < 255, balayage par
+ * ligne pour ne pas allouer toute l'image en IntArray). PUR CPU, hors thread
+ * principal ; une image illisible est simplement absente du résultat (le
+ * sous-mesh retombe sur sa couleur diffuse).
+ *
+ * Une entrée zip n'est décodée qu'UNE fois quelle que soit l'orthographe du nom
+ * dans les .3ds (`00011.png` / `00011.PNG` / `tex\00011.png` → même clé
+ * canonique, même [DecodedTexture] partagé → une seule texture GPU en aval).
+ * Parcours en ordre trié : le budget tombe toujours sur les mêmes images.
+ */
+private fun decodeTdsTextures(names: Set<String>, images: Map<String, ByteArray>): Map<String, DecodedTexture> {
+    if (names.isEmpty() || images.isEmpty()) return emptyMap()
+    val index = com.minou.mvrviewer.mvr.GlbImageIndex(images)
+    val out = HashMap<String, DecodedTexture>(names.size)
+    val byKey = HashMap<String, DecodedTexture?>()
+    var remaining = MAX_TDS_TEXTURE_PIXELS
+    for (name in names.sorted()) {
+        val key = index.canonicalKey(name) ?: continue
+        if (byKey.containsKey(key)) {
+            byKey[key]?.let { out[name] = it }
+            continue
+        }
+        val bytes = images[key] ?: continue
+        val decoded = runCatching {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val w = bounds.outWidth; val h = bounds.outHeight
+            if (w <= 0 || h <= 0) return@runCatching null
+            var sample = 1
+            while (maxOf(w, h) / sample > MAX_TDS_TEXTURE_SIDE) sample *= 2
+            fun pixels() = (w.toLong() / sample) * (h.toLong() / sample)
+            while (pixels() > remaining && maxOf(w, h) / sample > MIN_TDS_TEXTURE_SIDE) sample *= 2
+            if (pixels() > remaining) return@runCatching null
+            val opts = android.graphics.BitmapFactory.Options().apply {
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                inSampleSize = sample
+            }
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                ?: return@runCatching null
+            if (bmp.width <= 0 || bmp.height <= 0) return@runCatching null
+            DecodedTexture(bmp, bitmapHasTransparency(bmp))
+        }.getOrNull()
+        byKey[key] = decoded
+        if (decoded != null) {
+            out[name] = decoded
+            remaining -= decoded.bitmap.width.toLong() * decoded.bitmap.height
+        }
+    }
+    return out
+}
+
+/** Vrai dès qu'un pixel a un alpha < 255 (balayage ligne par ligne, arrêt au premier). */
+private fun bitmapHasTransparency(bmp: android.graphics.Bitmap): Boolean {
+    if (!bmp.hasAlpha()) return false
+    val w = bmp.width; val h = bmp.height
+    val row = IntArray(w)
+    for (y in 0 until h) {
+        bmp.getPixels(row, 0, w, 0, y, w, 1)
+        for (x in 0 until w) if ((row[x] ushr 24) != 0xFF) return true
+    }
+    return false
 }
 
 /**
@@ -2437,12 +2620,45 @@ private fun prepareMeshData(mesh: ThreeDSParser.Mesh): MeshData? {
         }
         i += 3
     }
+    // Coordonnées de texture (0x4140) : seulement si le fichier en a exactement
+    // une par sommet ; sinon aucun UV n'est émis et le mesh reste en couleur
+    // (voir `textureOf` : sans UV, un matériau texturé n'étirerait qu'un texel).
+    // CONVENTION : le .3ds a l'origine UV EN BAS À GAUCHE (v = 0 au sol). Les
+    // matériaux SceneView (opaque_textured / transparent_textured) sont compilés
+    // avec flipUV=true : leur vertex shader fait DÉJÀ `1.0 - mesh_uv0.y`
+    // (vérifié dans les .filamat de l'AAR) → V est passé TEL QUEL. Un second
+    // retournement ici mettrait les arbres tête en bas.
+    // Échelle/décalage UV du matériau (0xA354…, u' = u·s + o, sampler REPEAT)
+    // appliqués ici, sur les sommets, quand toutes les cartes du mesh partagent
+    // la même transformée (cas courant : un seul matériau texturé). Des cartes
+    // aux transformées différentes sur un même mesh (UV partagées) ne sont pas
+    // départagées : transformée identité.
+    val uvs = mesh.uvs?.takeIf { it.size == 2 * vc }
+    val maps = mesh.materialTextures.values
+    val uvXf = maps.firstOrNull()?.takeIf { f ->
+        maps.all { it.uScale == f.uScale && it.vScale == f.vScale && it.uOffset == f.uOffset && it.vOffset == f.vOffset }
+    }
+    val uSc = uvXf?.uScale ?: 1f; val vSc = uvXf?.vScale ?: 1f
+    val uOf = uvXf?.uOffset ?: 0f; val vOf = uvXf?.vOffset ?: 0f
     val verts = ArrayList<Geometry.Vertex>(vc)
     for (v in 0 until vc) {
         val len = sqrt(nx[v] * nx[v] + ny[v] * ny[v] + nz[v] * nz[v])
         val n = if (len > 1e-6f) Float3(nx[v] / len, ny[v] / len, nz[v] / len) else Float3(0f, 0f, 1f)
-        verts.add(Geometry.Vertex(position = Float3(vs[v * 3], vs[v * 3 + 1], vs[v * 3 + 2]), normal = n))
+        val pos = Float3(vs[v * 3], vs[v * 3 + 1], vs[v * 3 + 2])
+        if (uvs != null) {
+            val uv = Float2(uvs[v * 2] * uSc + uOf, uvs[v * 2 + 1] * vSc + vOf)
+            verts.add(Geometry.Vertex(position = pos, normal = n, uvCoordinate = uv))
+        } else {
+            verts.add(Geometry.Vertex(position = pos, normal = n))
+        }
     }
+    // Texture d'un groupe matériau : seulement avec des UV cohérents (sans UV, un
+    // matériau texturé n'aurait qu'un seul texel étiré → on garde la couleur).
+    fun textureOf(materialName: String?): String? =
+        if (uvs == null || materialName == null) null else mesh.materialTextures[materialName]?.fileName
+    // Faces sans groupe / restantes : la texture de l'UNIQUE matériau du fichier
+    // s'il n'y en a qu'un (comme la couleur), sinon aucune.
+    val soleMaterial = if (mesh.materials.size == 1) mesh.materials.keys.first() else null
 
     // Émet les 3 indices d'un triangle SEULEMENT s'ils sont tous valides (okTri).
     fun emit(out: ArrayList<Int>, t: Int) {
@@ -2457,11 +2673,13 @@ private fun prepareMeshData(mesh: ThreeDSParser.Mesh): MeshData? {
     // Sous-meshes par matériau.
     val prims = ArrayList<List<Int>>()
     val colors = ArrayList<Int>()
+    val textures = ArrayList<String?>()
     if (mesh.materialGroups.isEmpty()) {
         val all = allValidTris()
         if (all.isNotEmpty()) {
             prims.add(all)
             colors.add(if (mesh.materials.size == 1) mesh.materials.values.first().toColorInt() else GRAY)
+            textures.add(textureOf(soleMaterial))
         }
     } else {
         val assigned = BooleanArray(tc)
@@ -2474,14 +2692,15 @@ private fun prepareMeshData(mesh: ThreeDSParser.Mesh): MeshData? {
             if (idx.isNotEmpty()) {
                 prims.add(idx)
                 colors.add(mesh.materials[g.name]?.toColorInt() ?: GRAY)
+                textures.add(textureOf(g.name))
             }
         }
         val leftover = ArrayList<Int>()
         for (t in 0 until tc) if (!assigned[t] && okTri(t)) emit(leftover, t)
-        if (leftover.isNotEmpty()) { prims.add(leftover); colors.add(GRAY) }
+        if (leftover.isNotEmpty()) { prims.add(leftover); colors.add(GRAY); textures.add(textureOf(soleMaterial)) }
     }
     if (prims.isEmpty()) return null
-    return MeshData(verts, prims, colors, tc)
+    return MeshData(verts, prims, colors, tc, textures)
 }
 
 // ---- Repère / matrices ----

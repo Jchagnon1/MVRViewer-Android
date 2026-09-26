@@ -21,22 +21,30 @@ package com.minou.mvrviewer.mvr
  */
 class GlbImageIndex(private val images: Map<String, ByteArray>) {
 
-    /** Index par nom de base MINUSCULE, construit à la première demande. */
-    private val lower: Map<String, ByteArray> by lazy {
-        HashMap<String, ByteArray>(images.size).also { m ->
-            for ((k, v) in images) m.putIfAbsent(baseName(k).lowercase(), v)
+    /** Nom de base MINUSCULE → clé d'origine, construit à la première demande. */
+    private val lowerKeys: Map<String, String> by lazy {
+        HashMap<String, String>(images.size).also { m ->
+            for (k in images.keys) m.putIfAbsent(baseName(k).lowercase(), k)
         }
     }
 
     val isEmpty: Boolean get() = images.isEmpty()
 
-    fun resolve(uri: String): ByteArray? {
+    /**
+     * Clé de `images` (le nom de l'entrée zip) que désigne `uri`, ou null. Sert
+     * de clé CANONIQUE aux caches en aval : deux orthographes du même fichier
+     * (`00011.png`, `TEX\00011.PNG`) donnent la même clé, donc un seul décodage.
+     */
+    fun canonicalKey(uri: String): String? {
         if (images.isEmpty() || uri.isEmpty() || uri.startsWith("data:", ignoreCase = true)) return null
         val raw = baseName(uri)
         val dec = baseName(percentDecode(uri))
-        return images[dec] ?: images[raw]
-            ?: lower[dec.lowercase()] ?: lower[raw.lowercase()]
+        if (images.containsKey(dec)) return dec
+        if (images.containsKey(raw)) return raw
+        return lowerKeys[dec.lowercase()] ?: lowerKeys[raw.lowercase()]
     }
+
+    fun resolve(uri: String): ByteArray? = canonicalKey(uri)?.let { images[it] }
 
     companion object {
         /** Dernier segment de chemin, séparateurs `/` ET `\` (exports Windows). */

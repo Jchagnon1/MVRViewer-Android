@@ -35,6 +35,16 @@ class GlbImageIndexTest {
     }
 
     @Test
+    fun cleCanoniqueIdentiquePourToutesLesOrthographes() {
+        // Trois orthographes du même fichier → la même clé (celle de l'entrée zip).
+        assertEquals("Feuille Chene.png", index.canonicalKey("Feuille Chene.png"))
+        assertEquals("Feuille Chene.png", index.canonicalKey("textures/Feuille%20Chene.png"))
+        assertEquals("Feuille Chene.png", index.canonicalKey("C:\\TEX\\FEUILLE CHENE.PNG"))
+        assertEquals("ecorce.jpg", index.canonicalKey("Ecorce.JPG"))
+        assertNull(index.canonicalKey("tronc.png"))
+    }
+
+    @Test
     fun inconnuEtDataUri() {
         assertNull(index.resolve("tronc.png"))
         // Les `data:` URI sont décodées par gltfio lui-même.

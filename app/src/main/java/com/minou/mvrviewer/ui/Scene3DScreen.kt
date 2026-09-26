@@ -676,8 +676,11 @@ fun Scene3DScreen(
                 byFile.getOrPut(r.fileName) { mutableListOf() }.add(r.world)
                 layerByFile.getOrPut(r.fileName) { r.layer }
             }
+            // Images EXTERNES des .glb (Filament lit lui-même les embarquées) :
+            // résolution tolérante (%20, sous-dossier, casse), cf. GlbImageIndex.
+            val imageIndex = com.minou.mvrviewer.mvr.GlbImageIndex(imageBytes)
             val resolver: (String) -> java.nio.Buffer? = { uri ->
-                imageBytes[uri.substringAfterLast('/')]?.let { java.nio.ByteBuffer.wrap(it) }
+                imageIndex.resolve(uri)?.let { java.nio.ByteBuffer.wrap(it) }
             }
             // PIPELINE : on décompresse le PROCHAIN lot de .glb en arrière-plan
             // (Dispatchers.IO) PENDANT que le lot courant est construit sur le
@@ -706,6 +709,7 @@ fun Scene3DScreen(
                             modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), take, resolver)
                         }.getOrNull() ?: continue
                         instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
+                        forceDoubleSidedTransparency(instances)
                         val glbLayer = layerByFile[name] ?: ""
                         for (k in 0 until minOf(take, instances.size)) {
                             val node = io.github.sceneview.node.ModelNode(instances[k])
@@ -805,6 +809,7 @@ fun Scene3DScreen(
                             modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(fp.bytes), count)
                         }.getOrNull() ?: continue
                         instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
+                        forceDoubleSidedTransparency(instances)
                         val box = instances.firstOrNull()?.asset?.boundingBox
                         val rawMax = box?.halfExtent?.let { 2f * maxOf(it[0], it[1], it[2]) } ?: 0f
                         val s = when {
@@ -1182,6 +1187,7 @@ fun Scene3DScreen(
                     modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(data), 1)
                 }.getOrNull() ?: continue
                 instances.firstOrNull()?.asset?.let { importedAssets.add(it) }
+                forceDoubleSidedTransparency(instances)
                 instances.firstOrNull()?.let { inst ->
                     val node = io.github.sceneview.node.ModelNode(inst)
                     node.transform = world
@@ -2316,6 +2322,28 @@ private fun fixturesWithOwnGeometry(scene: MvrScene): Set<Int> {
 }
 
 // ---- Construction de géométrie (avec couleurs matériaux, comme toSCNNode iOS) ----
+
+/**
+ * Parité iOS (GLBFastDecoder, « les arbres Vectorworks ne sont plus des croix
+ * grises ») : les matériaux à OPACITÉ (alphaMode MASK/BLEND — feuillages
+ * découpés, vitrages) sont rendus DES DEUX CÔTÉS. Filament honore déjà
+ * `alphaMode` et les images embarquées ; mais un plan de feuillage vu de dos est
+ * ÉLIMINÉ (culling) si l'export n'a pas posé `doubleSided`, et un arbre en deux
+ * quads croisés perd alors la moitié de ses faces selon l'angle. Les matériaux
+ * opaques ne sont pas touchés. Chaque instance gltfio a ses propres
+ * MaterialInstance → on les parcourt toutes.
+ */
+private fun forceDoubleSidedTransparency(instances: List<com.google.android.filament.gltfio.FilamentInstance>) {
+    for (inst in instances) {
+        val mis = runCatching { inst.materialInstances }.getOrNull() ?: continue
+        for (mi in mis) {
+            val mode = runCatching { mi.material.blendingMode }.getOrNull() ?: continue
+            if (mode == com.google.android.filament.Material.BlendingMode.OPAQUE) continue
+            runCatching { mi.setDoubleSided(true) }
+            runCatching { mi.setCullingMode(com.google.android.filament.Material.CullingMode.NONE) }
+        }
+    }
+}
 
 private class BuiltMesh(val geometry: Geometry, val colors: List<Int>, val triangles: Int)
 

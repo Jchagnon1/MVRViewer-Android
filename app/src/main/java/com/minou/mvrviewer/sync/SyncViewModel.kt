@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -128,6 +129,51 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _currentProject.value = null
             _cloudProjects.value = emptyList()
         }
+    }
+
+    /**
+     * Suppression DÉFINITIVE du compte (politique Google Play « suppression de
+     * compte »). JAMAIS de garde Pro : c'est un droit, gratuit. Le service
+     * re-vérifie le mot de passe et n'ÉCRIT qu'après une sonde réseau ; en cas
+     * d'échec AVANT le commit (mot de passe faux, réseau, reconnexion exigée…)
+     * l'exception remonte à l'UI et le compte reste INTACT — l'observation du
+     * projet courant, coupée avant l'appel pour que plus aucun écouteur
+     * Firestore ne survive à la suppression, est rétablie.
+     * [SyncException.DeletionIncomplete] (données effacées, compte Auth encore
+     * vivant, service déjà déconnecté) : on passe à l'état déconnecté SANS rien
+     * rétablir ; l'utilisateur se reconnecte puis recommence.
+     * À la réussite : même nettoyage que [signOut] (identifiants chiffrés de
+     * reconnexion silencieuse effacés, état, projets cloud).
+     *
+     * Exécutée dans [viewModelScope] : la portée du dialogue peut être annulée
+     * (rotation, fermeture) sans interrompre une suppression IRRÉVERSIBLE déjà
+     * engagée ni laisser l'état du ViewModel incohérent ; l'appelant n'attend
+     * que le résultat.
+     */
+    suspend fun deleteAccount(password: String) {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        viewModelScope.async {
+            val project = _currentProject.value
+            stopObserving()
+            try {
+                service.deleteAccount(password)
+            } catch (e: SyncException.DeletionIncomplete) {
+                clearSignedInState()
+                throw e
+            } catch (e: Exception) {
+                project?.let { startObserving(it.id) }
+                throw e
+            }
+            clearSignedInState()
+        }.await()
+    }
+
+    /** État local « déconnecté » : identifiants de reconnexion silencieuse effacés, projets cloud oubliés. */
+    private fun clearSignedInState() {
+        runCatching { SyncCredentialStore.clear(ctx) }
+        _auth.value = AuthState.SignedOut
+        _currentProject.value = null
+        _cloudProjects.value = emptyList()
     }
 
     private suspend fun refreshProjects() {

@@ -28,9 +28,22 @@ import java.io.File
  * process : deux observateurs voient les écritures l'un de l'autre via un
  * SharedFlow de diffusion. Un Mutex sérialise tous les accès (comme l'acteur iOS).
  */
-class LocalSyncService private constructor(appContext: Context) : SyncService {
+class LocalSyncService private constructor(
+    private val rootDir: File,
+    private val session: SessionStore
+) : SyncService {
 
-    private val ctx = appContext.applicationContext
+    /**
+     * Persistance de la SESSION (reconnexion silencieuse) — abstraite pour que le
+     * stub soit testable en JVM pur : sur l'appareil c'est [SyncCredentialStore]
+     * (AndroidKeystore), en test un simple couple en mémoire.
+     */
+    interface SessionStore {
+        fun load(): Pair<String, String>?
+        fun save(email: String, secret: String)
+        fun clear()
+    }
+
     private val lock = Mutex()
     private var currentUser: AccountInfo? = null
 
@@ -41,13 +54,32 @@ class LocalSyncService private constructor(appContext: Context) : SyncService {
         @Volatile private var instance: LocalSyncService? = null
         fun shared(context: Context): LocalSyncService =
             instance ?: synchronized(this) {
-                instance ?: LocalSyncService(context).also { instance = it }
+                instance ?: fromContext(context).also { instance = it }
             }
+
+        private fun fromContext(context: Context): LocalSyncService {
+            val ctx = context.applicationContext
+            return LocalSyncService(File(ctx.filesDir, "CloudSim"), object : SessionStore {
+                override fun load() = SyncCredentialStore.load(ctx)
+                override fun save(email: String, secret: String) = SyncCredentialStore.save(ctx, email, secret)
+                override fun clear() = SyncCredentialStore.clear(ctx)
+            })
+        }
+
+        /** Instance ISOLÉE pour les tests JVM : arbre sous [root], session en mémoire, sans Context. */
+        internal fun forTesting(root: File): LocalSyncService = LocalSyncService(root, InMemorySession())
+    }
+
+    private class InMemorySession : SessionStore {
+        private var pair: Pair<String, String>? = null
+        override fun load() = pair
+        override fun save(email: String, secret: String) { pair = email to secret }
+        override fun clear() { pair = null }
     }
 
     // MARK: Arborescence
 
-    private val root: File get() = File(ctx.filesDir, "CloudSim").apply { mkdirs() }
+    private val root: File get() = rootDir.apply { mkdirs() }
     private val accountsFile get() = File(root, "accounts.json")
     private fun inviteFile(code: String) = File(File(root, "invites").apply { mkdirs() }, "$code.json")
     private fun projectDir(id: String) = File(File(root, "projects"), id).apply { mkdirs() }
@@ -69,7 +101,7 @@ class LocalSyncService private constructor(appContext: Context) : SyncService {
     private fun accounts(): JSONObject = readObj(accountsFile) ?: JSONObject()
 
     override suspend fun restoreSession(): AccountInfo? = lock.withLock {
-        val (email, secret) = SyncCredentialStore.load(ctx) ?: return null
+        val (email, secret) = session.load() ?: return null
         val acc = accounts().optJSONObject(email.lowercase()) ?: return null
         if (acc.optString("password") != secret) return null
         AccountInfo(acc.optString("uid"), acc.optString("email"), acc.optString("displayName")).also {
@@ -88,14 +120,14 @@ class LocalSyncService private constructor(appContext: Context) : SyncService {
             .put("uid", uid).put("email", email)
             .put("displayName", name).put("password", password))
         writeText(accountsFile, all.toString())
-        SyncCredentialStore.save(ctx, email, password)
+        session.save(email, password)
         AccountInfo(uid, email, name).also { currentUser = it }
     }
 
     override suspend fun signIn(email: String, password: String): AccountInfo = lock.withLock {
         val acc = accounts().optJSONObject(email.lowercase()) ?: throw SyncException.InvalidCredentials
         if (acc.optString("password") != password) throw SyncException.InvalidCredentials
-        SyncCredentialStore.save(ctx, email, password)
+        session.save(email, password)
         AccountInfo(acc.optString("uid"), acc.optString("email"), acc.optString("displayName")).also {
             currentUser = it
         }
@@ -103,7 +135,49 @@ class LocalSyncService private constructor(appContext: Context) : SyncService {
 
     override suspend fun signOut() = lock.withLock {
         currentUser = null
-        SyncCredentialStore.clear(ctx)
+        session.clear()
+    }
+
+    /**
+     * Suppression du compte (stub) — MÊME POLITIQUE que le backend réel
+     * ([FirebaseSyncService.deleteAccount]) : mot de passe RE-VÉRIFIÉ (faux →
+     * s'arrête AVANT toute écriture, compte intact, toujours connecté) ; projet
+     * dont il est le SEUL membre et le propriétaire → supprimé entièrement
+     * (sections, blobs, audit) ; seul membre sans être propriétaire → uid retiré
+     * (orphelin, comme la règle Firestore l'impose) ; projet avec d'autres
+     * membres → uid retiré et, s'il en était le propriétaire, PROPRIÉTÉ
+     * TRANSFÉRÉE au premier autre membre ; invitations qu'il a créées effacées ;
+     * compte effacé ; session persistée effacée. Les votes de puissance restent
+     * (comme côté Firebase : ménage serveur).
+     */
+    override suspend fun deleteAccount(password: String) = lock.withLock {
+        val u = requireUser()
+        val key = u.email.lowercase()
+        val all = accounts()
+        val acc = all.optJSONObject(key) ?: throw SyncException.NotSignedIn
+        if (acc.optString("password") != password) throw SyncException.InvalidCredentials
+        for (p in allProjects()) {
+            if (u.uid !in p.memberUids) continue
+            val others = p.memberUids - u.uid
+            if (others.isEmpty() && p.ownerUid == u.uid) {
+                projectDir(p.id).deleteRecursively()
+                continue
+            }
+            val left = p.copy(
+                memberUids = others,
+                ownerUid = if (p.ownerUid == u.uid && others.isNotEmpty()) others.first() else p.ownerUid,
+                updatedAtEpoch = nowEpoch()
+            )
+            writeProject(left)
+            bus.tryEmit(left.id to RemoteEvent.MembershipChanged(left.memberUids))
+        }
+        File(root, "invites").listFiles { f -> f.extension == "json" }
+            ?.filter { readObj(it)?.optString("createdBy") == u.uid }
+            ?.forEach { it.delete() }
+        all.remove(key)
+        writeText(accountsFile, all.toString())
+        currentUser = null
+        session.clear()
     }
 
     private fun requireUser(): AccountInfo = currentUser ?: throw SyncException.NotSignedIn
@@ -147,12 +221,14 @@ class LocalSyncService private constructor(appContext: Context) : SyncService {
     // MARK: Invitation / rejoindre
 
     override suspend fun createInvite(projectId: String): InviteCode = lock.withLock {
-        requireUser()
+        val u = requireUser()
         if (readProject(projectId) == null) throw SyncException.ProjectNotFound
         val code = shortInviteCode()
         val invite = InviteCode(code, projectId, "mvrviewer://join/$code", null)
+        // `createdBy` comme dans le cloud : effacée avec le compte de son auteur.
         writeText(inviteFile(code), JSONObject()
-            .put("code", code).put("projectId", projectId).put("url", invite.url).toString())
+            .put("code", code).put("projectId", projectId).put("url", invite.url)
+            .put("createdBy", u.uid).toString())
         invite
     }
 

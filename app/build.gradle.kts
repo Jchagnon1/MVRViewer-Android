@@ -9,14 +9,14 @@ plugins {
 
 android {
     namespace = "com.minou.mvrviewer"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.minou.mvrviewer"
         minSdk = 28  // requis par SceneView/Filament (vue 3D)
-        targetSdk = 35
-        versionCode = 19
-        versionName = "1.8.1"
+        targetSdk = 36  // exigence Google Play (niveau d'API cible) pour les nouvelles soumissions
+        versionCode = 20
+        versionName = "1.9.0"
         vectorDrawables { useSupportLibrary = true }
     }
 

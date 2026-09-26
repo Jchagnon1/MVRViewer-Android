@@ -313,6 +313,15 @@ sealed class SyncException(
     object BackendUnavailable : SyncException("Service de synchronisation indisponible.", com.minou.mvrviewer.R.string.sync_err_backend_unavailable)
     object SignUpFailed : SyncException("Création de compte impossible.", com.minou.mvrviewer.R.string.sync_err_signup_failed)
     object AuthFailed : SyncException("Erreur d'authentification.", com.minou.mvrviewer.R.string.sync_err_auth_failed)
+    object NetworkUnavailable : SyncException("Connexion réseau indisponible. Réessayez.", com.minou.mvrviewer.R.string.sync_err_network)
+    object RecentLoginRequired : SyncException("Par sécurité, reconnectez-vous puis réessayez.", com.minou.mvrviewer.R.string.sync_err_recent_login)
+    /**
+     * Suppression de compte INCOMPLÈTE : les données Firestore (profil,
+     * adhésions, invitations) sont déjà effacées mais le compte Auth n'a pas pu
+     * l'être. Le service a DÉCONNECTÉ l'appareil pour ne jamais laisser l'app
+     * « connectée sans profil » ; l'utilisateur se reconnecte puis recommence.
+     */
+    object DeletionIncomplete : SyncException("Suppression incomplète : reconnectez-vous puis réessayez.", com.minou.mvrviewer.R.string.sync_err_delete_incomplete)
     class Message(msg: String) : SyncException(msg)
 }
 

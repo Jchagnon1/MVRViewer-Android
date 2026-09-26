@@ -17,6 +17,23 @@ interface SyncService {
     suspend fun signIn(email: String, password: String): AccountInfo
     suspend fun signOut()
 
+    /**
+     * Suppression DÉFINITIVE du compte (politique Google Play « suppression de
+     * compte », Apple 5.1.1 (v)). Le mot de passe est RE-VÉRIFIÉ avant toute
+     * destruction et RIEN n'est écrit tant qu'une étape faillible précède : une
+     * erreur AVANT l'écriture (mot de passe faux, réseau, reconnexion exigée…)
+     * laisse le compte INTACT — toujours connecté, adhésions conservées — et
+     * remonte en [SyncException] lisible. Politique des données : projet dont il
+     * était le seul membre → supprimé ; projet partagé → il en est retiré et, s'il
+     * en était le propriétaire, la propriété passe au premier autre membre ;
+     * invitations qu'il a créées → supprimées ; profil → supprimé. Seule
+     * exception au « compte intact » : [SyncException.DeletionIncomplete] (données
+     * effacées, compte Auth pas encore) — le service a alors DÉCONNECTÉ
+     * l'appareil et l'utilisateur se reconnecte puis recommence. À la réussite,
+     * l'utilisateur est déconnecté. JAMAIS de garde Pro : c'est un droit, gratuit.
+     */
+    suspend fun deleteAccount(password: String)
+
     // — Projets / réunion —
     suspend fun createProject(contentKey: String, name: String): CloudProject
     suspend fun listProjects(): List<CloudProject>

@@ -9,7 +9,7 @@ coroutines = "1.9.0"
 sceneview = "4.22.0"
 firebaseBom = "33.7.0"
 googleServices = "4.4.2"
-billing = "7.1.1"
+billing = "8.3.0"  # Google Play exige Play Billing ≥ 8 (dernière 8.x publiée sur maven.google.com)
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

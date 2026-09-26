@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
@@ -33,6 +34,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -92,6 +95,7 @@ fun AccountDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
     var isSignUp by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var showDelete by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -106,6 +110,12 @@ fun AccountDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(stringResource(R.string.sync_backend_fmt, sync.backendLabel), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Suppression de compte (politique Google Play) : toujours
+                    // visible ici, JAMAIS derrière une garde Pro — c'est un droit.
+                    TextButton(
+                        onClick = { showDelete = true },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) { Text(stringResource(R.string.sync_delete_account)) }
                 } else {
                     OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.sync_email)) },
                         singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -150,6 +160,71 @@ fun AccountDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
             }
         }
+    )
+
+    if (showDelete) DeleteAccountDialog(
+        sync = sync,
+        onDismiss = { showDelete = false },
+        onDeleted = { showDelete = false; onDismiss() }
+    )
+}
+
+/**
+ * Confirmation de suppression de compte : le mot de passe est re-saisi (le
+ * backend le re-vérifie), l'erreur s'affiche dans le dialogue, qui se ferme
+ * seul à la réussite. Verrouillé pendant l'opération (pas de double envoi).
+ */
+@Composable
+private fun DeleteAccountDialog(sync: SyncViewModel, onDismiss: () -> Unit, onDeleted: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(stringResource(R.string.sync_delete_account_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.sync_delete_account_warning))
+                Text(stringResource(R.string.sync_delete_account_password_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.sync_password)) },
+                    singleLine = true, enabled = !busy, visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth())
+                if (busy) {
+                    // Libellé PROPRE à l'action destructive (pas « Synchro… », réservé
+                    // au badge du projet partagé) ; le même texte sert de
+                    // contentDescription au spinner pour les lecteurs d'écran.
+                    val progressLabel = stringResource(R.string.sync_delete_account_progress)
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier
+                            .heightIn(max = 18.dp)
+                            .semantics { contentDescription = progressLabel })
+                        Text(progressLabel, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && password.isNotBlank(),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                onClick = {
+                    busy = true; error = null
+                    scope.launch {
+                        try { sync.deleteAccount(password); onDeleted() }
+                        catch (e: Exception) { error = e.syncMessage(ctx) } finally { busy = false }
+                    }
+                }
+            ) { Text(stringResource(R.string.sync_delete_account_confirm)) }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } }
     )
 }
 

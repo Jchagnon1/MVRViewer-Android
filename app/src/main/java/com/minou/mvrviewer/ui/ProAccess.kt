@@ -140,10 +140,21 @@ object ProAccess {
                     .build()
             ))
             .build()
-        c.queryProductDetailsAsync(params) { result, list ->
+        // Play Billing 8 : la réponse est un QueryProductDetailsResult — les
+        // produits trouvés dans `productDetailsList`, ceux que Play n'a pas pu
+        // servir dans `unfetchedProductList` (produit non publié, région…) ; dans
+        // ce cas `productDetails` reste nul et [purchase] le signale comme avant.
+        c.queryProductDetailsAsync(params) { result, details ->
             if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                productDetails = list.firstOrNull()
-                price = productDetails?.oneTimePurchaseOfferDetails?.formattedPrice
+                val pd = details.productDetailsList.firstOrNull()
+                productDetails = pd
+                // 8.x : un produit ponctuel peut porter PLUSIEURS options d'achat
+                // (`oneTimePurchaseOfferDetailsList`) ; l'offre par défaut reste
+                // exposée par `oneTimePurchaseOfferDetails`, avec repli sur la
+                // première de la liste. Prix formaté par Google Play, jamais codé en dur.
+                val offer = pd?.oneTimePurchaseOfferDetails
+                    ?: pd?.oneTimePurchaseOfferDetailsList?.firstOrNull()
+                price = offer?.formattedPrice
             }
         }
     }

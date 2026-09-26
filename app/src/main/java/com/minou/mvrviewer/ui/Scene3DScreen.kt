@@ -1649,8 +1649,13 @@ fun Scene3DScreen(
             available = true, checked = importedModels.isNotEmpty() && showModelsPanel,
             busy = importingModel || modelBusy,
             onInvoke = {
-                if (importedModels.isEmpty()) showModelImportFormats = true
-                else showModelsPanel = !showModelsPanel
+                if (importedModels.isEmpty()) {
+                    ProAccess.gate("importer un objet 3D") { showModelImportFormats = true }
+                } else if (showModelsPanel) {
+                    showModelsPanel = false
+                } else {
+                    ProAccess.gate("régler les objets 3D importés") { showModelsPanel = true }
+                }
             }))
         // Panneau des calques : dockable en barre ; l'entrée de menu dédiée
         // (« Calques… ») est rendue par SceneOptionsMenu → inMenu=false ici pour
@@ -2115,7 +2120,7 @@ fun Scene3DScreen(
                         onSetImportedModels(rest)
                         if (rest.isEmpty()) showModelsPanel = false
                     },
-                    onAdd = { showModelImportFormats = true },
+                    onAdd = { ProAccess.gate("importer un objet 3D") { showModelImportFormats = true } },
                     // Double piège : bump de version (sinon rien ne bouge en 3D) ET
                     // sauvegarde différée (sinon rien n'est persisté).
                     onChanged = onImportedModelsTouched,

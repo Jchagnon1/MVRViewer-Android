@@ -930,7 +930,10 @@ fun PlanScreen(
             }))
         add(ToolSpec(ToolId.CALIBRATE, stringResource(R.string.tool_calibrate), Icons.Filled.Place,
             available = showLocation, checked = calibrating, onInvoke = {
-                calibrating = !calibrating; if (calibrating) measureMode = false
+                // Calibration GPS = donnée de show PARTAGÉE (poussée, journalisée,
+                // destructive pour l'équipe) : Pro. Désarmer reste libre.
+                if (calibrating) calibrating = false
+                else ProAccess.gate("calibrer la position GPS") { calibrating = true; measureMode = false }
             }))
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
             available = calibration.isCalibrated, checked = options.showSatellite,
@@ -946,8 +949,13 @@ fun PlanScreen(
             Icons.Filled.Layers,
             available = true, checked = referencePlan != null && showDxfPanel, busy = importing,
             onInvoke = {
-                if (referencePlan == null) importLauncher.launch(arrayOf("*/*"))
-                else showDxfPanel = !showDxfPanel
+                if (referencePlan == null) {
+                    ProAccess.gate("importer un plan") { importLauncher.launch(arrayOf("*/*")) }
+                } else if (showDxfPanel) {
+                    showDxfPanel = false
+                } else {
+                    ProAccess.gate("régler le plan importé") { showDxfPanel = true }
+                }
             }))
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
         add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,

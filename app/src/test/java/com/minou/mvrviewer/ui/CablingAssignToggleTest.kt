@@ -17,6 +17,11 @@ import org.junit.Test
  */
 class CablingAssignToggleTest {
 
+    // Les mutations de câblage sont GARDÉES (version Pro) : ce test exerce la
+    // logique d'affectation, pas la garde — il se déclare Pro.
+    @org.junit.Before fun proForTests() { ProAccess.forceForTests(true) }
+    @org.junit.After fun resetPro() { ProAccess.forceForTests(null) }
+
     /** Reproduit exactement la décision de `PlanScreen.toggleAssign` (branche SOCA). */
     private fun togglePower(state: PowerCablingState, fx: String, dist: String, circuit: Int) {
         val cur = state.assignmentOf(fx)

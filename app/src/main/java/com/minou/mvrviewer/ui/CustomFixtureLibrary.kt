@@ -57,12 +57,14 @@ class CustomFixtureLibrary {
 
     /** Crée ou remplace un type (même id) — mutation utilisateur. */
     fun upsert(t: CustomFixtureTypeDTO) {
+        if (!ProAccess.gate("créer un projecteur personnalisé") {}) return
         val i = types.indexOfFirst { it.id == t.id }
         if (i >= 0) types[i] = t else types.add(t)
         version++
     }
 
     fun remove(id: String) {
+        if (!ProAccess.gate("modifier un projecteur personnalisé") {}) return
         if (types.removeAll { it.id == id }) version++
     }
 
@@ -72,6 +74,7 @@ class CustomFixtureLibrary {
      * la copie (ou null si l'id source est introuvable) — mutation utilisateur.
      */
     fun duplicate(id: String): CustomFixtureTypeDTO? {
+        if (!ProAccess.gate("créer un projecteur personnalisé") {}) return null
         val src = types.firstOrNull { it.id == id } ?: return null
         val copy = src.copy(
             id = java.util.UUID.randomUUID().toString(),

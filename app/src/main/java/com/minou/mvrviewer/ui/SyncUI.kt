@@ -55,6 +55,30 @@ import com.minou.mvrviewer.R
  * piloté par le [SyncViewModel] partagé. Tout est no-op visuel si déconnecté.
  */
 
+// MARK: - Version Pro (état, déblocage, restauration) — même vocabulaire que
+// le paywall, au même endroit que le compte : c'est là qu'on cherche « ai-je
+// payé ? ».
+
+@Composable
+private fun ProAccountSection() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (ProAccess.isPro) {
+            Text("MVR Viewer Pro — édition débloquée", style = MaterialTheme.typography.titleSmall)
+        } else {
+            Text("MVR Viewer Pro", style = MaterialTheme.typography.titleSmall)
+            Text("La lecture est gratuite ; l'édition (patch, câblage, imports…) passe en Pro.",
+                style = MaterialTheme.typography.bodySmall)
+            androidx.compose.material3.TextButton(onClick = {
+                ProAccess.gate("débloquer l'édition") {}
+            }) { Text("Débloquer la version Pro") }
+        }
+        androidx.compose.material3.TextButton(onClick = { ProAccess.restore() }) {
+            Text("Restaurer un achat")
+        }
+    }
+    androidx.compose.material3.HorizontalDivider()
+}
+
 // MARK: - Compte (connexion / inscription / déconnexion)
 
 @Composable
@@ -74,6 +98,7 @@ fun AccountDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
         title = { Text(stringResource(if (auth.isSignedIn) R.string.nav_account else if (isSignUp) R.string.sync_create_account else R.string.sync_sign_in_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ProAccountSection()
                 val account = auth.accountOrNull
                 if (account != null) {
                     Text(account.displayName, style = MaterialTheme.typography.titleMedium)

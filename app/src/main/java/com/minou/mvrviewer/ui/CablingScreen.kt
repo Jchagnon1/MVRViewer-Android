@@ -550,7 +550,10 @@ private fun CircuitRow(
             // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
             // affectation vers CE circuit. Conserve l'affectation par la liste (bouton +).
             IconButton(onClick = {
-                onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.SOCA, dist.id, circuit))
+                // Garde en AMONT : ne pas armer le mode affectation du plan pour rien.
+                ProAccess.gate("affecter le câblage") {
+                    onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.SOCA, dist.id, circuit))
+                }
             }) {
                 Icon(Icons.Filled.Map, contentDescription = stringResource(R.string.cabling_select_on_plan_cd))
             }

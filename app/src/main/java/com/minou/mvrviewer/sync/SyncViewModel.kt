@@ -170,6 +170,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     // MARK: - Publier / rejoindre
 
     suspend fun publishCurrentProject(name: String): InviteCode {
+        // Partager = ouvrir SON projet à l'équipe : édition. Rejoindre reste gratuit.
+        if (!com.minou.mvrviewer.ui.ProAccess.gate("partager un projet") {}) throw SyncException.Message("Version Pro requise")
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
         val key = currentContentKey; val data = currentMvrBytes
         if (key == null || data == null) throw SyncException.Message(ctx.getString(com.minou.mvrviewer.R.string.sync_err_no_open_project))
@@ -215,6 +217,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Téléverse le plan DXF (`refplan.bin`, format d'échange DXP1) ; renvoie le SHA. */
     suspend fun uploadRefPlan(interopBytes: ByteArray): String? {
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return null
         val project = _currentProject.value ?: return null
         if (!_auth.value.isSignedIn) return null
         val sha = ContentHash.sha256Hex(interopBytes)
@@ -243,6 +246,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     // MARK: - Push (appelé par les écrans après édition locale)
 
     private fun push(payload: SectionPayload) {
+        // FILET PRO, SILENCIEUX (jamais de paywall depuis un effet de fond) :
+        // un gratuit n'écrit jamais dans le projet partagé, quel que soit le
+        // chemin — ses aides de lecture restent locales.
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return
         if (!_auth.value.isSignedIn) return
         val project = _currentProject.value ?: return
         val opId = UUID.randomUUID().toString()
@@ -292,6 +299,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
      * un consensus local de son seul vote. Personne n'écrase le vote d'un autre.
      */
     suspend fun submitPowerVote(spec: String, watts: Int): PowerConsensus? {
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return null
         if (spec.isBlank()) return null
         val by = _auth.value.accountOrNull?.uid ?: ""
         return runCatching {

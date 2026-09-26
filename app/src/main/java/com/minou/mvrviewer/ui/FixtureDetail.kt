@@ -144,6 +144,9 @@ class PatchOverrides {
     fun isEdited(o: MvrSceneObject) = edits.containsKey(key(o))
 
     fun set(o: MvrSceneObject, id: String?, address: String?, mode: String?, name: String?) {
+        // GARDE PRO — point unique : couvre « Enregistrer » ET l'annulation
+        // depuis l'historique. Ouvrir la fiche pour LIRE reste gratuit.
+        if (!ProAccess.gate("modifier le patch") {}) return
         val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o), effectiveName(o), effectiveSpec(o))
         // On PRÉSERVE l'override de spec de rendu existant (l'édition ID/adresse/mode/
         // nom ne doit pas effacer l'assignation d'un type custom).
@@ -159,6 +162,7 @@ class PatchOverrides {
      * le MÊME `onCommit` que le reste du patch → persistance patch + push cloud + audit.
      */
     fun assignSpec(o: MvrSceneObject, spec: String?) {
+        if (!ProAccess.gate("utiliser un projecteur personnalisé") {}) return
         val cur = edits[key(o)]
         val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o), effectiveName(o), effectiveSpec(o))
         val new = PatchEdit(cur?.fixtureId, cur?.address, cur?.modeName, cur?.name, spec?.ifBlank { null })

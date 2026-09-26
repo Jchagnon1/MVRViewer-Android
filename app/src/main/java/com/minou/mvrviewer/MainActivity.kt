@@ -61,6 +61,12 @@ class MainActivity : ComponentActivity() {
 
     // L'appli est en singleTop : un nouvel « ouvrir avec » alors qu'elle tourne
     // déjà arrive ici plutôt que de recréer l'activité.
+    override fun onResume() {
+        super.onResume()
+        // Achat validé hors app, remboursement : relire les droits au retour.
+        com.minou.mvrviewer.ui.ProAccess.refresh()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

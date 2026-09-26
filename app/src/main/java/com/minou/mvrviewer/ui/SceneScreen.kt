@@ -765,6 +765,8 @@ fun SceneScreen(
     // pousse au cloud et journalise l'annulation comme une entrée de plus. Le
     // journal reste ainsi strictement en ajout seul.
     fun undoAudit(e: AuditEntry) {
+        // Consulter l'historique est gratuit ; ANNULER une modification en est une.
+        if (!ProAccess.gate("annuler une modification") {}) return
         val raw = e.oldRaw ?: return
         when (e.fieldKey) {
             AuditFieldKey.FIXTURE_ID, AuditFieldKey.ADDRESS, AuditFieldKey.MODE, AuditFieldKey.NAME -> {
@@ -879,7 +881,7 @@ fun SceneScreen(
             onShowUniverse = { mode = SceneMode.UNIVERSE },
             onShowCabling = { mode = SceneMode.CABLING },
             onShowAccount = sync?.let { { showAccount = true } },
-            onShareProject = sync?.let { { showShare = true } },
+            onShareProject = sync?.let { { ProAccess.gate("partager un projet") { showShare = true } } },
             onShowHistory = sync?.let { { showHistory = true } },
             onJoinProject = sync?.let { { showJoin = true } },
             // Solo partagé avec la vue plan (survit aux bascules 3D ↔ plan).
@@ -949,7 +951,12 @@ fun SceneScreen(
             satellite = satellite,
             hiddenLayers = hiddenLayers,
             onToggleLayer = { layer ->
-                hiddenLayers = if (layer in hiddenLayers) hiddenLayers - layer else hiddenLayers + layer
+                // Calque DXF masqué = donnée PARTAGÉE (manifeste + audit,
+                // appliquée chez tous) : édition, donc Pro. Un gratuit continue
+                // de RECEVOIR et voir les calques masqués par l'équipe.
+                ProAccess.gate("modifier les calques du plan importé") {
+                    hiddenLayers = if (layer in hiddenLayers) hiddenLayers - layer else hiddenLayers + layer
+                }
             },
             onCalibrationChanged = { calibTick++ },
             // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à
@@ -973,7 +980,7 @@ fun SceneScreen(
             assignTarget = assignTarget,
             onAssignDone = { assignTarget = null; mode = SceneMode.CABLING },
             onShowAccount = sync?.let { { showAccount = true } },
-            onShareProject = sync?.let { { showShare = true } },
+            onShareProject = sync?.let { { ProAccess.gate("partager un projet") { showShare = true } } },
             onShowHistory = sync?.let { { showHistory = true } },
             onJoinProject = sync?.let { { showJoin = true } },
             // Retour à la 3D = aussi une sortie du mode affectation (échappatoire) :

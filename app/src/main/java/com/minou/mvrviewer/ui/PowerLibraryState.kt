@@ -66,6 +66,8 @@ class PowerLibraryState {
      * corrigera library/libraryVotes avec le consensus réel via [seedConsensus].
      */
     fun set(spec: String, watts: Int) {
+        // Voter une consommation alimente une bibliothèque PARTAGÉE : édition.
+        if (!ProAccess.gate("renseigner une consommation") {}) return
         val id = powerLibraryDocId(spec)
         val old = library[id]
         library[id] = watts

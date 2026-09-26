@@ -42,6 +42,9 @@ class PowerCablingState {
     // Suppression du commit pendant un chargement (disque/cloud) : sinon restaurer
     // l'état déclencherait un push qui se battrait avec le distant (LWW).
     private var loading = false
+    /** Dernier état COMMITÉ (ou chargé) : ce vers quoi on revient quand une
+     *  mutation est refusée par la garde Pro. */
+    private var lastCommitted: PowerCablingDTO? = null
 
     fun toDTO(): PowerCablingDTO =
         PowerCablingDTO(settings, distributors.toList(), assignments.values.toList())
@@ -54,12 +57,24 @@ class PowerCablingState {
         assignments.clear()
         for (a in dto.assignments) assignments[a.fixture] = a
         loading = false
+        lastCommitted = dto
         version++
     }
 
     private fun commit() {
+        // GARDE PRO — ici et pas sur chaque bouton : tous les mutateurs
+        // passent par là. La mutation est déjà faite en mémoire : on la
+        // DÉFAIT en rechargeant le dernier état commité (consulter le
+        // câblage reste gratuit, le modifier non).
+        if (!loading && !ProAccess.gate("modifier le câblage") {}) {
+            load(lastCommitted ?: PowerCablingDTO(settings, emptyList(), emptyList()))
+            return
+        }
         version++
-        if (!loading) onChange?.invoke(toDTO())
+        if (!loading) {
+            lastCommitted = toDTO()
+            onChange?.invoke(toDTO())
+        }
     }
 
     // ---- Distributeurs ------------------------------------------------------

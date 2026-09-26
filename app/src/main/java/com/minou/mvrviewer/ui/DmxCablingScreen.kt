@@ -299,7 +299,9 @@ private fun DmxCoreRow(
             // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
             // affectation vers CE départ. Conserve l'affectation par la liste (bouton +).
             IconButton(onClick = {
-                onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.DMX, dist.id, core))
+                ProAccess.gate("affecter le câblage") {
+                    onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.DMX, dist.id, core))
+                }
             }) {
                 Icon(Icons.Filled.Map, contentDescription = stringResource(R.string.cabling_select_on_plan_cd))
             }

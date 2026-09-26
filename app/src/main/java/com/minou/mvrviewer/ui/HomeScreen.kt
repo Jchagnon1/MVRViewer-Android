@@ -130,6 +130,11 @@ fun HomeScreen(
                 // Synchro cloud : compte + rejoindre un projet partagé.
                 if (sync != null) {
                     val auth by sync.auth.collectAsState()
+                    // INVITATION À CRÉER UN COMPTE — pour tout le monde, gratuit
+                    // compris : c'est par le compte que l'équipe REÇOIT les
+                    // projets partagés par le chef de chantier (Pro), avec ses
+                    // modifications en direct. Lire est gratuit.
+                    if (!auth.isSignedIn) AccountPromptCard(onClick = { showAccount = true })
                     Row(modifier = Modifier.padding(top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { showAccount = true }) {
@@ -245,4 +250,27 @@ private fun shareDiag(ctx: android.content.Context) {
         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     runCatching { ctx.startActivity(android.content.Intent.createChooser(send, ctx.getString(R.string.diag_share))) }
+}
+
+
+/** Carte d'invitation au compte — touche d'identité (voile jaune), une seule action. */
+@Composable
+private fun AccountPromptCard(onClick: () -> Unit) {
+    androidx.compose.material3.Surface(
+        color = com.minou.mvrviewer.ui.theme.Accent.fillLight.copy(alpha = 0.14f),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        modifier = Modifier.padding(top = 14.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text("Créez votre compte (gratuit)", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "C'est par lui que vous recevez les projets partagés par votre chef de chantier, avec ses modifications en direct. Lire est gratuit ; seule l'édition passe en Pro.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            TextButton(onClick = onClick, modifier = Modifier.padding(top = 4.dp)) {
+                Text("Créer un compte ou se connecter…")
+            }
+        }
+    }
 }

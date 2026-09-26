@@ -57,6 +57,14 @@ object ProAccess {
      *  (DEBUG uniquement, cf. MainActivity). */
     private var debugOverride: Boolean? = null
 
+    /** TESTS UNITAIRES (JVM, sans Activity ni Play) : force l'état. Les tests
+     *  qui exercent une MUTATION gardée doivent se déclarer Pro, sinon la
+     *  garde refuse — c'est précisément ce qu'elle doit faire en production. */
+    fun forceForTests(pro: Boolean?) {
+        debugOverride = pro
+        isPro = pro ?: false
+    }
+
     fun init(ctx: Context, debugOverride: Boolean? = null) {
         if (appContext != null) return
         val app = ctx.applicationContext

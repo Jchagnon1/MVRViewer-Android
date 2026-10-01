@@ -41,7 +41,9 @@ class FirebaseSyncService(context: Context) : SyncService {
 
     @Suppress("unused")
     private val appContext = context.applicationContext
-    private val auth get() = FirebaseAuth.getInstance()
+    // E-mails Firebase Auth (mot de passe oublié…) en FRANÇAIS, comme iOS :
+    // le gabarit anglais par défaut est illisible et plus souvent classé spam.
+    private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance().apply { setLanguageCode("fr") } }
     private val db get() = FirebaseFirestore.getInstance()
     private val storage get() = FirebaseStorage.getInstance()
 

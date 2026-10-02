@@ -312,7 +312,10 @@ class FirebaseSyncService(context: Context) : SyncService {
         storage.reference.child("projects/$projectId/blobs/$sha")
 
     override suspend fun blobExists(projectId: String, sha256: String): Boolean =
-        try { blobRef(projectId, sha256).metadata.await(); true } catch (e: Exception) { false }
+        try { blobRef(projectId, sha256).metadata.await(); true }
+        // Une annulation (délai d'attente de l'appelant, écran quitté) n'est pas « absent ».
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { false }
 
     override suspend fun uploadBlob(
         projectId: String, sha256: String, kind: BlobKind,
@@ -337,6 +340,12 @@ class FirebaseSyncService(context: Context) : SyncService {
         val data = blobRef(projectId, ref.sha256).getBytes(1L shl 30).await() // plafond 1 Go
         progress?.invoke(1.0)
         return data
+    }
+
+    override suspend fun blobSize(projectId: String, sha256: String): Long? = try {
+        blobRef(projectId, sha256).metadata.await().sizeBytes
+    } catch (e: com.google.firebase.storage.StorageException) {
+        if (e.errorCode == com.google.firebase.storage.StorageException.ERROR_OBJECT_NOT_FOUND) null else throw e
     }
 
     // MARK: État par section

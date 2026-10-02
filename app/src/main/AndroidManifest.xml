@@ -3,6 +3,9 @@
 
     <!-- GDTF Share : téléchargement des modèles fabricants. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Retour du réseau : retente les téléchargements de 3D des types MA (permission
+         normale, déjà apportée par Firebase ; déclarée ici car l'app s'en sert). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Position de l'utilisateur en direct sur le plan (après calibrage). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 

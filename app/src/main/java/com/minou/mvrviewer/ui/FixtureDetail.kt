@@ -122,6 +122,12 @@ class PatchOverrides {
         private set
     /** Hook de commit UTILISATEUR : (projecteur, ancien édit effectif, nouvel édit). */
     var onCommit: ((MvrSceneObject, PatchEdit, PatchEdit) -> Unit)? = null
+    /**
+     * Commit GROUPÉ (affectation d'un type à TOUTE une sélection, bibliothèque MA) : une
+     * seule persistance, un seul push de patch puis de customFixtures. À défaut, chaque
+     * changement passe par [onCommit].
+     */
+    var onCommitMany: ((List<Triple<MvrSceneObject, PatchEdit, PatchEdit>>) -> Unit)? = null
 
     /** Même identité que le masquage et le fil de fer (cf. mvrInstanceKey). */
     fun key(o: MvrSceneObject) = mvrInstanceKey(o)
@@ -169,6 +175,27 @@ class PatchOverrides {
         edits[key(o)] = new
         version++
         onCommit?.invoke(o, old, new)
+    }
+
+    /**
+     * Affecte (ou retire) une spec de rendu à PLUSIEURS projecteurs d'un coup (« custom:<id> »
+     * PAR INSTANCE, SPEC-ma.md §5.8). Garde Pro « modifier le patch ». Préserve
+     * ID/adresse/mode/nom de chacun.
+     */
+    fun assignSpecToAll(list: List<MvrSceneObject>, spec: String?) {
+        if (list.isEmpty()) return
+        if (!ProAccess.gate("modifier le patch") {}) return
+        val changes = ArrayList<Triple<MvrSceneObject, PatchEdit, PatchEdit>>(list.size)
+        for (o in list) {
+            val cur = edits[key(o)]
+            val old = PatchEdit(effectiveId(o), effectiveAddress(o), effectiveMode(o), effectiveName(o), effectiveSpec(o))
+            val new = PatchEdit(cur?.fixtureId, cur?.address, cur?.modeName, cur?.name, spec?.ifBlank { null })
+            edits[key(o)] = new
+            changes.add(Triple(o, old, new))
+        }
+        version++
+        val many = onCommitMany
+        if (many != null) many(changes) else changes.forEach { (o, a, b) -> onCommit?.invoke(o, a, b) }
     }
 
     /** État persistable (clé → édit) pour PatchStore / mapping cloud. */
@@ -308,6 +335,14 @@ fun FixtureDetailSheet(
                 Text(customType?.let { stringResource(R.string.fx_custom_type_fmt, it.name, maxOf(1, it.footprint)) }
                     ?: stringResource(R.string.fx_standard_fmt, fixture.gdtfSpec ?: "—"))
             }
+            // Bibliothèque MA : provenance + 3D du type, et statut « 3D indisponible » (§4.5).
+            customType?.let { ct ->
+                maTypeSubtitle(ct)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                val store3D = Fixture3DStore.of(androidx.compose.ui.platform.LocalContext.current)
+                Fixture3DStatusLines(ct, hasOrigin = !fixture.gdtfSpec.isNullOrBlank(), store = store3D)
+            }
             DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.fx_standard_fmt, fixture.gdtfSpec ?: "—")) },
@@ -316,7 +351,18 @@ fun FixtureDetailSheet(
                 if (customLibrary.types.isNotEmpty()) HorizontalDivider()
                 customLibrary.types.forEach { t ->
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.fx_type_channels_fmt, t.name, maxOf(1, t.footprint))) },
+                        text = {
+                            // Type MA / à 3D choisie : sous-titre §5.9 (+ « · 3D indisponible »).
+                            val sub = maTypeSubtitle(t)
+                            if (sub == null) Text(stringResource(R.string.fx_type_channels_fmt, t.name, maxOf(1, t.footprint)))
+                            else Column {
+                                Text(t.name)
+                                val store3D = Fixture3DStore.of(androidx.compose.ui.platform.LocalContext.current)
+                                val missing = t.model3D != null && !store3D.isAvailable(t.model3D)
+                                Text(sub + (if (missing) stringResource(R.string.ma_3d_unavail_suffix) else ""),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        },
                         onClick = {
                             overrides.assignSpec(fixture, com.minou.mvrviewer.sync.customFixtureSpec(t.id))
                             typeMenu = false

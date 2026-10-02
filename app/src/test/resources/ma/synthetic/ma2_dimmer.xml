@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fichier d'essai SYNTHÉTIQUE (SPEC-ma.md §7) : grandMA2, 1 module, 1 instance, 1 canal 8 bits. -->
+<MA xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://schemas.malighting.de/grandma2/xml/MA" xsi:schemaLocation="http://schemas.malighting.de/grandma2/xml/MA http://schemas.malighting.de/grandma2/xml/3.9.60/MA.xsd" major_vers="3" minor_vers="9" stream_vers="60">
+    <FixtureType name="Dimmer Test" mode="8 bit">
+        <short_name>Dim</short_name>
+        <manufacturer>Éclairages Test</manufacturer>
+        <short_manufacturer>EclT</short_manufacturer>
+        <Modules>
+            <Module name="Main" class="None" beamtype="Wash" beam_intensity="" index="0" beam_angle="25">
+                <ChannelType coarse="1" default="0" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215"/>
+                </ChannelType>
+            </Module>
+        </Modules>
+        <Instances>
+            <Instance module_index="0" patch="1" locked="true"/>
+        </Instances>
+    </FixtureType>
+</MA>

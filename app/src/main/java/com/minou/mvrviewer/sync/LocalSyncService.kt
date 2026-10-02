@@ -283,6 +283,10 @@ class LocalSyncService private constructor(
         f.readBytes().also { progress?.invoke(1.0) }
     }
 
+    override suspend fun blobSize(projectId: String, sha256: String): Long? = lock.withLock {
+        blobFile(projectId, sha256).takeIf { it.exists() }?.length()
+    }
+
     // MARK: État par section
 
     override suspend fun pushSection(projectId: String, payload: SectionPayload, opId: String) {

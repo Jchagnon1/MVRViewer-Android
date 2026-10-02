@@ -85,6 +85,14 @@ class GdtfOverrides {
         if (spec !in manualSpecs) manualSpecs.add(spec)
         version++
     }
+
+    /**
+     * Entrées à PERSISTER avec le projet : sans les clés de rendu LOCALES des types MA
+     * (`type3d:…`, cf. [Fixture3DStore]) — leurs octets vivent déjà dans le cache 3D de
+     * l'appareil et ces clés ne doivent jamais être sérialisées.
+     */
+    fun persistable(): Map<String, ByteArray> =
+        map.filterKeys { !it.startsWith(Fixture3DStore.RENDER_KEY_PREFIX) }
 }
 
 /**
@@ -270,6 +278,75 @@ fun GdtfShareScreen(
     }
 }
 
+/**
+ * Connexion GDTF Share autonome (même logique que [GdtfShareScreen]) : reconnexion
+ * silencieuse depuis les identifiants chiffrés, sinon formulaire. Réutilisée par la
+ * bibliothèque MA (choix de la 3D « GDTF Share ») avant la recherche.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun GdtfShareLoginPane(title: String, onBack: () -> Unit, onLoggedIn: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var user by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val sReconnecting = stringResource(R.string.gdtf_reconnecting)
+    val sConnecting = stringResource(R.string.gdtf_connecting)
+    val sLoginFailed = stringResource(R.string.gdtf_login_failed)
+    LaunchedEffect(Unit) {
+        if (GdtfShareClient.loggedIn) { onLoggedIn(); return@LaunchedEffect }
+        if (com.minou.mvrviewer.mvr.GdtfCredentialStore.username(ctx) != null) {
+            busy = true; status = sReconnecting
+            val ok = GdtfShareClient.ensureLoggedIn(ctx)
+            busy = false; status = ""
+            if (ok) onLoggedIn()
+        }
+    }
+    Column(Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1) },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
+                }
+            }
+        )
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
+            Text(stringResource(R.string.gdtf_intro), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 16.dp))
+            OutlinedTextField(
+                value = user, onValueChange = { user = it }, label = { Text(stringResource(R.string.gdtf_username)) },
+                singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            )
+            OutlinedTextField(
+                value = pass, onValueChange = { pass = it }, label = { Text(stringResource(R.string.sync_password)) },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            )
+            Button(
+                onClick = {
+                    scope.launch {
+                        busy = true; status = sConnecting
+                        runCatching { GdtfShareClient.login(user.trim(), pass) }.fold(
+                            onSuccess = {
+                                com.minou.mvrviewer.mvr.GdtfCredentialStore.save(ctx, user.trim(), pass)
+                                status = ""; busy = false; onLoggedIn()
+                            },
+                            onFailure = { status = it.gdtfShareMessage(ctx) ?: sLoginFailed; busy = false }
+                        )
+                    }
+                },
+                enabled = !busy && user.isNotBlank() && pass.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(stringResource(R.string.home_sign_in)) }
+            if (busy) CircularProgressIndicator(Modifier.padding(top = 16.dp))
+            if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 12.dp))
+        }
+    }
+}
+
 @androidx.annotation.StringRes
 private fun statusLabelRes(spec: String, overrides: GdtfOverrides): Int = when {
     spec in overrides.manualSpecs -> R.string.gdtf_status_manual
@@ -284,8 +361,14 @@ private fun statusLabelRes(spec: String, overrides: GdtfOverrides): Int = when {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GdtfSearchPane(spec: String, onBack: () -> Unit, onChosen: (ByteArray, Int) -> Unit) {
-    var query by remember { mutableStateOf("") }
+internal fun GdtfSearchPane(
+    spec: String,
+    onBack: () -> Unit,
+    onChosen: (ByteArray, Int) -> Unit,
+    /** Requête pré-remplie (bibliothèque MA : `<fixture>` du profil, SPEC-ma.md §4.2). */
+    initialQuery: String = ""
+) {
+    var query by remember { mutableStateOf(initialQuery) }
     var results by remember { mutableStateOf<List<GdtfShareEntry>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }

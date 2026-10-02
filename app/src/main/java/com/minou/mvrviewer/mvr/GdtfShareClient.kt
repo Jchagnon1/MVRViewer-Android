@@ -40,7 +40,14 @@ object GdtfShareClient {
         }
     }
 
-    @Volatile var loggedIn = false; private set
+    /**
+     * État de connexion OBSERVABLE (Compose : `collectAsState`) : une connexion faite depuis
+     * l'écran GDTF Share (ou une reconnexion silencieuse) relance les téléchargements de 3D
+     * des types MA qui attendaient un compte.
+     */
+    private val _loggedInFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val loggedInFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _loggedInFlow
+    val loggedIn: Boolean get() = _loggedInFlow.value
     private var cachedList: List<GdtfShareEntry>? = null
 
     /**
@@ -86,28 +93,65 @@ object GdtfShareClient {
                     ShareException(com.minou.mvrviewer.R.string.gdtf_err_credentials_fmt, msg)
                 else ShareException(com.minou.mvrviewer.R.string.gdtf_err_credentials_code_fmt, code)
             }
-            loggedIn = true
             cachedList = null
+            _loggedInFlow.value = true
         }
     }
 
     fun logout() {
-        loggedIn = false
+        _loggedInFlow.value = false
         cachedList = null
         (CookieHandler.getDefault() as? CookieManager)?.cookieStore?.removeAll()
     }
 
-    /**
-     * Reconnexion SILENCIEUSE depuis les identifiants enregistrés (le cookie de
-     * session n'est pas persisté — comme iOS, on refait un login au besoin pour
-     * obtenir un cookie frais). Renvoie true si (déjà) connecté. Échec silencieux
-     * (hors ligne, identifiants changés) → l'utilisateur voit le formulaire.
-     */
-    suspend fun ensureLoggedIn(ctx: android.content.Context): Boolean {
-        if (loggedIn) return true
-        val creds = GdtfCredentialStore.load(ctx) ?: return false
-        return runCatching { login(creds.first, creds.second) }.isSuccess
+    /** Issue d'une reconnexion silencieuse. */
+    enum class LoginOutcome {
+        OK,
+        /** Aucun identifiant enregistré sur l'appareil. */
+        NO_CREDENTIALS,
+        /** Identifiants refusés par le serveur (changés depuis). */
+        REJECTED,
+        /** Hors ligne / serveur injoignable ou en panne : réessayer en ligne. */
+        NETWORK
     }
+
+    /**
+     * Classe l'échec d'un [login] : identifiants refusés (401/403, ou message d'erreur du
+     * serveur) → [LoginOutcome.REJECTED] ; tout le reste (hors ligne, délai, TLS, 5xx…) →
+     * [LoginOutcome.NETWORK]. Une ANNULATION n'est jamais un échec : elle est relancée.
+     */
+    fun classifyLoginFailure(e: Throwable): LoginOutcome {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        val se = e as? ShareException ?: return LoginOutcome.NETWORK
+        return when (se.messageRes) {
+            com.minou.mvrviewer.R.string.gdtf_err_credentials_fmt -> LoginOutcome.REJECTED
+            com.minou.mvrviewer.R.string.gdtf_err_credentials_code_fmt ->
+                if ((se.args.firstOrNull() as? Int) in setOf(401, 403)) LoginOutcome.REJECTED else LoginOutcome.NETWORK
+            else -> LoginOutcome.NETWORK
+        }
+    }
+
+    /**
+     * Reconnexion SILENCIEUSE depuis les identifiants enregistrés (le cookie de session
+     * n'est pas persisté — comme iOS, on refait un login au besoin pour obtenir un cookie
+     * frais). Distingue « pas de compte » / « identifiants refusés » d'un échec RÉSEAU ;
+     * relance l'annulation (un effet relancé pendant l'appel ne doit pas passer pour un
+     * échec de connexion).
+     */
+    suspend fun ensureLoggedInOutcome(ctx: android.content.Context): LoginOutcome {
+        if (loggedIn) return LoginOutcome.OK
+        val creds = GdtfCredentialStore.load(ctx) ?: return LoginOutcome.NO_CREDENTIALS
+        return try {
+            login(creds.first, creds.second)
+            LoginOutcome.OK
+        } catch (e: Exception) {
+            classifyLoginFailure(e)
+        }
+    }
+
+    /** Comme [ensureLoggedInOutcome] : true si (déjà) connecté. Échec silencieux → formulaire. */
+    suspend fun ensureLoggedIn(ctx: android.content.Context): Boolean =
+        ensureLoggedInOutcome(ctx) == LoginOutcome.OK
 
     suspend fun fixtureList(): List<GdtfShareEntry> = withContext(Dispatchers.IO) {
         cachedList?.let { return@withContext it }

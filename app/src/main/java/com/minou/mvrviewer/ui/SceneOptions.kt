@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -163,6 +164,8 @@ fun SceneOptionsMenu(
     onShowUniverse: (() -> Unit)? = null,
     onShowCabling: (() -> Unit)? = null,
     onShowGdtfShare: (() -> Unit)? = null,
+    /** Bibliothèque MA (profils grandMA importés → types « profil MA + 3D »). Gratuit. */
+    onShowMaLibrary: (() -> Unit)? = null,
     /**
      * Outils de la vue (barre flottante) exposés AUSSI dans le menu — N10. Section
      * « Outils » rendue en tête si non vide. Voir [MenuTool].
@@ -244,6 +247,7 @@ fun SceneOptionsMenu(
         onShowUniverse?.let { nav(stringResource(R.string.nav_dmx_universe), Icons.Filled.GridView) { open = false; it() } }
         onShowCabling?.let { nav(stringResource(R.string.nav_power_cabling), Icons.Filled.Bolt) { open = false; it() } }
         onShowGdtfShare?.let { nav(stringResource(R.string.nav_gdtf_share_models), Icons.Filled.CloudDownload) { open = false; it() } }
+        onShowMaLibrary?.let { nav(stringResource(R.string.ma_library), Icons.AutoMirrored.Filled.LibraryBooks) { open = false; it() } }
         // ---- Outils de la vue (N10) : mêmes actions que la barre flottante,
         // accessibles ici. Les bascules gardent le menu ouvert ; les actions le
         // referment. Rendus dans l'ordre fourni par l'écran.

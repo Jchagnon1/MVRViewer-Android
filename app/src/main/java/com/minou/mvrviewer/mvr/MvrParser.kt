@@ -39,9 +39,18 @@ object MvrParser {
                     entry = zip.nextEntry
                 }
             }
-        } catch (_: Exception) { /* ZIP illisible → traité comme entrée absente */ }
+        } catch (_: Exception) {
+            // Lecture séquentielle impossible (ZIP corrompu, OU zip valide que
+            // ZipInputStream refuse : entrée STORED écrite en flux) → repli par le
+            // répertoire central ; toujours null si l'archive est vraiment illisible.
+            return centralEntry(mvrBytes) { it == name || it.substringAfterLast('/') == name }
+        }
         return null
     }
+
+    /** Repli par le répertoire central ([ZipCentralReader]) : première entrée vérifiant [match]. */
+    private fun centralEntry(bytes: ByteArray, match: (String) -> Boolean): ByteArray? =
+        (ZipCentralReader.find(bytes, match) as? ZipCentralReader.Lookup.Found)?.bytes
 
     /**
      * Comme extractEntry mais INSENSIBLE À LA CASSE sur le nom simple. Certaines
@@ -61,7 +70,10 @@ object MvrParser {
                     entry = zip.nextEntry
                 }
             }
-        } catch (_: Exception) { /* ZIP illisible → entrée absente */ }
+        } catch (_: Exception) {
+            // Repli par le répertoire central (cf. extractEntry) ; null si illisible.
+            return centralEntry(mvrBytes) { it.substringAfterLast('/').lowercase() == target }
+        }
         return null
     }
 
@@ -95,7 +107,21 @@ object MvrParser {
                     entry = zip.nextEntry
                 }
             }
-        } catch (_: Exception) { /* ZIP illisible → on renvoie l'extrait partiel */ }
+        } catch (_: Exception) {
+            // ZIP illisible en séquence → on complète l'extrait partiel par le répertoire
+            // central (entrée STORED écrite en flux…) ; sinon on renvoie l'extrait partiel.
+            val listing = ZipCentralReader.list(mvrBytes) as? ZipCentralReader.Listing.Ok ?: return out
+            for (e in listing.entries) {
+                val key = when {
+                    names.contains(e.name) -> e.name
+                    names.contains(e.name.substringAfterLast('/')) -> e.name.substringAfterLast('/')
+                    else -> null
+                } ?: continue
+                if (out.containsKey(key)) continue
+                ZipCentralReader.read(mvrBytes, listing, e)?.let { out[key] = it }
+                if (out.size == names.size) break
+            }
+        }
         return out
     }
 
@@ -109,7 +135,10 @@ object MvrParser {
                 var entry = zip.nextEntry
                 while (entry != null) { out.add(entry.name); entry = zip.nextEntry }
             }
-        } catch (_: Exception) { /* ZIP illisible → liste partielle */ }
+        } catch (_: Exception) {
+            // Répertoire central lisible → liste complète ; sinon liste partielle.
+            ZipCentralReader.names(mvrBytes)?.let { return it }
+        }
         return out
     }
 

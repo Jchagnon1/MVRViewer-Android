@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fichier d'essai SYNTHÉTIQUE (SPEC-ma.md §1.3) : grandMA2 dont un module est patché sur un
+     2e break (break="2", patch="1"). Le break est IGNORÉ : FAN tombe sur l'adresse 1 déjà prise
+     par DIM → le premier dans l'ordre du document gagne, FAN disparaît. Empreinte 4. -->
+<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" major_vers="3" minor_vers="9" stream_vers="60">
+    <FixtureType name="Hazer Test" mode="2 breaks">
+        <short_name>Haze</short_name>
+        <manufacturer>MVR Viewer Tests</manufacturer>
+        <Modules>
+            <Module name="Body" index="0">
+                <ChannelType coarse="1" attribute="DIM" feature="DIMMER" preset="DIMMER"/>
+                <ChannelType coarse="2" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR"/>
+                <ChannelType coarse="3" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR"/>
+                <ChannelType coarse="4" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR"/>
+            </Module>
+            <Module name="Fan" index="1">
+                <ChannelType coarse="1" attribute="FAN" feature="CONTROL" preset="CONTROL"/>
+            </Module>
+        </Modules>
+        <Instances>
+            <Instance module_index="0" patch="1"/>
+            <Instance module_index="1" patch="1" break="2"/>
+        </Instances>
+    </FixtureType>
+</MA>

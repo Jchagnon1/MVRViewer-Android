@@ -28,6 +28,13 @@ object SectionCodec {
     // ---- Enveloppe de section : encode/décode ------------------------------
 
     fun encode(payload: SectionPayload): String {
+        // customFixtures : forme CANONIQUE (ordre des clés de SPEC-ma.md §3.2, nombres
+        // `1000` jamais `1000.0`) — octets identiques sur appareil, en test JVM (org.json
+        // à HashMap) et chez iOS/web. L'enveloppe `{"<kind>":{"_0":…}}` est écrite à la main.
+        if (payload is SectionPayload.CustomFixtures) {
+            return "{\"" + payload.kind.raw + "\":{\"_0\":" +
+                CustomFixturesCodec.toCanonicalString(payload.dto) + "}}"
+        }
         val inner: JSONObject = when (payload) {
             is SectionPayload.Manifest -> encodeManifest(payload.dto)
             is SectionPayload.Calibration -> encodeCalibration(payload.dto)

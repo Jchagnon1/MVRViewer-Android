@@ -306,6 +306,80 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrNull()
     }
 
+    /**
+     * Envois de la 3D des types MA : dans [viewModelScope] (survivent à l'écran qui les a
+     * demandés), dédoublonnés, bornés — cf. [FixtureBlobUploader].
+     */
+    private val fixtureUploader = FixtureBlobUploader(
+        scope = viewModelScope,
+        exists = { pid, sha -> service.blobExists(pid, sha) },
+        upload = { pid, sha, data -> service.uploadBlob(pid, sha, BlobKind.FIXTURE_3D, data, null) }
+    )
+
+    /**
+     * S'assure que le blob `sha256` (déjà en cache local) est dans le Storage du projet :
+     * `blobExists`, sinon lecture paresseuse des octets puis envoi (SPEC-ma.md §4.3 règles
+     * (1) et (2)). L'envoi continue EN FOND au-delà de [waitMs] : l'appelant n'est jamais
+     * bloqué plus longtemps (« un échec ne bloque NI l'enregistrement NI le push »).
+     * Renvoie null si rien n'a été tenté (filet silencieux : gratuit, non connecté, projet
+     * non partagé, blob absent du cache), true si le blob est en ligne, false si l'envoi a
+     * échoué OU n'a pas fini dans le délai (nouvel essai au push suivant).
+     */
+    suspend fun ensureFixtureBlobUploaded(
+        sha256: String,
+        waitMs: Long = FixtureBlobUploader.WAIT_MS,
+        bytes: suspend () -> ByteArray?
+    ): Boolean? {
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return null
+        val project = _currentProject.value ?: return null
+        if (!_auth.value.isSignedIn) return null
+        return fixtureUploader.ensure(project.id, sha256, bytes, waitMs)
+    }
+
+    /** Issue d'un téléchargement de 3D de type MA (la vérification du SHA est faite par l'appelant). */
+    sealed class FixtureBlobDownload {
+        class Ok(val bytes: ByteArray) : FixtureBlobDownload()
+        /** Absent du Storage du projet (ou pas de projet partagé ouvert). */
+        object Missing : FixtureBlobDownload()
+        /** Objet Storage > 64 Mo : refusé AVANT téléchargement. */
+        object TooLarge : FixtureBlobDownload()
+        /** Hors ligne / erreur réseau : nouvel essai plus tard. */
+        object Failed : FixtureBlobDownload()
+    }
+
+    /**
+     * Télécharge une 3D de type MA (SPEC-ma.md §4.3). JAMAIS gardé Pro (réception) ;
+     * taille lue AVANT `getBytes` (plafond 64 Mo).
+     */
+    suspend fun downloadFixtureBlob(sha256: String): FixtureBlobDownload {
+        val project = _currentProject.value ?: return FixtureBlobDownload.Missing
+        // Délais BORNÉS : hors ligne, Firebase Storage relance `getMetadata` / `getBytes`
+        // jusqu'à 10 min ; « Téléchargement impossible » doit apparaître bien avant.
+        val size = try {
+            kotlinx.coroutines.withTimeout(BLOB_METADATA_TIMEOUT_MS) { service.blobSize(project.id, sha256) }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            return FixtureBlobDownload.Failed
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return FixtureBlobDownload.Failed
+        } ?: return FixtureBlobDownload.Missing
+        if (size > com.minou.mvrviewer.mvr.Fixture3DModel.MAX_BYTES) return FixtureBlobDownload.TooLarge
+        return try {
+            kotlinx.coroutines.withTimeout(BLOB_DOWNLOAD_TIMEOUT_MS) {
+                FixtureBlobDownload.Ok(service.downloadBlob(project.id, BlobRef(sha256, BlobKind.FIXTURE_3D, 0, ""), null))
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            FixtureBlobDownload.Failed
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: SyncException.BlobMissing) {
+            FixtureBlobDownload.Missing
+        } catch (e: Exception) {
+            FixtureBlobDownload.Failed
+        }
+    }
+
     suspend fun downloadRefPlan(sha256: String): ByteArray? {
         val project = _currentProject.value ?: return null
         return runCatching {
@@ -503,3 +577,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 }
+
+/** Lecture de la taille d'un blob 3D de type MA (hors ligne : échec rapide, pas 10 min). */
+private const val BLOB_METADATA_TIMEOUT_MS = 20_000L
+/** Téléchargement d'un blob 3D de type MA (≤ 64 Mo). */
+private const val BLOB_DOWNLOAD_TIMEOUT_MS = 180_000L

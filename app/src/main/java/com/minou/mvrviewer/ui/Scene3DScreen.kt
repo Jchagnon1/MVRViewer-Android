@@ -362,6 +362,8 @@ fun Scene3DScreen(
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
     onShowGdtfShare: () -> Unit,
+    /** Ouvre la bibliothèque MA (menu, à côté de GDTF Share). null = entrée masquée. */
+    onShowMaLibrary: (() -> Unit)? = null,
     onShowUniverse: () -> Unit = {},
     onShowCabling: () -> Unit = {},
     onShowAccount: (() -> Unit)? = null,
@@ -390,6 +392,12 @@ fun Scene3DScreen(
     // lecture du .mvr commencée à l'accueil (même pourcentage global 0→100 %).
     // null = pas de progression pilotée (aperçus, tests).
     progress: LoadProgress? = null,
+    // Bibliothèque MA (SPEC-ma.md §4.4-4.6) : cache 3D des types « profil MA + 3D
+    // choisie » (objets 3D statiques). null = aucun type MA (comportement historique).
+    fixture3DStore: Fixture3DStore? = null,
+    // Sélection courante (clés d'INSTANCE) remontée à la scène : « Enregistrer et
+    // affecter à la sélection » de la bibliothèque MA s'en sert.
+    onSelectionChanged: (List<String>) -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -715,9 +723,61 @@ fun Scene3DScreen(
         var truncated = false
         val sceneNodeBudget = MAX_NODES - FIXTURE_NODE_RESERVE
 
+        // 0) SOURCE 3D de chaque projecteur (SPEC-ma.md §4.6). Un type MA dont la 3D
+        //    choisie est DISPONIBLE ici (GDTF inscrit sous sa clé de rendu `type3d:…`,
+        //    ou objet 3D en cache) prime, y compris sur la géométrie PROPRE du projecteur
+        //    (choix explicite de l'utilisateur) : ses réfs .3ds/.glb sont alors écartées.
+        //    « Disponible » = DÉCODABLE (§4.6) : les objets 3D (d) sont donc décodés /
+        //    instanciés ICI, une fois par groupe (fichier, unité, axe, format), AVANT
+        //    d'écarter quoi que ce soit ; un objet que cet appareil ne sait pas lire
+        //    (PLY big-endian, FBX refusé, glTF non instanciable…) est retenu en échec
+        //    dans le store (statut « 3D indisponible » + raison) et ses projecteurs
+        //    gardent leur géométrie propre / base / GDTF d'origine.
+        val fixtures = scene.fixtures
+        class PreparedModel(
+            val glb: ArrayDeque<com.google.android.filament.gltfio.FilamentInstance>?,
+            val built: List<Pair<Geometry, Int>>
+        )
+        val preparedModels = HashMap<String, PreparedModel>()
+        val fixtureSources = fixture3DSourcesChecked(
+            fixtures, overrides, customResolver, fixture3DStore, gdtfOverrides
+        ) { key, m, count ->
+            val bytes = withContext(Dispatchers.IO) { fixture3DStore?.readBlob(m.sha256) }
+                ?: return@fixture3DSourcesChecked Fixture3DReason.MISSING_IN_PROJECT
+            if (m.format == "glb" || m.format == "gltf") {
+                val instances = runCatching {
+                    modelLoader.createInstancedModel(java.nio.ByteBuffer.wrap(bytes), minOf(count, MAX_NODES))
+                }.getOrNull()
+                if (instances.isNullOrEmpty()) return@fixture3DSourcesChecked Fixture3DReason.FORMAT_UNSUPPORTED
+                instances.firstOrNull()?.asset?.let { glbAssets.add(it) }
+                forceDoubleSidedTransparency(instances)
+                preparedModels[key] = PreparedModel(ArrayDeque(instances), emptyList())
+            } else {
+                val res = withContext(Dispatchers.Default) { com.minou.mvrviewer.mvr.Fixture3DModel.decode(bytes, m.format) }
+                val d = (res as? com.minou.mvrviewer.mvr.Fixture3DModel.DecodeResult.Ok)?.model
+                    ?: return@fixture3DSourcesChecked Fixture3DStore.reasonForDecodeFailure(res)
+                val prepared = withContext(Dispatchers.Default) { d.meshes.map { meshVertices(it) to it.color } }
+                val built = prepared.mapNotNull { (pv, color) ->
+                    runCatching {
+                        Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+                            .vertices(pv.first).primitivesIndices(listOf(pv.second)).build(engine)
+                    }.getOrNull()?.let { it to color }
+                }
+                if (built.isEmpty()) return@fixture3DSourcesChecked Fixture3DReason.FORMAT_UNSUPPORTED
+                preparedModels[key] = PreparedModel(null, built)
+            }
+            null
+        }
+        val model3DOwners = HashSet<Int>()
+        fixtureSources.forEachIndexed { i, src ->
+            if (src is Fixture3DSource.Model ||
+                (src is Fixture3DSource.Gdtf && src.spec.startsWith(Fixture3DStore.RENDER_KEY_PREFIX))) model3DOwners.add(i)
+        }
+
         // 2a) .3ds : géométries uniques partagées + un GeometryNode par instance.
         for (r in refs.tds) {
             if (nodes >= sceneNodeBudget || triangles >= MAX_TRIANGLES) { truncated = true; break }
+            if (r.owner >= 0 && r.owner in model3DOwners) continue
             val md = meshDataByFile[r.fileName]
             if (md.isNullOrEmpty()) continue
             val built = builtCache.getOrPut(r.fileName) { md.map { BuiltMesh(it.toGeometry(engine), it.colors, it.triangles, it.textures) } }
@@ -756,6 +816,7 @@ fun Scene3DScreen(
             // un réglage d'affichage, et O(1).
             val layerByFile = HashMap<String, String>()
             for (r in refs.glb) {
+                if (r.owner >= 0 && r.owner in model3DOwners) continue
                 byFile.getOrPut(r.fileName) { mutableListOf() }.add(r.world)
                 layerByFile.getOrPut(r.fileName) { r.layer }
             }
@@ -817,20 +878,30 @@ fun Scene3DScreen(
         //    la place du cube. Un spec = UN assemblage préparé, instancié pour
         //    chaque projecteur qui l'utilise (géométries 3ds partagées, glb via
         //    createInstancedModel).
-        val fixtures = scene.fixtures
         val bySpec = LinkedHashMap<String, MutableList<Int>>()
-        fixtures.forEachIndexed { fi2, f ->
-            // Projecteur custom → géométrie de baseGdtfSpec (résolveur) ; sinon la
-            // spec brute. Tout le pipeline d'assemblage (571+) reste INCHANGÉ.
-            val s = effectiveGeometrySpec(f, overrides, customResolver)?.trim()
-            // GDTF = REPLI : on ignore les projecteurs qui ont déjà leur géométrie
-            // propre (sinon silhouette GDTF superposée au modèle embarqué).
-            if (!s.isNullOrEmpty() && fi2 !in ownGeomFixtures) bySpec.getOrPut(s) { mutableListOf() }.add(fi2)
+        // Objets 3D statiques (d) des types MA, groupés par (fichier, unité, axe).
+        val byModel = LinkedHashMap<String, Pair<com.minou.mvrviewer.sync.CustomFixtureModel3D.ModelBlob, MutableList<Int>>>()
+        fixtureSources.forEachIndexed { fi2, src ->
+            when (src) {
+                // Projecteur custom → géométrie de baseGdtfSpec (résolveur), ou GDTF de
+                // la 3D choisie (clé `type3d:…`) ; sinon la spec brute. Tout le
+                // pipeline d'assemblage reste INCHANGÉ.
+                // GDTF = REPLI : on ignore les projecteurs qui ont déjà leur géométrie
+                // propre (sinon silhouette GDTF superposée au modèle embarqué) — SAUF
+                // quand la 3D vient d'un type MA (elle remplace la géométrie propre).
+                is Fixture3DSource.Gdtf ->
+                    if (fi2 !in ownGeomFixtures || fi2 in model3DOwners) bySpec.getOrPut(src.spec) { mutableListOf() }.add(fi2)
+                is Fixture3DSource.Model -> {
+                    val k = fixtureModelGroupKey(src.model)
+                    byModel.getOrPut(k) { src.model to mutableListOf() }.second.add(fi2)
+                }
+                Fixture3DSource.None -> {}
+            }
         }
         val gdtfDone = HashSet<Int>()
         // Dénominateur d'avancement de l'étape « Chargement des GDTF… » : nombre de
         // projecteurs qui attendent une silhouette (tous specs confondus).
-        val gdtfTotal = bySpec.values.sumOf { it.size }.coerceAtLeast(1)
+        val gdtfTotal = (bySpec.values.sumOf { it.size } + byModel.values.sumOf { it.second.size }).coerceAtLeast(1)
         // Modèle GDTF préparé HORS THREAD MOTEUR : octets + ext + MeshData (déjà
         // normalisés) + dimension brute (pour l'échelle), au lieu de meshes bruts.
         class GdtfModelPrep(val ext: String, val bytes: ByteArray, val meshData: List<MeshData>, val rawMax: Float)
@@ -962,6 +1033,59 @@ fun Scene3DScreen(
                 progress?.report(LoadStep.GDTF, gdtfDone.size.toFloat() / gdtfTotal)
                 break@sourceLoop  // spec rendu — pas besoin du repli
             }
+        }
+
+        // 2d) Objets 3D STATIQUES des types MA (SPEC-ma.md §4.4.2) : posés au point
+        //     d'accroche du projecteur par `[yUp ? Rx(+90°) : I] · S(unitScaleToMm)`
+        //     (valeurs du DTO, jamais recalculées), sans articulation ni faisceau.
+        //     Décodés / instanciés UNE fois par groupe à l'étape 0 (seuls les objets
+        //     RÉELLEMENT prêts arrivent ici), géométrie PARTAGÉE entre projecteurs. Le
+        //     nœud est une PARTIE du projecteur (LOD d'interaction + cube-proxy), pas
+        //     un décor importé.
+        modelLoop@ for ((key, pair) in byModel) {
+            val (m, idxs) = pair
+            if (nodes >= MAX_NODES) { truncated = true; break }
+            val prep = preparedModels[key] ?: continue
+            val adjust = scaleMat(m.unitScaleToMm.toFloat()) * (if (m.yUp) RX90 else IDENTITY4)
+            val isGltf = prep.glb != null
+            val glbQueue = prep.glb ?: ArrayDeque()
+            val built = prep.built
+            for (fi2 in idxs) {
+                if (nodes >= MAX_NODES) { truncated = true; break@modelLoop }
+                val world = conv * drMat(fixtures[fi2].transform.m) * adjust
+                val fixLayer = fixtures[fi2].layerName
+                var any = false
+                if (isGltf) {
+                    val inst = glbQueue.removeFirstOrNull() ?: continue
+                    val node = io.github.sceneview.node.ModelNode(inst)
+                    node.transform = world
+                    enqueueAdd(node)
+                    lod.addEntry(node, fixLayer, autoCandidate = true)
+                    nodes++; any = true
+                } else {
+                    for ((geom, color) in built) {
+                        val node = GeometryNode(engine, geom, listOf(material(color)))
+                        node.transform = world
+                        enqueueAdd(node)
+                        lod.addEntry(node, fixLayer, autoCandidate = true)
+                        nodes++; any = true
+                    }
+                }
+                if (any) {
+                    gdtfDone.add(fi2)
+                    if (fi2 < layout.positions.size && layout.valid[fi2]) {
+                        val proxy = io.github.sceneview.node.CubeNode(
+                            engine, Float3(layout.cube, layout.cube, layout.cube),
+                            layout.positions[fi2], material(layout.colors[fi2])
+                        )
+                        proxy.isVisible = false
+                        enqueueAdd(proxy)
+                        lod.addProxy(proxy, fixLayer)
+                    }
+                }
+                slice()
+            }
+            progress?.report(LoadStep.GDTF, gdtfDone.size.toFloat() / gdtfTotal)
         }
         flushAdds()   // pousse le dernier lot de nœuds en attente
         gdtfFixtures = gdtfDone
@@ -1385,6 +1509,13 @@ fun Scene3DScreen(
     // les projecteurs dont la projection écran tombe dedans. Hors ce mode, le
     // glissé pilote la caméra normalement. `selected` = index dans layout/fixtures.
     val selected = remember(scene) { mutableStateListOf<Int>() }
+    // Sélection remontée à la scène (clés d'INSTANCE) — bibliothèque MA, « affecter à
+    // la sélection ». La dernière valeur survit au passage dans la bibliothèque.
+    LaunchedEffect(selected, fixtureKeys) {
+        androidx.compose.runtime.snapshotFlow { selected.toList() }.collect { sel ->
+            onSelectionChanged(sel.mapNotNull { fixtureKeys.getOrNull(it) })
+        }
+    }
     var rectMode by remember(scene) { mutableStateOf(false) }
     var rectStart by remember { mutableStateOf<Offset?>(null) }
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
@@ -1869,7 +2000,7 @@ fun Scene3DScreen(
                 SceneOptionsMenu(
                     options = options, tint = LocalContentColor.current,
                     onShowPlan = onShowPlan, onShowPatch = onShowPatch,
-                    onShowGdtfShare = onShowGdtfShare, onShowUniverse = onShowUniverse,
+                    onShowGdtfShare = onShowGdtfShare, onShowMaLibrary = onShowMaLibrary, onShowUniverse = onShowUniverse,
                     onShowCabling = onShowCabling,
                     onShowAccount = onShowAccount, onShareProject = onShareProject,
                     onShowHistory = onShowHistory, onJoinProject = onJoinProject,
@@ -2326,7 +2457,7 @@ fun Scene3DScreen(
 // ---- Résolution des références de géométrie ----
 
 /** [layer] = calque MVR de l'objet d'origine — nécessaire au LOD par calque (#1). */
-private class RenderRef(val world: Mat4, val fileName: String, val layer: String)
+private class RenderRef(val world: Mat4, val fileName: String, val layer: String, val owner: Int = -1)
 private class RenderRefs(val tds: List<RenderRef>, val glb: List<RenderRef>)
 
 /** Les .glb MVR sont en MÈTRES, le monde MVR en mm → ×1000 (même fix qu'iOS). */
@@ -2344,6 +2475,12 @@ private val GLB_SCALE = Mat4(
 private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
     val tds = ArrayList<RenderRef>()
     val glb = ArrayList<RenderRef>()
+    // Projecteur PROPRIÉTAIRE de chaque réf (index dans scene.fixtures, -1 sinon) :
+    // un type MA dont la 3D choisie est disponible REMPLACE la géométrie propre du
+    // projecteur (SPEC-ma.md §4.6) — ses réfs doivent pouvoir être écartées.
+    val fixtureIndex = java.util.IdentityHashMap<MvrSceneObject, Int>()
+    scene.fixtures.forEachIndexed { i, f -> fixtureIndex[f] = i }
+    var owner = -1
     // `layer` est propagé le long de la descente (y compris à travers les
     // Symdef) : le LOD par calque a besoin du calque MVR de l'objet d'origine.
     fun walk(refs: List<MvrGeometryRef>, parent: Mat4, depth: Int, layer: String) {
@@ -2353,7 +2490,7 @@ private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
                 val world = parent * drMat(g.transform.m)
                 when {
                     g.fileName.endsWith(".3ds", ignoreCase = true) ->
-                        tds.add(RenderRef(world, g.fileName, layer))
+                        tds.add(RenderRef(world, g.fileName, layer, owner))
                     g.fileName.endsWith(".glb", ignoreCase = true) ||
                         g.fileName.endsWith(".gltf", ignoreCase = true) ->
                         // glTF est Y-HAUT (le format l'impose), le monde MVR est
@@ -2364,7 +2501,7 @@ private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
                         // sur elle-même : les arches devenaient un gril à plat et
                         // les praticables des panneaux DEBOUT — d'où le « plancher
                         // manquant » (on voyait la sous-structure au travers).
-                        glb.add(RenderRef(world * GLB_SCALE * RX90, g.fileName, layer))
+                        glb.add(RenderRef(world * GLB_SCALE * RX90, g.fileName, layer, owner))
                 }
             }
             is MvrGeometryRef.Symbol -> {
@@ -2373,7 +2510,10 @@ private fun collectRenderRefs(scene: MvrScene, conv: Mat4): RenderRefs {
             }
         }
     }
-    for (obj in scene.allObjects) walk(obj.geometryRefs, conv * drMat(obj.transform.m), 0, obj.layerName)
+    for (obj in scene.allObjects) {
+        owner = fixtureIndex[obj] ?: -1
+        walk(obj.geometryRefs, conv * drMat(obj.transform.m), 0, obj.layerName)
+    }
     return RenderRefs(tds, glb)
 }
 

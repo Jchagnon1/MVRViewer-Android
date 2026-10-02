@@ -34,10 +34,34 @@ import com.minou.mvrviewer.sync.RemoteEvent
 import com.minou.mvrviewer.sync.SectionPayload
 import com.minou.mvrviewer.sync.SyncViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE, UNIVERSE, CABLING }
+enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE, UNIVERSE, CABLING, MA_LIBRARY }
+
+/**
+ * Compteur incrémenté à chaque RETOUR du réseau (réseau par défaut disponible) : sert de
+ * clé pour retenter les téléchargements de 3D en échec « hors ligne » (salle sans réseau).
+ * Rappels reçus sur le fil principal ; sans effet si le service est indisponible.
+ */
+@Composable
+private fun rememberNetworkEpoch(): Int {
+    val ctx = LocalContext.current
+    var epoch by remember { mutableIntStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(ctx) {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) { epoch++ }
+        }
+        val registered = cm != null && runCatching {
+            cm.registerDefaultNetworkCallback(cb, android.os.Handler(android.os.Looper.getMainLooper()))
+        }.isSuccess
+        onDispose { if (registered) runCatching { cm?.unregisterNetworkCallback(cb) } }
+    }
+    return epoch
+}
 
 /**
  * Hôte d'un .mvr ouvert. Comme iOS, la **vue 3D est l'écran principal** ; la
@@ -125,6 +149,13 @@ fun SceneScreen(
     // fixture→custom voyage via la section PATCH ; les DÉFINITIONS via customFixtures.
     val customLibrary = remember { CustomFixtureLibrary() }
     val customResolver = remember { CustomFixtureResolver() }
+    // Bibliothèque MA (SPEC-ma.md) : profils importés (locaux, chargés à la première
+    // ouverture de l'écran) + cache 3D des types « profil MA + 3D choisie ».
+    val maLibrary = remember { MaLibraryState() }
+    val fixture3DStore = remember { Fixture3DStore.of(ctx) }
+    // Dernière sélection de projecteurs (clés d'INSTANCE) en 3D ou en plan — sert à
+    // « Enregistrer et affecter à la sélection » depuis la bibliothèque MA.
+    var selectionKeys by remember { mutableStateOf<List<String>>(emptyList()) }
     // Bibliothèque de puissances (outil de câblage) : cache réactif de la conso
     // par type. Semée du cache disque global, remplie par extraction GDTF +
     // fusion cloud (cf. LaunchedEffect plus bas).
@@ -247,7 +278,7 @@ fun SceneScreen(
     // Sauvegarde des modèles GDTF appliqués quand ils changent (action utilisateur).
     LaunchedEffect(gdtfOverrides.version) {
         if (restored && gdtfOverrides.version > 0) withContext(Dispatchers.IO) {
-            ProjectStore.saveOverrides(ctx, projectKey, gdtfOverrides.map.toMap(), gdtfOverrides.manualSpecs.toSet())
+            ProjectStore.saveOverrides(ctx, projectKey, gdtfOverrides.persistable(), gdtfOverrides.manualSpecs.toSet())
         }
     }
     LaunchedEffect(options.showSatellite) {
@@ -398,7 +429,7 @@ fun SceneScreen(
                     // n'aura pas besoin du réseau.
                     withContext(Dispatchers.IO) {
                         ProjectStore.saveOverrides(
-                            ctx, projectKey, gdtfOverrides.map.toMap(), gdtfOverrides.manualSpecs.toSet()
+                            ctx, projectKey, gdtfOverrides.persistable(), gdtfOverrides.manualSpecs.toSet()
                         )
                     }
                 }
@@ -454,8 +485,90 @@ fun SceneScreen(
                 else com.minou.mvrviewer.sync.CustomFixturesCodec.toJsonString(
                     com.minou.mvrviewer.sync.CustomFixturesDTO(types)))
         }
+        // Bibliothèque MA (§4.3 règle (2)) : la 3D importée des types poussés doit être
+        // dans le Storage du projet AVANT la section qui la référence. Filet silencieux ;
+        // envois en PARALLÈLE et attente BORNÉE (FixtureBlobUploader.WAIT_MS) : la section
+        // part même si un envoi n'a pas abouti (hors ligne, réseau lent) — il continue en
+        // fond, nouvel essai au push suivant. « Un échec ne bloque NI l'enregistrement NI
+        // le push. »
+        sync?.let { s ->
+            if (s.isCurrentProjectShared) {
+                val shas = types.mapNotNull { it.model3D?.blobSha }.distinct().filter { fixture3DStore.hasBlob(it) }
+                if (shas.isNotEmpty()) kotlinx.coroutines.coroutineScope {
+                    shas.map { sha ->
+                        async { s.ensureFixtureBlobUploaded(sha) { withContext(Dispatchers.IO) { fixture3DStore.readBlob(sha) } } }
+                    }.awaitAll()
+                }
+            }
+        }
         sync?.pushCustomFixtures(com.minou.mvrviewer.sync.CustomFixturesDTO(types))
     }
+
+    // ---- Bibliothèque MA : 3D des types « profil MA + 3D choisie » (SPEC-ma.md §4) ----
+    // Types RÉFÉRENCÉS par la scène (patch) : seuls eux sont rendus, donc téléchargés.
+    fun referencedCustomTypes(): List<com.minou.mvrviewer.sync.CustomFixtureTypeDTO> =
+        overrides.edits.values.mapNotNull { com.minou.mvrviewer.sync.customFixtureIdOf(it.spec) }.toSet()
+            .mapNotNull { customResolver.resolve(it) }
+
+    // RÉCEPTION (jamais gardée Pro) : connexion GDTF Share OBSERVABLE et retour du réseau
+    // relancent les 3D en attente ; les téléchargements vivent dans des jobs DÉDIÉS du
+    // scope de la scène (une relance de l'effet ne les annule ni ne les recommence).
+    val shareSignedIn by com.minou.mvrviewer.mvr.GdtfShareClient.loggedInFlow.collectAsState()
+    val networkEpoch = rememberNetworkEpoch()
+    val syncRef = androidx.compose.runtime.rememberUpdatedState(sync)
+    val type3DFetcher = remember(fixture3DStore) {
+        Type3DFetcher(scope, fixture3DStore, object : Type3DFetcher.Backend {
+            override suspend fun shareLogin() = com.minou.mvrviewer.mvr.GdtfShareClient.ensureLoggedInOutcome(ctx)
+            override suspend fun shareDownload(rid: Int): ByteArray? = withContext(Dispatchers.IO) {
+                try { com.minou.mvrviewer.mvr.GdtfShareClient.download(rid) }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { null }
+            }
+            override fun projectShared() = syncRef.value?.isCurrentProjectShared == true
+            override suspend fun blobDownload(sha256: String) =
+                syncRef.value?.downloadFixtureBlob(sha256) ?: SyncViewModel.FixtureBlobDownload.Missing
+        })
+    }
+
+    /**
+     * INSCRIPTION des GDTF (b)(c) DÉJÀ au cache sous leur clé de rendu `type3d:…` (jamais
+     * sérialisée), AVANT et indépendamment des téléchargements : un blob lent ou en échec
+     * ne retarde plus l'affichage des autres types. Reconstruit la 3D si une clé est
+     * ajoutée (ou si un objet 3D vient d'arriver : [forceRebuild]).
+     */
+    suspend fun registerCachedType3D(forceRebuild: Boolean = false) {
+        val added = Type3DFetcher.registerCached(referencedCustomTypes(), fixture3DStore, gdtfOverrides)
+        if (added || forceRebuild) gdtfOverrides.version++
+    }
+
+    /**
+     * Enregistre un type créé depuis la bibliothèque MA (§5.7-5.8) : biblio custom locale
+     * (upsert) + table projet du résolveur, PUIS affectation PAR INSTANCE à la sélection si
+     * demandée (patch PUIS customFixtures, poussés par le commit), et SEULEMENT ENSUITE
+     * l'attente BORNÉE de l'envoi de la 3D (« Envoi de la 3D… »). L'envoi tourne dans le
+     * scope du ViewModel : quitter l'écran ne perd ni l'affectation ni l'envoi.
+     * Renvoie false si l'envoi a échoué ou n'a pas fini dans le délai (note §5.7).
+     */
+    suspend fun saveMaType(t: com.minou.mvrviewer.sync.CustomFixtureTypeDTO, assign: Boolean): Boolean =
+        saveMaTypeOrdered(
+            register = {
+                customLibrary.upsert(t)
+                customResolver.setLibrary(customLibrary.types.toList())
+                customResolver.mergeProject(listOf(t))
+            },
+            assign = if (!assign) null else ({
+                val keys = selectionKeys.toSet()
+                val targets = scene.fixtures.filter { overrides.key(it) in keys }
+                overrides.assignSpecToAll(targets, com.minou.mvrviewer.sync.customFixtureSpec(t.id))
+            }),
+            awaitUpload = {
+                val sha = t.model3D?.blobSha
+                val s = sync
+                if (sha != null && s != null && s.isCurrentProjectShared)
+                    s.ensureFixtureBlobUploaded(sha) { withContext(Dispatchers.IO) { fixture3DStore.readBlob(sha) } }
+                else null
+            }
+        )
 
     // Pousse TOUT l'état local courant (au moment du partage) — mirroir de
     // pushFullStateSnapshot iOS : un collègue qui rejoint voit le patch, la
@@ -547,6 +660,23 @@ fun SceneScreen(
         com.minou.mvrviewer.sync.CustomFixturesCodec.fromJsonString(json)?.let { customResolver.mergeProject(it.types) }
     }
 
+    // Bibliothèque MA : à l'ouverture du show, à chaque section customFixtures appliquée
+    // (résolveur), à chaque affectation (patch), à la (re)connexion (compte, GDTF Share) et
+    // au retour du réseau → (1) inscription IMMÉDIATE des clés de rendu déjà au cache,
+    // (2) téléchargements manquants lancés SANS ATTENDRE (jobs dédiés, dédoublonnés).
+    // Les échecs retenus sont oubliés quand la signature change (nouvel essai).
+    LaunchedEffect(customResolver.version, overrides.version, curProject?.value?.id,
+                   authState?.value?.isSignedIn, shareSignedIn, networkEpoch) {
+        registerCachedType3D()
+        type3DFetcher.fetchMissing(
+            referencedCustomTypes(),
+            signature = listOf(projectKey, curProject?.value?.id, authState?.value?.isSignedIn,
+                shareSignedIn, networkEpoch, customResolver.version)
+        ) { m -> registerCachedType3D(forceRebuild = m is com.minou.mvrviewer.sync.CustomFixtureModel3D.ModelBlob) }
+    }
+    // Connexion GDTF Share réussie : les raisons « Connectez-vous… » sont périmées.
+    LaunchedEffect(shareSignedIn) { if (shareSignedIn) fixture3DStore.clearShareSignInIssues() }
+
     // Commit d'une modification UTILISATEUR du câblage → persistance locale + push
     // cloud. Le chargement disque/distant NE déclenche PAS onChange (garde-fou LWW).
     LaunchedEffect(sync, projectKey) {
@@ -575,10 +705,9 @@ fun SceneScreen(
     // persistance locale + push cloud.
     LaunchedEffect(sync, projectKey) {
         val s = sync
-        if (s == null) { overrides.onCommit = null; return@LaunchedEffect }
-        overrides.onCommit = { fixture, old, new ->
-            scope.launch(Dispatchers.IO) { PatchStore.save(ctx, projectKey, overrides.toPersistedList()) }
-            s.pushPatch(scene, overrides.toPersistedList())
+        if (s == null) { overrides.onCommit = null; overrides.onCommitMany = null; return@LaunchedEffect }
+        // Entrées d'audit d'UN changement (qui/quoi/avant→après).
+        fun auditsOf(fixture: MvrSceneObject, old: PatchEdit, new: PatchEdit): List<AuditEntry> {
             val target = "Projecteur ${new.fixtureId ?: old.fixtureId ?: fixture.name}"
             // La clé d'INSTANCE est la seule identité stable du projecteur : le
             // libellé « Projecteur N° 213 » redevient ambigu dès le repatch suivant.
@@ -607,11 +736,21 @@ fun SceneScreen(
                     objKey, AuditFieldKey.SPEC, old.spec ?: "", new.spec ?: ""
                 ) else null
             )
-            s.recordAudit(audits)
+            return audits
+        }
+        // UNE persistance + UN push de patch pour tout le lot (affectation d'un type à
+        // une sélection), PUIS la section customFixtures si une spec a changé.
+        fun commit(changes: List<Triple<MvrSceneObject, PatchEdit, PatchEdit>>) {
+            if (changes.isEmpty()) return
+            scope.launch(Dispatchers.IO) { PatchStore.save(ctx, projectKey, overrides.toPersistedList()) }
+            s.pushPatch(scene, overrides.toPersistedList())
+            s.recordAudit(changes.flatMap { (f, o, n) -> auditsOf(f, o, n) })
             // Une (dé)assignation de type custom garantit la présence de sa
             // définition dans la section customFixtures du projet + pousse.
-            if (old.spec != new.spec) scope.launch { syncCustomFixtures() }
+            if (changes.any { it.second.spec != it.third.spec }) scope.launch { syncCustomFixtures() }
         }
+        overrides.onCommit = { fixture, old, new -> commit(listOf(Triple(fixture, old, new))) }
+        overrides.onCommitMany = { commit(it) }
     }
 
     // Applique les changements DISTANTS live (réutilise applySection).
@@ -898,6 +1037,10 @@ fun SceneScreen(
             // Étapes nommées + pourcentage global : la construction 3D poursuit la
             // progression commencée à l'accueil (#4).
             progress = progress,
+            // Bibliothèque MA : objets 3D statiques des types MA + sélection remontée.
+            fixture3DStore = fixture3DStore,
+            onSelectionChanged = { selectionKeys = it },
+            onShowMaLibrary = { mode = SceneMode.MA_LIBRARY },
             onClose = onClose,
             modifier = modifier
         )
@@ -992,6 +1135,9 @@ fun SceneScreen(
             // N11 — disposition des barres d'outils plan (persistée globalement).
             toolbarLayout = layoutPlan,
             onLayoutChange = { layoutPlan = it },
+            // Bibliothèque MA : entrée de menu + sélection remontée (affectation).
+            onShowMaLibrary = { mode = SceneMode.MA_LIBRARY },
+            onSelectionChanged = { selectionKeys = it },
             modifier = modifier
         )
         SceneMode.PATCH -> PatchListScreen(
@@ -1007,6 +1153,24 @@ fun SceneScreen(
             gdtfOverrides = gdtfOverrides,
             customLibrary = customLibrary,
             customResolver = customResolver,
+            onBack = { mode = SceneMode.THREE_D },
+            modifier = modifier
+        )
+        SceneMode.MA_LIBRARY -> MaLibraryScreen(
+            state = maLibrary,
+            scene = scene,
+            mvrBytes = mvrBytes,
+            gdtfOverrides = gdtfOverrides,
+            customLibrary = customLibrary,
+            customResolver = customResolver,
+            fixture3DStore = fixture3DStore,
+            sharedProjectOpen = sync?.isCurrentProjectShared == true && curProject?.value != null,
+            selectionCount = run {
+                val keys = selectionKeys.toSet()
+                scene.fixtures.count { overrides.key(it) in keys }
+            },
+            onSaveType = { t, assign -> saveMaType(t, assign) },
+            onCustomLibraryChanged = { scope.launch { syncCustomFixtures() } },
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

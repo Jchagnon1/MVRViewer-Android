@@ -61,6 +61,12 @@ interface SyncService {
     suspend fun downloadBlob(
         projectId: String, ref: BlobRef, progress: ((Double) -> Unit)? = null
     ): ByteArray
+    /**
+     * Taille (octets) d'un blob AVANT de le télécharger — null s'il est ABSENT ; lève en
+     * cas d'erreur réseau. Sert au plafond de 64 Mo des 3D de types MA (SPEC-ma.md §4.3 :
+     * `getMetadata` avant `getBytes`).
+     */
+    suspend fun blobSize(projectId: String, sha256: String): Long?
 
     // — État par section (dernière écriture gagne) —
     suspend fun pushSection(projectId: String, payload: SectionPayload, opId: String)

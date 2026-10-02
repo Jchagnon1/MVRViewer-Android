@@ -1,0 +1,44 @@
+{
+ "box_obj_yup_meters.obj": {
+  "format": "obj",
+  "sha256": "fb08ce5d7ba68d98d248b1793e8c31ad2fcf28320e6ce37b442cade474a7950e",
+  "unitScaleToMm": 1000,
+  "yUp": true,
+  "minMm": [
+   -100.0,
+   -50.0,
+   -500.0
+  ],
+  "maxMm": [
+   100.0,
+   50.0,
+   0.0
+  ],
+  "sizeMm": [
+   200.0,
+   100.0,
+   500.0
+  ]
+ },
+ "box_dae_zup_inch.dae": {
+  "format": "dae",
+  "sha256": "9f0b45134042ce5d673ae54b2f88bfb0a28765c188606e12f6414d9e0b7a193e",
+  "unitScaleToMm": 25.4,
+  "yUp": false,
+  "minMm": [
+   0.0,
+   0.0,
+   -254.0
+  ],
+  "maxMm": [
+   101.6,
+   152.4,
+   0.0
+  ],
+  "sizeMm": [
+   101.6,
+   152.4,
+   254.0
+  ]
+ }
+}

@@ -184,6 +184,10 @@ fun PlanScreen(
     onLayoutChange: (ToolbarLayout) -> Unit = {},
     onBack: () -> Unit,
     onShowPatch: () -> Unit,
+    /** Bibliothèque MA (entrée de menu). null = entrée masquée. */
+    onShowMaLibrary: (() -> Unit)? = null,
+    /** Sélection courante (clés d'INSTANCE) remontée à la scène — « affecter à la sélection ». */
+    onSelectionChanged: (List<String>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val ctxPlan = androidx.compose.ui.platform.LocalContext.current
@@ -557,6 +561,11 @@ fun PlanScreen(
     var offset by remember { mutableStateOf(Offset.Zero) }
     var canvas by remember { mutableStateOf(Offset.Zero) } // largeur/hauteur du Canvas
     val selected = remember(scene) { mutableStateListOf<Int>() } // indices dans data.fixtures
+    LaunchedEffect(selected, data) {
+        androidx.compose.runtime.snapshotFlow { selected.toList() }.collect { sel ->
+            onSelectionChanged(sel.mapNotNull { data.fixtures.getOrNull(it)?.key })
+        }
+    }
     var rectMode by remember { mutableStateOf(false) }
     /** Mode « masquer des éléments » : le toucher (ou le cadre) retire. */
     var maskMode by remember(scene) { mutableStateOf(false) }
@@ -1817,6 +1826,7 @@ fun PlanScreen(
             SceneOptionsMenu(
                 options = options, tint = inkColor,
                 onShow3D = onBack, onShowPatch = onShowPatch,
+                onShowMaLibrary = onShowMaLibrary,
                 onShowAccount = onShowAccount, onShareProject = onShareProject,
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
                 onShowClasses = onShowClasses,

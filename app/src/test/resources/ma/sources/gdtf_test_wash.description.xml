@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<!-- Source du description.xml de gdtf_test_wash.gdtf (SPEC-ma.md §7) : GDTF 1.2, 1 mode,
+     Offset="1,2" (16 bits), canal virtuel Offset="None", trou à l'adresse 6. -->
+<GDTF DataVersion="1.2">
+    <FixtureType Name="Test Wash GDTF" ShortName="TWG" LongName="Test Wash GDTF" Manufacturer="MVR Viewer Tests" Description="synthetique" FixtureTypeID="6C8F0E1A-2B3C-4D5E-8F90-A1B2C3D4E5F6" Thumbnail="" RefFT="">
+        <AttributeDefinitions>
+            <ActivationGroups><ActivationGroup Name="PanTilt"/></ActivationGroups>
+            <FeatureGroups>
+                <FeatureGroup Name="Position" Pretty="Position"><Feature Name="PanTilt"/></FeatureGroup>
+                <FeatureGroup Name="Dimmer" Pretty="Dimmer"><Feature Name="Dimmer"/></FeatureGroup>
+                <FeatureGroup Name="Beam" Pretty="Beam"><Feature Name="Beam"/></FeatureGroup>
+                <FeatureGroup Name="Color" Pretty="Color"><Feature Name="Color"/></FeatureGroup>
+            </FeatureGroups>
+            <Attributes>
+                <Attribute Name="Pan" Pretty="P" ActivationGroup="PanTilt" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
+                <Attribute Name="Tilt" Pretty="T" ActivationGroup="PanTilt" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
+                <Attribute Name="Dimmer" Pretty="Dim" Feature="Dimmer.Dimmer"/>
+                <Attribute Name="Shutter1" Pretty="Sh1" Feature="Beam.Beam"/>
+                <Attribute Name="Color1" Pretty="C1" Feature="Color.Color"/>
+            </Attributes>
+        </AttributeDefinitions>
+        <Wheels/>
+        <PhysicalDescriptions/>
+        <Models/>
+        <Geometries>
+            <Geometry Name="Base" Position="{1.000000,0.000000,0.000000,0.000000}{0.000000,1.000000,0.000000,0.000000}{0.000000,0.000000,1.000000,0.000000}{0,0,0,1}">
+                <Axis Name="Yoke" Position="{1.000000,0.000000,0.000000,0.000000}{0.000000,1.000000,0.000000,0.000000}{0.000000,0.000000,1.000000,-0.100000}{0,0,0,1}">
+                    <Axis Name="Head" Position="{1.000000,0.000000,0.000000,0.000000}{0.000000,1.000000,0.000000,0.000000}{0.000000,0.000000,1.000000,-0.200000}{0,0,0,1}">
+                        <Beam Name="Beam" BeamType="Wash" BeamAngle="25.000000" FieldAngle="30.000000" BeamRadius="0.050000"/>
+                    </Axis>
+                </Axis>
+            </Geometry>
+        </Geometries>
+        <DMXModes>
+            <DMXMode Name="Mode 1 16 bit" Geometry="Base">
+                <DMXChannels>
+                    <DMXChannel DMXBreak="1" Offset="1,2" Default="32768/2" Highlight="None" Geometry="Yoke" InitialFunction="Yoke_Pan.Pan.Pan 1">
+                        <LogicalChannel Attribute="Pan" Snap="No" Master="None" MibFade="0.000000" DMXChangeTimeLimit="0.000000">
+                            <ChannelFunction Name="Pan 1" Attribute="Pan" OriginalAttribute="" DMXFrom="0/2" Default="0/2" PhysicalFrom="-270.000000" PhysicalTo="270.000000" RealFade="0.000000" RealAcceleration="0.000000"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel DMXBreak="1" Offset="3,4" Default="32768/2" Highlight="None" Geometry="Head" InitialFunction="Head_Tilt.Tilt.Tilt 1">
+                        <LogicalChannel Attribute="Tilt">
+                            <ChannelFunction Name="Tilt 1" Attribute="Tilt" DMXFrom="0/2" PhysicalFrom="-135.000000" PhysicalTo="135.000000"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel DMXBreak="1" Offset="5" Default="0/1" Highlight="255/1" Geometry="Beam" InitialFunction="Beam_Dimmer.Dimmer.Dimmer 1">
+                        <LogicalChannel Attribute="Dimmer">
+                            <ChannelFunction Name="Dimmer 1" Attribute="Dimmer" DMXFrom="0/1"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel DMXBreak="1" Offset="None" Default="0/1" Highlight="None" Geometry="Beam" InitialFunction="Beam_Shutter1.Shutter1.Open">
+                        <LogicalChannel Attribute="Shutter1">
+                            <ChannelFunction Name="Open" Attribute="Shutter1" DMXFrom="0/1"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel DMXBreak="1" Offset="7" Default="0/1" Highlight="None" Geometry="Beam" InitialFunction="Beam_Color1.Color1.Color 1">
+                        <LogicalChannel Attribute="Color1">
+                            <ChannelFunction Name="Color 1" Attribute="Color1" DMXFrom="0/1"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                </DMXChannels>
+            </DMXMode>
+        </DMXModes>
+    </FixtureType>
+</GDTF>

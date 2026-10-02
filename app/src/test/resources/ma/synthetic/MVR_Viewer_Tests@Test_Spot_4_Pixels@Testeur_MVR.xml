@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fichier d'essai SYNTHÉTIQUE (SPEC-ma.md §7) : grandMA3 (racine GMA3), 2 modes.
+     « Standard 16 bit » : Pan/Tilt/Dimmer 16 bits (Coarse/Fine), Shutter1 sur DEUX géométries
+     (préfixe par la géométrie), géométrie MODÈLE « Pixel » référencée 4 fois (Break DMXOffset
+     9, 12, 15, 18), canal B sur « PixelBeam » (DESCENDANTE du modèle → instanciée aussi),
+     Dimmer VIRTUEL sans Coarse sur le modèle (ignoré, ne compte pas dans l'ambiguïté).
+     « Basic 8 bit » : canaux simples, aucun modèle. Racine du mode = Geometry « Base » dont
+     les enfants sont des Axis (types de géométrie non « Geometry »). -->
+<GMA3 DataVersion="2.1.1.5">
+    <FixtureType Name="Test Spot 4 Pixels" Guid="4D 56 52 56 54 45 53 54 00 00 00 00 00 00 00 01" ShortName="TS4P" Description="synthetique" Manufacturer="MVR Viewer Tests" Universal="No">
+        <AttributeDefinitions>
+            <ActivationGroups>
+                <ActivationGroup Name="PanTilt"/>
+                <ActivationGroup Name="ColorRGB"/>
+            </ActivationGroups>
+            <FeatureGroups>
+                <FeatureGroup Name="Position"><Feature Name="PanTilt"/></FeatureGroup>
+                <FeatureGroup Name="Dimmer"><Feature Name="Dimmer"/></FeatureGroup>
+                <FeatureGroup Name="Color"><Feature Name="RGB"/></FeatureGroup>
+                <FeatureGroup Name="Beam"><Feature Name="Beam"/></FeatureGroup>
+            </FeatureGroups>
+            <Attributes>
+                <Attribute Name="Pan" Pretty="P" ActivationGroup="PanTilt" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
+                <Attribute Name="Tilt" Pretty="T" ActivationGroup="PanTilt" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
+                <Attribute Name="Dimmer" Pretty="Dim" Feature="Dimmer.Dimmer"/>
+                <Attribute Name="Shutter1" Pretty="Sh1" Feature="Beam.Beam"/>
+                <Attribute Name="ColorRGB_R" Pretty="R" ActivationGroup="ColorRGB" Feature="Color.RGB"/>
+                <Attribute Name="ColorRGB_G" Pretty="G" ActivationGroup="ColorRGB" Feature="Color.RGB"/>
+                <Attribute Name="ColorRGB_B" Pretty="B" ActivationGroup="ColorRGB" Feature="Color.RGB"/>
+            </Attributes>
+        </AttributeDefinitions>
+        <Wheels/>
+        <PhysicalDescriptions/>
+        <Models/>
+        <Geometries>
+            <Geometry Name="Pixel">
+                <Beam Name="PixelBeam" BeamType="Wash"/>
+            </Geometry>
+            <Geometry Name="Base">
+                <Axis Name="Yoke">
+                    <Axis Name="Head">
+                        <Beam Name="MainBeam" BeamType="Spot"/>
+                        <Geometry Name="Pixel Ring">
+                            <GeometryReference Name="Pixel 1" Geometry="Pixel">
+                                <Break DMXOffset="9"/>
+                            </GeometryReference>
+                            <GeometryReference Name="Pixel 2" Geometry="Pixel">
+                                <Break DMXOffset="12"/>
+                            </GeometryReference>
+                            <GeometryReference Name="Pixel 3" Geometry="Pixel">
+                                <Break DMXOffset="15"/>
+                            </GeometryReference>
+                            <GeometryReference Name="Pixel 4" Geometry="Pixel">
+                                <Break DMXOffset="18"/>
+                            </GeometryReference>
+                        </Geometry>
+                    </Axis>
+                </Axis>
+            </Geometry>
+        </Geometries>
+        <DMXModes>
+            <DMXMode Name="Standard 16 bit" Geometry="Base" XYZ="No">
+                <DMXChannels>
+                    <DMXChannel Coarse="1" Fine="2" Default="808080" Geometry="Yoke">
+                        <LogicalChannel Attribute="Pan">
+                            <ChannelFunction Attribute="Pan" PhysicalFrom="-270" PhysicalTo="270"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="3" Fine="4" Default="808080" Geometry="Head">
+                        <LogicalChannel Attribute="Tilt">
+                            <ChannelFunction Attribute="Tilt" PhysicalFrom="-135" PhysicalTo="135"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="5" Fine="6" Geometry="Head">
+                        <LogicalChannel Attribute="Dimmer">
+                            <ChannelFunction Attribute="Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="7" Geometry="Head">
+                        <LogicalChannel Attribute="Shutter1">
+                            <ChannelFunction Attribute="Shutter1"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="8" Geometry="MainBeam">
+                        <LogicalChannel Attribute="Shutter1">
+                            <ChannelFunction Attribute="Shutter1"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="1" Default="FFFFFF" Geometry="Pixel">
+                        <LogicalChannel Attribute="ColorRGB_R">
+                            <ChannelFunction Attribute="ColorRGB_R" Emitter="Red"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="2" Default="FFFFFF" Geometry="Pixel">
+                        <LogicalChannel Attribute="ColorRGB_G">
+                            <ChannelFunction Attribute="ColorRGB_G" Emitter="Green"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="3" Default="FFFFFF" Geometry="PixelBeam">
+                        <LogicalChannel Attribute="ColorRGB_B">
+                            <ChannelFunction Attribute="ColorRGB_B" Emitter="Blue"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Default="FFFFFF" Geometry="Pixel">
+                        <LogicalChannel Attribute="Dimmer">
+                            <ChannelFunction Attribute="Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                </DMXChannels>
+            </DMXMode>
+            <DMXMode Name="Basic 8 bit" Geometry="Base" XYZ="No">
+                <DMXChannels>
+                    <DMXChannel Coarse="1" Geometry="Yoke">
+                        <LogicalChannel Attribute="Pan"/>
+                    </DMXChannel>
+                    <DMXChannel Coarse="2" Geometry="Head">
+                        <LogicalChannel Attribute="Tilt"/>
+                    </DMXChannel>
+                    <DMXChannel Coarse="3" Geometry="Head">
+                        <LogicalChannel Attribute="Dimmer"/>
+                    </DMXChannel>
+                    <DMXChannel Coarse="4" Geometry="Head">
+                        <LogicalChannel Attribute="ColorRGB_R"/>
+                    </DMXChannel>
+                    <DMXChannel Coarse="5" Geometry="Head">
+                        <LogicalChannel Attribute="ColorRGB_G"/>
+                    </DMXChannel>
+                    <DMXChannel Coarse="6" Geometry="Head">
+                        <LogicalChannel Attribute="ColorRGB_B"/>
+                    </DMXChannel>
+                </DMXChannels>
+            </DMXMode>
+        </DMXModes>
+    </FixtureType>
+</GMA3>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fichier d'essai SYNTHÉTIQUE (SPEC-ma.md §1.5) : export grandMA3 qui N'EST PAS un type de projecteur (macro) → "unknown". -->
+<GMA3 DataVersion="2.1.1.5">
+    <Macro Name="Test Go">
+        <MacroLine Command="Go+ Sequence 1"/>
+    </Macro>
+</GMA3>

@@ -47,7 +47,10 @@ data class InviteCode(
 )
 
 enum class BlobKind(val raw: String) {
-    MVR("mvr"), REF_PLAN("refPlan");
+    MVR("mvr"), REF_PLAN("refPlan"),
+    /** 3D importée d'un type de projecteur MA (SPEC-ma.md §4.3) — usage LOCAL seulement,
+     *  jamais sérialisé dans Firestore (le chemin Storage ne dépend que du SHA). */
+    FIXTURE_3D("fixture3D");
 
     companion object {
         fun from(raw: String): BlobKind = entries.firstOrNull { it.raw == raw } ?: MVR

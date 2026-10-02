@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,9 +73,13 @@ fun CustomFixtureEditorSheet(
 ) {
     val id = remember(initial) { initial?.id ?: UUID.randomUUID().toString() }
     var name by remember(initial) { mutableStateOf(initial?.name ?: "") }
-    var baseSpec by remember(initial) {
-        mutableStateOf(initial?.baseGdtfSpec?.takeIf { it.isNotBlank() } ?: defaultBaseSpec)
-    }
+    // Type MA / à 3D choisie / « Aucune » : la base reste celle du type (souvent vide) —
+    // pas de pré-remplissage par le GDTF du projecteur, qui la changerait à l'enregistrement.
+    val initial3D = remember(initial) { editor3DInitial(initial, defaultBaseSpec) }
+    var baseSpec by remember(initial) { mutableStateOf(initial3D.baseSpec) }
+    // (e) « Aucune (formes génériques) » choisie explicitement : ni base ni 3D, et
+    // « Enregistrer » reste permis (§4.1 (e)) — y compris pour un type ancien.
+    var explicitNone by remember(initial) { mutableStateOf(initial3D.explicitNone) }
     val channels: SnapshotStateList<String> = remember(initial) {
         (initial?.channels ?: emptyList()).toMutableStateList()
     }
@@ -84,6 +89,12 @@ fun CustomFixtureEditorSheet(
     var specMenu by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // Bibliothèque MA (SPEC-ma.md §5.9) : provenance (lecture seule) + 3D choisie.
+    val profile = initial?.profile
+    var model3D by remember(initial) { mutableStateOf(initial?.model3D) }
+    var choose3D by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val fixture3DStore = remember { Fixture3DStore.of(ctx) }
 
     // Types GDTF présents dans la scène (base de géométrie possible).
     val specChoices = remember(scene) {
@@ -110,6 +121,26 @@ fun CustomFixtureEditorSheet(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
             )
 
+            // ---- Profil MA (lecture seule) -------------------------------------
+            profile?.let { pr ->
+                Text(stringResource(R.string.ma_editor_profile), style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(bottom = 2.dp))
+                Text("${pr.manufacturer} — ${pr.fixture}", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.ma_editor_mode, pr.mode.ifEmpty { stringResource(R.string.ma_mode_unnamed) }),
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 12.dp))
+            }
+
+            // ---- 3D : libellé, statut d'indisponibilité, « Changer la 3D… » ----
+            val draft3D = CustomFixtureTypeDTO(id, name, baseSpec.orEmpty(), emptyList(), 1, profile, model3D)
+            Text(stringResource(R.string.ma_editor_3d), style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(bottom = 2.dp))
+            Text(stringResource(R.string.ma_3d_line, type3DLabel(draft3D)), style = MaterialTheme.typography.bodyMedium)
+            Fixture3DStatusLines(draft3D, hasOrigin = !defaultBaseSpec.isNullOrBlank(), store = fixture3DStore)
+            OutlinedButton(
+                onClick = { ProAccess.gate("créer un type personnalisé") { choose3D = true } },
+                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+            ) { Text(stringResource(R.string.ma_change_3d)) }
+
             // GDTF de base (fournit la géométrie 3D).
             Text(stringResource(R.string.cfx_base_gdtf), style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(bottom = 4.dp))
@@ -119,7 +150,7 @@ fun CustomFixtureEditorSheet(
                 }
                 DropdownMenu(expanded = specMenu, onDismissRequest = { specMenu = false }) {
                     specChoices.forEach { s ->
-                        DropdownMenuItem(text = { Text(s) }, onClick = { baseSpec = s; specMenu = false })
+                        DropdownMenuItem(text = { Text(s) }, onClick = { baseSpec = s; explicitNone = false; specMenu = false })
                     }
                 }
             }
@@ -208,21 +239,112 @@ fun CustomFixtureEditorSheet(
                 }
                 Spacer(Modifier.weight(1f))
                 Button(
-                    enabled = name.isNotBlank() && !baseSpec.isNullOrBlank(),
+                    // Base FACULTATIVE pour un type MA (profil), un type à 3D choisie, ou
+                    // quand « Aucune » a été choisie explicitement.
+                    enabled = canSaveCustomType(name, Editor3DState(baseSpec, model3D, explicitNone), profile != null),
                     onClick = {
                         onSave(
                             CustomFixtureTypeDTO(
                                 id = id,
                                 name = name.trim(),
                                 baseGdtfSpec = baseSpec.orEmpty(),
-                                channels = channels.toList(),
-                                footprint = footprintOrDefault()
+                                channels = if (profile != null) keepHoles(channels.toList()) else channels.toList(),
+                                footprint = footprintOrDefault(),
+                                profile = profile,
+                                model3D = model3D
                             )
                         )
                     }
                 ) { Text(stringResource(R.string.cfx_save_type)) }
             }
         }
+    }
+
+    // « Changer la 3D… » : même étape que la création depuis la bibliothèque MA.
+    if (choose3D) {
+        Fixture3DChooserDialog(
+            scene = scene, store = fixture3DStore,
+            shareQuery = profile?.fixture ?: name,
+            onDismiss = { choose3D = false },
+            onChosen = { c ->
+                val next = editor3DAfterChoice(c)
+                model3D = next.model3D
+                baseSpec = next.baseSpec
+                explicitNone = next.explicitNone
+                choose3D = false
+            }
+        )
+    }
+}
+
+/** Choix de 3D en cours d'édition : base (GDTF du show), 3D choisie, « Aucune » explicite. */
+internal data class Editor3DState(
+    val baseSpec: String?,
+    val model3D: com.minou.mvrviewer.sync.CustomFixtureModel3D?,
+    val explicitNone: Boolean
+)
+
+/**
+ * État initial de l'éditeur. Nouveau type : base pré-remplie avec le GDTF du projecteur.
+ * Type existant : sa base telle quelle — un type MA / à 3D choisie n'est pas pré-rempli, et
+ * un type enregistré avec « Aucune » (ni base, ni 3D, ni profil) le reste.
+ */
+internal fun editor3DInitial(initial: CustomFixtureTypeDTO?, defaultBaseSpec: String?): Editor3DState {
+    if (initial == null) return Editor3DState(defaultBaseSpec, null, false)
+    val base = initial.baseGdtfSpec.takeIf { it.isNotBlank() }
+    if (base != null) return Editor3DState(base, initial.model3D, false)
+    if (initial.profile != null || initial.model3D != null) return Editor3DState(null, initial.model3D, false)
+    return Editor3DState(null, null, explicitNone = true)
+}
+
+/**
+ * Résultat de « Changer la 3D… » (§4.1) : (a) GDTF du show → base ; (b)(c)(d) → `model3D`
+ * sans base ; (e) « Aucune » → NI base NI 3D, QUEL QUE SOIT le type (avant : l'ancienne base
+ * d'un type sans profil était conservée, et le choix n'avait aucun effet).
+ */
+internal fun editor3DAfterChoice(c: Chosen3D): Editor3DState {
+    val base = c.baseGdtfSpec.takeIf { it.isNotBlank() }
+    return Editor3DState(base, c.model3D, explicitNone = base == null && c.model3D == null)
+}
+
+/** « Enregistrer » : un nom, et une base OU une 3D choisie OU un profil MA OU « Aucune » explicite. */
+internal fun canSaveCustomType(name: String, s: Editor3DState, hasProfile: Boolean): Boolean =
+    name.isNotBlank() && (!s.baseSpec.isNullOrBlank() || s.model3D != null || hasProfile || s.explicitNone)
+
+/**
+ * Canaux d'un type À `profile` (SPEC-ma.md §3.7) : noms `trim()`, trous `""` du MILIEU
+ * GARDÉS (l'index est l'offset), `""` de FIN retirés.
+ */
+internal fun keepHoles(list: List<String>): List<String> {
+    val trimmed = list.map { it.trim() }
+    var end = trimmed.size
+    while (end > 0 && trimmed[end - 1].isEmpty()) end--
+    return trimmed.subList(0, end)
+}
+
+/** Statut « 3D indisponible » + raison (§4.5), dans l'éditeur et la fiche projecteur. */
+@Composable
+internal fun Fixture3DStatusLines(t: CustomFixtureTypeDTO, hasOrigin: Boolean, store: Fixture3DStore) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    @Suppress("UNUSED_VARIABLE") val tick = store.version  // recompose quand le cache change
+    // Connexion OBSERVABLE : une connexion GDTF Share efface aussitôt « Connectez-vous… ».
+    val signedIn by com.minou.mvrviewer.mvr.GdtfShareClient.loggedInFlow.collectAsState()
+    val credsStored = remember { com.minou.mvrviewer.mvr.GdtfCredentialStore.username(ctx) != null }
+    val u = store.unavailability(t, hasOrigin, signedIn, credsStored) ?: return
+    Text(
+        stringResource(if (u.originShown) R.string.ma_3d_unavail_origin else R.string.ma_3d_unavail_generic),
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error
+    )
+    val reason = when (u.reason) {
+        Fixture3DReason.SIGN_IN_SHARE -> stringResource(R.string.ma_reason_sign_in)
+        Fixture3DReason.FORMAT_UNSUPPORTED -> stringResource(R.string.ma_reason_format, u.formatLabel ?: "?")
+        Fixture3DReason.MISSING_IN_PROJECT -> stringResource(R.string.ma_reason_missing)
+        Fixture3DReason.DOWNLOAD_FAILED -> stringResource(R.string.ma_reason_download)
+        Fixture3DReason.CORRUPTED -> stringResource(R.string.ma_reason_corrupt)
+        null -> null
+    }
+    reason?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

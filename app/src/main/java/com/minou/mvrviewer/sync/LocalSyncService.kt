@@ -150,6 +150,10 @@ class LocalSyncService private constructor(
         uid in proGrants
     }
 
+    /** Pas de serveur derrière le stub : aucun idToken → l'envoi de la preuve
+     *  d'achat est sauté, sans message (SPEC-purchase §6.3). */
+    override suspend fun currentIdToken(forceRefresh: Boolean): String? = null
+
     /**
      * Suppression du compte (stub) — MÊME POLITIQUE que le backend réel
      * ([FirebaseSyncService.deleteAccount]) : mot de passe RE-VÉRIFIÉ (faux →

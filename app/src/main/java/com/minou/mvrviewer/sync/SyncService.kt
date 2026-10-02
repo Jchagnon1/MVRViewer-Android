@@ -42,6 +42,16 @@ interface SyncService {
      */
     suspend fun fetchProGrant(): Boolean
 
+    /**
+     * idToken Firebase du compte connecté, pour authentifier l'envoi de la
+     * preuve d'achat à la fonction `verifyPurchase` (`Authorization: Bearer`,
+     * SPEC-purchase §6.1). [forceRefresh] : jeton rafraîchi de force (après un
+     * 401). `null` si déconnecté, hors ligne ou sans serveur (backend LOCAL :
+     * l'envoi est alors sauté, sans message) ; ne lève jamais (seule une
+     * annulation de la coroutine appelante remonte).
+     */
+    suspend fun currentIdToken(forceRefresh: Boolean): String?
+
     // — Projets / réunion —
     suspend fun createProject(contentKey: String, name: String): CloudProject
     suspend fun listProjects(): List<CloudProject>

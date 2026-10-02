@@ -351,6 +351,10 @@
     <string name="power_tab_hint">Set power draw by TYPE: your value applies to every fixture of that type and feeds the shared library. The cabling updates immediately.</string>
     <string name="power_to_enter">to be entered</string>
     <string name="power_watts_gdtf_fmt">%1$d W · GDTF</string>
+    <string name="pro_link_invalid_purchase">This purchase could not be verified.</string>
+    <string name="pro_link_owned_by_other_account">This purchase is already linked to another MVR Viewer account. Sign in with that account to get Pro on your other devices.</string>
+    <string name="pro_link_revoked">This purchase was refunded or cancelled and no longer unlocks Pro.</string>
+    <string name="pro_link_test_purchase_refused">Test purchases are not accepted.</string>
     <string name="raster_jpeg">JPEG image</string>
     <string name="raster_pdf">PDF</string>
     <string name="raster_png">PNG image</string>

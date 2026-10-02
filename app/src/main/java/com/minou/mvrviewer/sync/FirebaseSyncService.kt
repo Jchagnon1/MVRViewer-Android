@@ -108,6 +108,24 @@ class FirebaseSyncService(context: Context) : SyncService {
     }
 
     /**
+     * idToken du compte connecté pour l'envoi de la preuve d'achat à la
+     * fonction `verifyPurchase` (SPEC-purchase §6.1) — Firebase Auth déjà
+     * présent, AUCUNE dépendance nouvelle. Hors forçage, Firebase rend le jeton
+     * en cache tant qu'il est valide (≈ 1 h) ; [forceRefresh] le renouvelle
+     * (après un 401). Toute erreur (hors ligne, session révoquée) → null ;
+     * l'annulation de la coroutine remonte, comme dans [fetchProGrant].
+     */
+    override suspend fun currentIdToken(forceRefresh: Boolean): String? {
+        val user = auth.currentUser ?: return null
+        return try {
+            user.getIdToken(forceRefresh).await().token
+        } catch (e: Exception) {
+            if (e is CancellationException && e !is TimeoutCancellationException) throw e
+            null
+        }
+    }
+
+    /**
      * Suppression DÉFINITIVE du compte (politique Google Play). Ordre imposé par
      * Firebase (tout ce qui touche Firestore doit précéder `user.delete()`, après
      * quoi il n'y a plus d'authentification) — et choisi pour qu'AUCUNE écriture

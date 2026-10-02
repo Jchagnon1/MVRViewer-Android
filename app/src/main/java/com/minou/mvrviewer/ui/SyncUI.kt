@@ -26,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +65,12 @@ import com.minou.mvrviewer.R
 
 @Composable
 private fun ProAccountSection() {
+    // Bloc à l'écran : un refus de rattachement s'affiche ICI (pas d'alerte en
+    // double par-dessus, cf. ProAccess.setAccountLinkRefusal).
+    DisposableEffect(Unit) {
+        ProAccess.accountSectionShown(true)
+        onDispose { ProAccess.accountSectionShown(false) }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (ProAccess.isPro) {
             Text("MVR Viewer Pro — édition débloquée", style = MaterialTheme.typography.titleSmall)
@@ -74,6 +81,12 @@ private fun ProAccountSection() {
             androidx.compose.material3.TextButton(onClick = {
                 ProAccess.gate("débloquer l'édition") {}
             }) { Text("Débloquer la version Pro") }
+        }
+        // Refus DÉFINITIF du rattachement de l'achat au compte, après un achat ou
+        // « Restaurer un achat » seulement (SPEC-purchase §6.4) ; rien sinon.
+        ProAccess.accountLinkMessage?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error)
         }
         androidx.compose.material3.TextButton(onClick = { ProAccess.restore() }) {
             Text("Restaurer un achat")

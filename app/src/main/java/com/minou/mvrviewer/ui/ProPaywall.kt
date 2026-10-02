@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -23,11 +24,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.minou.mvrviewer.ui.theme.Accent
@@ -114,6 +117,30 @@ fun ProPaywallHost() {
             }
         }
     }
+}
+
+/**
+ * REFUS DU RATTACHEMENT de l'achat au compte (SPEC-purchase §6.4), montré tout
+ * de suite après un achat ou « Restaurer un achat » faits depuis le paywall —
+ * qui est déjà FERMÉ quand le serveur répond (l'achat Play débloque l'appareil
+ * d'abord). Posé UNE fois à la racine, à côté de [ProPaywallHost]. Rien
+ * d'autre que le texte localisé du §6.4 ; le même message reste ensuite dans
+ * le bloc Pro de l'écran compte. Pas d'alerte si ce bloc est déjà à l'écran
+ * (cf. [ProAccess.setAccountLinkRefusal]).
+ */
+@Composable
+fun ProLinkRefusalHost() {
+    val message = ProAccess.linkRefusalAlert ?: return
+    AlertDialog(
+        onDismissRequest = { ProAccess.dismissLinkRefusalAlert() },
+        title = { Text("MVR Viewer Pro") },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = { ProAccess.dismissLinkRefusalAlert() }) {
+                Text(stringResource(android.R.string.ok))
+            }
+        }
+    )
 }
 
 private val FEATURES = listOf(

@@ -15,6 +15,10 @@ import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import com.minou.mvrviewer.sync.PlayPurchaseSnapshot
+import com.minou.mvrviewer.sync.PurchaseLink
+import com.minou.mvrviewer.sync.PurchaseProof
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * ACCÈS « PRO » — parité exacte avec `ProAccess.swift` iOS.
@@ -29,6 +33,11 @@ import com.android.billingclient.api.QueryPurchasesParams
  *    par « Restaurer un achat » ([restore] → [grantRefresher]) ; retirée à la
  *    déconnexion. Le paywall n'en parle pas — c'est le canal du propriétaire et
  *    de ses testeurs tant que le produit n'est pas en ligne.
+ *    Elle est AUSSI écrite par la fonction serveur `verifyPurchase` quand une
+ *    app lui envoie la preuve d'un achat vérifié (SPEC-purchase.md) : l'achat
+ *    Play est rattaché au compte connecté ([accountUid] → `obfuscatedAccountId`
+ *    au lancement du flux), sa preuve ([currentProof]) part par
+ *    [purchaseLinker] — et l'achat compte alors sur iPhone et sur le web.
  * RÈGLE D'INTERFACE : un utilisateur gratuit VOIT les commandes d'édition ; les
  * toucher ouvre le paywall via [gate] — jamais un bouton qui disparaît.
  *
@@ -75,6 +84,48 @@ object ProAccess {
     /** Branché par le SyncViewModel : relit la licence par compte. Appelé au
      *  début de [restore] — « Restaurer un achat » couvre aussi la licence. */
     var grantRefresher: (() -> Unit)? = null
+
+    // MARK: - Achat reconnu sur les autres plateformes (SPEC-purchase §6.3)
+
+    /** uid du compte connecté (posé par le SyncViewModel à la connexion /
+     *  session restaurée, `null` à la déconnexion). Connu : le flux d'achat
+     *  porte `setObfuscatedAccountId` (hachage de l'uid) ; inconnu : achat SANS
+     *  identifiant (permis — le premier compte qui présentera la preuve l'aura). */
+    var accountUid: String? = null
+    /** Branché par le SyncViewModel : envoie la preuve d'achat au serveur.
+     *  `explicit` = geste de l'utilisateur (acheter, « Restaurer un achat ») :
+     *  envoi même si déjà fait, et message en cas de refus définitif. Appelé
+     *  après l'achat (et son acquittement local), après la relecture Play de
+     *  [restore], après la relecture Play faite à la connexion du BillingClient. */
+    var purchaseLinker: ((explicit: Boolean) -> Unit)? = null
+    /** Refus DÉFINITIF du serveur après un geste explicite (achat ou
+     *  « Restaurer un achat ») — affiché dans le bloc Pro de l'écran compte.
+     *  Effacé par un rattachement réussi et à la déconnexion. Jamais de texte
+     *  pour un succès ni pour un échec réessayable (silencieux, renvoyé plus
+     *  tard). */
+    var accountLinkMessage by mutableStateOf<String?>(null)
+        private set
+    /** Le MÊME refus, à montrer TOUT DE SUITE là où se trouve l'utilisateur
+     *  (alerte posée à la racine, `ProLinkRefusalHost`) quand le bloc Pro de
+     *  l'écran compte n'est pas à l'écran. Pourquoi pas le paywall
+     *  ([lastError]) : sur Android il est DÉJÀ FERMÉ quand le serveur répond
+     *  — [applyPurchases] le ferme dès que Play confirme l'achat, AVANT
+     *  l'envoi de la preuve, et [gate] ne le rouvre plus (l'appareil est Pro).
+     *  Fermée par l'utilisateur ([dismissLinkRefusalAlert]), effacée par un
+     *  rattachement réussi et à la déconnexion. */
+    var linkRefusalAlert by mutableStateOf<String?>(null)
+        private set
+    /** Blocs Pro de l'écran compte actuellement composés (`ProAccountSection`
+     *  le signale) : s'il y en a un, le refus y est déjà visible — pas
+     *  d'alerte en double. */
+    private val accountSectionsShown = java.util.concurrent.atomic.AtomicInteger(0)
+    /** Jeton du `Purchase` PURCHASED du produit lu en dernier chez Play (jamais
+     *  un PENDING) — la preuve envoyée au serveur. Non persisté : Play le rend
+     *  à chaque relecture, y compris hors ligne. */
+    @Volatile private var lastPurchaseToken: String? = null
+    /** Résout un texte localisé (`R.string`) — Context de l'app ; remplaçable
+     *  par les tests JVM (pas de Context). */
+    internal var messageResolver: (Int) -> String? = { id -> appContext?.getString(id) }
 
     /** TESTS UNITAIRES (JVM, sans Activity ni Play) : force l'état ; `null`
      *  rend la main aux états réels (achat / licence). Les tests qui exercent
@@ -128,6 +179,56 @@ object ProAccess {
         if (granted) showPaywall = false
     }
 
+    // MARK: - Preuve d'achat (rattachement au compte, SPEC-purchase §6.3)
+
+    /** Preuve de l'achat Play VALIDE (PURCHASED), `null` s'il n'y en a pas. */
+    fun currentProof(): PurchaseProof? = lastPurchaseToken?.let { PurchaseLink.proofFor(it) }
+
+    /** Retient le jeton de la preuve parmi les achats lus chez Play ; un achat
+     *  EN ATTENTE n'en produit jamais. Appelé par [applyPurchases] (et les tests). */
+    internal fun rememberPurchases(snapshots: List<PlayPurchaseSnapshot>) {
+        lastPurchaseToken = PurchaseLink.selectProofToken(snapshots)
+    }
+
+    /** `obfuscatedAccountId` passé au flux d'achat : hachage de [accountUid]
+     *  (64 caractères hexadécimaux, sans donnée personnelle), `null` si
+     *  déconnecté. */
+    internal fun purchaseAccountId(): String? = accountUid?.let { PurchaseLink.obfuscatedAccountId(it) }
+
+    /**
+     * Pose (refus définitif, `code` du contrat serveur) ou efface (`null`) le
+     * message de rattachement — appelée par le PurchaseLinker du SyncViewModel,
+     * seulement après un geste explicite pour un refus. Texte localisé (FR/EN,
+     * `strings.xml`) : dans le bloc Pro de l'écran compte ([accountLinkMessage])
+     * et, si ce bloc n'est pas à l'écran, en alerte immédiate
+     * ([linkRefusalAlert]) — le geste a été fait dans le paywall, déjà fermé.
+     */
+    fun setAccountLinkRefusal(code: String?) {
+        val message = code?.let { messageResolver(PurchaseLink.refusalMessageRes(it)) }
+        accountLinkMessage = message
+        linkRefusalAlert = if (message != null && accountSectionsShown.get() == 0) message else null
+    }
+
+    /** L'utilisateur ferme l'alerte ; le message reste dans l'écran compte. */
+    fun dismissLinkRefusalAlert() {
+        linkRefusalAlert = null
+    }
+
+    /** `ProAccountSection` entre (`true`) ou sort (`false`) de l'écran. */
+    fun accountSectionShown(visible: Boolean) {
+        if (visible) accountSectionsShown.incrementAndGet()
+        else accountSectionsShown.updateAndGet { maxOf(0, it - 1) }
+    }
+
+    /** Déconnexion : plus de compte pour le flux d'achat, message et alerte
+     *  effacés. La mémoire de la dernière issue (`pro.link`, indexée par uid)
+     *  est CONSERVÉE. */
+    fun clearAccount() {
+        accountUid = null
+        accountLinkMessage = null
+        linkRefusalAlert = null
+    }
+
     // MARK: - Play Billing
 
     private fun connect() {
@@ -143,7 +244,11 @@ object ProAccess {
             override fun onBillingSetupFinished(result: BillingResult) {
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
                     queryProduct()
-                    refresh()
+                    // Relecture au lancement : la preuve d'un achat déjà possédé
+                    // part AUTOMATIQUEMENT (sautée si déjà rattachée à ce compte —
+                    // sauf RÉPARATION si la licence relue plus tôt, avant que Play
+                    // ait répondu, était fausse : cf. PurchaseLinker.linkPurchase).
+                    refresh { purchaseLinker?.invoke(false) }
                 }
             }
             // Le client se reconnecte à la prochaine action ([purchase],
@@ -194,8 +299,10 @@ object ProAccess {
         }
     }
 
-    /** Relit les achats depuis Google Play et met le cache à jour. */
-    fun refresh() {
+    /** Relit les achats depuis Google Play et met le cache à jour. [then] :
+     *  appelé une fois la relecture RÉUSSIE appliquée (et l'acquittement local
+     *  éventuel terminé) — c'est là que part la preuve d'achat. */
+    fun refresh(then: (() -> Unit)? = null) {
         if (debugOverride != null) return
         val c = client ?: return
         val params = QueryPurchasesParams.newBuilder()
@@ -203,23 +310,41 @@ object ProAccess {
             .build()
         c.queryPurchasesAsync(params) { result, purchases ->
             if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                applyPurchases(purchases)
+                applyPurchases(purchases, then)
             }
         }
     }
 
     private fun onPurchasesUpdated(result: BillingResult, purchases: List<Purchase>?) {
+        // Flux lancé par [purchase] (isBusy) = geste EXPLICITE ; sinon (achat en
+        // attente confirmé plus tard, achat fait hors de l'app) = AUTOMATIQUE.
+        val initiated = isBusy
         isBusy = false
         when (result.responseCode) {
-            BillingClient.BillingResponseCode.OK -> applyPurchases(purchases.orEmpty())
+            BillingClient.BillingResponseCode.OK ->
+                applyPurchases(purchases.orEmpty()) { purchaseLinker?.invoke(initiated) }
             BillingClient.BillingResponseCode.USER_CANCELED -> {}
-            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> refresh()
+            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> refresh { purchaseLinker?.invoke(true) }
             else -> lastError = result.debugMessage.ifEmpty { "L'achat n'a pas abouti." }
         }
     }
 
-    private fun applyPurchases(purchases: List<Purchase>) {
-        val app = appContext ?: return
+    /** [then] : appelé UNE fois, après l'acquittement local s'il y en a un à
+     *  faire (réussi ou non : le serveur acquitte aussi, en ceinture), sinon
+     *  tout de suite. Un achat valide FERME le paywall AVANT [then] (donc avant
+     *  l'envoi de la preuve) : l'appareil est débloqué sans attendre le
+     *  serveur. Nul-sûr sans [init] (tests JVM : ni cache, ni acquittement). */
+    internal fun applyPurchases(purchases: List<Purchase>, then: (() -> Unit)? = null) {
+        rememberPurchases(purchases.map {
+            PlayPurchaseSnapshot(
+                products = it.products,
+                purchased = it.purchaseState == Purchase.PurchaseState.PURCHASED,
+                purchaseToken = it.purchaseToken
+            )
+        })
+        val fired = AtomicBoolean(false)
+        val fire = { if (fired.compareAndSet(false, true)) then?.invoke() }
+        var acknowledging = false
         var entitled = false
         for (p in purchases) {
             if (PRODUCT_ID !in p.products) continue
@@ -228,15 +353,18 @@ object ProAccess {
             // Google exige l'acquittement sous 3 jours, sinon REMBOURSEMENT
             // automatique — on acquitte dès qu'on voit l'achat.
             if (!p.isAcknowledged) {
-                client?.acknowledgePurchase(
+                val c = client ?: continue
+                acknowledging = true
+                c.acknowledgePurchase(
                     AcknowledgePurchaseParams.newBuilder()
                         .setPurchaseToken(p.purchaseToken).build()
-                ) {}
+                ) { fire() }
             }
         }
         purchased = entitled
-        prefs(app).edit().putBoolean(KEY_ENTITLED, entitled).apply()
+        appContext?.let { prefs(it).edit().putBoolean(KEY_ENTITLED, entitled).apply() }
         if (entitled) showPaywall = false
+        if (!acknowledging) fire()
     }
 
     fun purchase(activity: Activity) {
@@ -249,12 +377,16 @@ object ProAccess {
                 lastError = "Le produit n'est pas disponible pour le moment. Vérifiez votre connexion et réessayez."
                 return@ensureConnected
             }
-            val params = BillingFlowParams.newBuilder()
+            val builder = BillingFlowParams.newBuilder()
                 .setProductDetailsParamsList(listOf(
                     BillingFlowParams.ProductDetailsParams.newBuilder()
                         .setProductDetails(pd).build()
                 ))
-                .build()
+            // Connecté : l'achat porte le hachage de l'uid (relu par le serveur
+            // dans `obfuscatedExternalAccountId`) → il ne pourra être rattaché
+            // qu'à CE compte (SPEC-purchase §3.3/§3.4).
+            purchaseAccountId()?.let { builder.setObfuscatedAccountId(it) }
+            val params = builder.build()
             isBusy = true
             val r = client?.launchBillingFlow(activity, params)
             if (r == null || r.responseCode != BillingClient.BillingResponseCode.OK) {
@@ -266,10 +398,11 @@ object ProAccess {
 
     /** « Restaurer un achat » : les achats Google Play suivent le compte,
      *  il suffit de les relire — et on relit AUSSI la licence par compte
-     *  ([grantRefresher], branché par le SyncViewModel). */
+     *  ([grantRefresher], branché par le SyncViewModel). Après la relecture
+     *  Play, la preuve repart EXPLICITEMENT (même si déjà rattachée). */
     fun restore() {
         lastError = null
         grantRefresher?.invoke()
-        ensureConnected { refresh() }
+        ensureConnected { refresh { purchaseLinker?.invoke(true) } }
     }
 }

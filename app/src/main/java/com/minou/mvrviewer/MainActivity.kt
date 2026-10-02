@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.core.content.IntentCompat
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.minou.mvrviewer.sync.SyncViewModel
 import com.minou.mvrviewer.ui.HomeScreen
@@ -54,6 +55,9 @@ class MainActivity : ComponentActivity() {
                     )
                     // Paywall posé UNE fois, par-dessus tout écran.
                     com.minou.mvrviewer.ui.ProPaywallHost()
+                    // Refus du rattachement de l'achat au compte (après un geste
+                    // fait dans le paywall, déjà fermé) — SPEC-purchase §6.4.
+                    com.minou.mvrviewer.ui.ProLinkRefusalHost()
                 }
             }
         }
@@ -65,6 +69,11 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Achat validé hors app, remboursement : relire les droits au retour.
         com.minou.mvrviewer.ui.ProAccess.refresh()
+        // Preuve d'achat restée en échec RÉESSAYABLE (hors ligne, 503…) :
+        // renvoyée une fois par retour au premier plan (SPEC-purchase §6.1).
+        // MÊME instance que le `viewModel()` de l'écran (magasin de l'activité,
+        // clé par défaut).
+        ViewModelProvider(this)[SyncViewModel::class.java].onForeground()
     }
 
     override fun onNewIntent(intent: Intent) {

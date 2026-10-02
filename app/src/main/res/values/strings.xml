@@ -351,6 +351,10 @@
     <string name="power_tab_hint">Réglez la conso par TYPE : votre valeur profite à tous les projecteurs de ce type et alimente la bibliothèque partagée. Le câblage se met à jour aussitôt.</string>
     <string name="power_to_enter">à saisir</string>
     <string name="power_watts_gdtf_fmt">%1$d W · GDTF</string>
+    <string name="pro_link_invalid_purchase">Cet achat n\'a pas pu être vérifié.</string>
+    <string name="pro_link_owned_by_other_account">Cet achat est déjà rattaché à un autre compte MVR Viewer. Connectez-vous avec ce compte pour retrouver la version Pro sur vos autres appareils.</string>
+    <string name="pro_link_revoked">Cet achat a été remboursé ou annulé : il ne donne plus accès à la version Pro.</string>
+    <string name="pro_link_test_purchase_refused">Les achats de test ne sont pas acceptés.</string>
     <string name="raster_jpeg">Image JPEG</string>
     <string name="raster_pdf">PDF</string>
     <string name="raster_png">Image PNG</string>

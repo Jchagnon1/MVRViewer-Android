@@ -90,8 +90,27 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     // (crochet ProAccess.grantRefresher), retirée à la déconnexion.
     private val grantRefresher: () -> Unit = { refreshProGrant() }
 
+    // ACHAT PRO RECONNU PARTOUT (SPEC-purchase.md §6.1/§6.3) : la preuve de
+    // l'achat Play part vers la fonction `verifyPurchase`, qui rattache l'achat
+    // au compte et écrit `entitlements/{uid}` (lu par fetchProGrant, inchangé)
+    // → le Pro acheté ici vaut aussi sur iPhone et sur le web. Déclencheurs :
+    // ProAccess (achat, « Restaurer un achat », relecture Play au lancement)
+    // via [purchaseLinker], chaque relecture de licence, retour au premier plan
+    // après un échec réessayable ([onForeground]).
+    private val purchaseLinks = PurchaseLinker(
+        service = service,
+        transport = HttpPurchaseLinkTransport(),
+        store = PrefsPurchaseLinkStore(ctx),
+        proof = { com.minou.mvrviewer.ui.ProAccess.currentProof() },
+        currentUid = { _auth.value.accountOrNull?.uid },
+        applyGrant = { com.minou.mvrviewer.ui.ProAccess.setAccountGrant(it) },
+        showRefusal = { com.minou.mvrviewer.ui.ProAccess.setAccountLinkRefusal(it) }
+    )
+    private val purchaseLinker: (Boolean) -> Unit = { explicit -> linkPurchase(explicit) }
+
     init {
         com.minou.mvrviewer.ui.ProAccess.grantRefresher = grantRefresher
+        com.minou.mvrviewer.ui.ProAccess.purchaseLinker = purchaseLinker
     }
 
     // MARK: - Auth
@@ -100,26 +119,44 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val acc = runCatching { service.restoreSession() }.getOrNull() ?: return@launch
             _auth.value = AuthState.SignedIn(acc)
+            bindProAccount(acc)
             refreshProGrant()
             refreshProjects()
         }
     }
 
+    /** Compte connecté → ProAccess : uid pour l'`obfuscatedAccountId` du flux
+     *  d'achat, crochet d'envoi de la preuve (re)branché. */
+    private fun bindProAccount(acc: AccountInfo) {
+        com.minou.mvrviewer.ui.ProAccess.accountUid = acc.uid
+        com.minou.mvrviewer.ui.ProAccess.purchaseLinker = purchaseLinker
+    }
+
     /**
      * Relit la licence par compte pour la session courante et l'applique à
      * [com.minou.mvrviewer.ui.ProAccess]. No-op si déconnecté. Dans
-     * [viewModelScope] (ne retarde pas la connexion) ; garde de course : si la
-     * session a changé pendant la lecture (déconnexion, autre compte), le
-     * résultat n'est pas appliqué. `fetchProGrant` ne lève jamais.
+     * [viewModelScope] (ne retarde pas la connexion). ORDRE (SPEC-purchase
+     * §6.1) : envoi automatique de la preuve d'achat si nécessaire →
+     * `fetchProGrant` → réparation (licence fausse alors que l'achat est
+     * mémorisé rattaché : un envoi forcé par session). Garde de course : si la
+     * session a changé pendant l'envoi ou la lecture (déconnexion, autre
+     * compte), le résultat n'est pas appliqué. Rien ici ne lève.
      */
     private fun refreshProGrant() {
-        val uid = _auth.value.accountOrNull?.uid ?: return
-        viewModelScope.launch {
-            val granted = service.fetchProGrant()
-            if (_auth.value.accountOrNull?.uid == uid) {
-                com.minou.mvrviewer.ui.ProAccess.setAccountGrant(granted)
-            }
-        }
+        if (_auth.value.accountOrNull == null) return
+        viewModelScope.launch { purchaseLinks.refreshProGrant() }
+    }
+
+    /** Envoie la preuve d'achat (déclencheurs ProAccess) ; `explicit` = geste
+     *  de l'utilisateur. Rattaché → licence relue. No-op si déconnecté. */
+    fun linkPurchase(explicit: Boolean) {
+        viewModelScope.launch { purchaseLinks.linkPurchase(explicit) }
+    }
+
+    /** Retour au premier plan (MainActivity.onResume) : renvoi automatique,
+     *  SEULEMENT si la dernière tentative a échoué de façon réessayable. */
+    fun onForeground() {
+        if (purchaseLinks.lastOutcomeIsRetry()) linkPurchase(explicit = false)
     }
 
     suspend fun signIn(email: String, password: String) {
@@ -127,6 +164,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val acc = service.signIn(email, password)
             _auth.value = AuthState.SignedIn(acc)
+            bindProAccount(acc)
             refreshProGrant()
             refreshProjects()
             reattachAfterAuth()
@@ -141,6 +179,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val acc = service.signUp(email, password, displayName)
             _auth.value = AuthState.SignedIn(acc)
+            bindProAccount(acc)
             refreshProGrant()
             refreshProjects()
             reattachAfterAuth()
@@ -158,6 +197,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _currentProject.value = null
             _cloudProjects.value = emptyList()
             com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
+            com.minou.mvrviewer.ui.ProAccess.clearAccount()
         }
     }
 
@@ -205,6 +245,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         _currentProject.value = null
         _cloudProjects.value = emptyList()
         com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
+        com.minou.mvrviewer.ui.ProAccess.clearAccount()
     }
 
     private suspend fun refreshProjects() {
@@ -574,6 +615,9 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         // Ne pas laisser le singleton ProAccess retenir ce ViewModel.
         if (com.minou.mvrviewer.ui.ProAccess.grantRefresher === grantRefresher) {
             com.minou.mvrviewer.ui.ProAccess.grantRefresher = null
+        }
+        if (com.minou.mvrviewer.ui.ProAccess.purchaseLinker === purchaseLinker) {
+            com.minou.mvrviewer.ui.ProAccess.purchaseLinker = null
         }
     }
 }

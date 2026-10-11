@@ -137,8 +137,140 @@ class SatelliteRequestTest {
     @Test fun zoneTresAllongeeNordSudSansEtirement() {
         val (area, r) = request(boxM(60.0, 24.94, 60.0, 3000.0))
         verifieGeometrie("60×3000 m", area, r)
-        assertEquals(SatelliteFetcher.MAX_PX, r.height)
+        // Plafond sur le grand côté EN MÈTRES ramené à l'est-ouest (échelle de
+        // l'ancien calcul) : une zone haute a ≈ MAX_PX·cos(lat) px de haut.
+        val attendu = SatelliteFetcher.MAX_PX * cosd((area.minLat + area.maxLat) / 2)
+        assertTrue("h=${r.height} ≈ $attendu", abs(r.height - attendu) <= 1.0)
         assertTrue("w=${r.width}", r.width < 256)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Régressions du correctif 7b6ced7 (relecture), vérifiées sur le vrai serveur.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Copie FIDÈLE de l'ancien calcul (575783b) : degPerPx que le serveur RENDAIT,
+     * soit max(Δlon/w, Δlat/h) (il élargit l'axe court, pixels carrés en degrés).
+     */
+    private fun ancienDegPerPxRendu(needed: GeoBox): Double {
+        var minLat = needed.minLat; var maxLat = needed.maxLat
+        var minLon = needed.minLon; var maxLon = needed.maxLon
+        val padLat = (maxLat - minLat) * 0.08 + 1e-6
+        val padLon = (maxLon - minLon) * 0.08 + 1e-6
+        minLat -= padLat; maxLat += padLat; minLon -= padLon; maxLon += padLon
+        val cosLat = cos((minLat + maxLat) / 2.0 * PI / 180.0)
+        val minSpanM = 120.0
+        var latSpanM = (maxLat - minLat) * 111_320.0
+        var lonSpanM = (maxLon - minLon) * 111_320.0 * cosLat
+        if (latSpanM < minSpanM) {
+            val g = (minSpanM - latSpanM) / 2.0 / 111_320.0; minLat -= g; maxLat += g; latSpanM = minSpanM
+        }
+        if (lonSpanM < minSpanM) {
+            val g = (minSpanM - lonSpanM) / 2.0 / (111_320.0 * cosLat); minLon -= g; maxLon += g; lonSpanM = minSpanM
+        }
+        val majorM = max(latSpanM, lonSpanM)
+        val maxDim = (majorM / 0.30).coerceIn(256.0, 1024.0)
+        val aspect = lonSpanM / max(latSpanM, 1e-9)
+        val w = (if (aspect >= 1) maxDim else maxDim * aspect).coerceAtLeast(256.0).toInt()
+        val h = (if (aspect >= 1) maxDim / aspect else maxDim).coerceAtLeast(256.0).toInt()
+        return max((maxLon - minLon) / w, (maxLat - minLat) / h)
+    }
+
+    /**
+     * Défaut 1 : pour une zone HAUTE plafonnée (> 307 m nord-sud), 7b6ced7 demandait
+     * cos(lat) fois plus fin que l'ancien calcul. Mesuré au curl (200 × 480 m) :
+     * Australie (−30, 135) ancien 0,63 m/px → 200, 7b6ced7 0,544 → 500 ; idem
+     * Maroc (31,6, −7) et Inde (22, 78). Règle : JAMAIS plus fin que l'ancien.
+     */
+    @Test fun jamaisPlusFinQueLAncienCalcul() {
+        val lats = listOf(0.0, 22.0, -30.0, 31.6, 48.86, 60.0, 63.5, -45.0)
+        val tailles = listOf(
+            5.0 to 5.0, 100.0 to 80.0, 200.0 to 480.0, 80.0 to 300.0, 60.0 to 3000.0, 50.0 to 4000.0,
+            300.0 to 1200.0, 2000.0 to 1500.0, 3000.0 to 60.0, 480.0 to 200.0, 1000.0 to 1000.0, 400.0 to 500.0
+        )
+        for (lat in lats) for ((ew, ns) in tailles) {
+            val needed = boxM(lat, 10.0, ew, ns)
+            val (_, r) = request(needed)
+            val ancien = ancienDegPerPxRendu(needed)
+            // Tolérance : l'ancien code TRONQUAIT w et h (toInt, ≥ 256 px), ce qui le
+            // rendait plus grossier d'au plus 1 px sur 256 (0,4 %) — bien moins que
+            // l'écart d'un niveau de cache (×2) ou que l'erreur de 7b6ced7 (cos(lat)).
+            assertTrue("lat=$lat ${ew}×$ns : ${r.degPerPx * m} < ancien ${ancien * m} m/px",
+                r.degPerPx >= ancien * (1 - 1.0 / 256))
+        }
+    }
+
+    @Test fun zoneHauteRuraleMemeEchelleQueLAncien() {
+        // Le cas mesuré : 200 × 480 m en Australie rurale. Ancien = 0,629 m/px (200).
+        val needed = boxM(-30.0, 135.0, 200.0, 480.0)
+        val (area, r) = request(needed)
+        verifieGeometrie("Australie 200×480 m", area, r)
+        val ancien = ancienDegPerPxRendu(needed)
+        assertEquals(0.629, ancien * m, 0.002)
+        // Même échelle à 0,2 % près (constantes m/° : 111 320 avant, sphère de 6 371 km
+        // maintenant) ; 7b6ced7 était à 0,544 m/px (−13 %), soit cos(30°) fois plus fin.
+        assertEquals(ancien, r.degPerPx, ancien * 2e-3)
+        assertTrue("au-dessus du niveau 18 (≈ 0,597 m/px) : ${r.degPerPx * m}", r.degPerPx * m > 0.6)
+        assertTrue(r.height <= SatelliteFetcher.MAX_PX && r.width <= SatelliteFetcher.MAX_PX)
+    }
+
+    /** Calibration à 1 ancre au Kenya rural (0, 37,5) : nord = +Y, 1000 mm/m. */
+    private fun calibKenya() = GeoCalibration().apply { addAnchor(GeoAnchor(0f, 0f, 0.0, 37.5)) }
+
+    /** Résolution du niveau 18 du cache (deg/px) : seuil mesuré en zone rurale. */
+    private val niveau18 = 360.0 / (256.0 * (1 shl 18))
+
+    /**
+     * Défaut 2 : contenu de 100 × 80 m au Kenya rural → 0,30 m/px → ArcGIS répond
+     * 500 (l'imagerie s'arrête au niveau 18) ; la 2e tentative renvoyait la MÊME URL.
+     * Désormais chaque essai est 2× plus grossier et a SES coins.
+     */
+    @Test fun essaisDeSecoursDePlusEnPlusGrossiersAvecLeursCoins() {
+        val calib = calibKenya()
+        val plans = SatelliteFetcher.plansFor(calib, -50_000f, -40_000f, 50_000f, 40_000f)
+        assertEquals(SatelliteFetcher.ATTEMPTS, plans.size)
+        assertEquals(plans.size, plans.map { it.request.url }.toSet().size)
+        assertEquals(plans[0].request.url, SatelliteFetcher.planFor(calib, -50_000f, -40_000f, 50_000f, 40_000f)!!.request.url)
+        for ((i, p) in plans.withIndex()) {
+            val r = p.request
+            assertEquals("essai $i : ×${1 shl i}", plans[0].request.degPerPx * (1 shl i), r.degPerPx, 1e-15)
+            // Coins = emprise de CET essai (pas celle du premier).
+            val b = r.bbox
+            val nw = calib.worldPosition(b.maxLat, b.minLon)!!
+            val se = calib.worldPosition(b.minLat, b.maxLon)!!
+            assertEquals(nw.first, p.nwX, 0f); assertEquals(nw.second, p.nwY, 0f)
+            assertEquals(se.first, p.seX, 0f); assertEquals(se.second, p.seY, 0f)
+            // Géométrie toujours exacte (rapport en degrés, rendu = demandé) et contenu couvert.
+            assertTrue(abs(r.width * r.degPerPx - b.dLon) < 1e-12 && abs(r.height * r.degPerPx - b.dLat) < 1e-12)
+            assertTrue(p.nwX <= -50_000f && p.seX >= 50_000f && p.seY <= -40_000f && p.nwY >= 40_000f)
+        }
+        // Le 1er essai est sous le niveau 18 (500 en zone rurale), le 2e au-dessus.
+        assertTrue(plans[0].request.degPerPx < niveau18 * 0.9)
+        assertTrue(plans[1].request.degPerPx > niveau18)
+    }
+
+    @Test fun premierEssaiReussiEtJamaisDeuxFoisLaMemeUrl() {
+        val plans = SatelliteFetcher.plansFor(calibKenya(), -50_000f, -40_000f, 50_000f, 40_000f)
+        // Serveur simulé d'après les mesures (seuil entre 0,90 et 0,99 × niveau 18) :
+        // 500 plus fin que 0,95 × niveau 18, image sinon.
+        val demandees = mutableListOf<String>()
+        val rural = SatelliteFetcher.firstSuccess<String>(plans) { p ->
+            demandees += p.request.url
+            if (p.request.degPerPx < niveau18 * 0.95) null else "image"
+        }
+        assertNotNull(rural)
+        assertEquals(plans[1], rural!!.first)
+        assertEquals(listOf(plans[0].request.url, plans[1].request.url), demandees)
+        // En ville (imagerie fine) : un seul appel, le plus fin.
+        demandees.clear()
+        val ville = SatelliteFetcher.firstSuccess<String>(plans) { p -> demandees += p.request.url; "image" }
+        assertEquals(plans[0], ville!!.first)
+        assertEquals(1, demandees.size)
+        // Rien nulle part : null après ATTEMPTS URL toutes DIFFÉRENTES.
+        demandees.clear()
+        assertNull(SatelliteFetcher.firstSuccess<String>(plans) { p -> demandees += p.request.url; null })
+        assertEquals(SatelliteFetcher.ATTEMPTS, demandees.size)
+        assertEquals(demandees.size, demandees.toSet().size)
     }
 
     @Test fun planchersAgrandissentLEmpriseAuLieuDEtirer() {

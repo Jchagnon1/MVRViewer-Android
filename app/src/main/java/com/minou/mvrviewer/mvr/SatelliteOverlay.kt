@@ -4,9 +4,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.math.BigDecimal
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -18,6 +21,17 @@ import kotlin.math.roundToLong
  * (mm). Vue plan ET vue 3D dessinent ensuite l'image comme un quad avec LEUR
  * propre projection monde→écran → l'alignement est automatique et identique.
  * Source : ArcGIS World Imagery (satellite, sans clé API ; attribution Esri).
+ *
+ * GÉOMÉTRIE DE L'EXPORT (vérifiée au curl, 2026-10-11) : en EPSG:4326
+ * (`bboxSR=imageSR=4326`), le serveur rend des pixels CARRÉS EN DEGRÉS. Si
+ * `size` n'a pas le rapport Δlon/Δlat EN DEGRÉS, il ÉLARGIT l'emprise rendue
+ * (980×920 px demandés pour 0,0025° de latitude → 0,003755° rendus). L'ancien
+ * calcul prenait le rapport en MÈTRES (Δlon·cos(lat)/Δlat) : les coins posés sur
+ * l'emprise DEMANDÉE ne correspondaient plus à l'image → image étirée nord-sud
+ * d'environ 1/cos(lat) (×1,5 à Paris), en plan comme en 3D. Désormais la taille
+ * est au rapport exact en degrés et l'emprise est AJUSTÉE à un nombre entier de
+ * pixels : le serveur rend exactement l'emprise demandée, et les 4 coins sont
+ * calculés sur cette emprise FINALE (cf. [SatelliteFetcher.requestForArea]).
  */
 class SatelliteOverlay(
     val bitmap: Bitmap,
@@ -29,9 +43,153 @@ class SatelliteOverlay(
     val key: String
 )
 
+/** Boîte géographique (degrés), nord = maxLat, est = maxLon. */
+data class GeoBox(val minLat: Double, val minLon: Double, val maxLat: Double, val maxLon: Double) {
+    val dLat get() = maxLat - minLat
+    val dLon get() = maxLon - minLon
+    fun contains(o: GeoBox, eps: Double = 1e-12) =
+        o.minLat >= minLat - eps && o.maxLat <= maxLat + eps &&
+            o.minLon >= minLon - eps && o.maxLon <= maxLon + eps
+}
+
+/**
+ * Requête d'export ArcGIS (PURE, sans réseau). [bbox] = emprise FINALE, exactement
+ * celle que le serveur rend : `width·degPerPx = Δlon` et `height·degPerPx = Δlat`
+ * (pixels carrés en degrés). [url] est l'URL à télécharger.
+ */
+data class SatelliteRequest(val bbox: GeoBox, val width: Int, val height: Int, val degPerPx: Double) {
+    val url: String get() = SatelliteFetcher.exportUrl(bbox, width, height)
+}
+
+/**
+ * Requête + positions MONDE MVR (mm) des 4 coins de son emprise FINALE (ordre
+ * image : nord-ouest, nord-est, sud-est, sud-ouest) — ce que plan et 3D plaquent.
+ */
+data class SatellitePlan(
+    val request: SatelliteRequest,
+    val nwX: Float, val nwY: Float,
+    val neX: Float, val neY: Float,
+    val seX: Float, val seY: Float,
+    val swX: Float, val swY: Float
+)
+
 object SatelliteFetcher {
 
-    /** Clé de déduplication : ne re-télécharge que si calibration/bornes changent. */
+    const val EXPORT_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export"
+    /** Marge de contexte autour du contenu, par axe (comme iOS). */
+    const val MARGIN = 0.08
+    /** Région MINIMALE (m) par axe : en deçà, on demanderait une résolution que
+     *  l'imagerie ne fournit pas (ArcGIS répond 500) et le contexte manquerait. */
+    const val MIN_SPAN_M = 120.0
+    /**
+     * Résolution SÛRE (m/px) sur l'axe le PLUS FIN, l'axe est-ouest (en pixels carrés
+     * en degrés, le pixel fait degPerPx·M·cos(lat) m d'est en ouest et degPerPx·M m du
+     * nord au sud). C'est exactement l'échelle que le serveur rendait déjà avec
+     * l'ancien calcul (il retenait degPerPx = Δlon/w) : aucune zone qui marchait ne
+     * se met à répondre 500. Plus fin (0,3 m/px nord-sud) échoue par endroits
+     * (sondé : Finlande rurale 63,5° N → 500).
+     */
+    const val TARGET_M_PER_PX = 0.30
+    /** Plafond de pixels par côté (mémoire Android : bitmap ARGB 4 Mo + copie à
+     *  l'opacité cuite pour la 3D + texture GPU). Au-delà, l'image est plus grossière. */
+    const val MAX_PX = 1024
+    /** Plancher de pixels par côté (zone très allongée) : on ÉLARGIT l'emprise. */
+    const val MIN_PX = 16
+    /** Mètres par degré de latitude, sur la sphère de [GeoCalibration]. */
+    const val M_PER_DEG = 6_371_000.0 * PI / 180.0
+
+    /**
+     * Zone à couvrir pour une emprise géographique [needed] : marge 8 % par axe puis
+     * au moins [MIN_SPAN_M] de côté (mètres réels). null si coordonnée invalide, trop
+     * près d'un pôle ou hors [-180 ; 180] en longitude.
+     */
+    fun areaFor(needed: GeoBox, margin: Double = MARGIN, minSpanM: Double = MIN_SPAN_M): GeoBox? {
+        with(needed) {
+            if (!(minLat.isFinite() && maxLat.isFinite() && minLon.isFinite() && maxLon.isFinite())) return null
+            if (minLat > maxLat || minLon > maxLon) return null
+        }
+        val padLat = needed.dLat * margin + 1e-6
+        val padLon = needed.dLon * margin + 1e-6
+        var minLat = needed.minLat - padLat; var maxLat = needed.maxLat + padLat
+        var minLon = needed.minLon - padLon; var maxLon = needed.maxLon + padLon
+        val cos0 = cos((minLat + maxLat) / 2.0 * PI / 180.0)
+        if (!(cos0 > 0.02) || abs(minLat) > 85.0 || abs(maxLat) > 85.0) return null
+        val latSpanM = (maxLat - minLat) * M_PER_DEG
+        val lonSpanM = (maxLon - minLon) * M_PER_DEG * cos0
+        if (latSpanM < minSpanM) {
+            val g = (minSpanM - latSpanM) / 2.0 / M_PER_DEG; minLat -= g; maxLat += g
+        }
+        if (lonSpanM < minSpanM) {
+            val g = (minSpanM - lonSpanM) / 2.0 / (M_PER_DEG * cos0); minLon -= g; maxLon += g
+        }
+        if (minLon < -180.0 || maxLon > 180.0) return null
+        return GeoBox(minLat, minLon, maxLat, maxLon)
+    }
+
+    /**
+     * Requête d'export couvrant [area] : pixels CARRÉS EN DEGRÉS ([degPerPx] identique
+     * sur les deux axes), [TARGET_M_PER_PX] d'est en ouest, au plus [MAX_PX] px par
+     * côté, au moins [MIN_PX]. Le nombre de pixels est arrondi au-dessus et l'emprise
+     * ÉLARGIE autour du centre à ce nombre entier : rapport w/h = Δlon/Δlat exact, et
+     * aucun plancher n'étire l'image (il agrandit l'emprise dans la direction courte).
+     */
+    fun requestForArea(
+        area: GeoBox,
+        targetMPerPx: Double = TARGET_M_PER_PX,
+        maxPx: Int = MAX_PX,
+        minPx: Int = MIN_PX
+    ): SatelliteRequest? {
+        if (!(area.dLat > 0 && area.dLon > 0)) return null
+        val cLat = (area.minLat + area.maxLat) / 2.0
+        val cLon = (area.minLon + area.maxLon) / 2.0
+        val cos0 = cos(cLat * PI / 180.0)
+        if (!(cos0 > 0.02)) return null
+        val degPerPx = max(targetMPerPx / (M_PER_DEG * cos0), max(area.dLat, area.dLon) / maxPx)
+        // −1e-9 : un quotient « entier » à l'arrondi flottant près ne gagne pas 1 px.
+        val width = ceil(area.dLon / degPerPx - 1e-9).toInt().coerceIn(minPx, maxPx)
+        val height = ceil(area.dLat / degPerPx - 1e-9).toInt().coerceIn(minPx, maxPx)
+        val hw = width * degPerPx / 2.0
+        val hh = height * degPerPx / 2.0
+        val bbox = GeoBox(cLat - hh, cLon - hw, cLat + hh, cLon + hw)
+        if (bbox.minLon < -180.0 || bbox.maxLon > 180.0) return null
+        return SatelliteRequest(bbox, width, height, degPerPx)
+    }
+
+    /**
+     * Calcul COMPLET (pur, sans réseau) pour les bornes MONDE (mm) du contenu : boîte
+     * géographique des 4 coins, zone ([areaFor]), requête ([requestForArea]) et coins
+     * MONDE de l'emprise FINALE. null si non calibré ou zone invalide.
+     */
+    fun planFor(calib: GeoCalibration, minX: Float, minY: Float, maxX: Float, maxY: Float): SatellitePlan? {
+        if (!calib.isCalibrated) return null
+        val c1 = calib.latLonOf(minX, minY) ?: return null
+        val c2 = calib.latLonOf(maxX, minY) ?: return null
+        val c3 = calib.latLonOf(maxX, maxY) ?: return null
+        val c4 = calib.latLonOf(minX, maxY) ?: return null
+        val needed = GeoBox(
+            minOf(c1.first, c2.first, c3.first, c4.first), minOf(c1.second, c2.second, c3.second, c4.second),
+            maxOf(c1.first, c2.first, c3.first, c4.first), maxOf(c1.second, c2.second, c3.second, c4.second)
+        )
+        val area = areaFor(needed) ?: return null
+        val req = requestForArea(area) ?: return null
+        val b = req.bbox
+        val nw = calib.worldPosition(b.maxLat, b.minLon) ?: return null
+        val ne = calib.worldPosition(b.maxLat, b.maxLon) ?: return null
+        val se = calib.worldPosition(b.minLat, b.maxLon) ?: return null
+        val sw = calib.worldPosition(b.minLat, b.minLon) ?: return null
+        return SatellitePlan(req, nw.first, nw.second, ne.first, ne.second, se.first, se.second, sw.first, sw.second)
+    }
+
+    /** URL d'export (JPEG, 4326 → 4326, image brute). Nombres en notation décimale
+     *  pleine, indépendante de la langue (jamais « 1.2E-4 » ni de virgule). */
+    fun exportUrl(bbox: GeoBox, width: Int, height: Int): String {
+        fun n(v: Double) = BigDecimal.valueOf(v).toPlainString()
+        return "$EXPORT_URL?bbox=${n(bbox.minLon)},${n(bbox.minLat)},${n(bbox.maxLon)},${n(bbox.maxLat)}" +
+            "&bboxSR=4326&imageSR=4326&size=$width,$height&format=jpg&transparent=false&f=image"
+    }
+
+    /** Clé de déduplication : ne re-télécharge que si calibration/bornes changent.
+     *  La requête est une fonction déterministe de ces mêmes entrées ([planFor]). */
     fun keyFor(calib: GeoCalibration, minX: Float, minY: Float, maxX: Float, maxY: Float): String {
         val a = calib.anchors.joinToString("|") {
             "${(it.worldX).roundToLong()},${(it.worldY).roundToLong()}," +
@@ -44,47 +202,9 @@ object SatelliteFetcher {
     suspend fun fetch(
         calib: GeoCalibration, minX: Float, minY: Float, maxX: Float, maxY: Float
     ): SatelliteOverlay? = withContext(Dispatchers.IO) {
-        if (!calib.isCalibrated) return@withContext null
-        // 4 coins monde → lat/lon.
-        val c1 = calib.latLonOf(minX, minY) ?: return@withContext null
-        val c2 = calib.latLonOf(maxX, minY) ?: return@withContext null
-        val c3 = calib.latLonOf(maxX, maxY) ?: return@withContext null
-        val c4 = calib.latLonOf(minX, maxY) ?: return@withContext null
-        var minLat = minOf(c1.first, c2.first, c3.first, c4.first)
-        var maxLat = maxOf(c1.first, c2.first, c3.first, c4.first)
-        var minLon = minOf(c1.second, c2.second, c3.second, c4.second)
-        var maxLon = maxOf(c1.second, c2.second, c3.second, c4.second)
-        // Marge 8 % pour le contexte (comme iOS).
-        val padLat = (maxLat - minLat) * 0.08 + 1e-6
-        val padLon = (maxLon - minLon) * 0.08 + 1e-6
-        minLat -= padLat; maxLat += padLat; minLon -= padLon; maxLon += padLon
-        if (maxLat - minLat < 1e-7 || maxLon - minLon < 1e-7) return@withContext null
-
-        var centerLat = (minLat + maxLat) / 2.0
-        val cosLat = cos(centerLat * Math.PI / 180.0)
-        // Région MINIMALE ~120 m : sinon on demande une résolution que l'imagerie
-        // ne fournit pas (ArcGIS répond 500) et on manque de contexte autour du rig.
-        val minSpanM = 120.0
-        var latSpanM = (maxLat - minLat) * 111_320.0
-        var lonSpanM = (maxLon - minLon) * 111_320.0 * cosLat
-        if (latSpanM < minSpanM) {
-            val g = (minSpanM - latSpanM) / 2.0 / 111_320.0; minLat -= g; maxLat += g; latSpanM = minSpanM
-        }
-        if (lonSpanM < minSpanM) {
-            val g = (minSpanM - lonSpanM) / 2.0 / (111_320.0 * cosLat); minLon -= g; maxLon += g; lonSpanM = minSpanM
-        }
-        centerLat = (minLat + maxLat) / 2.0
-        // Pixels calés sur une résolution SÛRE (~0,3 m/px) : demander plus fin que
-        // l'imagerie disponible fait échouer l'export. Plafonné à 1024.
-        val majorM = max(latSpanM, lonSpanM)
-        val maxDim = (majorM / 0.30).coerceIn(256.0, 1024.0)
-        val aspect = lonSpanM / max(latSpanM, 1e-9)
-        val w = (if (aspect >= 1) maxDim else maxDim * aspect).coerceAtLeast(256.0).toInt()
-        val h = (if (aspect >= 1) maxDim / aspect else maxDim).coerceAtLeast(256.0).toInt()
-
-        val url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export" +
-            "?bbox=$minLon,$minLat,$maxLon,$maxLat&bboxSR=4326&imageSR=4326&size=$w,$h" +
-            "&format=jpg&transparent=false&f=image"
+        // Emprise, taille et coins : calcul PUR (testé en JVM), une seule source.
+        val plan = planFor(calib, minX, minY, maxX, maxY) ?: return@withContext null
+        val url = plan.request.url
         // Une nouvelle tentative si l'export échoue (le serveur ArcGIS répond
         // parfois 500 transitoire sous charge).
         var bmp: Bitmap? = null
@@ -105,14 +225,10 @@ object SatelliteFetcher {
         }
         if (bmp == null) return@withContext null
 
-        // 4 coins de la bbox géographique → repère monde (mm), pour le placement.
-        val nw = calib.worldPosition(maxLat, minLon) ?: return@withContext null
-        val ne = calib.worldPosition(maxLat, maxLon) ?: return@withContext null
-        val se = calib.worldPosition(minLat, maxLon) ?: return@withContext null
-        val sw = calib.worldPosition(minLat, minLon) ?: return@withContext null
+        // Coins = emprise FINALE de la requête (celle que le serveur a rendue).
         SatelliteOverlay(
-            bmp, nw.first, nw.second, ne.first, ne.second,
-            se.first, se.second, sw.first, sw.second,
+            bmp, plan.nwX, plan.nwY, plan.neX, plan.neY,
+            plan.seX, plan.seY, plan.swX, plan.swY,
             keyFor(calib, minX, minY, maxX, maxY)
         )
     }

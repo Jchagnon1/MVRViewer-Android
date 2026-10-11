@@ -83,7 +83,10 @@ fun SceneScreen(
     onInitialModelConsumed: () -> Unit = {},
     // Avancement NOMMÉ du chargement (#4) : la vue 3D poursuit la progression
     // commencée à l'accueil (lecture/parse) jusqu'à 100 %.
-    progress: LoadProgress? = null
+    progress: LoadProgress? = null,
+    // Bibliothèque MA partagée avec l'accueil + file des profils reçus du système.
+    maLibrary: MaLibraryState = remember { MaLibraryState() },
+    maInbox: MaInbox? = null
 ) {
     val ctx = LocalContext.current
     // Vue SEMÉE depuis l'état persisté : on rouvre l'app sur la vue qu'on
@@ -150,9 +153,14 @@ fun SceneScreen(
     val customLibrary = remember { CustomFixtureLibrary() }
     val customResolver = remember { CustomFixtureResolver() }
     // Bibliothèque MA (SPEC-ma.md) : profils importés (locaux, chargés à la première
-    // ouverture de l'écran) + cache 3D des types « profil MA + 3D choisie ».
-    val maLibrary = remember { MaLibraryState() }
+    // ouverture de l'écran, état `maLibrary` reçu en paramètre) + cache 3D des types
+    // « profil MA + 3D choisie ».
     val fixture3DStore = remember { Fixture3DStore.of(ctx) }
+    // Profil REÇU (« Ouvrir avec », partage) : la bibliothèque s'ouvre PAR-DESSUS le show,
+    // qui reste ouvert ; l'import démarre aussitôt (SPEC-ma-gdtfshare.md §5.1).
+    if (maInbox != null) LaunchedEffect(maInbox.batches.size) {
+        if (!maInbox.isEmpty) mode = SceneMode.MA_LIBRARY
+    }
     // Dernière sélection de projecteurs (clés d'INSTANCE) en 3D ou en plan — sert à
     // « Enregistrer et affecter à la sélection » depuis la bibliothèque MA.
     var selectionKeys by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1172,7 +1180,8 @@ fun SceneScreen(
             onSaveType = { t, assign -> saveMaType(t, assign) },
             onCustomLibraryChanged = { scope.launch { syncCustomFixtures() } },
             onBack = { mode = SceneMode.THREE_D },
-            modifier = modifier
+            modifier = modifier,
+            inbox = maInbox
         )
         SceneMode.GDTF_SHARE -> GdtfShareScreen(
             scene = scene,

@@ -13,24 +13,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.minou.mvrviewer.sync.SyncViewModel
+import com.minou.mvrviewer.mvr.IncomingFileRouter
+import com.minou.mvrviewer.ui.HomeMaLibraryHost
 import com.minou.mvrviewer.ui.HomeScreen
+import com.minou.mvrviewer.ui.IncomingFiles
 import com.minou.mvrviewer.ui.SceneScreen
 import com.minou.mvrviewer.ui.SceneViewModel
 import com.minou.mvrviewer.ui.theme.MvrViewerTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
-    // URI d'un .mvr ouvert DEPUIS une autre appli (gestionnaire de fichiers,
-    // Drive, « Ouvrir avec… ») via ACTION_VIEW / ACTION_SEND. Équivalent Android
-    // du `onOpenURL` iOS. Consommé une fois par l'écran (LaunchedEffect).
-    private val incomingUri = mutableStateOf<Uri?>(null)
+    // Fichiers ouverts DEPUIS une autre appli (gestionnaire de fichiers, Drive,
+    // « Ouvrir avec… ») via ACTION_VIEW / ACTION_SEND / ACTION_SEND_MULTIPLE.
+    // Équivalent Android du `onOpenURL` iOS. Consommés une fois par l'écran, puis
+    // AIGUILLÉS (show, objet 3D ou bibliothèque MA — SPEC-ma-gdtfshare.md §5.3).
+    private val incomingUris = mutableStateOf<List<Uri>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,15 +51,22 @@ class MainActivity : ComponentActivity() {
         val proOverride = if (isDebuggable && intent.hasExtra("MVR_PRO"))
             intent.getBooleanExtra("MVR_PRO", false) else null
         com.minou.mvrviewer.ui.ProAccess.init(this, proOverride)
+        // GDTF Share simulé (DEBUG seulement) : dossier `getList.json` + `<rid>.gdtf`
+        // (`<rid>.fail` = panne), poussé par adb dans le stockage propre à l'app :
+        //   adb shell am start -n com.minou.mvrviewer/.MainActivity \
+        //     --es MVR_GDTFSHARE_MOCK_DIR /sdcard/Android/data/com.minou.mvrviewer/files/gdtfmock
+        if (isDebuggable) intent.getStringExtra("MVR_GDTFSHARE_MOCK_DIR")?.let {
+            com.minou.mvrviewer.mvr.GdtfShareClient.enableMock(java.io.File(it))
+        }
         enableEdgeToEdge()
-        incomingUri.value = uriFrom(intent)
+        incomingUris.value = urisFrom(intent)
         setContent {
             MvrViewerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
                     App(
                         modifier = Modifier.padding(padding),
-                        incomingUri = incomingUri.value,
-                        onUriConsumed = { incomingUri.value = null }
+                        incomingUris = incomingUris.value,
+                        onUrisConsumed = { incomingUris.value = emptyList() }
                     )
                     // Paywall posé UNE fois, par-dessus tout écran.
                     com.minou.mvrviewer.ui.ProPaywallHost()
@@ -79,21 +94,23 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        incomingUri.value = uriFrom(intent)
+        incomingUris.value = urisFrom(intent)
     }
 
-    private fun uriFrom(intent: Intent?): Uri? = when (intent?.action) {
-        Intent.ACTION_VIEW -> intent.data
-        Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-        else -> null
+    private fun urisFrom(intent: Intent?): List<Uri> = when (intent?.action) {
+        Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+        Intent.ACTION_SEND -> listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
+        Intent.ACTION_SEND_MULTIPLE ->
+            IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+        else -> emptyList()
     }
 }
 
 @Composable
 private fun App(
     modifier: Modifier = Modifier,
-    incomingUri: Uri? = null,
-    onUriConsumed: () -> Unit = {}
+    incomingUris: List<Uri> = emptyList(),
+    onUrisConsumed: () -> Unit = {}
 ) {
     val vm: SceneViewModel = viewModel()
     // Cerveau de la synchro cloud, partagé accueil ↔ scène. Reconnexion silencieuse
@@ -102,19 +119,52 @@ private fun App(
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { sync.restoreSessionIfPossible() }
 
-    // Ouverture externe : dès qu'une URI arrive, on la charge (une seule fois).
-    LaunchedEffect(incomingUri) {
-        if (incomingUri != null) {
-            vm.open(incomingUri)
-            onUriConsumed()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Bibliothèque MA ouverte depuis l'ACCUEIL (bouton, ou profil reçu sans show).
+    var homeMaOpen by remember { mutableStateOf(false) }
+    // Ouverture externe : dès que des URI arrivent, on les AIGUILLE (une seule fois).
+    // Un fichier seul : show / objet 3D (comportement existant) ou bibliothèque MA ;
+    // plusieurs fichiers partagés : UN lot dans la bibliothèque MA (un .mvr compte ignoré).
+    LaunchedEffect(incomingUris) {
+        if (incomingUris.isEmpty()) return@LaunchedEffect
+        val uris = incomingUris
+        onUrisConsumed()
+        scope.launch {
+            val toLibrary = uris.size > 1 || when (withContext(Dispatchers.IO) {
+                runCatching { IncomingFiles.route(ctx, uris[0]) }.getOrDefault(IncomingFileRouter.Route.MVR)
+            }) {
+                IncomingFileRouter.Route.MVR, IncomingFileRouter.Route.MODEL -> false
+                IncomingFileRouter.Route.GDTF, IncomingFileRouter.Route.MA_PROFILES -> true
+            }
+            if (!toLibrary) { vm.open(uris[0]); return@launch }
+            // Recevoir un profil ne ferme JAMAIS le show : la bibliothèque s'ouvre par-dessus
+            // (SceneScreen surveille la file), sinon depuis l'accueil.
+            vm.maInbox.enqueue(uris)
+            if (vm.state.value !is SceneViewModel.UiState.Loaded) homeMaOpen = true
         }
     }
 
     val state by vm.state
+    // Un show ouvert reprend la main : au retour à l'accueil, c'est l'accueil qui s'affiche.
+    LaunchedEffect(state) { if (state is SceneViewModel.UiState.Loaded) homeMaOpen = false }
     when (val s = state) {
         is SceneViewModel.UiState.Home,
-        is SceneViewModel.UiState.Loading,
         is SceneViewModel.UiState.Error ->
+            if (homeMaOpen) HomeMaLibraryHost(vm, modifier) { homeMaOpen = false }
+            else HomeScreen(
+                state = s, modifier = modifier, onOpen = { uri: Uri -> vm.open(uri) },
+                onOpenMaLibrary = { homeMaOpen = true },
+                sync = sync,
+                onOpenCloudProject = { project ->
+                    scope.launch {
+                        runCatching { sync.downloadMvr(project) }.getOrNull()?.let {
+                            vm.openBytes(it, project.name)
+                        }
+                    }
+                },
+                progress = vm.progress
+            )
+        is SceneViewModel.UiState.Loading ->
             HomeScreen(
                 state = s, modifier = modifier, onOpen = { uri: Uri -> vm.open(uri) },
                 sync = sync,
@@ -133,6 +183,8 @@ private fun App(
                 scene = s.scene, fileName = s.fileName, mvrBytes = s.bytes, modifier = modifier,
                 onClose = { sync.detach(); vm.reset() },
                 sync = sync,
+                maLibrary = vm.maLibrary,
+                maInbox = vm.maInbox,
                 onReopenBytes = { bytes, name -> vm.openBytes(bytes, name) },
                 // OBJET 3D ouvert seul depuis l'accueil : la scène est vide, la
                 // vue 3D importe ce modèle au premier affichage.

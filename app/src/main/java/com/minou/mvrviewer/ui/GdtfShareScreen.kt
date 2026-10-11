@@ -204,6 +204,7 @@ fun GdtfShareScreen(
                     enabled = !busy && user.isNotBlank() && pass.isNotBlank(),
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(stringResource(R.string.home_sign_in)) }
+                GdtfSignupLink()
             } else {
                 Text(stringResource(R.string.gdtf_connected_to_share), style = MaterialTheme.typography.titleSmall)
                 // 1) Résolution automatique de tout.
@@ -341,11 +342,35 @@ internal fun GdtfShareLoginPane(title: String, onBack: () -> Unit, onLoggedIn: (
                 enabled = !busy && user.isNotBlank() && pass.isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
             ) { Text(stringResource(R.string.home_sign_in)) }
+            GdtfSignupLink()
             if (busy) CircularProgressIndicator(Modifier.padding(top = 16.dp))
             if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 12.dp))
         }
     }
 }
+
+/**
+ * Lien d'inscription sous « Se connecter » (la doc officielle de l'API demande de diriger
+ * un utilisateur sans compte vers l'inscription) : ouvre gdtf-share.com/signup dans le
+ * navigateur du système.
+ */
+@Composable
+private fun GdtfSignupLink() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.material3.TextButton(
+        onClick = {
+            runCatching {
+                ctx.startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(GDTF_SIGNUP_URL))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        },
+        modifier = Modifier.padding(top = 4.dp)
+    ) { Text(stringResource(R.string.gdtf_signup), style = MaterialTheme.typography.bodySmall) }
+}
+
+internal const val GDTF_SIGNUP_URL = "https://gdtf-share.com/signup"
 
 @androidx.annotation.StringRes
 private fun statusLabelRes(spec: String, overrides: GdtfOverrides): Int = when {

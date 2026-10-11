@@ -57,7 +57,9 @@ fun HomeScreen(
     sync: com.minou.mvrviewer.sync.SyncViewModel? = null,
     onOpenCloudProject: (com.minou.mvrviewer.sync.CloudProject) -> Unit = {},
     // Avancement NOMMÉ du chargement (#4). null → ancien indicateur indéterminé.
-    progress: LoadProgress? = null
+    progress: LoadProgress? = null,
+    // Bibliothèque MA depuis l'accueil (comme iOS), sans show ouvert.
+    onOpenMaLibrary: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     var showAccount by remember { mutableStateOf(false) }
@@ -127,6 +129,10 @@ fun HomeScreen(
                     modifier = Modifier.padding(top = 4.dp),
                     textAlign = TextAlign.Center
                 )
+                // Bibliothèque MA : TOUJOURS visible (profils importés, recherche GDTF Share).
+                TextButton(onClick = onOpenMaLibrary, modifier = Modifier.padding(top = 4.dp)) {
+                    Text(stringResource(R.string.ma_library))
+                }
                 // Synchro cloud : compte + rejoindre un projet partagé.
                 if (sync != null) {
                     val auth by sync.auth.collectAsState()
@@ -273,4 +279,49 @@ private fun AccountPromptCard(onClick: () -> Unit) {
             }
         }
     }
+}
+
+
+/**
+ * « Bibliothèque MA » hébergée par l'ACCUEIL, sans show (SPEC-ma-gdtfshare.md §5.5) : même
+ * écran que dans un show (`scene = null` : « Aucun show ouvert » au choix de la 3D). La
+ * bibliothèque custom locale est relue à chaque ouverture (un show a pu la modifier) ; un
+ * type créé ici est enregistré sur l'appareil (aucune sélection à affecter).
+ */
+@Composable
+fun HomeMaLibraryHost(vm: SceneViewModel, modifier: Modifier = Modifier, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val gdtfOverrides = remember { GdtfOverrides() }
+    val customLibrary = remember { CustomFixtureLibrary().apply { seed(CustomFixtureLibraryStore.load(ctx)) } }
+    val customResolver = remember { CustomFixtureResolver().apply { setLibrary(customLibrary.types.toList()) } }
+    val fixture3DStore = remember { Fixture3DStore.of(ctx) }
+    fun persist() {
+        customResolver.setLibrary(customLibrary.types.toList())
+        CustomFixtureLibraryStore.save(ctx, customLibrary.types.toList())
+    }
+    // Retour matériel depuis la LISTE : retour à l'accueil (les pages internes ont le leur,
+    // composé plus tard, donc prioritaire).
+    androidx.activity.compose.BackHandler { onBack() }
+    MaLibraryScreen(
+        state = vm.maLibrary,
+        scene = null,
+        mvrBytes = null,
+        gdtfOverrides = gdtfOverrides,
+        customLibrary = customLibrary,
+        customResolver = customResolver,
+        fixture3DStore = fixture3DStore,
+        sharedProjectOpen = false,
+        selectionCount = 0,
+        onSaveType = { t, _ ->
+            customLibrary.upsert(t)
+            customResolver.setLibrary(customLibrary.types.toList())
+            val list = customLibrary.types.toList()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { CustomFixtureLibraryStore.save(ctx, list) }
+            true
+        },
+        onCustomLibraryChanged = { persist() },
+        onBack = onBack,
+        modifier = modifier,
+        inbox = vm.maInbox
+    )
 }

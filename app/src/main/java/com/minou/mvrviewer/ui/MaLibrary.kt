@@ -9,7 +9,12 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.minou.mvrviewer.mvr.GdtfLoader
+import com.minou.mvrviewer.mvr.GdtfShareEntry
+import com.minou.mvrviewer.mvr.GdtfShareList
+import com.minou.mvrviewer.mvr.IncomingFileRouter
 import com.minou.mvrviewer.mvr.MaProfileReader
+import com.minou.mvrviewer.mvr.MaZipImport
+import com.minou.mvrviewer.mvr.ZipCentralReader
 import com.minou.mvrviewer.sync.ContentHash
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,15 +22,30 @@ import java.io.File
 import java.text.Normalizer
 
 /**
- * BIBLIOTHÈQUE MA LOCALE (SPEC-ma.md §2) — profils grandMA3 / grandMA2 / GDTF importés
- * depuis des FICHIERS (MA Fixture Share n'a aucune API publique : l'app ne s'y connecte
- * jamais). Par APPAREIL, NON synchronisée : seuls les TYPES créés depuis un mode voyagent
- * (section customFixtures). Importer et consulter = GRATUIT (lecture).
+ * BIBLIOTHÈQUE MA LOCALE (SPEC-ma.md §2, SPEC-ma-gdtfshare.md) — profils grandMA3 /
+ * grandMA2 / GDTF importés depuis des FICHIERS (un, plusieurs, un dossier, une archive
+ * `.zip`) ou révisions GDTF Share téléchargées par l'app (API officielle). MA Fixture Share
+ * n'a aucune API pour les tiers : l'app ne s'y connecte jamais. Par APPAREIL, NON
+ * synchronisée : seuls les TYPES créés depuis un mode voyagent (section customFixtures).
+ * Importer, télécharger et consulter = GRATUIT (lecture).
  *
  *  - Index : `filesDir/maLibrary/library.json` = `{"version":1,"profiles":[entrée…]}` ;
  *  - octets des GDTF qui ont un vrai modèle 3D : `filesDir/maLibrary/files/<id>.gdtf`
  *    (option « La 3D de ce fichier GDTF ») ; les autres profils ne gardent pas le fichier.
  */
+
+/**
+ * Origine GDTF Share d'une entrée (clé `share`, LOCALE, jamais synchronisée —
+ * SPEC-ma-gdtfshare.md §4.2). `lastModified` = date §3.2 en secondes, 0 si inconnue.
+ */
+data class MaShareInfo(
+    val rid: Int,
+    val uuid: String,
+    val revision: String,
+    /** `"manufacturer"` | `"user"` | `""`. */
+    val uploader: String,
+    val lastModified: Long
+)
 
 /** Une entrée de la bibliothèque (§2.1). `id` = SHA-256 hex minuscule des octets bruts. */
 data class MaLibraryEntry(
@@ -40,7 +60,9 @@ data class MaLibraryEntry(
     val fileSize: Long,
     /** Secondes depuis 1970. */
     val importedAt: Double,
-    val hasModel3D: Boolean
+    val hasModel3D: Boolean,
+    /** Présente seulement pour une révision téléchargée de GDTF Share. */
+    val share: MaShareInfo? = null
 )
 
 /** Erreur d'import d'UN fichier (les erreurs ne bloquent jamais la suite du lot). */
@@ -49,9 +71,18 @@ sealed class MaImportError {
     object Unreadable : MaImportError()
     object Unknown : MaImportError()
     object Empty : MaImportError()
-    /** Fichier > 64 Mo, refusé AVANT lecture ; `megabytes` = taille arrondie. */
-    data class TooLarge(val megabytes: Int) : MaImportError()
+    /**
+     * Objet trop volumineux, refusé AVANT lecture ; `megabytes` = taille arrondie,
+     * `maxMegabytes` = plafond de l'objet (64 pour un fichier ou une entrée, 512 pour une archive).
+     */
+    data class TooLarge(val megabytes: Int, val maxMegabytes: Int = (MaProfileReader.MAX_FILE_BYTES / (1024 * 1024)).toInt()) : MaImportError()
     object Io : MaImportError()
+    /** Archive `.zip` illisible ou corrompue. */
+    object ZipUnreadable : MaImportError()
+    /** Archive sans aucun profil candidat (après développement de ses imbriquées). */
+    object ZipEmpty : MaImportError()
+    /** Garde-fou d'archive : lecture arrêtée après `count` fichiers. */
+    data class ZipLimit(val count: Int) : MaImportError()
 
     companion object {
         fun of(code: MaProfileReader.ErrorCode): MaImportError = when (code) {
@@ -59,6 +90,13 @@ sealed class MaImportError {
             MaProfileReader.ErrorCode.UNREADABLE -> Unreadable
             MaProfileReader.ErrorCode.UNKNOWN -> Unknown
             MaProfileReader.ErrorCode.EMPTY -> Empty
+        }
+
+        fun of(e: MaZipImport.ArchiveError): MaImportError = when (e) {
+            MaZipImport.ArchiveError.Unreadable -> ZipUnreadable
+            MaZipImport.ArchiveError.Empty -> ZipEmpty
+            is MaZipImport.ArchiveError.Limit -> ZipLimit(e.count)
+            is MaZipImport.ArchiveError.TooLarge -> TooLarge(e.megabytes, e.maxMegabytes)
         }
     }
 }
@@ -82,22 +120,54 @@ suspend fun saveMaTypeOrdered(
     return awaitUpload() != false
 }
 
-/** Bilan d'un lot (§2.4), toujours affiché. */
+/** Bilan d'un lot (§2.4, SPEC-ma-gdtfshare.md §5.8), toujours affiché. */
 data class MaImportReport(
     val added: Int,
     val duplicates: Int,
     val ignored: Int,
     val errors: List<Pair<String, MaImportError>>,
     val stopped: Boolean
-)
+) {
+    /** Profils protégés `.pxml` rencontrés (ligne « dont N profils protégés (.pxml) »). */
+    val protectedCount: Int get() = errors.count { it.second == MaImportError.Protected }
+}
 
-/** Un fichier candidat (dossier local en test JVM, document SAF sur l'appareil). */
+/** Un fichier candidat (dossier local en test JVM, document SAF, entrée d'archive). */
 interface MaImportSource {
     /** Nom du fichier tel qu'importé (sans dossier). */
     val name: String
     /** Taille DÉCLARÉE (null si inconnue). */
     val size: Long?
     fun read(): ByteArray
+    /** Nom affiché dans le bilan (`archive.zip › dossier/fichier.xml` pour une entrée d'archive). */
+    val displayName: String get() = name
+}
+
+/**
+ * Échec de lecture QUALIFIÉ d'une source (entrée d'archive) : l'erreur à porter au bilan,
+ * éventuellement sous un autre nom (l'archive pour `zipLimit`) ; `skip` = archive déjà
+ * arrêtée, source sautée sans bruit.
+ */
+class MaImportException(
+    val error: MaImportError?,
+    val displayName: String? = null,
+    val skip: Boolean = false
+) : java.io.IOException()
+
+/**
+ * Lot prêt à importer : candidats (archives développées), fichiers ignorés, erreurs
+ * trouvées en préparant le lot (archives illisibles, vides, trop grosses…), et le
+ * ménage à faire à la fin (fermer les archives, effacer les copies temporaires).
+ */
+data class MaImportPlan(
+    val sources: List<MaImportSource>,
+    val ignored: Int,
+    val errors: List<Pair<String, MaImportError>> = emptyList(),
+    val cleanup: () -> Unit = {}
+) {
+    operator fun plus(o: MaImportPlan) = MaImportPlan(
+        sources + o.sources, ignored + o.ignored, errors + o.errors
+    ) { cleanup(); o.cleanup() }
 }
 
 /** Fichier local (tests JVM, dossiers de l'appareil). */
@@ -105,6 +175,23 @@ class FileImportSource(private val file: File) : MaImportSource {
     override val name: String get() = file.name
     override val size: Long? get() = file.length()
     override fun read(): ByteArray = file.readBytes()
+}
+
+/** Entrée candidate d'une archive `.zip` (lue en mémoire par la session de l'archive). */
+class ZipEntryImportSource(
+    private val candidate: MaZipImport.Candidate,
+    private val session: MaZipImport.Session
+) : MaImportSource {
+    override val name: String get() = candidate.baseName
+    override val size: Long? get() = candidate.declaredSize
+    override val displayName: String get() = candidate.displayName
+    override fun read(): ByteArray = when (val r = session.read(candidate)) {
+        is MaZipImport.EntryRead.Ok -> r.bytes
+        is MaZipImport.EntryRead.TooLarge -> throw MaImportException(MaImportError.TooLarge(r.megabytes))
+        MaZipImport.EntryRead.Unreadable -> throw MaImportException(MaImportError.Unreadable)
+        is MaZipImport.EntryRead.Limit -> throw MaImportException(MaImportError.ZipLimit(r.count), session.archiveName)
+        MaZipImport.EntryRead.Skipped -> throw MaImportException(null, skip = true)
+    }
 }
 
 /** Recherche / tri (§2.5) — purs, partagés par l'écran et les tests. */
@@ -118,9 +205,12 @@ object MaSearch {
         Normalizer.normalize(s, Normalizer.Form.NFD).replace(COMBINING, "").lowercase()
             .replace(SPACES, " ").trim()
 
+    /** Mots d'une requête (pliée, mots vides retirés). */
+    fun words(query: String): List<String> = fold(query).split(" ").filter { it.isNotEmpty() }
+
     /** Chaque mot de la requête est contenu dans le fabricant OU dans le modèle. */
     fun matches(e: MaLibraryEntry, query: String): Boolean {
-        val words = fold(query).split(" ").filter { it.isNotEmpty() }
+        val words = words(query)
         if (words.isEmpty()) return true
         val m = fold(e.manufacturer); val f = fold(e.fixture)
         return words.all { m.contains(it) || f.contains(it) }
@@ -141,11 +231,18 @@ object MaSearch {
 
     /** Filtre (chaque mot dans le fabricant OU le modèle) puis tri §2.5. */
     fun search(all: List<MaLibraryEntry>, query: String): List<MaLibraryEntry> {
-        val words = fold(query).split(" ").filter { it.isNotEmpty() }
+        val words = words(query)
         return all.asSequence().map { Keyed(it) }
             .filter { k -> words.all { k.m.contains(it) || k.f.contains(it) } }
             .sortedWith(KEYED_ORDER).map { it.e }.toList()
     }
+}
+
+/** Issue d'un téléchargement GDTF Share importé dans la bibliothèque (SPEC-ma-gdtfshare.md §4.3). */
+sealed class MaShareImportOutcome {
+    data class Added(val id: String) : MaShareImportOutcome()
+    data class AlreadyPresent(val id: String) : MaShareImportOutcome()
+    data class Failed(val error: MaImportError) : MaShareImportOutcome()
 }
 
 /**
@@ -211,12 +308,68 @@ class MaLibraryStore(private val root: File) {
         rest
     }
 
+    /** Entrée déjà téléchargée pour cette révision GDTF Share (§4.3 étape 1), d'après l'index disque. */
+    fun entryForShareRid(rid: Int): MaLibraryEntry? = load().firstOrNull { it.share?.rid == rid }
+
+    /**
+     * Importe une révision GDTF Share TÉLÉCHARGÉE (§4.1 étapes 5-7, §4.3) EXACTEMENT comme
+     * un fichier importé : SHA-256 → déjà présent (un fichier importé avant à la main reçoit
+     * la clé `share`, rien d'autre ne change) ; sinon lecteur de profils → entrée nommée
+     * `<M>@<F>@rid<rid>.gdtf` (fabricant et modèle LUS dans le fichier). Persistance
+     * immédiate ; renvoie l'issue + la bibliothèque complète (index disque).
+     */
+    fun importShareRevision(
+        entry: GdtfShareEntry,
+        bytes: ByteArray,
+        now: () -> Double = { System.currentTimeMillis() / 1000.0 }
+    ): Pair<MaShareImportOutcome, List<MaLibraryEntry>> {
+        if (bytes.size > MaProfileReader.MAX_FILE_BYTES)
+            return MaShareImportOutcome.Failed(MaImportError.TooLarge(megabytes(bytes.size.toLong()))) to load()
+        val id = ContentHash.sha256Hex(bytes)
+        val share = MaShareInfo(entry.rid, entry.uuid, entry.revision, entry.uploader, entry.date)
+        synchronized(lock) {
+            val disk = loadLocked()
+            val i = disk.indexOfFirst { it.id == id }
+            if (i >= 0) {
+                if (disk[i].share != null) return MaShareImportOutcome.AlreadyPresent(id) to disk
+                val updated = disk.toMutableList().also { it[i] = it[i].copy(share = share) }
+                saveLocked(updated)
+                return MaShareImportOutcome.AlreadyPresent(id) to updated
+            }
+        }
+        val p = when (val r = MaProfileReader.read(bytes, "rid${entry.rid}.gdtf")) {
+            is MaProfileReader.Result.Error -> return MaShareImportOutcome.Failed(MaImportError.of(r.code)) to load()
+            is MaProfileReader.Result.Ok -> r.profile
+        }
+        val has3D = p.format == "gdtf" && runCatching { GdtfLoader.hasThreeDModel(bytes) }.getOrDefault(false)
+        if (has3D) runCatching { filesDir().mkdirs(); gdtfFile(id).writeBytes(bytes) }
+        val e = MaLibraryEntry(
+            id, p.format, p.manufacturer, p.fixture, p.shortName, p.author, p.modes,
+            MaShareSearch.fileName(p.manufacturer, p.fixture, entry.rid), bytes.size.toLong(), now(), has3D, share
+        )
+        return MaShareImportOutcome.Added(id) to appendToIndex(listOf(e))
+    }
+
+    /** [import] d'un lot préparé, puis ménage (archives fermées, copies temporaires effacées). */
+    fun import(
+        plan: MaImportPlan,
+        now: () -> Double = { System.currentTimeMillis() / 1000.0 },
+        isCancelled: () -> Boolean = { false },
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        onBatch: (List<MaLibraryEntry>) -> Unit = {}
+    ): Pair<MaImportReport, List<MaLibraryEntry>> = try {
+        import(plan.sources, plan.ignored, now, isCancelled, onProgress, onBatch, plan.errors)
+    } finally {
+        runCatching { plan.cleanup() }
+    }
+
     /**
      * Importe un LOT (§2.4), en série ; renvoie le bilan + la bibliothèque complète (index
      * disque). Les doublons sont jugés contre l'index DISQUE (relu ici : un appelant n'a pas
      * à avoir fini de charger la liste). Persistance par paquets de 100 entrées et à la fin,
      * en n'AJOUTANT que les nouveaux profils à l'index relu. `isCancelled` est lu ENTRE deux
-     * fichiers (arrêt propre : ce qui est importé reste).
+     * fichiers (arrêt propre : ce qui est importé reste). `preErrors` : erreurs trouvées en
+     * préparant le lot (archives), placées en tête du bilan.
      */
     fun import(
         sources: List<MaImportSource>,
@@ -224,30 +377,43 @@ class MaLibraryStore(private val root: File) {
         now: () -> Double = { System.currentTimeMillis() / 1000.0 },
         isCancelled: () -> Boolean = { false },
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
-        onBatch: (List<MaLibraryEntry>) -> Unit = {}
+        onBatch: (List<MaLibraryEntry>) -> Unit = {},
+        preErrors: List<Pair<String, MaImportError>> = emptyList()
     ): Pair<MaImportReport, List<MaLibraryEntry>> {
         val pending = ArrayList<MaLibraryEntry>()
         val seen = load().mapTo(HashSet()) { it.id }
         var added = 0; var dupes = 0
-        val errors = ArrayList<Pair<String, MaImportError>>()
+        val errors = ArrayList<Pair<String, MaImportError>>(preErrors)
         var stopped = false
         onProgress(0, sources.size)
         for ((i, src) in sources.withIndex()) {
             if (isCancelled()) { stopped = true; break }
             val declared = src.size
             if (declared != null && declared > MaProfileReader.MAX_FILE_BYTES) {
-                errors.add(src.name to MaImportError.TooLarge(megabytes(declared)))
+                errors.add(src.displayName to MaImportError.TooLarge(megabytes(declared)))
+            } else if (src.name.lowercase().endsWith(".pxml")) {
+                // Protégé : refusé sans lire ni décompresser (le lecteur dirait la même chose).
+                errors.add(src.displayName to MaImportError.Protected)
             } else {
-                val bytes = runCatching { src.read() }.getOrNull()
+                var failure: Pair<String, MaImportError>? = null
+                val bytes = try {
+                    src.read()
+                } catch (e: MaImportException) {
+                    if (!e.skip && e.error != null) failure = (e.displayName ?: src.displayName) to e.error
+                    null
+                } catch (e: Exception) {
+                    failure = src.displayName to MaImportError.Io
+                    null
+                }
                 when {
-                    bytes == null -> errors.add(src.name to MaImportError.Io)
+                    bytes == null -> failure?.let { errors.add(it) }
                     bytes.size > MaProfileReader.MAX_FILE_BYTES ->
-                        errors.add(src.name to MaImportError.TooLarge(megabytes(bytes.size.toLong())))
+                        errors.add(src.displayName to MaImportError.TooLarge(megabytes(bytes.size.toLong())))
                     else -> {
                         val id = ContentHash.sha256Hex(bytes)
                         if (id in seen) dupes++
                         else when (val r = MaProfileReader.read(bytes, src.name)) {
-                            is MaProfileReader.Result.Error -> errors.add(src.name to MaImportError.of(r.code))
+                            is MaProfileReader.Result.Error -> errors.add(src.displayName to MaImportError.of(r.code))
                             is MaProfileReader.Result.Ok -> {
                                 val p = r.profile
                                 val has3D = p.format == "gdtf" && runCatching { GdtfLoader.hasThreeDModel(bytes) }.getOrDefault(false)
@@ -273,30 +439,70 @@ class MaLibraryStore(private val root: File) {
 
     companion object {
         /** Extensions retenues (casse ignorée) ; les `.pxml` sont gardés pour être COMPTÉS en erreur. */
-        val EXTENSIONS = setOf("xml", "xmlp", "gdtf", "pxml")
+        val EXTENSIONS = MaZipImport.PROFILE_EXTENSIONS
 
         /** Fichier caché ou dossier `__MACOSX` : ignoré EN SILENCE. */
         fun isSilentlySkipped(name: String): Boolean = name.startsWith(".") || name == "__MACOSX"
 
         fun isCandidate(name: String): Boolean = name.substringAfterLast('.', "").lowercase() in EXTENSIONS
 
+        /** Archive `.zip` (casse ignorée) : développée (§5.2). */
+        fun isArchive(name: String): Boolean = name.substringAfterLast('.', "").lowercase() == "zip"
+
         /**
-         * Énumère un dossier LOCAL récursivement (tests JVM) : renvoie (candidats triés,
-         * nombre de fichiers « autres formats »).
+         * Développe une archive (profondeur 0) déjà ouverte : candidats, ignorés, erreurs
+         * d'archive (nommées d'après `archiveName`) ; `afterClose` est appelé au ménage
+         * (copie temporaire à effacer).
          */
-        fun collect(dir: File): Pair<List<MaImportSource>, Int> {
+        fun planArchive(archiveName: String, src: ZipCentralReader.Source, afterClose: () -> Unit = {}): MaImportPlan {
+            val p = MaZipImport.plan(archiveName, src)
+            val session = p.session
+            return MaImportPlan(
+                sources = if (session == null) emptyList() else p.candidates.map { ZipEntryImportSource(it, session) },
+                ignored = p.ignored,
+                errors = p.errors.map { (n, e) -> n to MaImportError.of(e) },
+                cleanup = { runCatching { session?.close() }; afterClose() }
+            )
+        }
+
+        /** Archive locale (tests JVM, fichier déjà copié en cache). */
+        fun planArchiveFile(file: File, archiveName: String = file.name, deleteAfter: Boolean = false): MaImportPlan {
+            val src = runCatching { ZipCentralReader.FileSource.open(file) }.getOrNull()
+                ?: return MaImportPlan(emptyList(), 0, listOf(archiveName to MaImportError.ZipUnreadable),
+                    cleanup = { if (deleteAfter) file.delete() })
+            return planArchive(archiveName, src) { if (deleteAfter) file.delete() }
+        }
+
+        /**
+         * Énumère un dossier LOCAL récursivement (tests JVM) : candidats triés, nombre de
+         * fichiers « autres formats », archives `.zip` développées à leur place.
+         */
+        fun collect(dir: File): MaImportPlan {
             val out = ArrayList<File>(); var ignored = 0
             fun walk(d: File) {
                 val kids = d.listFiles()?.sortedBy { it.name } ?: return
                 for (k in kids) {
                     if (isSilentlySkipped(k.name)) continue
                     if (k.isDirectory) walk(k)
-                    else if (isCandidate(k.name)) out.add(k) else ignored++
+                    else if (isCandidate(k.name) || isArchive(k.name)) out.add(k) else ignored++
                 }
             }
             walk(dir)
-            return out.map { FileImportSource(it) } to ignored
+            var plan = MaImportPlan(emptyList(), ignored)
+            for (f in out) {
+                plan += if (isArchive(f.name)) {
+                    if (f.length() > MaZipImport.MAX_ARCHIVE_BYTES) MaImportPlan(emptyList(), 0, listOf(f.name to archiveTooLarge(f.length())))
+                    else planArchiveFile(f)
+                } else MaImportPlan(listOf(FileImportSource(f)), 0)
+            }
+            return plan
         }
+
+        /** `Fichier trop volumineux (N Mo, maximum 512 Mo).` pour une archive. */
+        fun archiveTooLarge(bytes: Long?): MaImportError.TooLarge = MaImportError.TooLarge(
+            if (bytes != null) MaZipImport.megabytes(bytes) else (MaZipImport.MAX_ARCHIVE_BYTES / (1024 * 1024)).toInt() + 1,
+            (MaZipImport.MAX_ARCHIVE_BYTES / (1024 * 1024)).toInt()
+        )
 
         fun of(ctx: Context) = MaLibraryStore(File(ctx.filesDir, "maLibrary"))
 
@@ -310,6 +516,12 @@ class MaLibraryStore(private val root: File) {
             })
             .put("fileName", e.fileName).put("fileSize", e.fileSize)
             .put("importedAt", e.importedAt).put("hasModel3D", e.hasModel3D)
+            .apply {
+                e.share?.let { s ->
+                    put("share", JSONObject().put("rid", s.rid).put("uuid", s.uuid).put("revision", s.revision)
+                        .put("uploader", s.uploader).put("lastModified", s.lastModified))
+                }
+            }
 
         private fun decodeEntry(o: JSONObject): MaLibraryEntry? {
             val id = o.optString("id").takeIf { it.isNotBlank() } ?: return null
@@ -322,15 +534,28 @@ class MaLibraryStore(private val root: File) {
             return MaLibraryEntry(
                 id, o.optString("format"), o.optString("manufacturer"), o.optString("fixture"),
                 o.optString("shortName"), o.optString("author"), modes, o.optString("fileName"),
-                o.optLong("fileSize"), o.optDouble("importedAt", 0.0), o.optBoolean("hasModel3D", false)
+                o.optLong("fileSize"), o.optDouble("importedAt", 0.0), o.optBoolean("hasModel3D", false),
+                decodeShare(o.opt("share"))
             )
+        }
+
+        /**
+         * Décodage TOLÉRANT de `share` (§4.2) : absent ou non objet → null ; `rid` entier > 0,
+         * flottant entier ou chaîne de chiffres, sinon null — l'ENTRÉE, elle, est toujours gardée.
+         */
+        internal fun decodeShare(v: Any?): MaShareInfo? {
+            val s = v as? JSONObject ?: return null
+            val rid = GdtfShareList.integral(s.opt("rid"))?.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt() ?: return null
+            val uploader = (s.opt("uploader") as? String)?.takeIf { it == "manufacturer" || it == "user" } ?: ""
+            val lastModified = (s.opt("lastModified") as? Number)?.let { GdtfShareList.integral(it) }?.takeIf { it >= 0 } ?: 0L
+            return MaShareInfo(rid, s.opt("uuid") as? String ?: "", s.opt("revision") as? String ?: "", uploader, lastModified)
         }
     }
 }
 
 // ---- Énumération SAF (appareil) ---------------------------------------------------------
 
-/** Document choisi par le sélecteur (OpenMultipleDocuments / OpenDocumentTree). */
+/** Document choisi par le sélecteur (OpenMultipleDocuments / OpenDocumentTree) ou reçu. */
 class UriImportSource(
     private val ctx: Context, val uri: Uri, override val name: String, override val size: Long?
 ) : MaImportSource {
@@ -340,34 +565,121 @@ class UriImportSource(
 
 object MaSafEnumerator {
 
-    /** Fichiers choisis un par un : (candidats, ignorés). */
-    fun fromDocuments(ctx: Context, uris: List<Uri>): Pair<List<MaImportSource>, Int> {
-        val out = ArrayList<MaImportSource>(); var ignored = 0
-        for (u in uris) {
-            var name: String? = null; var size: Long? = null
-            runCatching {
-                ctx.contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
-                    if (c.moveToFirst()) {
-                        if (!c.isNull(0)) name = c.getString(0)
-                        if (!c.isNull(1)) size = c.getLong(1)
-                    }
+    /** Copies temporaires des archives reçues : `cacheDir/maImport/<uuid>.zip`, effacées à la fin. */
+    private fun importCacheDir(ctx: Context) = File(ctx.cacheDir, "maImport")
+
+    /** Ménage des copies laissées par un import interrompu (aucun import ne tourne alors). */
+    fun purgeCache(ctx: Context) {
+        importCacheDir(ctx).listFiles()?.forEach { runCatching { it.delete() } }
+    }
+
+    /** Nom et taille déclarée d'un document. */
+    fun describe(ctx: Context, u: Uri): Pair<String, Long?> {
+        var name: String? = null; var size: Long? = null
+        runCatching {
+            ctx.contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    if (!c.isNull(0)) name = c.getString(0)
+                    if (!c.isNull(1)) size = c.getLong(1)
                 }
             }
-            val n = name ?: u.lastPathSegment?.substringAfterLast('/') ?: "fichier"
-            if (MaLibraryStore.isSilentlySkipped(n)) continue
-            if (MaLibraryStore.isCandidate(n)) out.add(UriImportSource(ctx, u, n, size)) else ignored++
         }
-        return out to ignored
+        return (name ?: u.lastPathSegment?.substringAfterLast('/') ?: "fichier") to size
+    }
+
+    /** Issue d'une copie bornée d'un document en cache. */
+    sealed class Copied {
+        class Ok(val file: File) : Copied()
+        object TooLarge : Copied()
+        object Failed : Copied()
+    }
+
+    /** Copie le flux d'un document dans `cacheDir/maImport/<uuid>.zip`, au plus `max` octets. */
+    fun copyToCache(ctx: Context, uri: Uri, max: Long = MaZipImport.MAX_ARCHIVE_BYTES): Copied {
+        val dir = importCacheDir(ctx).apply { mkdirs() }
+        val tmp = File(dir, java.util.UUID.randomUUID().toString() + ".zip")
+        val copied = runCatching {
+            ctx.contentResolver.openInputStream(uri)?.use { ins ->
+                tmp.outputStream().use { out ->
+                    val buf = ByteArray(1 shl 16)
+                    var total = 0L
+                    while (true) {
+                        val n = ins.read(buf)
+                        if (n <= 0) break
+                        total += n
+                        if (total > max) return@runCatching false
+                        out.write(buf, 0, n)
+                    }
+                }
+                true
+            } ?: throw java.io.IOException("flux nul")
+        }
+        return when (copied.getOrNull()) {
+            true -> Copied.Ok(tmp)
+            false -> { tmp.delete(); Copied.TooLarge }
+            null -> { tmp.delete(); Copied.Failed }
+        }
+    }
+
+    /**
+     * Archive `.zip` d'un document : copie du flux SAF en cache (≤ 512 Mo, refus AVANT
+     * lecture si la taille déclarée dépasse), puis lecture par le répertoire central.
+     */
+    fun planArchive(ctx: Context, uri: Uri, name: String, declared: Long?): MaImportPlan {
+        if (declared != null && declared > MaZipImport.MAX_ARCHIVE_BYTES)
+            return MaImportPlan(emptyList(), 0, listOf(name to MaLibraryStore.archiveTooLarge(declared)))
+        return when (val c = copyToCache(ctx, uri)) {
+            is Copied.Ok -> MaLibraryStore.planArchiveFile(c.file, name, deleteAfter = true)
+            Copied.TooLarge -> MaImportPlan(emptyList(), 0, listOf(name to MaLibraryStore.archiveTooLarge(null)))
+            Copied.Failed -> MaImportPlan(emptyList(), 0, listOf(name to MaImportError.Io))
+        }
+    }
+
+    /**
+     * Document reçu SANS extension (fournisseur qui ne donne pas de nom) : le routeur lit son
+     * contenu ; profil ou archive de profils → nom complété (`.gdtf`, `.zip`, `.xml`) pour
+     * suivre le pipeline habituel, sinon nom inchangé (compté « ignoré »).
+     */
+    private fun withSniffedExtension(ctx: Context, u: Uri, n: String): String {
+        if (n.contains('.')) return n
+        return when (runCatching { IncomingFiles.route(ctx, u) }.getOrNull()) {
+            IncomingFileRouter.Route.GDTF -> "$n.gdtf"
+            IncomingFileRouter.Route.MA_PROFILES -> {
+                val head = runCatching {
+                    ctx.contentResolver.openInputStream(u)?.use { ins -> ByteArray(2).also { ins.read(it) } }
+                }.getOrNull()
+                if (head != null && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()) "$n.zip" else "$n.xml"
+            }
+            else -> n
+        }
+    }
+
+    /** Fichiers choisis un par un (ou reçus) : candidats, archives développées, ignorés. */
+    fun fromDocuments(ctx: Context, uris: List<Uri>): MaImportPlan {
+        var plan = MaImportPlan(emptyList(), 0)
+        for (u in uris) {
+            val (n0, size) = describe(ctx, u)
+            val n = withSniffedExtension(ctx, u, n0)
+            if (MaLibraryStore.isSilentlySkipped(n)) continue
+            plan += when {
+                MaLibraryStore.isArchive(n) -> planArchive(ctx, u, n, size)
+                MaLibraryStore.isCandidate(n) -> MaImportPlan(listOf(UriImportSource(ctx, u, n, size)), 0)
+                else -> MaImportPlan(emptyList(), 1)
+            }
+        }
+        return plan
     }
 
     /**
      * Dossier ENTIER (OpenDocumentTree) parcouru RÉCURSIVEMENT via DocumentsContract
-     * (fichiers cachés et `__MACOSX` ignorés en silence). Hors thread principal.
+     * (fichiers cachés et `__MACOSX` ignorés en silence ; `.zip` développées). Hors thread
+     * principal.
      */
-    fun fromTree(ctx: Context, treeUri: Uri, isCancelled: () -> Boolean = { false }): Pair<List<MaImportSource>, Int> {
-        val out = ArrayList<Pair<String, MaImportSource>>(); var ignored = 0
+    fun fromTree(ctx: Context, treeUri: Uri, isCancelled: () -> Boolean = { false }): MaImportPlan {
+        class Found(val path: String, val name: String, val uri: Uri, val size: Long?)
+        val out = ArrayList<Found>(); var ignored = 0
         val cr = ctx.contentResolver
-        val rootId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return emptyList<MaImportSource>() to 0
+        val rootId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return MaImportPlan(emptyList(), 0)
         val stack = ArrayDeque<Pair<String, String>>()   // (documentId, chemin)
         stack.addLast(rootId to "")
         val cols = arrayOf(
@@ -386,17 +698,82 @@ object MaSafEnumerator {
                         if (MaLibraryStore.isSilentlySkipped(name)) continue
                         if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                             stack.addLast(id to "$path/$name")
-                        } else if (MaLibraryStore.isCandidate(name)) {
+                        } else if (MaLibraryStore.isCandidate(name) || MaLibraryStore.isArchive(name)) {
                             val size = if (c.isNull(3)) null else c.getLong(3)
                             val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
-                            out.add("$path/$name" to UriImportSource(ctx, uri, name, size))
+                            out.add(Found("$path/$name", name, uri, size))
                         } else ignored++
                     }
                 }
             }
         }
-        return out.sortedBy { it.first.lowercase() }.map { it.second } to ignored
+        var plan = MaImportPlan(emptyList(), ignored)
+        for (f in out.sortedBy { it.path.lowercase() }) {
+            if (isCancelled()) break
+            plan += if (MaLibraryStore.isArchive(f.name)) planArchive(ctx, f.uri, f.name, f.size)
+            else MaImportPlan(listOf(UriImportSource(ctx, f.uri, f.name, f.size)), 0)
+        }
+        return plan
     }
+}
+
+/**
+ * Aiguillage d'un document REÇU sur l'appareil (« Ouvrir avec », partage) : le routeur pur
+ * ([IncomingFileRouter]) sur le nom, l'en-tête et, pour un zip, la table centrale lue par
+ * positions (descripteur « seekable ») ou, à défaut, sur une copie en cache (≤ 512 Mo).
+ * Hors thread principal.
+ */
+object IncomingFiles {
+
+    fun route(ctx: Context, uri: Uri): IncomingFileRouter.Route {
+        val cr = ctx.contentResolver
+        var name: String? = null
+        runCatching {
+            cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst() && !c.isNull(0)) name = c.getString(0)
+            }
+        }
+        if (name == null) name = uri.lastPathSegment?.substringAfterLast('/')
+        val ext = IncomingFileRouter.extensionOf(name)
+        // Tranché par le nom : aucune lecture (un .mvr part au chargement de show existant).
+        when {
+            ext == "mvr" -> return IncomingFileRouter.Route.MVR
+            ext in IncomingFileRouter.MODEL_EXTENSIONS -> return IncomingFileRouter.Route.MODEL
+            ext == "gdtf" -> return IncomingFileRouter.Route.GDTF
+            ext == "xmlp" || ext == "pxml" -> return IncomingFileRouter.Route.MA_PROFILES
+        }
+        val head = runCatching {
+            cr.openInputStream(uri)?.use { ins ->
+                val b = ByteArray(4096); var n = 0
+                while (n < b.size) { val r = ins.read(b, n, b.size - n); if (r <= 0) break; n += r }
+                b.copyOf(n)
+            }
+        }.getOrNull() ?: return IncomingFileRouter.Route.MVR
+        var closer: java.io.Closeable? = null
+        var tmp: File? = null
+        try {
+            return IncomingFileRouter.route(name, head) {
+                openSeekable(ctx, uri)?.also { closer = it }
+                    ?: (MaSafEnumerator.copyToCache(ctx, uri) as? MaSafEnumerator.Copied.Ok)?.file?.let { f ->
+                        tmp = f
+                        ZipCentralReader.FileSource.open(f).also { closer = it }
+                    }
+            }
+        } finally {
+            runCatching { closer?.close() }
+            tmp?.delete()
+        }
+    }
+
+    /** Descripteur à accès direct (fichier local) ; null pour un flux (tube) non « seekable ». */
+    private fun openSeekable(ctx: Context, uri: Uri): ZipCentralReader.FileSource? = runCatching {
+        val pfd = ctx.contentResolver.openFileDescriptor(uri, "r") ?: return null
+        val fis = java.io.FileInputStream(pfd.fileDescriptor)
+        val ch = fis.channel
+        val ok = runCatching { ch.size() > 0 && ch.position(0) != null }.getOrDefault(false)
+        if (!ok) { runCatching { fis.close() }; runCatching { pfd.close() }; return null }
+        ZipCentralReader.FileSource(ch, java.io.Closeable { runCatching { fis.close() }; runCatching { pfd.close() } })
+    }.getOrNull()
 }
 
 // ---- État réactif ------------------------------------------------------------------------
@@ -418,4 +795,19 @@ class MaLibraryState {
     }
 
     fun get(id: String): MaLibraryEntry? = entries.firstOrNull { it.id == id }
+
+    /** Entrée déjà téléchargée pour cette révision (marque « Dans la bibliothèque »). */
+    fun entryForShareRid(rid: Int): MaLibraryEntry? = entries.firstOrNull { it.share?.rid == rid }
+}
+
+/**
+ * Fichiers REÇUS du système (« Ouvrir avec », partage) à importer dans la bibliothèque MA,
+ * en FILE D'ATTENTE : un lot par réception, servis l'un après l'autre (chaque lot a sa
+ * progression et son bilan — SPEC-ma-gdtfshare.md §5.1).
+ */
+class MaInbox {
+    val batches = mutableStateListOf<List<Uri>>()
+    fun enqueue(uris: List<Uri>) { if (uris.isNotEmpty()) batches.add(uris) }
+    fun poll(): List<Uri>? = if (batches.isEmpty()) null else batches.removeAt(0)
+    val isEmpty: Boolean get() = batches.isEmpty()
 }

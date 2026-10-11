@@ -78,21 +78,26 @@ import java.util.Locale
 import java.util.UUID
 
 /**
- * ÉCRAN « Bibliothèque MA » (SPEC-ma.md §5.2-5.8) : liste + recherche, import de
- * fichiers / d'un dossier entier (progression, Arrêter, bilan), fiche profil, puis
- * création d'un TYPE « profil MA + 3D choisie » (choix de la 3D → résumé → Enregistrer
- * [et affecter à la sélection]).
+ * ÉCRAN « Bibliothèque MA » (SPEC-ma.md §5.2-5.8, SPEC-ma-gdtfshare.md) : liste +
+ * recherche, import de fichiers / d'un dossier entier / d'archives `.zip` (progression,
+ * Arrêter, bilan), recherche GDTF Share intégrée, fiche profil, puis création d'un TYPE
+ * « profil MA + 3D choisie » (choix de la 3D → résumé → Enregistrer [et affecter à la
+ * sélection]).
  *
- * Pro : importer / consulter / supprimer un profil = GRATUIT ; « Créer un type à partir
- * de ce mode » = garde « créer un type personnalisé » ; « Enregistrer et affecter » =
- * garde « modifier le patch ». Toutes les commandes restent VISIBLES pour un gratuit.
+ * Pro : importer / chercher sur GDTF Share / télécharger / consulter / supprimer un profil
+ * = GRATUIT ; « Créer un type à partir de ce mode » = garde « créer un type personnalisé » ;
+ * « Enregistrer et affecter » = garde « modifier le patch ». Toutes les commandes restent
+ * VISIBLES pour un gratuit.
+ *
+ * `scene` null : bibliothèque ouverte depuis l'ACCUEIL (aucun show) ; `inbox` : fichiers
+ * reçus du système (« Ouvrir avec », partage), importés un lot après l'autre.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaLibraryScreen(
     state: MaLibraryState,
-    scene: MvrScene,
-    mvrBytes: ByteArray,
+    scene: MvrScene?,
+    mvrBytes: ByteArray?,
     gdtfOverrides: GdtfOverrides,
     customLibrary: CustomFixtureLibrary,
     customResolver: CustomFixtureResolver,
@@ -110,13 +115,18 @@ fun MaLibraryScreen(
     /** La biblio custom a changé depuis l'éditeur (« Ouvrir l'existant »). */
     onCustomLibraryChanged: () -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    inbox: MaInbox? = null
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember { MaLibraryStore.of(ctx) }
     var page by remember { mutableStateOf<MaPage>(MaPage.List) }
     var note by remember { mutableStateOf<String?>(null) }
+    // Note d'information en tête de fiche (« Ajouté à la bibliothèque MA. »…).
+    var info by remember { mutableStateOf<String?>(null) }
+    // Recherche GDTF Share : requête, filtre, tri, défilement gardés en revenant de la fiche.
+    val shareState = remember { MaShareSearchState(MaShareSortStore.load(ctx)) }
     var editing by remember { mutableStateOf<CustomFixtureTypeDTO?>(null) }
     var dupPrompt by remember { mutableStateOf<Pair<MaDraft, CustomFixtureTypeDTO>?>(null) }
 
@@ -130,7 +140,7 @@ fun MaLibraryScreen(
     }
 
     // ---- Import ----
-    fun runImport(collect: suspend () -> Pair<List<MaImportSource>, Int>) {
+    fun runImport(collect: suspend () -> MaImportPlan) {
         // Boutons désactivés tant que la liste n'est pas chargée (le store, lui, ne
         // dépend plus de cette liste : il relit et COMPLÈTE l'index disque).
         if (state.progress != null || !state.loaded) return
@@ -139,11 +149,16 @@ fun MaLibraryScreen(
         scope.launch {
             var finished = false
             try {
-                val (sources, ignored) = withContext(Dispatchers.IO) { collect() }
                 val job = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+                // Préparation (copie des archives reçues, tables centrales) ET import dans le
+                // MÊME bloc : écran quitté pendant la préparation → l'import voit l'annulation
+                // tout de suite et fait quand même le ménage (archives fermées, copies effacées).
                 val (report, lib) = withContext(Dispatchers.IO) {
+                    // Copies d'archives laissées par un import interrompu (aucun import ne tourne).
+                    MaSafEnumerator.purgeCache(ctx)
+                    val plan = collect()
                     store.import(
-                        sources, ignored,
+                        plan,
                         isCancelled = { state.cancelRequested || job?.isActive == false },
                         onProgress = { d, t -> scope.launch(Dispatchers.Main) { if (state.progress != null) state.progress = d to t } },
                         onBatch = { partial -> scope.launch(Dispatchers.Main) { state.replaceAll(partial) } }
@@ -165,6 +180,13 @@ fun MaLibraryScreen(
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
         if (tree != null) runImport { MaSafEnumerator.fromTree(ctx, tree) { state.cancelRequested } }
     }
+    // Fichiers REÇUS (« Ouvrir avec », partage) : un lot à la fois, le suivant quand le
+    // bilan du précédent a été fermé (chaque lot a sa progression et son bilan).
+    if (inbox != null) LaunchedEffect(inbox.batches.size, state.loaded, state.progress, state.report) {
+        if (state.loaded && state.progress == null && state.report == null) {
+            inbox.poll()?.let { uris -> runImport { MaSafEnumerator.fromDocuments(ctx, uris) } }
+        }
+    }
 
     // ---- Création d'un type ----
     fun startCreate(entry: MaLibraryEntry, mode: MaProfileReader.Mode) {
@@ -172,6 +194,7 @@ fun MaLibraryScreen(
             val draft = MaDraft(entry, mode)
             val wanted = draft.profileDTO()
             val existing = customLibrary.types.firstOrNull { it.profile == wanted }
+            info = null      // la note « Ajouté à la bibliothèque MA. » ne vaut qu'à l'arrivée sur la fiche
             if (existing != null) dupPrompt = draft to existing else page = MaPage.Choose3D(draft)
         }
     }
@@ -179,7 +202,8 @@ fun MaLibraryScreen(
     // Retour matériel : recule d'une page (la scène, elle, ramène à la 3D depuis la liste).
     BackHandler(enabled = page !is MaPage.List) {
         page = when (val p = page) {
-            is MaPage.Profile -> MaPage.List
+            is MaPage.Profile -> if (p.fromSearch) MaPage.ShareSearch else MaPage.List
+            MaPage.ShareSearch -> MaPage.List
             is MaPage.Choose3D -> MaPage.Profile(p.draft.entry.id)
             is MaPage.Summary -> MaPage.Choose3D(p.draft)
             MaPage.List -> MaPage.List
@@ -193,21 +217,30 @@ fun MaLibraryScreen(
                 onBack = onBack,
                 onImportFiles = { filesPicker.launch(arrayOf("*/*")) },
                 onImportFolder = { folderPicker.launch(null) },
-                onOpen = { page = MaPage.Profile(it.id); note = null }
+                onShareSearch = { page = MaPage.ShareSearch },
+                onOpen = { page = MaPage.Profile(it.id); note = null; info = null }
+            )
+            MaPage.ShareSearch -> MaShareSearchPage(
+                state = shareState,
+                library = state,
+                store = store,
+                onBack = { page = MaPage.List },
+                onOpenProfile = { id, n -> note = null; info = n; page = MaPage.Profile(id, fromSearch = true) }
             )
             is MaPage.Profile -> {
                 val entry = state.get(p.id)
-                if (entry == null) LaunchedEffect(p.id) { page = MaPage.List } else MaProfilePage(
+                if (entry == null) LaunchedEffect(p.id) { page = if (p.fromSearch) MaPage.ShareSearch else MaPage.List } else MaProfilePage(
                     entry = entry,
                     note = note,
-                    onBack = { page = MaPage.List },
+                    info = info,
+                    onBack = { page = if (p.fromSearch) MaPage.ShareSearch else MaPage.List },
                     onCreate = { mode -> startCreate(entry, mode) },
                     onDelete = {
                         scope.launch {
                             // Retrait sur l'index DISQUE relu (sûr même pendant un import).
                             val rest = withContext(Dispatchers.IO) { store.remove(entry.id) }
                             state.replaceAll(rest)
-                            page = MaPage.List
+                            page = if (p.fromSearch) MaPage.ShareSearch else MaPage.List
                         }
                     }
                 )
@@ -217,7 +250,7 @@ fun MaLibraryScreen(
                 store = fixture3DStore,
                 shareQuery = p.draft.entry.fixture,
                 ownGdtf = if (p.draft.entry.format == "gdtf" && p.draft.entry.hasModel3D)
-                    p.draft.entry.fileName to { store.gdtfBytes(p.draft.entry.id) } else null,
+                    OwnGdtf(p.draft.entry.fileName, p.draft.entry.share?.rid) { store.gdtfBytes(p.draft.entry.id) } else null,
                 onBack = { page = MaPage.Profile(p.draft.entry.id) },
                 onChosen = { c -> page = MaPage.Summary(p.draft.copy(chosen = c)) }
             )
@@ -280,7 +313,8 @@ fun MaLibraryScreen(
     // « Ouvrir l'existant » : l'éditeur de type habituel.
     editing?.let { t ->
         CustomFixtureEditorSheet(
-            initial = t, scene = scene, mvrBytes = mvrBytes, gdtfOverrides = gdtfOverrides,
+            initial = t, scene = scene ?: MvrScene(emptyList(), emptyMap()), mvrBytes = mvrBytes ?: ByteArray(0),
+            gdtfOverrides = gdtfOverrides,
             defaultBaseSpec = null,
             onSave = { saved ->
                 customLibrary.upsert(saved)
@@ -304,7 +338,10 @@ fun MaLibraryScreen(
 
 private sealed class MaPage {
     object List : MaPage()
-    data class Profile(val id: String) : MaPage()
+    /** Recherche GDTF Share (SPEC-ma-gdtfshare.md §3). */
+    object ShareSearch : MaPage()
+    /** Fiche ; `fromSearch` : ouverte par-dessus la recherche (retour → la recherche). */
+    data class Profile(val id: String, val fromSearch: Boolean = false) : MaPage()
     data class Choose3D(val draft: MaDraft) : MaPage()
     data class Summary(val draft: MaDraft) : MaPage()
 }
@@ -317,25 +354,68 @@ data class Chosen3D(
     val warning: String? = null
 )
 
-private data class MaDraft(
+internal data class MaDraft(
     val entry: MaLibraryEntry,
     val mode: MaProfileReader.Mode,
     val chosen: Chosen3D? = null
 ) {
     fun profileDTO() = CustomFixtureProfileDTO(entry.format, entry.manufacturer, entry.fixture, mode.name, entry.fileName)
+
+    /** Type construit au résumé (§5.7) : trous "" GARDÉS (l'index EST l'offset). */
+    fun buildType(id: String, name: String): CustomFixtureTypeDTO {
+        val c = chosen ?: Chosen3D("", null)
+        return CustomFixtureTypeDTO(
+            id = id, name = name.trim(), baseGdtfSpec = c.baseGdtfSpec, channels = mode.channels,
+            footprint = mode.footprint, profile = profileDTO(), model3D = c.model3D
+        )
+    }
+}
+
+/** Profil GDTF à vrai modèle 3D : option « La 3D de ce fichier GDTF » (§4.6). */
+internal class OwnGdtf(
+    val fileName: String,
+    /** Révision GDTF Share d'origine (entrée à `share`), sinon null (fichier importé). */
+    val shareRid: Int?,
+    val bytes: () -> ByteArray?
+)
+
+/**
+ * Choix de « La 3D de ce fichier GDTF » (SPEC-ma-gdtfshare.md §4.6) : profil venu de GDTF
+ * Share → `gdtfShare(rid)`, octets copiés au cache GDTF Share du rid AU MOMENT DU CHOIX
+ * (rien n'est envoyé au Storage du projet : chaque membre retélécharge avec SON compte) ;
+ * fichier importé → `gdtfBlob` (inchangé).
+ */
+internal fun chooseOwnGdtf(own: OwnGdtf, bytes: ByteArray, store: Fixture3DStore): Chosen3D {
+    val rid = own.shareRid
+    return if (rid != null) {
+        store.putShare(rid, bytes)
+        Chosen3D("", CustomFixtureModel3D.GdtfShare(rid))
+    } else {
+        Chosen3D("", CustomFixtureModel3D.GdtfBlob(store.putBlob(bytes), own.fileName))
+    }
 }
 
 // ---- Libellés partagés -------------------------------------------------------------
 
-@Composable
-internal fun maImportErrorText(e: MaImportError): String = when (e) {
-    MaImportError.Protected -> stringResource(R.string.ma_err_protected)
-    MaImportError.Unreadable -> stringResource(R.string.ma_err_unreadable)
-    MaImportError.Unknown -> stringResource(R.string.ma_err_unknown)
-    MaImportError.Empty -> stringResource(R.string.ma_err_empty)
-    is MaImportError.TooLarge -> stringResource(R.string.ma_err_too_large, e.megabytes, (MaProfileReader.MAX_FILE_BYTES / (1024 * 1024)).toInt())
-    MaImportError.Io -> stringResource(R.string.ma_err_io)
+/** Ressource + arguments du message d'une erreur d'import (pur : vérifiable en JVM). */
+internal fun maImportErrorRes(e: MaImportError): Pair<Int, List<Any>> = when (e) {
+    MaImportError.Protected -> R.string.ma_err_protected to emptyList()
+    MaImportError.Unreadable -> R.string.ma_err_unreadable to emptyList()
+    MaImportError.Unknown -> R.string.ma_err_unknown to emptyList()
+    MaImportError.Empty -> R.string.ma_err_empty to emptyList()
+    is MaImportError.TooLarge -> R.string.ma_err_too_large to listOf(e.megabytes, e.maxMegabytes)
+    MaImportError.Io -> R.string.ma_err_io to emptyList()
+    MaImportError.ZipUnreadable -> R.string.ma_err_zip_unreadable to emptyList()
+    MaImportError.ZipEmpty -> R.string.ma_err_zip_empty to emptyList()
+    is MaImportError.ZipLimit -> R.string.ma_err_zip_limit to listOf(e.count)
 }
+
+/** Message d'une erreur d'import, dans la langue du téléphone. */
+internal fun maImportErrorString(ctx: Context, e: MaImportError): String =
+    maImportErrorRes(e).let { (res, args) -> ctx.getString(res, *args.toTypedArray()) }
+
+@Composable
+internal fun maImportErrorText(e: MaImportError): String = maImportErrorString(LocalContext.current, e)
 
 @Composable
 private fun modeName(m: MaProfileReader.Mode): String =
@@ -353,6 +433,7 @@ private fun MaListPage(
     onBack: () -> Unit,
     onImportFiles: () -> Unit,
     onImportFolder: () -> Unit,
+    onShareSearch: () -> Unit,
     onOpen: (MaLibraryEntry) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
@@ -391,9 +472,19 @@ private fun MaListPage(
                     Text(stringResource(R.string.ma_import_folder), maxLines = 2)
                 }
             }
+            // Recherche GDTF Share intégrée (API officielle) — gratuite, toujours visible ;
+            // désactivée comme les imports (il faut connaître les profils déjà présents).
+            OutlinedButton(onClick = onShareSearch, enabled = canImport, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.width(18.dp))
+                Text("  " + stringResource(R.string.ma_share_search), maxLines = 2)
+            }
+            Text(
+                stringResource(R.string.ma_help), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp)
+            )
             Text(
                 stringResource(R.string.ma_formats), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp)
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
             )
         }
         HorizontalDivider()
@@ -423,8 +514,10 @@ private fun MaListPage(
                         Column(Modifier.weight(1f)) {
                             Text("${e.manufacturer} — ${e.fixture}", style = MaterialTheme.typography.bodyLarge, maxLines = 2)
                             val sub = pluralStringResource(R.plurals.ma_row_modes, e.modes.size, maFormatLabel(e.format), e.modes.size)
+                            // Révision GDTF Share : le segment auteur devient la marque « GDTF Share ».
+                            val author = if (e.share != null) "GDTF Share" else e.author
                             Text(
-                                if (e.author.isNotEmpty()) "$sub · ${e.author}" else sub,
+                                if (author.isNotEmpty()) "$sub · $author" else sub,
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -454,6 +547,8 @@ private fun MaReportDialog(r: MaImportReport, onDismiss: () -> Unit) {
                 if (r.ignored > 0) Text(pluralStringResource(R.plurals.ma_ignored, r.ignored, r.ignored))
                 if (r.errors.isNotEmpty()) {
                     Text(pluralStringResource(R.plurals.ma_errors, r.errors.size, r.errors.size))
+                    // Sous la ligne d'erreurs, seulement si au moins un .pxml a été rencontré.
+                    if (r.protectedCount > 0) Text(pluralStringResource(R.plurals.ma_protected_count, r.protectedCount, r.protectedCount))
                     TextButton(onClick = { showErrors = !showErrors }) { Text(stringResource(R.string.ma_show_errors)) }
                     if (showErrors) r.errors.take(500).forEach { (file, err) ->
                         Text(
@@ -475,6 +570,7 @@ private fun MaReportDialog(r: MaImportReport, onDismiss: () -> Unit) {
 private fun MaProfilePage(
     entry: MaLibraryEntry,
     note: String?,
+    info: String?,
     onBack: () -> Unit,
     onCreate: (MaProfileReader.Mode) -> Unit,
     onDelete: () -> Unit
@@ -492,11 +588,35 @@ private fun MaProfilePage(
             }
         )
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            info?.let {
+                Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 8.dp))
+            }
             note?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(bottom = 8.dp))
             }
             Text(stringResource(R.string.ma_format, maFormatLabel(entry.format)), style = MaterialTheme.typography.bodyMedium)
+            // Révision GDTF Share (§4.5) : source, révision, déposant, date de modification.
+            entry.share?.let { s ->
+                Text(stringResource(R.string.ma_source_share, s.rid), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (s.revision.isEmpty()) stringResource(R.string.ma_share_revision_unnamed)
+                    else stringResource(R.string.ma_share_revision, s.revision),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                when (s.uploader) {
+                    "manufacturer" -> stringResource(R.string.ma_share_by_manufacturer)
+                    "user" -> stringResource(R.string.ma_share_by_user)
+                    else -> null
+                }?.let { Text(stringResource(R.string.ma_uploaded_by, it), style = MaterialTheme.typography.bodyMedium) }
+                if (s.lastModified > 0) {
+                    val modified = remember(s.lastModified) {
+                        DateFormat.getDateInstance(DateFormat.MEDIUM, localeOf(ctx)).format(Date(s.lastModified * 1000))
+                    }
+                    Text(stringResource(R.string.ma_modified, modified), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
             if (entry.author.isNotEmpty()) Text(stringResource(R.string.ma_author, entry.author), style = MaterialTheme.typography.bodyMedium)
             if (entry.shortName.isNotEmpty() && entry.shortName != entry.fixture)
                 Text(stringResource(R.string.ma_short, entry.shortName), style = MaterialTheme.typography.bodyMedium)
@@ -573,16 +693,8 @@ private fun MaSummaryPage(
     var busy by remember { mutableStateOf(false) }
     val chosen = draft.chosen ?: Chosen3D("", null)
     val hasBlob = chosen.model3D?.blobSha != null
-    fun build(): CustomFixtureTypeDTO = CustomFixtureTypeDTO(
-        // Android : UUID minuscules (iOS et le web écrivent des majuscules — les deux circulent).
-        id = UUID.randomUUID().toString(),
-        name = name.trim(),
-        baseGdtfSpec = chosen.baseGdtfSpec,
-        channels = draft.mode.channels,          // trous "" GARDÉS : l'index EST l'offset
-        footprint = draft.mode.footprint,
-        profile = draft.profileDTO(),
-        model3D = chosen.model3D
-    )
+    // Android : UUID minuscules (iOS et le web écrivent des majuscules — les deux circulent).
+    fun build(): CustomFixtureTypeDTO = draft.buildType(UUID.randomUUID().toString(), name)
     val previewType = build()
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -677,8 +789,8 @@ internal fun Fixture3DChooser(
     scene: MvrScene?,
     store: Fixture3DStore,
     shareQuery: String,
-    /** (nom du fichier, lecteur de ses octets) pour un profil GDTF À vrai modèle 3D. */
-    ownGdtf: Pair<String, () -> ByteArray?>?,
+    /** Profil GDTF À vrai modèle 3D : son propre fichier (option recommandée, en PREMIER). */
+    ownGdtf: OwnGdtf?,
     onBack: () -> Unit,
     onChosen: (Chosen3D) -> Unit
 ) {
@@ -801,6 +913,22 @@ internal fun Fixture3DChooser(
             }
             Text(stringResource(R.string.ma_choose_3d_intro), style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(bottom = 8.dp))
+            // « La 3D de ce fichier GDTF » en PREMIER, marquée « Recommandé » (SPEC-ma-gdtfshare.md §4.6).
+            ownGdtf?.let { own ->
+                ChoiceRow(
+                    stringResource(R.string.ma_3d_own), stringResource(R.string.ma_3d_own_sub, own.fileName), enabled = !busy,
+                    badge = stringResource(R.string.ma_3d_recommended)
+                ) {
+                    busy = true
+                    scope.launch {
+                        val bytes = withContext(Dispatchers.IO) { own.bytes() }
+                        if (bytes == null) { busy = false; error = ctx.getString(R.string.ma_err_io); return@launch }
+                        val chosen = withContext(Dispatchers.IO) { chooseOwnGdtf(own, bytes, store) }
+                        busy = false
+                        onChosen(chosen)
+                    }
+                }
+            }
             val hasShow = scene != null && scene.allObjects.any { !it.gdtfSpec.isNullOrBlank() }
             ChoiceRow(
                 stringResource(R.string.ma_3d_show),
@@ -809,18 +937,6 @@ internal fun Fixture3DChooser(
             ) { sub = ChooserSub.ShowList }
             ChoiceRow(stringResource(R.string.ma_3d_share), stringResource(R.string.ma_3d_share_sub), enabled = !busy) {
                 sub = if (com.minou.mvrviewer.mvr.GdtfShareClient.loggedIn) ChooserSub.ShareSearch else ChooserSub.ShareLogin
-            }
-            ownGdtf?.let { (fileName, bytesOf) ->
-                ChoiceRow(stringResource(R.string.ma_3d_own), stringResource(R.string.ma_3d_own_sub, fileName), enabled = !busy) {
-                    busy = true
-                    scope.launch {
-                        val bytes = withContext(Dispatchers.IO) { bytesOf() }
-                        busy = false
-                        if (bytes == null) { error = ctx.getString(R.string.ma_err_io); return@launch }
-                        val sha = withContext(Dispatchers.IO) { store.putBlob(bytes) }
-                        onChosen(Chosen3D("", CustomFixtureModel3D.GdtfBlob(sha, fileName)))
-                    }
-                }
             }
             ChoiceRow(stringResource(R.string.ma_3d_gdtf_file), stringResource(R.string.ma_3d_gdtf_file_sub), enabled = !busy) {
                 gdtfPicker.launch(arrayOf("*/*"))
@@ -834,7 +950,7 @@ internal fun Fixture3DChooser(
 }
 
 @Composable
-private fun ChoiceRow(title: String, subtitle: String?, enabled: Boolean, onClick: () -> Unit) {
+private fun ChoiceRow(title: String, subtitle: String?, enabled: Boolean, badge: String? = null, onClick: () -> Unit) {
     HorizontalDivider()
     Row(
         Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 12.dp),
@@ -842,8 +958,14 @@ private fun ChoiceRow(title: String, subtitle: String?, enabled: Boolean, onClic
     ) {
         val alpha = if (enabled) 1f else 0.45f
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
+                badge?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+                        modifier = Modifier.padding(start = 8.dp))
+                }
+            }
             subtitle?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha))

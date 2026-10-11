@@ -1,0 +1,244 @@
+package com.minou.mvrviewer.mvr
+
+import java.io.Closeable
+
+/**
+ * ARCHIVES `.zip` DE PROFILS MA (SPEC-ma-gdtfshare.md §5.2) — PUR (testable en JVM).
+ *
+ * Une archive choisie, trouvée dans un dossier ou reçue (« Ouvrir avec ») est développée
+ * comme un dossier : ses entrées `.xml .xmlp .gdtf .pxml` sont des CANDIDATS du pipeline
+ * habituel de la bibliothèque MA ; une `.zip` dans l'archive (profondeur 0) est développée
+ * à son tour (profondeur 1, pas de troisième niveau). Rien n'est jamais écrit sur disque
+ * sous le chemin d'une entrée (pas de « zip-slip ») : tout est lu EN MÉMOIRE, entrée par
+ * entrée, par le répertoire central ([ZipCentralReader] sur un fichier à accès direct).
+ *
+ * Garde-fous : archive ≤ 512 Mo (vérifié par l'appelant AVANT lecture), entrée ≤ 64 Mo
+ * (déclarée, puis décompression BORNÉE), au plus 50 000 entrées et 2 Gio décompressés par
+ * archive (toutes profondeurs) → lecture ARRÊTÉE, erreur `zipLimit`. Pic mémoire : une
+ * archive imbriquée + une entrée.
+ */
+object MaZipImport {
+
+    const val MAX_ARCHIVE_BYTES: Long = 512L * 1024 * 1024
+    const val MAX_ENTRY_BYTES: Long = MaProfileReader.MAX_FILE_BYTES
+    const val MAX_TOTAL_BYTES: Long = 2L * 1024 * 1024 * 1024
+    const val MAX_ENTRIES = 50_000
+
+    /** Séparateur des noms affichés : `ext.zip › dossier/int.zip › fichier.xml`. */
+    const val SEP = " › "
+
+    val PROFILE_EXTENSIONS = setOf("xml", "xmlp", "gdtf", "pxml")
+
+    enum class Kind {
+        /** Dossier, `__MACOSX`, fichier caché : ignoré EN SILENCE. */
+        SILENT,
+        CANDIDATE,
+        /** `.zip` dans une archive de profondeur 0 : développée. */
+        NESTED,
+        /** Autre format (ou `.zip` de troisième niveau) : compté « ignoré ». */
+        IGNORED
+    }
+
+    /** Segments d'un chemin interne (séparateurs `/` ou `\`). */
+    private fun segments(path: String): List<String> = path.split('/', '\\')
+
+    fun baseName(path: String): String = segments(path).last()
+
+    /** Classement EXACT d'une entrée (§5.2). */
+    fun classify(path: String, depth: Int): Kind {
+        if (path.isEmpty() || path.endsWith("/") || path.endsWith("\\")) return Kind.SILENT
+        val segs = segments(path)
+        if (segs.any { it == "__MACOSX" }) return Kind.SILENT
+        val base = segs.last()
+        if (base.isEmpty() || base.startsWith(".")) return Kind.SILENT
+        val ext = base.substringAfterLast('.', "").lowercase()
+        return when {
+            ext in PROFILE_EXTENSIONS -> Kind.CANDIDATE
+            ext == "zip" -> if (depth == 0) Kind.NESTED else Kind.IGNORED
+            else -> Kind.IGNORED
+        }
+    }
+
+    /** Erreur d'ARCHIVE (comptée dans « N erreurs » ; nom affiché = l'archive seule). */
+    sealed class ArchiveError {
+        object Unreadable : ArchiveError()
+        object Empty : ArchiveError()
+        /** Lecture arrêtée après `count` entrées lues. */
+        data class Limit(val count: Int) : ArchiveError()
+        /** Archive (ou archive imbriquée) trop volumineuse. */
+        data class TooLarge(val megabytes: Int, val maxMegabytes: Int) : ArchiveError()
+    }
+
+    internal class Nested(
+        val entry: ZipCentralReader.Entry,
+        val displayName: String,
+        val listing: ZipCentralReader.Listing.Ok
+    )
+
+    /** Une entrée candidate planifiée. */
+    class Candidate internal constructor(
+        /** `archive.zip › dossier/fichier.xml` (bilan). */
+        val displayName: String,
+        /** Nom de base (`fichier.xml`) : nom du profil dans la bibliothèque. */
+        val baseName: String,
+        /** Taille décompressée DÉCLARÉE. */
+        val declaredSize: Long,
+        /** Nombre d'entrées lues AVANT celle-ci (message `zipLimit` d'un arrêt en cours d'import). */
+        internal val ordinal: Int,
+        internal val entry: ZipCentralReader.Entry,
+        internal val nested: Nested?
+    )
+
+    /**
+     * Plan d'une archive : candidats (dans l'ordre du répertoire central, imbriquées
+     * développées à leur place), ignorés, erreurs d'archive, et la [Session] qui lira les
+     * candidats (à fermer en fin d'import).
+     */
+    class Plan(
+        val archiveName: String,
+        val candidates: List<Candidate>,
+        val ignored: Int,
+        val errors: List<Pair<String, ArchiveError>>,
+        val session: Session?
+    )
+
+    /** Issue de la lecture d'un candidat. */
+    sealed class EntryRead {
+        class Ok(val bytes: ByteArray) : EntryRead()
+        /** Décompression arrêtée (`megabytes` = taille déclarée arrondie si elle dépasse, sinon 65). */
+        data class TooLarge(val megabytes: Int) : EntryRead()
+        object Unreadable : EntryRead()
+        /** Garde-fou 2 Gio atteint : lecture de l'archive ARRÊTÉE (erreur à nommer d'après l'archive). */
+        data class Limit(val count: Int) : EntryRead()
+        /** Archive déjà arrêtée : candidat sauté sans bruit. */
+        object Skipped : EntryRead()
+    }
+
+    /** Lecture des candidats d'UNE archive ; garde UNE archive imbriquée en mémoire. */
+    class Session internal constructor(
+        val archiveName: String,
+        private val src: ZipCentralReader.Source,
+        private val listing: ZipCentralReader.Listing.Ok,
+        decompressedSoFar: Long
+    ) : Closeable {
+        private var total: Long = decompressedSoFar
+        private var stopped = false
+        private var currentNested: Nested? = null
+        private var nestedSource: ZipCentralReader.ByteSource? = null
+
+        fun read(c: Candidate): EntryRead {
+            if (stopped) return EntryRead.Skipped
+            if (total + minOf(c.declaredSize, MAX_ENTRY_BYTES) > MAX_TOTAL_BYTES) {
+                stopped = true
+                return EntryRead.Limit(c.ordinal)
+            }
+            val (s, l) = if (c.nested == null) src to listing else {
+                val n = c.nested
+                if (currentNested !== n) {
+                    currentNested = null; nestedSource = null
+                    val r = ZipCentralReader.readBounded(src, listing, n.entry, MAX_ENTRY_BYTES)
+                    val bytes = (r as? ZipCentralReader.Read.Ok)?.bytes ?: return EntryRead.Unreadable
+                    currentNested = n; nestedSource = ZipCentralReader.ByteSource(bytes)
+                }
+                nestedSource!! to n.listing
+            }
+            return when (val r = ZipCentralReader.readBounded(s, l, c.entry, MAX_ENTRY_BYTES)) {
+                is ZipCentralReader.Read.Ok -> {
+                    total += r.bytes.size
+                    EntryRead.Ok(r.bytes)
+                }
+                ZipCentralReader.Read.TooLarge -> EntryRead.TooLarge(tooLargeMegabytes(c.declaredSize))
+                ZipCentralReader.Read.Unreadable -> EntryRead.Unreadable
+            }
+        }
+
+        override fun close() {
+            currentNested = null; nestedSource = null
+            (src as? Closeable)?.let { runCatching { it.close() } }
+        }
+    }
+
+    /** `ceil(déclarée / 1 Mio)` si elle dépasse 64 Mo, sinon 65 (arrêt à 64 Mo + 1 octet). */
+    fun tooLargeMegabytes(declared: Long): Int =
+        if (declared > MAX_ENTRY_BYTES) megabytes(declared) else (MAX_ENTRY_BYTES / MIB).toInt() + 1
+
+    private const val MIB = 1024L * 1024
+    fun megabytes(bytes: Long): Int = ((bytes + MIB - 1) / MIB).toInt()
+
+    private fun display(prefix: String, path: String) = prefix + SEP + path.replace('\\', '/')
+
+    /**
+     * Lit les tables centrales (archive puis imbriquées) AVANT tout import : le total de la
+     * progression compte ainsi tous les candidats. `src` est fermée par la session (ou ici en
+     * cas d'erreur d'archive).
+     */
+    fun plan(archiveName: String, src: ZipCentralReader.Source): Plan {
+        fun failed(err: ArchiveError): Plan {
+            (src as? Closeable)?.let { runCatching { it.close() } }
+            return Plan(archiveName, emptyList(), 0, listOf(archiveName to err), null)
+        }
+        if (src.size > MAX_ARCHIVE_BYTES) return failed(ArchiveError.TooLarge(megabytes(src.size), (MAX_ARCHIVE_BYTES / MIB).toInt()))
+        if (src.size < 2) return failed(ArchiveError.Unreadable)
+        val magic = ByteArray(2)
+        if (!src.readAt(0, magic, 0, 2) || magic[0] != 'P'.code.toByte() || magic[1] != 'K'.code.toByte())
+            return failed(ArchiveError.Unreadable)
+        val listing = ZipCentralReader.list(src, MAX_ENTRIES + 1) as? ZipCentralReader.Listing.Ok
+            ?: return failed(ArchiveError.Unreadable)
+
+        val candidates = ArrayList<Candidate>()
+        val errors = ArrayList<Pair<String, ArchiveError>>()
+        var ignored = 0
+        var count = 0
+        var limit = false
+        var decompressed = 0L
+        outer@ for (e in listing.entries) {
+            if (count >= MAX_ENTRIES) { limit = true; break }
+            count++
+            when (classify(e.name, 0)) {
+                Kind.SILENT -> {}
+                Kind.IGNORED -> ignored++
+                Kind.CANDIDATE -> candidates.add(Candidate(display(archiveName, e.name), baseName(e.name), e.size, count - 1, e, null))
+                Kind.NESTED -> {
+                    val nd = display(archiveName, e.name)
+                    if (decompressed + minOf(e.size, MAX_ENTRY_BYTES) > MAX_TOTAL_BYTES) { limit = true; break@outer }
+                    when (val r = ZipCentralReader.readBounded(src, listing, e, MAX_ENTRY_BYTES)) {
+                        ZipCentralReader.Read.TooLarge ->
+                            errors.add(nd to ArchiveError.TooLarge(tooLargeMegabytes(e.size), (MAX_ENTRY_BYTES / MIB).toInt()))
+                        ZipCentralReader.Read.Unreadable -> errors.add(nd to ArchiveError.Unreadable)
+                        is ZipCentralReader.Read.Ok -> {
+                            decompressed += r.bytes.size
+                            val nl = if (r.bytes.size >= 2 && r.bytes[0] == 'P'.code.toByte() && r.bytes[1] == 'K'.code.toByte())
+                                ZipCentralReader.list(ZipCentralReader.ByteSource(r.bytes), MAX_ENTRIES - count + 1) as? ZipCentralReader.Listing.Ok
+                            else null
+                            if (nl == null) errors.add(nd to ArchiveError.Unreadable)
+                            else {
+                                val ref = Nested(e, nd, nl)
+                                var found = 0
+                                for (ne in nl.entries) {
+                                    if (count >= MAX_ENTRIES) { limit = true; break@outer }
+                                    count++
+                                    when (classify(ne.name, 1)) {
+                                        Kind.SILENT -> {}
+                                        Kind.CANDIDATE -> {
+                                            candidates.add(Candidate(display(nd, ne.name), baseName(ne.name), ne.size, count - 1, ne, ref))
+                                            found++
+                                        }
+                                        else -> ignored++
+                                    }
+                                }
+                                if (found == 0) errors.add(nd to ArchiveError.Empty)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (limit) errors.add(archiveName to ArchiveError.Limit(count))
+        else if (candidates.isEmpty()) errors.add(archiveName to ArchiveError.Empty)
+        if (candidates.isEmpty()) {
+            (src as? Closeable)?.let { runCatching { it.close() } }
+            return Plan(archiveName, candidates, ignored, errors, null)
+        }
+        return Plan(archiveName, candidates, ignored, errors, Session(archiveName, src, listing, decompressed))
+    }
+}

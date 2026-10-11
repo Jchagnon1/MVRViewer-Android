@@ -210,6 +210,7 @@
     <string name="gdtf_resolving_fmt">Resolving %1$d/%2$d…</string>
     <string name="gdtf_search_failed">Search failed.</string>
     <string name="gdtf_search_hint">Manufacturer or model</string>
+    <string name="gdtf_signup">No account yet? Create a free account on gdtf-share.com ↗</string>
     <string name="gdtf_share_title">GDTF Share</string>
     <string name="gdtf_status_auto">real model (auto)</string>
     <string name="gdtf_status_generic">generic shapes</string>
@@ -489,8 +490,8 @@
     <string name="ma_search">Manufacturer or model</string>
     <string name="ma_import_files">Import MA profiles…</string>
     <string name="ma_import_folder">Import a folder…</string>
-    <string name="ma_formats">Formats: .xml (grandMA3 or grandMA2), .xmlp (grandMA2), .gdtf</string>
-    <string name="ma_empty">No MA profiles yet. Download profiles from MA Fixture Share (fixtureshare.malighting.com, MA account required) or export them from grandMA3 / grandMA2 onPC, then import the files or the whole folder here.</string>
+    <string name="ma_formats">Formats: .xml (grandMA3 or grandMA2), .xmlp (grandMA2), .gdtf, and .zip archives containing them</string>
+    <string name="ma_empty">No MA profiles yet. Import the profiles exported from your console, or find a GDTF with “Search GDTF Share”.</string>
     <string name="ma_no_match">No profile matches “%1$s”.</string>
     <string name="ma_too_many">%1$d results — refine your search (200 shown).</string>
     <string name="ma_fmt_ma3">grandMA3</string>
@@ -579,6 +580,46 @@
     <string name="ma_type_name">Type name</string>
     <string name="ma_downloading">Downloading…</string>
     <string name="ma_reading">Reading…</string>
+    <string name="ma_help">Export your profiles from grandMA3 / grandMA3 onPC (.xml or GDTF) or grandMA2 onPC (.xml / .xmlp), then import them here: files, a folder or a .zip.</string>
+    <string name="ma_share_search">Search GDTF Share</string>
+    <string name="ma_share_title">Search GDTF Share</string>
+    <string name="ma_share_intro">GDTF files published on GDTF Share (free gdtf-share.com account). The file you pick is added to your MA library, on this device.</string>
+    <string name="ma_share_footprint">Channels (DMX footprint)</string>
+    <string name="ma_share_footprint_any">Any</string>
+    <string name="ma_share_no_footprints">Footprints not provided by GDTF Share right now: filter unavailable.</string>
+    <string name="ma_share_sort">Sort</string>
+    <string name="ma_share_sort_manufacturer">Manufacturer</string>
+    <string name="ma_share_sort_recent">Newest</string>
+    <string name="ma_share_sort_rating">Top rated</string>
+    <string name="ma_share_hint">Type a manufacturer or a model, or a number of channels.</string>
+    <string name="ma_share_loading">Loading the GDTF Share list…</string>
+    <string name="ma_share_no_match">No revision matches “%1$s”.</string>
+    <string name="ma_share_no_match_fp">No revision has a mode with a footprint of %1$d.</string>
+    <string name="ma_share_no_match_both">No revision matches “%1$s” with a mode with a footprint of %2$d.</string>
+    <string name="ma_share_offline">Offline: searching GDTF Share requires an Internet connection.</string>
+    <string name="ma_share_error">The GDTF Share list could not be loaded.</string>
+    <string name="ma_share_retry">Try again</string>
+    <string name="ma_share_revision">Revision: %1$s</string>
+    <string name="ma_share_revision_unnamed">Unnamed revision</string>
+    <string name="ma_share_by_manufacturer">Manufacturer</string>
+    <string name="ma_share_by_user">User</string>
+    <string name="ma_share_gdtf_version">GDTF %1$s</string>
+    <string name="ma_share_modes">Modes: %1$s</string>
+    <string name="ma_share_mode_item">%1$s (%2$d ch)</string>
+    <string name="ma_share_modes_more">+%1$d</string>
+    <string name="ma_share_modes_none">not listed</string>
+    <string name="ma_share_in_library">In the library</string>
+    <string name="ma_share_download_failed">Download failed. Try again.</string>
+    <string name="ma_share_not_added">Not added: %1$s</string>
+    <string name="ma_share_added">Added to the MA library.</string>
+    <string name="ma_share_already">Already in the MA library.</string>
+    <string name="ma_source_share">Source: GDTF Share (rid %1$d)</string>
+    <string name="ma_uploaded_by">Uploaded by: %1$s</string>
+    <string name="ma_modified">Modified %1$s</string>
+    <string name="ma_3d_recommended">Recommended</string>
+    <string name="ma_err_zip_unreadable">Unreadable or corrupted .zip archive.</string>
+    <string name="ma_err_zip_empty">No MA profile or GDTF in this archive.</string>
+    <string name="ma_err_zip_limit">Archive too large: reading stopped after %1$d files.</string>
     <plurals name="ma_count">
         <item quantity="one">%1$d profile</item>
         <item quantity="other">%1$d profiles</item>
@@ -610,5 +651,9 @@
     <plurals name="ma_mode_line">
         <item quantity="one">Mode: %1$s · %2$d channel</item>
         <item quantity="other">Mode: %1$s · %2$d channels</item>
+    </plurals>
+    <plurals name="ma_protected_count">
+        <item quantity="one">including %1$d protected profile (.pxml)</item>
+        <item quantity="other">including %1$d protected profiles (.pxml)</item>
     </plurals>
 </resources>

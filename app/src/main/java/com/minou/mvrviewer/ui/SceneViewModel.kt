@@ -57,6 +57,14 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
      */
     val progress = LoadProgress()
 
+    /**
+     * Bibliothèque MA PARTAGÉE par l'accueil et le show (un seul chargement de la liste), et
+     * FILE D'ATTENTE des profils reçus du système (« Ouvrir avec », partage) : portées par le
+     * ViewModel, elles survivent aux allers-retours accueil ↔ show (SPEC-ma-gdtfshare.md §5.1).
+     */
+    val maLibrary = MaLibraryState()
+    val maInbox = MaInbox()
+
     // Fichier en cours (chargé ou en chargement) : rend `open` IDEMPOTENT.
     // Le ViewModel survit aux recréations d'activité (rotation, mode sombre,
     // retour depuis le multitâche) → si la même URI est re-livrée, on NE

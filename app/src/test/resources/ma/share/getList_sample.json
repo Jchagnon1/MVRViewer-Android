@@ -1,0 +1,10 @@
+{"result":true,"timestamp":1790000000,"list":[
+ {"rid":12345,"fixture":"MegaPointe","manufacturer":"Robe Lighting","revision":"V1.6 - DMX 39ch","creationDate":"1570494396","lastModified":"1690000000","uploader":"Manuf.","rating":"4.1","version":"1.1","creator":"robe_official","uuid":"AAAAAAAA-0001-4C7C-ACA2-AAAAAAAAAAAA","filesize":4809117,"modes":[{"0":{"name":"Mode 1 - 34ch","dmxfootprint":34}},{"1":{"name":"Mode 2 - 39ch","dmxfootprint":39}}]},
+ {"rid":"12346","fixture":"MegaPointe","manufacturer":"Robe Lighting","revision":"  ","creationDate":1580000000,"lastModified":1580000000,"uploader":"User","rating":3,"version":1.0,"uuid":"AAAAAAAA-0001-4C7C-ACA2-AAAAAAAAAAAA","filesize":"5100000","modes":[{"name":"Mode 1","dmxfootprint":"34"}]},
+ {"rid":777,"fixture":"Sharpy","manufacturer":"Clay Paky","revision":"2.0","creationDate":"","lastModified":null,"uploader":"","rating":null,"uuid":"BBBBBBBB-0002-4000-8000-BBBBBBBBBBBB","modes":{"0":{"name":"Standard","dmxfootprint":16},"1":{"name":"Vector","dmxfootprint":"20"},"2":{"name":"Broken","dmxfootprint":"x"},"3":{"name":"Shapes","dmxfootprint":24},"4":{"name":"Basic","dmxfootprint":12},"10":{"name":"Full","dmxfootprint":30}}},
+ {"rid":778,"fixture":"Éclairage Test","manufacturer":"Éclairages Test","revision":"r1","creationDate":1600000000000,"lastModified":1600000000000,"uploader":"manufacturer","rating":"4.95","version":"1.2","uuid":"CCCCCCCC-0003-4000-8000-CCCCCCCCCCCC","filesize":70000000,"modes":[[{"name":"","dmxfootprint":1}]]},
+ {"rid":0,"fixture":"Bad rid","manufacturer":"X","uuid":"DDDD"},
+ {"rid":900,"fixture":"No uuid","manufacturer":"X"},
+ {"rid":902,"fixture":"Empty uuid","manufacturer":"X","uuid":""},
+ {"rid":901,"manufacturer":"Y","uuid":"EEEE"}
+]}

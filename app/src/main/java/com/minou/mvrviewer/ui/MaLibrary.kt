@@ -158,21 +158,49 @@ class MaImportException(
  * Lot prêt à importer : candidats (archives développées), fichiers ignorés, erreurs
  * trouvées en préparant le lot (archives illisibles, vides, trop grosses…), et le
  * ménage à faire à la fin (fermer les archives, effacer les copies temporaires).
+ * `cancelled` : préparation interrompue (« Arrêter », écran quitté) — le bilan dit « arrêté ».
+ *
+ * Un lot de plusieurs fichiers ou archives s'assemble avec [Builder] (listes accumulées,
+ * ménage en boucle) : PAS par additions successives de lots, qui recopiaient toute la liste
+ * à chaque fichier et chaînaient les ménages (mémoire au carré du nombre de fichiers :
+ * OutOfMemoryError vers 16 000 fichiers).
  */
 data class MaImportPlan(
     val sources: List<MaImportSource>,
     val ignored: Int,
     val errors: List<Pair<String, MaImportError>> = emptyList(),
-    val cleanup: () -> Unit = {}
+    val cleanup: () -> Unit = {},
+    val cancelled: Boolean = false
 ) {
-    operator fun plus(o: MaImportPlan) = MaImportPlan(
-        sources + o.sources, ignored + o.ignored, errors + o.errors
-    ) { cleanup(); o.cleanup() }
+    /** Assemblage LINÉAIRE d'un lot (un fichier, une archive développée, des ignorés à la fois). */
+    class Builder {
+        private val sources = ArrayList<MaImportSource>()
+        private var ignored = 0
+        private val errors = ArrayList<Pair<String, MaImportError>>()
+        private val cleanups = ArrayList<() -> Unit>()
+        private var cancelled = false
+
+        fun addSource(s: MaImportSource) = apply { sources.add(s) }
+        fun addIgnored(n: Int = 1) = apply { ignored += n }
+        fun addError(name: String, e: MaImportError) = apply { errors.add(name to e) }
+        fun markCancelled() = apply { cancelled = true }
+
+        /** Ajoute un lot déjà préparé (archive développée) ; son ménage est GARDÉ pour la fin. */
+        fun add(p: MaImportPlan) = apply {
+            sources.addAll(p.sources); ignored += p.ignored; errors.addAll(p.errors)
+            cleanups.add(p.cleanup)
+            if (p.cancelled) cancelled = true
+        }
+
+        fun build(): MaImportPlan {
+            val all = cleanups.toTypedArray()
+            return MaImportPlan(sources, ignored, errors, { for (c in all) runCatching { c() } }, cancelled)
+        }
+    }
 }
 
-/** Fichier local (tests JVM, dossiers de l'appareil). */
-class FileImportSource(private val file: File) : MaImportSource {
-    override val name: String get() = file.name
+/** Fichier local (tests JVM, dossiers de l'appareil) ; `name` = nom présenté au pipeline. */
+class FileImportSource(private val file: File, override val name: String = file.name) : MaImportSource {
     override val size: Long? get() = file.length()
     override fun read(): ByteArray = file.readBytes()
 }
@@ -350,7 +378,10 @@ class MaLibraryStore(private val root: File) {
         return MaShareImportOutcome.Added(id) to appendToIndex(listOf(e))
     }
 
-    /** [import] d'un lot préparé, puis ménage (archives fermées, copies temporaires effacées). */
+    /**
+     * [import] d'un lot préparé, puis ménage (archives fermées, copies temporaires effacées).
+     * Préparation interrompue ([MaImportPlan.cancelled]) : rien n'est lu, le bilan dit « arrêté ».
+     */
     fun import(
         plan: MaImportPlan,
         now: () -> Double = { System.currentTimeMillis() / 1000.0 },
@@ -358,7 +389,9 @@ class MaLibraryStore(private val root: File) {
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
         onBatch: (List<MaLibraryEntry>) -> Unit = {}
     ): Pair<MaImportReport, List<MaLibraryEntry>> = try {
-        import(plan.sources, plan.ignored, now, isCancelled, onProgress, onBatch, plan.errors)
+        val stop: () -> Boolean = if (plan.cancelled) ({ true }) else isCancelled
+        val (report, lib) = import(plan.sources, plan.ignored, now, stop, onProgress, onBatch, plan.errors)
+        (if (plan.cancelled) report.copy(stopped = true) else report) to lib
     } finally {
         runCatching { plan.cleanup() }
     }
@@ -454,30 +487,41 @@ class MaLibraryStore(private val root: File) {
          * d'archive (nommées d'après `archiveName`) ; `afterClose` est appelé au ménage
          * (copie temporaire à effacer).
          */
-        fun planArchive(archiveName: String, src: ZipCentralReader.Source, afterClose: () -> Unit = {}): MaImportPlan {
-            val p = MaZipImport.plan(archiveName, src)
+        fun planArchive(
+            archiveName: String,
+            src: ZipCentralReader.Source,
+            isCancelled: () -> Boolean = { false },
+            afterClose: () -> Unit = {}
+        ): MaImportPlan {
+            val p = MaZipImport.plan(archiveName, src, isCancelled)
             val session = p.session
             return MaImportPlan(
                 sources = if (session == null) emptyList() else p.candidates.map { ZipEntryImportSource(it, session) },
                 ignored = p.ignored,
                 errors = p.errors.map { (n, e) -> n to MaImportError.of(e) },
-                cleanup = { runCatching { session?.close() }; afterClose() }
+                cleanup = { runCatching { session?.close() }; afterClose() },
+                cancelled = p.cancelled
             )
         }
 
         /** Archive locale (tests JVM, fichier déjà copié en cache). */
-        fun planArchiveFile(file: File, archiveName: String = file.name, deleteAfter: Boolean = false): MaImportPlan {
+        fun planArchiveFile(
+            file: File,
+            archiveName: String = file.name,
+            deleteAfter: Boolean = false,
+            isCancelled: () -> Boolean = { false }
+        ): MaImportPlan {
             val src = runCatching { ZipCentralReader.FileSource.open(file) }.getOrNull()
                 ?: return MaImportPlan(emptyList(), 0, listOf(archiveName to MaImportError.ZipUnreadable),
                     cleanup = { if (deleteAfter) file.delete() })
-            return planArchive(archiveName, src) { if (deleteAfter) file.delete() }
+            return planArchive(archiveName, src, isCancelled) { if (deleteAfter) file.delete() }
         }
 
         /**
          * Énumère un dossier LOCAL récursivement (tests JVM) : candidats triés, nombre de
          * fichiers « autres formats », archives `.zip` développées à leur place.
          */
-        fun collect(dir: File): MaImportPlan {
+        fun collect(dir: File, isCancelled: () -> Boolean = { false }): MaImportPlan {
             val out = ArrayList<File>(); var ignored = 0
             fun walk(d: File) {
                 val kids = d.listFiles()?.sortedBy { it.name } ?: return
@@ -488,14 +532,58 @@ class MaLibraryStore(private val root: File) {
                 }
             }
             walk(dir)
-            var plan = MaImportPlan(emptyList(), ignored)
+            val plan = MaImportPlan.Builder().addIgnored(ignored)
             for (f in out) {
-                plan += if (isArchive(f.name)) {
-                    if (f.length() > MaZipImport.MAX_ARCHIVE_BYTES) MaImportPlan(emptyList(), 0, listOf(f.name to archiveTooLarge(f.length())))
-                    else planArchiveFile(f)
-                } else MaImportPlan(listOf(FileImportSource(f)), 0)
+                if (isCancelled()) { plan.markCancelled(); break }
+                if (!isArchive(f.name)) plan.addSource(FileImportSource(f))
+                else if (f.length() > MaZipImport.MAX_ARCHIVE_BYTES) plan.addError(f.name, archiveTooLarge(f.length()))
+                else plan.add(planArchiveFile(f, isCancelled = isCancelled))
             }
-            return plan
+            return plan.build()
+        }
+
+        /**
+         * Décision pour UN document choisi ou reçu (pure : testable en JVM, appelée par
+         * [MaSafEnumerator.fromDocuments] avec des fonctions sur l'URI) : candidat, archive
+         * développée ou ignoré. Pour un document REÇU, la décision du routeur (§5.3) est
+         * respectée : un GDTF renommé `.zip` (T12 : aiguillé « gdtf ») est importé comme UN
+         * fichier `.gdtf` — avec sa 3D et le même identifiant que le vrai `.gdtf` — et non
+         * développé comme une archive (qui n'en gardait que `description.xml`, sans 3D).
+         * Nom sans extension : complété d'après le routeur (`.gdtf`, `.zip`, `.xml`).
+         */
+        fun planDocument(
+            name: String,
+            received: Boolean,
+            route: () -> IncomingFileRouter.Route?,
+            startsWithPK: () -> Boolean,
+            asSource: (name: String) -> MaImportSource,
+            asArchive: (name: String) -> MaImportPlan,
+            into: MaImportPlan.Builder
+        ) {
+            val n = importName(name, received, route, startsWithPK)
+            when {
+                isSilentlySkipped(n) -> {}
+                isArchive(n) -> into.add(asArchive(n))
+                isCandidate(n) -> into.addSource(asSource(n))
+                else -> into.addIgnored()
+            }
+        }
+
+        /** Nom sous lequel un document suit le pipeline (voir [planDocument]). */
+        fun importName(
+            name: String,
+            received: Boolean,
+            route: () -> IncomingFileRouter.Route?,
+            startsWithPK: () -> Boolean
+        ): String {
+            if (!name.contains('.')) return when (route()) {
+                IncomingFileRouter.Route.GDTF -> "$name.gdtf"
+                IncomingFileRouter.Route.MA_PROFILES -> if (startsWithPK()) "$name.zip" else "$name.xml"
+                else -> name
+            }
+            if (received && isArchive(name) && route() == IncomingFileRouter.Route.GDTF)
+                return name.substringBeforeLast('.') + ".gdtf"
+            return name
         }
 
         /** `Fichier trop volumineux (N Mo, maximum 512 Mo).` pour une archive. */
@@ -625,49 +713,52 @@ object MaSafEnumerator {
      * Archive `.zip` d'un document : copie du flux SAF en cache (≤ 512 Mo, refus AVANT
      * lecture si la taille déclarée dépasse), puis lecture par le répertoire central.
      */
-    fun planArchive(ctx: Context, uri: Uri, name: String, declared: Long?): MaImportPlan {
+    fun planArchive(
+        ctx: Context, uri: Uri, name: String, declared: Long?,
+        isCancelled: () -> Boolean = { false }
+    ): MaImportPlan {
         if (declared != null && declared > MaZipImport.MAX_ARCHIVE_BYTES)
             return MaImportPlan(emptyList(), 0, listOf(name to MaLibraryStore.archiveTooLarge(declared)))
         return when (val c = copyToCache(ctx, uri)) {
-            is Copied.Ok -> MaLibraryStore.planArchiveFile(c.file, name, deleteAfter = true)
+            is Copied.Ok -> MaLibraryStore.planArchiveFile(c.file, name, deleteAfter = true, isCancelled = isCancelled)
             Copied.TooLarge -> MaImportPlan(emptyList(), 0, listOf(name to MaLibraryStore.archiveTooLarge(null)))
             Copied.Failed -> MaImportPlan(emptyList(), 0, listOf(name to MaImportError.Io))
         }
     }
 
-    /**
-     * Document reçu SANS extension (fournisseur qui ne donne pas de nom) : le routeur lit son
-     * contenu ; profil ou archive de profils → nom complété (`.gdtf`, `.zip`, `.xml`) pour
-     * suivre le pipeline habituel, sinon nom inchangé (compté « ignoré »).
-     */
-    private fun withSniffedExtension(ctx: Context, u: Uri, n: String): String {
-        if (n.contains('.')) return n
-        return when (runCatching { IncomingFiles.route(ctx, u) }.getOrNull()) {
-            IncomingFileRouter.Route.GDTF -> "$n.gdtf"
-            IncomingFileRouter.Route.MA_PROFILES -> {
-                val head = runCatching {
-                    ctx.contentResolver.openInputStream(u)?.use { ins -> ByteArray(2).also { ins.read(it) } }
-                }.getOrNull()
-                if (head != null && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()) "$n.zip" else "$n.xml"
-            }
-            else -> n
-        }
+    /** Les deux premiers octets d'un document sont `PK` (zip). */
+    private fun startsWithPK(ctx: Context, u: Uri): Boolean {
+        val head = runCatching {
+            ctx.contentResolver.openInputStream(u)?.use { ins -> ByteArray(2).also { ins.read(it) } }
+        }.getOrNull()
+        return head != null && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()
     }
 
-    /** Fichiers choisis un par un (ou reçus) : candidats, archives développées, ignorés. */
-    fun fromDocuments(ctx: Context, uris: List<Uri>): MaImportPlan {
-        var plan = MaImportPlan(emptyList(), 0)
+    /**
+     * Fichiers choisis un par un, ou REÇUS (`received` : « Ouvrir avec », partage — la
+     * décision du routeur est alors respectée, voir [MaLibraryStore.planDocument]) :
+     * candidats, archives développées, ignorés.
+     */
+    fun fromDocuments(
+        ctx: Context, uris: List<Uri>,
+        received: Boolean = false,
+        isCancelled: () -> Boolean = { false }
+    ): MaImportPlan {
+        val plan = MaImportPlan.Builder()
         for (u in uris) {
+            if (isCancelled()) { plan.markCancelled(); break }
             val (n0, size) = describe(ctx, u)
-            val n = withSniffedExtension(ctx, u, n0)
-            if (MaLibraryStore.isSilentlySkipped(n)) continue
-            plan += when {
-                MaLibraryStore.isArchive(n) -> planArchive(ctx, u, n, size)
-                MaLibraryStore.isCandidate(n) -> MaImportPlan(listOf(UriImportSource(ctx, u, n, size)), 0)
-                else -> MaImportPlan(emptyList(), 1)
-            }
+            MaLibraryStore.planDocument(
+                name = n0,
+                received = received,
+                route = { runCatching { IncomingFiles.route(ctx, u) }.getOrNull() },
+                startsWithPK = { startsWithPK(ctx, u) },
+                asSource = { n -> UriImportSource(ctx, u, n, size) },
+                asArchive = { n -> planArchive(ctx, u, n, size, isCancelled) },
+                into = plan
+            )
         }
-        return plan
+        return plan.build()
     }
 
     /**
@@ -707,13 +798,14 @@ object MaSafEnumerator {
                 }
             }
         }
-        var plan = MaImportPlan(emptyList(), ignored)
+        val plan = MaImportPlan.Builder().addIgnored(ignored)
+        if (isCancelled()) plan.markCancelled()          // parcours du dossier interrompu
         for (f in out.sortedBy { it.path.lowercase() }) {
-            if (isCancelled()) break
-            plan += if (MaLibraryStore.isArchive(f.name)) planArchive(ctx, f.uri, f.name, f.size)
-            else MaImportPlan(listOf(UriImportSource(ctx, f.uri, f.name, f.size)), 0)
+            if (isCancelled()) { plan.markCancelled(); break }
+            if (MaLibraryStore.isArchive(f.name)) plan.add(planArchive(ctx, f.uri, f.name, f.size, isCancelled))
+            else plan.addSource(UriImportSource(ctx, f.uri, f.name, f.size))
         }
-        return plan
+        return plan.build()
     }
 }
 

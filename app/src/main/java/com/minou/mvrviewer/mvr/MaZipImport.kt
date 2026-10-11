@@ -14,8 +14,11 @@ import java.io.Closeable
  *
  * Garde-fous : archive ≤ 512 Mo (vérifié par l'appelant AVANT lecture), entrée ≤ 64 Mo
  * (déclarée, puis décompression BORNÉE), au plus 50 000 entrées et 2 Gio décompressés par
- * archive (toutes profondeurs) → lecture ARRÊTÉE, erreur `zipLimit`. Pic mémoire : une
- * archive imbriquée + une entrée.
+ * archive (toutes profondeurs) → lecture ARRÊTÉE, erreur `zipLimit`. Les 2 Gio comptent les
+ * octets RÉELLEMENT décompressés ([ZipCentralReader.Meter]), y compris ceux des entrées
+ * rejetées ensuite (trop volumineuses, illisibles) : sinon une archive piégée de quelques
+ * Ko (une donnée de 64 Mo référencée par des milliers d'entrées) faisait décompresser
+ * 50 000 × 64 Mo. Pic mémoire : une archive imbriquée + une entrée.
  */
 object MaZipImport {
 
@@ -23,6 +26,18 @@ object MaZipImport {
     const val MAX_ENTRY_BYTES: Long = MaProfileReader.MAX_FILE_BYTES
     const val MAX_TOTAL_BYTES: Long = 2L * 1024 * 1024 * 1024
     const val MAX_ENTRIES = 50_000
+
+    /**
+     * Plafonds appliqués (ceux de la spec par défaut ; les tests en passent de plus petits
+     * pour vérifier les garde-fous sans décompresser des gigaoctets).
+     */
+    class Limits(
+        val entryBytes: Long = MAX_ENTRY_BYTES,
+        val totalBytes: Long = MAX_TOTAL_BYTES,
+        val entries: Int = MAX_ENTRIES
+    )
+
+    private val DEFAULT_LIMITS = Limits()
 
     /** Séparateur des noms affichés : `ext.zip › dossier/int.zip › fichier.xml`. */
     const val SEP = " › "
@@ -99,7 +114,9 @@ object MaZipImport {
         val candidates: List<Candidate>,
         val ignored: Int,
         val errors: List<Pair<String, ArchiveError>>,
-        val session: Session?
+        val session: Session?,
+        /** Préparation interrompue par l'utilisateur (« Arrêter », écran quitté) : plan vide. */
+        val cancelled: Boolean = false
     )
 
     /** Issue de la lecture d'un candidat. */
@@ -119,16 +136,21 @@ object MaZipImport {
         val archiveName: String,
         private val src: ZipCentralReader.Source,
         private val listing: ZipCentralReader.Listing.Ok,
-        decompressedSoFar: Long
+        decompressedSoFar: Long,
+        private val limits: Limits = DEFAULT_LIMITS
     ) : Closeable {
-        private var total: Long = decompressedSoFar
+        /** Octets RÉELLEMENT décompressés pour cette archive (tables d'imbriquées comprises), quelle que soit l'issue. */
+        private val meter = ZipCentralReader.Meter().also { it.bytes = decompressedSoFar }
         private var stopped = false
         private var currentNested: Nested? = null
         private var nestedSource: ZipCentralReader.ByteSource? = null
 
+        /** Total décompressé jusqu'ici (garde-fou 2 Gio ; lu par les tests). */
+        val decompressed: Long get() = meter.bytes
+
         fun read(c: Candidate): EntryRead {
             if (stopped) return EntryRead.Skipped
-            if (total + minOf(c.declaredSize, MAX_ENTRY_BYTES) > MAX_TOTAL_BYTES) {
+            if (meter.bytes + minOf(c.declaredSize, limits.entryBytes) > limits.totalBytes) {
                 stopped = true
                 return EntryRead.Limit(c.ordinal)
             }
@@ -136,17 +158,17 @@ object MaZipImport {
                 val n = c.nested
                 if (currentNested !== n) {
                     currentNested = null; nestedSource = null
-                    val r = ZipCentralReader.readBounded(src, listing, n.entry, MAX_ENTRY_BYTES)
+                    // Relecture de l'imbriquée : déjà comptée UNE fois par plan() (ses candidats
+                    // se suivent, elle n'est relue qu'une fois) — pas de second décompte.
+                    val r = ZipCentralReader.readBounded(src, listing, n.entry, limits.entryBytes)
                     val bytes = (r as? ZipCentralReader.Read.Ok)?.bytes ?: return EntryRead.Unreadable
                     currentNested = n; nestedSource = ZipCentralReader.ByteSource(bytes)
                 }
                 nestedSource!! to n.listing
             }
-            return when (val r = ZipCentralReader.readBounded(s, l, c.entry, MAX_ENTRY_BYTES)) {
-                is ZipCentralReader.Read.Ok -> {
-                    total += r.bytes.size
-                    EntryRead.Ok(r.bytes)
-                }
+            // Le compteur avance de ce qui a été décompressé, MÊME si l'entrée est rejetée.
+            return when (val r = ZipCentralReader.readBounded(s, l, c.entry, limits.entryBytes, meter = meter)) {
+                is ZipCentralReader.Read.Ok -> EntryRead.Ok(r.bytes)
                 ZipCentralReader.Read.TooLarge -> EntryRead.TooLarge(tooLargeMegabytes(c.declaredSize))
                 ZipCentralReader.Read.Unreadable -> EntryRead.Unreadable
             }
@@ -170,11 +192,19 @@ object MaZipImport {
     /**
      * Lit les tables centrales (archive puis imbriquées) AVANT tout import : le total de la
      * progression compte ainsi tous les candidats. `src` est fermée par la session (ou ici en
-     * cas d'erreur d'archive).
+     * cas d'erreur d'archive). `isCancelled` est lu avant chaque archive imbriquée (seule
+     * étape coûteuse : jusqu'à 64 Mo décompressés) : « Arrêter » ou l'écran quitté arrête la
+     * préparation, et le plan rendu est vide (`cancelled`).
      */
-    fun plan(archiveName: String, src: ZipCentralReader.Source): Plan {
+    fun plan(
+        archiveName: String,
+        src: ZipCentralReader.Source,
+        isCancelled: () -> Boolean = { false },
+        limits: Limits = DEFAULT_LIMITS
+    ): Plan {
+        fun closeSrc() { (src as? Closeable)?.let { runCatching { it.close() } } }
         fun failed(err: ArchiveError): Plan {
-            (src as? Closeable)?.let { runCatching { it.close() } }
+            closeSrc()
             return Plan(archiveName, emptyList(), 0, listOf(archiveName to err), null)
         }
         if (src.size > MAX_ARCHIVE_BYTES) return failed(ArchiveError.TooLarge(megabytes(src.size), (MAX_ARCHIVE_BYTES / MIB).toInt()))
@@ -182,7 +212,7 @@ object MaZipImport {
         val magic = ByteArray(2)
         if (!src.readAt(0, magic, 0, 2) || magic[0] != 'P'.code.toByte() || magic[1] != 'K'.code.toByte())
             return failed(ArchiveError.Unreadable)
-        val listing = ZipCentralReader.list(src, MAX_ENTRIES + 1) as? ZipCentralReader.Listing.Ok
+        val listing = ZipCentralReader.list(src, limits.entries + 1) as? ZipCentralReader.Listing.Ok
             ?: return failed(ArchiveError.Unreadable)
 
         val candidates = ArrayList<Candidate>()
@@ -190,32 +220,36 @@ object MaZipImport {
         var ignored = 0
         var count = 0
         var limit = false
-        var decompressed = 0L
+        // Octets RÉELLEMENT décompressés (imbriquées lues ici), même pour une imbriquée rejetée.
+        val meter = ZipCentralReader.Meter()
         outer@ for (e in listing.entries) {
-            if (count >= MAX_ENTRIES) { limit = true; break }
+            if (count >= limits.entries) { limit = true; break }
             count++
             when (classify(e.name, 0)) {
                 Kind.SILENT -> {}
                 Kind.IGNORED -> ignored++
                 Kind.CANDIDATE -> candidates.add(Candidate(display(archiveName, e.name), baseName(e.name), e.size, count - 1, e, null))
                 Kind.NESTED -> {
+                    if (isCancelled()) {
+                        closeSrc()
+                        return Plan(archiveName, emptyList(), ignored, emptyList(), null, cancelled = true)
+                    }
                     val nd = display(archiveName, e.name)
-                    if (decompressed + minOf(e.size, MAX_ENTRY_BYTES) > MAX_TOTAL_BYTES) { limit = true; break@outer }
-                    when (val r = ZipCentralReader.readBounded(src, listing, e, MAX_ENTRY_BYTES)) {
+                    if (meter.bytes + minOf(e.size, limits.entryBytes) > limits.totalBytes) { limit = true; break@outer }
+                    when (val r = ZipCentralReader.readBounded(src, listing, e, limits.entryBytes, meter = meter)) {
                         ZipCentralReader.Read.TooLarge ->
                             errors.add(nd to ArchiveError.TooLarge(tooLargeMegabytes(e.size), (MAX_ENTRY_BYTES / MIB).toInt()))
                         ZipCentralReader.Read.Unreadable -> errors.add(nd to ArchiveError.Unreadable)
                         is ZipCentralReader.Read.Ok -> {
-                            decompressed += r.bytes.size
                             val nl = if (r.bytes.size >= 2 && r.bytes[0] == 'P'.code.toByte() && r.bytes[1] == 'K'.code.toByte())
-                                ZipCentralReader.list(ZipCentralReader.ByteSource(r.bytes), MAX_ENTRIES - count + 1) as? ZipCentralReader.Listing.Ok
+                                ZipCentralReader.list(ZipCentralReader.ByteSource(r.bytes), limits.entries - count + 1) as? ZipCentralReader.Listing.Ok
                             else null
                             if (nl == null) errors.add(nd to ArchiveError.Unreadable)
                             else {
                                 val ref = Nested(e, nd, nl)
                                 var found = 0
                                 for (ne in nl.entries) {
-                                    if (count >= MAX_ENTRIES) { limit = true; break@outer }
+                                    if (count >= limits.entries) { limit = true; break@outer }
                                     count++
                                     when (classify(ne.name, 1)) {
                                         Kind.SILENT -> {}
@@ -236,9 +270,9 @@ object MaZipImport {
         if (limit) errors.add(archiveName to ArchiveError.Limit(count))
         else if (candidates.isEmpty()) errors.add(archiveName to ArchiveError.Empty)
         if (candidates.isEmpty()) {
-            (src as? Closeable)?.let { runCatching { it.close() } }
+            closeSrc()
             return Plan(archiveName, candidates, ignored, errors, null)
         }
-        return Plan(archiveName, candidates, ignored, errors, Session(archiveName, src, listing, decompressed))
+        return Plan(archiveName, candidates, ignored, errors, Session(archiveName, src, listing, meter.bytes, limits))
     }
 }

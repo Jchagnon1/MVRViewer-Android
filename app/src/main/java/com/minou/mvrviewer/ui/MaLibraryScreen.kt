@@ -140,7 +140,7 @@ fun MaLibraryScreen(
     }
 
     // ---- Import ----
-    fun runImport(collect: suspend () -> MaImportPlan) {
+    fun runImport(collect: suspend (isCancelled: () -> Boolean) -> MaImportPlan) {
         // Boutons désactivés tant que la liste n'est pas chargée (le store, lui, ne
         // dépend plus de cette liste : il relit et COMPLÈTE l'index disque).
         if (state.progress != null || !state.loaded) return
@@ -150,16 +150,19 @@ fun MaLibraryScreen(
             var finished = false
             try {
                 val job = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+                // « Arrêter » ou écran quitté : lu PENDANT la préparation (avant chaque fichier
+                // et chaque archive imbriquée) comme pendant l'import.
+                val isCancelled = { state.cancelRequested || job?.isActive == false }
                 // Préparation (copie des archives reçues, tables centrales) ET import dans le
                 // MÊME bloc : écran quitté pendant la préparation → l'import voit l'annulation
                 // tout de suite et fait quand même le ménage (archives fermées, copies effacées).
                 val (report, lib) = withContext(Dispatchers.IO) {
                     // Copies d'archives laissées par un import interrompu (aucun import ne tourne).
                     MaSafEnumerator.purgeCache(ctx)
-                    val plan = collect()
+                    val plan = collect(isCancelled)
                     store.import(
                         plan,
-                        isCancelled = { state.cancelRequested || job?.isActive == false },
+                        isCancelled = isCancelled,
                         onProgress = { d, t -> scope.launch(Dispatchers.Main) { if (state.progress != null) state.progress = d to t } },
                         onBatch = { partial -> scope.launch(Dispatchers.Main) { state.replaceAll(partial) } }
                     )
@@ -175,16 +178,19 @@ fun MaLibraryScreen(
         }
     }
     val filesPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) runImport { MaSafEnumerator.fromDocuments(ctx, uris) }
+        if (uris.isNotEmpty()) runImport { cancelled -> MaSafEnumerator.fromDocuments(ctx, uris, isCancelled = cancelled) }
     }
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
-        if (tree != null) runImport { MaSafEnumerator.fromTree(ctx, tree) { state.cancelRequested } }
+        if (tree != null) runImport { cancelled -> MaSafEnumerator.fromTree(ctx, tree, cancelled) }
     }
     // Fichiers REÇUS (« Ouvrir avec », partage) : un lot à la fois, le suivant quand le
     // bilan du précédent a été fermé (chaque lot a sa progression et son bilan).
     if (inbox != null) LaunchedEffect(inbox.batches.size, state.loaded, state.progress, state.report) {
         if (state.loaded && state.progress == null && state.report == null) {
-            inbox.poll()?.let { uris -> runImport { MaSafEnumerator.fromDocuments(ctx, uris) } }
+            // Documents REÇUS : la décision du routeur est respectée (GDTF renommé .zip → .gdtf).
+            inbox.poll()?.let { uris ->
+                runImport { cancelled -> MaSafEnumerator.fromDocuments(ctx, uris, received = true, isCancelled = cancelled) }
+            }
         }
     }
 

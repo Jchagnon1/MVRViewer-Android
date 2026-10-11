@@ -117,6 +117,124 @@ class MaZipImportTest {
         assertEquals(listOf("g.zip" to MaZipImport.ArchiveError.TooLarge(513, 512)), MaZipImport.plan("g.zip", big).errors)
     }
 
+    // ---- Garde-fou « 2 Gio décompressés par archive » (§5.2) ---------------------------------
+
+    private fun le16(o: ByteArrayOutputStream, v: Int) { o.write(v and 0xFF); o.write((v shr 8) and 0xFF) }
+    private fun le32(o: ByteArrayOutputStream, v: Long) { for (k in 0..3) o.write(((v shr (8 * k)) and 0xFF).toInt()) }
+
+    /** `n` octets nuls compressés (deflate brut), sans tout allouer d'un coup. */
+    private fun deflatedZeros(n: Long): Pair<ByteArray, Long> {
+        val def = java.util.zip.Deflater(9, true)
+        val crc = java.util.zip.CRC32()
+        val chunk = ByteArray(1 shl 20)
+        val out = ByteArrayOutputStream(); val buf = ByteArray(1 shl 16)
+        var left = n
+        while (left > 0) {
+            val k = minOf(left, chunk.size.toLong()).toInt()
+            crc.update(chunk, 0, k)
+            def.setInput(chunk, 0, k)
+            while (!def.needsInput()) { val c = def.deflate(buf); out.write(buf, 0, c) }
+            left -= k
+        }
+        def.finish()
+        while (!def.finished()) { val c = def.deflate(buf); out.write(buf, 0, c) }
+        def.end()
+        return out.toByteArray() to crc.value
+    }
+
+    /**
+     * Archive PIÉGÉE : UNE donnée (méthode `method`) référencée par `k` entrées centrales de même
+     * nom, taille décompressée DÉCLARÉE `declared`, CRC `crc`. Quelques Ko pour `k` × la donnée.
+     */
+    private fun overlapping(name: String, k: Int, data: ByteArray, method: Int, crc: Long, declared: Long): ByteArray {
+        val nb = name.toByteArray()
+        val o = ByteArrayOutputStream()
+        le32(o, 0x04034b50); le16(o, 20); le16(o, 0); le16(o, method); le16(o, 0); le16(o, 0)
+        le32(o, crc); le32(o, data.size.toLong()); le32(o, declared); le16(o, nb.size); le16(o, 0); o.write(nb); o.write(data)
+        val cdOff = o.size().toLong()
+        repeat(k) {
+            le32(o, 0x02014b50); le16(o, 20); le16(o, 20); le16(o, 0); le16(o, method); le16(o, 0); le16(o, 0)
+            le32(o, crc); le32(o, data.size.toLong()); le32(o, declared); le16(o, nb.size); le16(o, 0); le16(o, 0)
+            le16(o, 0); le16(o, 0); le32(o, 0); le32(o, 0); o.write(nb)
+        }
+        val cdSize = o.size() - cdOff
+        le32(o, 0x06054b50); le16(o, 0); le16(o, 0); le16(o, k); le16(o, k); le32(o, cdSize); le32(o, cdOff); le16(o, 0)
+        return o.toByteArray()
+    }
+
+    /**
+     * Relecture (défaut 2) : 40 entrées de taille déclarée 100 octets qui décompressent chacune
+     * 65 Mo (archive de ~68 Ko). Chaque entrée est rejetée « trop volumineuse » APRÈS 64 Mo
+     * décompressés — ces octets comptent : la lecture s'ARRÊTE (`zipLimit`) vers 2 Gio, au lieu
+     * de décompresser les 40 (et 50 000 dans une archive réelle). Plafonds RÉELS de la spec.
+     */
+    @Test fun rejectedEntriesCountTowardTheTwoGibibyteCap() {
+        val mib = 1024L * 1024
+        val (data, crc) = deflatedZeros(65 * mib)
+        val zip = overlapping("n.xml", 40, data, 8, crc, 100)
+        assertTrue(zip.size < 100_000)
+        val plan = MaZipImport.plan("bombe.zip", ZipCentralReader.ByteSource(zip))
+        assertEquals(40, plan.candidates.size)
+        val session = plan.session!!
+        val results = plan.candidates.map { session.read(it) }
+        val tooLarge = results.count { it is MaZipImport.EntryRead.TooLarge }
+        // 32 × (64 Mo + un tampon) dépassent 2 Gio : la 33ᵉ n'est plus lue.
+        assertEquals(32, tooLarge)
+        assertEquals(MaZipImport.EntryRead.Limit(32), results[32])
+        assertTrue(results.drop(33).all { it == MaZipImport.EntryRead.Skipped })
+        assertTrue(session.decompressed <= MaZipImport.MAX_TOTAL_BYTES + MaZipImport.MAX_ENTRY_BYTES + 64 * 1024)
+        session.close()
+    }
+
+    /** Même garde-fou pour des entrées « illisibles » (CRC faux) après lecture complète. */
+    @Test fun unreadableEntriesCountTowardTheCap() {
+        val data = ByteArray(1 shl 20) { 7 }
+        val zip = overlapping("s.xml", 20, data, 0, 0xDEADBEEFL, data.size.toLong())   // STORED, CRC faux
+        val limits = MaZipImport.Limits(entryBytes = 1L shl 20, totalBytes = 4L shl 20)
+        val plan = MaZipImport.plan("crc.zip", ZipCentralReader.ByteSource(zip), limits = limits)
+        val results = plan.candidates.map { plan.session!!.read(it) }
+        assertEquals(List(4) { MaZipImport.EntryRead.Unreadable }, results.take(4))
+        assertEquals(MaZipImport.EntryRead.Limit(4), results[4])
+        assertTrue(results.drop(5).all { it == MaZipImport.EntryRead.Skipped })
+    }
+
+    /**
+     * Archives IMBRIQUÉES rejetées (décompressées puis trop grosses) : comptées aussi dans
+     * plan(), qui s'arrête au plafond au lieu de toutes les lire (plafonds réduits).
+     */
+    @Test fun rejectedNestedArchivesCountTowardTheCapInPlan() {
+        val (data, crc) = deflatedZeros(3L shl 20)                      // 3 Mo > plafond d'entrée (1 Mo)
+        val zip = overlapping("n.zip", 40, data, 8, crc, 100)
+        val limits = MaZipImport.Limits(entryBytes = 1L shl 20, totalBytes = 8L shl 20)
+        val plan = MaZipImport.plan("bombe2.zip", ZipCentralReader.ByteSource(zip), limits = limits)
+        val tooLarge = plan.errors.count { it.second is MaZipImport.ArchiveError.TooLarge }
+        assertTrue("imbriquées lues : $tooLarge", tooLarge in 7..8)
+        assertEquals("bombe2.zip" to MaZipImport.ArchiveError.Limit(tooLarge + 1), plan.errors.last())
+        assertNull(plan.session)
+    }
+
+    /** « Arrêter » pendant la préparation : plan() s'arrête avant l'imbriquée suivante. */
+    @Test fun planStopsWhenCancelled() {
+        val (data, crc) = deflatedZeros(3L shl 20)
+        val zip = overlapping("n.zip", 40, data, 8, crc, 100)
+        var asked = 0
+        var closed = false
+        val src = object : ZipCentralReader.Source, java.io.Closeable {
+            val inner = ZipCentralReader.ByteSource(zip)
+            override val size get() = inner.size
+            override fun readAt(pos: Long, dst: ByteArray, off: Int, len: Int) = inner.readAt(pos, dst, off, len)
+            override fun close() { closed = true }
+        }
+        val plan = MaZipImport.plan("arret.zip", src, isCancelled = { ++asked > 3 },
+            limits = MaZipImport.Limits(entryBytes = 1L shl 20))
+        assertTrue(plan.cancelled)
+        assertEquals(4, asked)                                          // 3 imbriquées lues, puis arrêt
+        assertTrue(plan.candidates.isEmpty())
+        assertTrue(plan.errors.isEmpty())
+        assertNull(plan.session)
+        assertTrue(closed)
+    }
+
     /** Le lecteur par positions (fichier) lit comme le lecteur en mémoire. */
     @Test fun fileSourceMatchesByteSource() {
         val f = res("zips/ma_profiles.zip")

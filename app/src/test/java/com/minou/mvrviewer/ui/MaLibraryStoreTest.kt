@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import com.minou.mvrviewer.mvr.IncomingFileRouter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -382,6 +383,134 @@ class MaLibraryStoreTest {
         assertEquals(9, r.added)                                // ma2_break2 du dossier = celui de l'archive
         assertEquals(2, r.duplicates)
         assertTrue(r.errors.all { it.first.startsWith("profils.ZIP › ") })
+    }
+
+    /**
+     * Relecture (défaut 1) : préparer un GROS dossier coûte une mémoire LINÉAIRE. L'ancien
+     * assemblage (`plan += …` par fichier) recopiait toute la liste à chaque fichier et
+     * gardait chaque plan intermédiaire : OutOfMemoryError vers 16 000 fichiers (tas 512 Mo).
+     */
+    @Test fun preparingAHugeFolderIsLinear() {
+        val dir = Files.createTempDirectory("mabig").toFile()
+        try {
+            val n = 20_000
+            for (i in 0 until n) File(dir, "p%06d.xml".format(i)).writeText("<MA/>")
+            File(dir, "notes.txt").writeText("x")
+            val plan = MaLibraryStore.collect(dir)
+            assertEquals(n, plan.sources.size)
+            assertEquals(1, plan.ignored)
+            assertEquals("p000000.xml", plan.sources.first().name)
+            assertEquals("p019999.xml", plan.sources.last().name)
+            // Le ménage est une BOUCLE (pas une chaîne de fermetures) : pile minuscule suffisante.
+            var failure: Throwable? = null
+            val t = Thread(null, { try { plan.cleanup() } catch (e: Throwable) { failure = e } }, "pile-64k", 64L * 1024)
+            t.start(); t.join()
+            assertEquals(null, failure)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    /** Le ménage de 100 000 lots assemblés est appelé une fois chacun, en boucle (pile de 64 Kio). */
+    @Test fun builderCleanupIsAFlatLoop() {
+        val b = MaImportPlan.Builder()
+        var calls = 0
+        repeat(100_000) { b.add(MaImportPlan(emptyList(), 1, cleanup = { calls++ })) }
+        val plan = b.build()
+        assertEquals(100_000, plan.ignored)
+        var failure: Throwable? = null
+        val t = Thread(null, { try { plan.cleanup() } catch (e: Throwable) { failure = e } }, "pile-64k", 64L * 1024)
+        t.start(); t.join()
+        assertEquals(null, failure)
+        assertEquals(100_000, calls)
+    }
+
+    /** « Arrêter » pendant la préparation d'un dossier : plan marqué, bilan « arrêté », rien d'ajouté. */
+    @Test fun cancelDuringPreparationReportsStopped() {
+        val dir = Files.createTempDirectory("macancel").toFile()
+        try {
+            fixtures("zips").resolve("ma_profiles.zip").copyTo(File(dir, "a.zip"))
+            fixtures("zips").resolve("ma_profiles.zip").copyTo(File(dir, "b.zip"))
+            var asked = 0
+            // « Arrêter » dès la 2ᵉ vérification (avant l'imbriquée de la 1ʳᵉ archive).
+            val plan = MaLibraryStore.collect(dir) { ++asked > 1 }
+            assertTrue(plan.cancelled)
+            val (store, _) = tempStore()
+            val (r, lib) = store.import(plan)
+            assertTrue(r.stopped)
+            assertEquals(0, r.added)
+            assertTrue(lib.isEmpty())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    /** [MaLibraryStore.planDocument] sur un fichier LOCAL (mêmes décisions que pour un document SAF). */
+    private fun planLocalDocument(file: File, name: String, received: Boolean): MaImportPlan {
+        val bytes = file.readBytes()
+        val b = MaImportPlan.Builder()
+        MaLibraryStore.planDocument(
+            name = name,
+            received = received,
+            route = { IncomingFileRouter.route(name, bytes) },
+            startsWithPK = { bytes.size >= 2 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() },
+            asSource = { n -> FileImportSource(file, n) },
+            asArchive = { n -> MaLibraryStore.planArchiveFile(file, n) },
+            into = b
+        )
+        return b.build()
+    }
+
+    /**
+     * Relecture (défaut 3) : un GDTF renommé `.zip` REÇU (« Ouvrir avec », partage) est
+     * aiguillé « gdtf » par le routeur (T12) : il entre comme UN fichier `.gdtf`, AVEC sa 3D
+     * et le même identifiant que le vrai `.gdtf` (doublon reconnu) — plus comme une archive
+     * dont seul `description.xml` entrait, sans 3D.
+     */
+    @Test fun receivedGdtfRenamedZipIsImportedAsGdtf() {
+        val zip = fixtures("routing").resolve("gdtf_3d.zip")
+        val gdtf = fixtures("share").resolve("gdtf_test_wash_3d.gdtf")
+        assertTrue(zip.readBytes().contentEquals(gdtf.readBytes()))
+        val (store, _) = tempStore()
+        val (r, lib) = store.import(planLocalDocument(zip, "gdtf_3d.zip", received = true))
+        assertEquals(1, r.added)
+        assertEquals(0, r.ignored)
+        assertTrue(r.errors.isEmpty())
+        val e = lib.single()
+        assertEquals("gdtf_3d.gdtf", e.fileName)
+        assertEquals("gdtf", e.format)
+        assertTrue(e.hasModel3D)
+        // Le vrai .gdtf importé ensuite est reconnu « déjà présent » (même SHA-256).
+        val (r2, lib2) = store.import(listOf(FileImportSource(gdtf)), 0)
+        assertEquals(0, r2.added)
+        assertEquals(1, r2.duplicates)
+        assertEquals(lib, lib2)
+    }
+
+    /** Une archive de profils REÇUE reste développée ; un `.zip` CHOISI reste une archive (§5.2). */
+    @Test fun receivedProfilesZipAndChosenZipStayArchives() {
+        val (store, _) = tempStore()
+        val (r, _) = store.import(planLocalDocument(fixtures("zips").resolve("ma_profiles.zip"), "ma_profiles.zip", received = true))
+        assertEquals(9, r.added)
+        assertEquals(17, r.added + r.duplicates + r.errors.size)
+        val (store2, _) = tempStore()
+        val (r2, lib2) = store2.import(planLocalDocument(fixtures("routing").resolve("gdtf_3d.zip"), "gdtf_3d.zip", received = false))
+        assertEquals(1, r2.added)
+        assertEquals("description.xml", lib2.single().fileName)
+    }
+
+    /** Nom sans extension complété d'après le routeur ; nom avec extension inchangé hors cas GDTF reçu. */
+    @Test fun importNameFollowsTheRouter() {
+        fun name(n: String, received: Boolean, route: IncomingFileRouter.Route?, pk: Boolean = false) =
+            MaLibraryStore.importName(n, received, { route }, { pk })
+        assertEquals("doc.gdtf", name("doc", false, IncomingFileRouter.Route.GDTF))
+        assertEquals("doc.zip", name("doc", true, IncomingFileRouter.Route.MA_PROFILES, pk = true))
+        assertEquals("doc.xml", name("doc", true, IncomingFileRouter.Route.MA_PROFILES))
+        assertEquals("doc", name("doc", true, IncomingFileRouter.Route.MVR))
+        assertEquals("Wash.gdtf", name("Wash.ZIP", true, IncomingFileRouter.Route.GDTF))
+        assertEquals("Wash.zip", name("Wash.zip", false, IncomingFileRouter.Route.GDTF))
+        assertEquals("p.zip", name("p.zip", true, IncomingFileRouter.Route.MA_PROFILES))
+        assertEquals("p.xml", name("p.xml", true, IncomingFileRouter.Route.GDTF))
     }
 
     /** T15 — gratuit : télécharger et importer une archive n'ouvrent JAMAIS la fenêtre Pro. */

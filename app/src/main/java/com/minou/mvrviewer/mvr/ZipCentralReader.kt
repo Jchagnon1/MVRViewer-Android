@@ -143,14 +143,30 @@ object ZipCentralReader {
     }
 
     /**
+     * Compteur des octets RÉELLEMENT produits par les lectures (décompressés, ou lus tels quels
+     * pour une entrée STORED), QUELLE QUE SOIT l'issue : une entrée rejetée « trop volumineuse »
+     * ou « illisible » après 64 Mo décompressés a coûté ces 64 Mo. C'est ce total qui sert au
+     * garde-fou « 2 Gio décompressés par archive » (SPEC-ma-gdtfshare.md §5.2) : compter les
+     * seules lectures réussies laissait une archive piégée faire décompresser 50 000 × 64 Mo.
+     */
+    class Meter {
+        var bytes: Long = 0L
+            internal set
+    }
+
+    /**
      * Lit une entrée en s'arrêtant à `limit` octets décompressés (taille DÉCLARÉE au-delà →
      * [Read.TooLarge] sans rien décompresser ; flux qui dépasse `limit` → [Read.TooLarge]).
      * `stopAtDeclared` : arrêt (illisible) dès que le flux dépasse sa taille déclarée — sinon
      * on ne s'arrête qu'au plafond (une taille déclarée MENSONGÈRE donne alors « trop
      * volumineux », règle de l'import d'archives, SPEC-ma-gdtfshare.md §5.2).
+     * `meter` : reçoit les octets réellement produits, même si la lecture échoue.
      */
-    fun readBounded(src: Source, listing: Listing.Ok, entry: Entry, limit: Long, stopAtDeclared: Boolean = false): Read = try {
-        readInternal(src, listing.concat, entry, limit, stopAtDeclared)
+    fun readBounded(
+        src: Source, listing: Listing.Ok, entry: Entry, limit: Long,
+        stopAtDeclared: Boolean = false, meter: Meter? = null
+    ): Read = try {
+        readInternal(src, listing.concat, entry, limit, stopAtDeclared, meter)
     } catch (_: Exception) {
         Read.Unreadable
     } catch (_: OutOfMemoryError) {
@@ -260,7 +276,7 @@ object ZipCentralReader {
         return Listing.Ok(out, concat)
     }
 
-    private fun readInternal(src: Source, concat: Long, e: Entry, limit: Long, stopAtDeclared: Boolean): Read {
+    private fun readInternal(src: Source, concat: Long, e: Entry, limit: Long, stopAtDeclared: Boolean, meter: Meter?): Read {
         if (e.isEncrypted) return Read.Unreadable                    // chiffré
         if (e.size < 0 || e.compressedSize < 0) return Read.Unreadable
         if (e.size > limit) return Read.TooLarge
@@ -277,6 +293,7 @@ object ZipCentralReader {
         val bytes: ByteArray = when (e.method) {
             0 -> {
                 if (e.compressedSize != e.size) return Read.Unreadable
+                meter?.let { it.bytes += e.compressedSize }
                 readBytes(src, start, e.compressedSize.toInt()) ?: return Read.Unreadable
             }
             8 -> {
@@ -299,6 +316,7 @@ object ZipCentralReader {
                         }
                         val n = inf.inflate(buf)
                         if (n > 0) {
+                            meter?.let { it.bytes += n }
                             total += n
                             if (total > limit) return Read.TooLarge
                             if (stopAtDeclared && total > e.size) return Read.Unreadable

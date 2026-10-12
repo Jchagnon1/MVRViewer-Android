@@ -42,6 +42,13 @@ object MaZipImport {
     /** Séparateur des noms affichés : `ext.zip › dossier/int.zip › fichier.xml`. */
     const val SEP = " › "
 
+    /**
+     * Noms des entrées sans drapeau UTF-8 : UTF-8 s'il est valide, sinon CP437 (§5.2, web
+     * `zipEntryName`). Règle propre aux archives de profils MA (et au routeur qui les
+     * reconnaît) : les .mvr et .gdtf gardent la lecture Latin-1 de fflate.
+     */
+    val NAMES = ZipCentralReader.NameRule.UTF8_OR_CP437
+
     val PROFILE_EXTENSIONS = setOf("xml", "xmlp", "gdtf", "pxml")
 
     enum class Kind {
@@ -239,7 +246,8 @@ object MaZipImport {
         val magic = ByteArray(2)
         if (!src.readAt(0, magic, 0, 2) || magic[0] != 'P'.code.toByte() || magic[1] != 'K'.code.toByte())
             return failed(ArchiveError.Unreadable)
-        val listing = ZipCentralReader.list(src, limits.entries + 1) as? ZipCentralReader.Listing.Ok
+        // Noms sans drapeau UTF-8 : UTF-8 valide, sinon CP437 (§5.2, règle propre aux profils MA).
+        val listing = ZipCentralReader.list(src, limits.entries + 1, NAMES) as? ZipCentralReader.Listing.Ok
             ?: return failed(ArchiveError.Unreadable)
 
         val candidates = ArrayList<Candidate>()
@@ -269,7 +277,7 @@ object MaZipImport {
                         ZipCentralReader.Read.Unreadable -> errors.add(nd to ArchiveError.Unreadable)
                         is ZipCentralReader.Read.Ok -> {
                             val nl = if (r.bytes.size >= 2 && r.bytes[0] == 'P'.code.toByte() && r.bytes[1] == 'K'.code.toByte())
-                                ZipCentralReader.list(ZipCentralReader.ByteSource(r.bytes), limits.entries - count + 1) as? ZipCentralReader.Listing.Ok
+                                ZipCentralReader.list(ZipCentralReader.ByteSource(r.bytes), limits.entries - count + 1, NAMES) as? ZipCentralReader.Listing.Ok
                             else null
                             if (nl == null) errors.add(nd to ArchiveError.Unreadable)
                             else {

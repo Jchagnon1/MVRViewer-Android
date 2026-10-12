@@ -71,7 +71,8 @@ object IncomingFileRouter {
 
     private fun listing(zip: () -> ZipCentralReader.Source?): Pair<ZipCentralReader.Source, ZipCentralReader.Listing.Ok>? {
         val src = runCatching { zip() }.getOrNull() ?: return null
-        val l = ZipCentralReader.list(src, MaZipImport.MAX_ENTRIES + 1) as? ZipCentralReader.Listing.Ok ?: return null
+        // Mêmes noms que l'import MA : le routeur reconnaît ses candidats avec son classement.
+        val l = ZipCentralReader.list(src, MaZipImport.MAX_ENTRIES + 1, MaZipImport.NAMES) as? ZipCentralReader.Listing.Ok ?: return null
         return src to l
     }
 

@@ -257,7 +257,8 @@ class MaZipImportTest {
      * l'oracle. Avant : Latin-1 sans drapeau, « Ã‰clairage@Dimmer@RÃ©mi.xml ».
      */
     @Test fun entryNamesUtf8WhenValidElseCp437() {
-        val l = ZipCentralReader.list(res("zips/accented_names.zip").readBytes()) as ZipCentralReader.Listing.Ok
+        val zip = ZipCentralReader.ByteSource(res("zips/accented_names.zip").readBytes())
+        val l = ZipCentralReader.list(zip, names = MaZipImport.NAMES) as ZipCentralReader.Listing.Ok
         assertEquals(
             listOf(
                 "Profils/Éclairage@Dimmer@Rémi.xml" to 0,      // UTF-8 SANS drapeau

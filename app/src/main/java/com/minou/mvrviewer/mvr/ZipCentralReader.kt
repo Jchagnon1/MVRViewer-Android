@@ -85,7 +85,7 @@ object ZipCentralReader {
     }
 
     class Entry internal constructor(
-        /** Nom tel qu'écrit dans le répertoire central, décodé par [entryName]. */
+        /** Nom tel qu'écrit dans le répertoire central, décodé selon la [NameRule] de la lecture. */
         val name: String,
         internal val rawName: ByteArray,
         internal val flags: Int,
@@ -110,15 +110,39 @@ object ZipCentralReader {
         object Broken : Listing()
     }
 
-    /** Répertoire central COMPLET (une entrée centrale malformée → [Listing.Broken], comme Python). */
+    /**
+     * Décodage des noms d'entrées SANS drapeau UTF-8 (bit 11 du drapeau général) ; avec ce
+     * drapeau, le nom est toujours lu en UTF-8.
+     */
+    enum class NameRule {
+        /**
+         * ISO-8859-1 : chaque octet est son point de code. Lecture des .mvr, .gdtf et modèles
+         * 3D, comme fflate sur le web et comme Android avant la bibliothèque MA. Un .mvr qui
+         * nomme « modèle.3ds » en Latin-1 (sans drapeau) retrouve ainsi son entrée par le repli
+         * de [MvrParser] ; en CP437, 0xE8 donnerait « Φ » et l'entrée serait introuvable.
+         */
+        LATIN1,
+
+        /**
+         * UTF-8 s'il est valide, sinon CP437 ([entryName]) : RÉSERVÉ aux archives `.zip` de
+         * profils MA (import et routeur, SPEC-ma-gdtfshare.md §5.2), comme le web `zipEntryName`.
+         */
+        UTF8_OR_CP437
+    }
+
+    /**
+     * Répertoire central COMPLET (une entrée centrale malformée → [Listing.Broken], comme
+     * Python) ; noms sans drapeau UTF-8 lus en Latin-1 ([NameRule.LATIN1]).
+     */
     fun list(data: ByteArray): Listing = list(ByteSource(data))
 
     /**
      * Répertoire central d'une [Source] ; au plus `maxEntries` entrées (au-delà : liste
-     * tronquée, `truncated` vrai — le reste n'est même pas lu).
+     * tronquée, `truncated` vrai — le reste n'est même pas lu). `names` : décodage des noms
+     * sans drapeau UTF-8 (Latin-1 par défaut ; [NameRule.UTF8_OR_CP437] pour les profils MA).
      */
-    fun list(src: Source, maxEntries: Int = Int.MAX_VALUE): Listing = try {
-        listInternal(src, maxEntries) ?: Listing.Broken
+    fun list(src: Source, maxEntries: Int = Int.MAX_VALUE, names: NameRule = NameRule.LATIN1): Listing = try {
+        listInternal(src, maxEntries, names) ?: Listing.Broken
     } catch (_: Exception) {
         Listing.Broken
     } catch (_: OutOfMemoryError) {
@@ -194,8 +218,9 @@ object ZipCentralReader {
      * drapeau UTF-8 (bit 11) → UTF-8 ; SANS lui → UTF-8 s'il est VALIDE (« Compresser » du
      * Finder et `zip` d'Info-ZIP sur macOS écrivent de l'UTF-8 sans poser le drapeau), sinon
      * CP437 (page de code d'origine du format : archives DOS/Windows anciennes). Les noms
-     * ASCII sont identiques dans les trois cas. Avant : Latin-1 sans drapeau, d'où
-     * « Ã‰clairage@Dimmer@RÃ©mi.xml » (nom ET auteur faux dans la bibliothèque).
+     * ASCII sont identiques dans les trois cas. Règle [NameRule.UTF8_OR_CP437], réservée aux
+     * profils MA (Latin-1 y donnait « Ã‰clairage@Dimmer@RÃ©mi.xml » : nom ET auteur faux dans
+     * la bibliothèque) ; les .mvr et .gdtf gardent [NameRule.LATIN1], comme le web.
      */
     fun entryName(raw: ByteArray, flags: Int): String {
         if (flags and 0x800 != 0) return String(raw, Charsets.UTF_8)
@@ -253,7 +278,7 @@ object ZipCentralReader {
         return if (src.readAt(pos, b, 0, len)) b else null
     }
 
-    private fun listInternal(src: Source, maxEntries: Int): Listing.Ok? {
+    private fun listInternal(src: Source, maxEntries: Int, names: NameRule): Listing.Ok? {
         val size = src.size
         if (size < 22) return null
         // Fin de répertoire central : dans les 22 + 65 535 derniers octets.
@@ -317,7 +342,11 @@ object ZipCentralReader {
                 }
                 x += 4 + len
             }
-            out.add(Entry(entryName(raw, flags), raw, flags, method, crc, csize, usize, offset))
+            val name = when (names) {
+                NameRule.UTF8_OR_CP437 -> entryName(raw, flags)
+                NameRule.LATIN1 -> if (flags and 0x800 != 0) String(raw, Charsets.UTF_8) else String(raw, Charsets.ISO_8859_1)
+            }
+            out.add(Entry(name, raw, flags, method, crc, csize, usize, offset))
             p += 46L + varLen + commentLen
         }
         // Comme Python, c'est la TAILLE du répertoire qui borne la lecture, pas le décompte.

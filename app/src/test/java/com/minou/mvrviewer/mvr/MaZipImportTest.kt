@@ -248,4 +248,79 @@ class MaZipImportTest {
         }
         assertEquals(0, u16(byteArrayOf(0, 0), 0))
     }
+
+    // ---- Écarts relevés par la relecture du web (SPEC-ma-gdtfshare.md §5.2, « à aligner ») ----
+
+    /**
+     * Noms des entrées : drapeau UTF-8 (bit 11) → UTF-8 ; SANS lui → UTF-8 s'il est VALIDE
+     * (« Compresser » du Finder, `zip` d'Info-ZIP sur macOS), sinon CP437 — comme le web et
+     * l'oracle. Avant : Latin-1 sans drapeau, « Ã‰clairage@Dimmer@RÃ©mi.xml ».
+     */
+    @Test fun entryNamesUtf8WhenValidElseCp437() {
+        val l = ZipCentralReader.list(res("zips/accented_names.zip").readBytes()) as ZipCentralReader.Listing.Ok
+        assertEquals(
+            listOf(
+                "Profils/Éclairage@Dimmer@Rémi.xml" to 0,      // UTF-8 SANS drapeau
+                "Profils/Café@Break@Noël.xml" to 0,            // CP437 sans drapeau
+                "Profils/Zoé@LED Bar@Hélène.xml" to 1          // UTF-8 avec drapeau
+            ),
+            l.entries.map { it.name to (if (it.flags and 0x800 != 0) 1 else 0) }
+        )
+        assertEquals("Rémi.xml", ZipCentralReader.entryName("Rémi.xml".toByteArray(), 0))
+        assertEquals("Noëlé", ZipCentralReader.entryName(byteArrayOf(0x4e, 0x6f, 0x89.toByte(), 0x6c, 0x82.toByte()), 0))
+        assertEquals("a.xml", ZipCentralReader.entryName("a.xml".toByteArray(), 0))
+        assertEquals("Zoé", ZipCentralReader.entryName("Zoé".toByteArray(), 0x800))
+        // UTF-8 tronqué (dernier octet manquant) : invalide → CP437, jamais d'exception.
+        assertEquals("R\u251c", ZipCentralReader.entryName(byteArrayOf(0x52, 0xC3.toByte()), 0))
+        // Table CP437 entière (0x80-0xFF : jamais de l'UTF-8 valide), contre le jeu de la JVM
+        // quand il existe (il n'est pas garanti sur Android, d'où la table embarquée).
+        val high = ByteArray(128) { (it + 0x80).toByte() }
+        val ibm437 = runCatching { java.nio.charset.Charset.forName("IBM437") }.getOrNull()
+        if (ibm437 != null) assertEquals(String(high, ibm437), ZipCentralReader.entryName(high, 0))
+        assertEquals('\u00c7', ZipCentralReader.entryName(high, 0).first())
+        assertEquals('\u00a0', ZipCentralReader.entryName(high, 0).last())
+    }
+
+    /**
+     * UNE seule erreur `zipLimit` par archive : plafond d'entrées signalé à la préparation,
+     * puis plafond décompressé atteint à la lecture → arrêt SANS seconde erreur (avant : une
+     * 2ᵉ erreur « après 1 fichiers »). Même scénario que le web (5 entrées, 1000 octets).
+     */
+    @Test fun oneZipLimitErrorPerArchive() {
+        val d = res("zips/ma_profiles.zip").readBytes()
+        val limits = MaZipImport.Limits(totalBytes = 1000, entries = 5)
+        val p = MaZipImport.plan("ma_profiles.zip", ZipCentralReader.ByteSource(d), limits = limits)
+        assertEquals(listOf("ma_profiles.zip" to MaZipImport.ArchiveError.Limit(5)), p.errors)
+        assertEquals(3, p.candidates.size)                              // 3 profils réels retenus
+        val session = p.session!!
+        assertEquals(List(3) { MaZipImport.EntryRead.Skipped }, p.candidates.map { session.read(it) })
+        // Jamais signalée (préparation sans arrêt) : `zipLimit` UNE fois, puis sauté.
+        val flat = zip("a.xml" to dimmer, "b.xml" to res("synthetic/ma2_break2.xml").readBytes())
+        val q = MaZipImport.plan("flat.zip", ZipCentralReader.ByteSource(flat), limits = MaZipImport.Limits(totalBytes = 1000))
+        assertTrue(q.errors.isEmpty())
+        val qs = q.session!!
+        assertEquals(MaZipImport.EntryRead.Limit(0), qs.read(q.candidates[0]))
+        assertEquals(MaZipImport.EntryRead.Skipped, qs.read(q.candidates[1]))
+    }
+
+    /** Session fermée : imbriquée, source et table rendues ; tout candidat est ensuite sauté. */
+    @Test fun closedSessionReleasesEverything() {
+        val inner = zip("p.xml" to dimmer)
+        var srcClosed = false
+        val bytes = zip("in.zip" to inner, "z.xml" to res("synthetic/ma2_break2.xml").readBytes())
+        val src = object : ZipCentralReader.Source, java.io.Closeable {
+            val inMemory = ZipCentralReader.ByteSource(bytes)
+            override val size get() = inMemory.size
+            override fun readAt(pos: Long, dst: ByteArray, off: Int, len: Int) = inMemory.readAt(pos, dst, off, len)
+            override fun close() { srcClosed = true }
+        }
+        val p = MaZipImport.plan("x.zip", src)
+        val s = p.session!!
+        assertTrue(s.read(p.candidates[0]) is MaZipImport.EntryRead.Ok)   // p.xml de l'imbriquée
+        assertTrue(s.holdsNested)
+        s.close()
+        assertTrue(s.closed); assertTrue(srcClosed); assertTrue(!s.holdsNested)
+        assertEquals(MaZipImport.EntryRead.Skipped, s.read(p.candidates[1]))
+        s.close()                                                       // idempotent
+    }
 }

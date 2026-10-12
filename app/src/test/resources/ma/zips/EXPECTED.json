@@ -32,6 +32,27 @@
   "errors": 7,
   "protected": 1
  },
+ "accented_names.zip": {
+  "added": 3,
+  "duplicates": 0,
+  "ignored": 0,
+  "errors": 0,
+  "protected": 0,
+  "entries": [
+   {
+    "fileName": "Éclairage@Dimmer@Rémi.xml",
+    "author": "Rémi"
+   },
+   {
+    "fileName": "Café@Break@Noël.xml",
+    "author": "Noël"
+   },
+   {
+    "fileName": "Zoé@LED Bar@Hélène.xml",
+    "author": "Hélène"
+   }
+  ]
+ },
  "no_profiles.zip": {
   "added": 0,
   "duplicates": 0,

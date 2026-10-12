@@ -141,6 +141,11 @@ interface MaImportSource {
     fun read(): ByteArray
     /** Nom affiché dans le bilan (`archive.zip › dossier/fichier.xml` pour une entrée d'archive). */
     val displayName: String get() = name
+    /**
+     * Appelé par l'import quand il en a FINI avec cette source (lue, refusée ou sautée).
+     * Le DERNIER candidat d'une archive y ferme l'archive (voir [ZipEntryImportSource]).
+     */
+    fun finished() {}
 }
 
 /**
@@ -157,7 +162,9 @@ class MaImportException(
 /**
  * Lot prêt à importer : candidats (archives développées), fichiers ignorés, erreurs
  * trouvées en préparant le lot (archives illisibles, vides, trop grosses…), et le
- * ménage à faire à la fin (fermer les archives, effacer les copies temporaires).
+ * ménage de fin de lot (fermer les archives, effacer les copies temporaires) — FILET
+ * seulement : chaque archive est déjà fermée dès son dernier candidat traité
+ * ([MaImportSource.finished]) ; il ne reste que celles d'un import arrêté avant.
  * `cancelled` : préparation interrompue (« Arrêter », écran quitté) — le bilan dit « arrêté ».
  *
  * Un lot de plusieurs fichiers ou archives s'assemble avec [Builder] (listes accumulées,
@@ -185,7 +192,7 @@ data class MaImportPlan(
         fun addError(name: String, e: MaImportError) = apply { errors.add(name to e) }
         fun markCancelled() = apply { cancelled = true }
 
-        /** Ajoute un lot déjà préparé (archive développée) ; son ménage est GARDÉ pour la fin. */
+        /** Ajoute un lot déjà préparé (archive développée) ; son ménage est GARDÉ (filet de fin de lot). */
         fun add(p: MaImportPlan) = apply {
             sources.addAll(p.sources); ignored += p.ignored; errors.addAll(p.errors)
             cleanups.add(p.cleanup)
@@ -205,20 +212,46 @@ class FileImportSource(private val file: File, override val name: String = file.
     override fun read(): ByteArray = file.readBytes()
 }
 
-/** Entrée candidate d'une archive `.zip` (lue en mémoire par la session de l'archive). */
+/**
+ * Entrée candidate d'une archive `.zip` (lue en mémoire par la session de l'archive).
+ * `release` (porté par le DERNIER candidat de l'archive seulement) : ménage de l'archive —
+ * session fermée (imbriquée, source, table centrale rendues) et copie temporaire effacée —
+ * fait dès que ce candidat est traité ([finished]), pas à la fin du lot (SPEC-ma-gdtfshare.md
+ * §5.2 : pic mémoire = une archive imbriquée + une entrée, même pour un lot de plusieurs
+ * archives). Une fois traitée, la source lâche aussi son candidat (table de l'imbriquée).
+ */
 class ZipEntryImportSource(
-    private val candidate: MaZipImport.Candidate,
-    private val session: MaZipImport.Session
+    candidate: MaZipImport.Candidate,
+    session: MaZipImport.Session,
+    private var release: (() -> Unit)? = null
 ) : MaImportSource {
-    override val name: String get() = candidate.baseName
-    override val size: Long? get() = candidate.declaredSize
-    override val displayName: String get() = candidate.displayName
-    override fun read(): ByteArray = when (val r = session.read(candidate)) {
-        is MaZipImport.EntryRead.Ok -> r.bytes
-        is MaZipImport.EntryRead.TooLarge -> throw MaImportException(MaImportError.TooLarge(r.megabytes))
-        MaZipImport.EntryRead.Unreadable -> throw MaImportException(MaImportError.Unreadable)
-        is MaZipImport.EntryRead.Limit -> throw MaImportException(MaImportError.ZipLimit(r.count), session.archiveName)
-        MaZipImport.EntryRead.Skipped -> throw MaImportException(null, skip = true)
+    override val name: String = candidate.baseName
+    override val size: Long? = candidate.declaredSize
+    override val displayName: String = candidate.displayName
+    private var candidate: MaZipImport.Candidate? = candidate
+    /** Session de l'archive, jusqu'à ce que la source soit traitée (lue par les tests). */
+    internal var session: MaZipImport.Session? = session
+        private set
+
+    override fun read(): ByteArray {
+        val c = candidate
+        val s = session
+        if (c == null || s == null) throw MaImportException(null, skip = true)
+        return when (val r = s.read(c)) {
+            is MaZipImport.EntryRead.Ok -> r.bytes
+            is MaZipImport.EntryRead.TooLarge -> throw MaImportException(MaImportError.TooLarge(r.megabytes))
+            MaZipImport.EntryRead.Unreadable -> throw MaImportException(MaImportError.Unreadable)
+            is MaZipImport.EntryRead.Limit -> throw MaImportException(MaImportError.ZipLimit(r.count), s.archiveName)
+            MaZipImport.EntryRead.Skipped -> throw MaImportException(null, skip = true)
+        }
+    }
+
+    override fun finished() {
+        candidate = null
+        session = null
+        val r = release ?: return
+        release = null
+        runCatching { r() }
     }
 }
 
@@ -379,7 +412,9 @@ class MaLibraryStore(private val root: File) {
     }
 
     /**
-     * [import] d'un lot préparé, puis ménage (archives fermées, copies temporaires effacées).
+     * [import] d'un lot préparé. Chaque archive est fermée dès son dernier candidat traité ;
+     * le ménage de fin de lot n'est qu'un filet (archives d'un import arrêté avant, copies
+     * temporaires).
      * Préparation interrompue ([MaImportPlan.cancelled]) : rien n'est lu, le bilan dit « arrêté ».
      */
     fun import(
@@ -421,46 +456,53 @@ class MaLibraryStore(private val root: File) {
         onProgress(0, sources.size)
         for ((i, src) in sources.withIndex()) {
             if (isCancelled()) { stopped = true; break }
-            val declared = src.size
-            if (declared != null && declared > MaProfileReader.MAX_FILE_BYTES) {
-                errors.add(src.displayName to MaImportError.TooLarge(megabytes(declared)))
-            } else if (src.name.lowercase().endsWith(".pxml")) {
-                // Protégé : refusé sans lire ni décompresser (le lecteur dirait la même chose).
-                errors.add(src.displayName to MaImportError.Protected)
-            } else {
-                var failure: Pair<String, MaImportError>? = null
-                val bytes = try {
-                    src.read()
-                } catch (e: MaImportException) {
-                    if (!e.skip && e.error != null) failure = (e.displayName ?: src.displayName) to e.error
-                    null
-                } catch (e: Exception) {
-                    failure = src.displayName to MaImportError.Io
-                    null
-                }
-                when {
-                    bytes == null -> failure?.let { errors.add(it) }
-                    bytes.size > MaProfileReader.MAX_FILE_BYTES ->
-                        errors.add(src.displayName to MaImportError.TooLarge(megabytes(bytes.size.toLong())))
-                    else -> {
-                        val id = ContentHash.sha256Hex(bytes)
-                        if (id in seen) dupes++
-                        else when (val r = MaProfileReader.read(bytes, src.name)) {
-                            is MaProfileReader.Result.Error -> errors.add(src.displayName to MaImportError.of(r.code))
-                            is MaProfileReader.Result.Ok -> {
-                                val p = r.profile
-                                val has3D = p.format == "gdtf" && runCatching { GdtfLoader.hasThreeDModel(bytes) }.getOrDefault(false)
-                                if (has3D) runCatching {
-                                    filesDir().mkdirs(); gdtfFile(id).writeBytes(bytes)
+            try {
+                val declared = src.size
+                if (declared != null && declared > MaProfileReader.MAX_FILE_BYTES) {
+                    errors.add(src.displayName to MaImportError.TooLarge(megabytes(declared)))
+                } else if (src.name.lowercase().endsWith(".pxml")) {
+                    // Protégé : refusé sans lire ni décompresser (le lecteur dirait la même chose).
+                    errors.add(src.displayName to MaImportError.Protected)
+                } else {
+                    var failure: Pair<String, MaImportError>? = null
+                    val bytes = try {
+                        src.read()
+                    } catch (e: MaImportException) {
+                        if (!e.skip && e.error != null) failure = (e.displayName ?: src.displayName) to e.error
+                        null
+                    } catch (e: Exception) {
+                        failure = src.displayName to MaImportError.Io
+                        null
+                    }
+                    when {
+                        bytes == null -> failure?.let { errors.add(it) }
+                        bytes.size > MaProfileReader.MAX_FILE_BYTES ->
+                            errors.add(src.displayName to MaImportError.TooLarge(megabytes(bytes.size.toLong())))
+                        else -> {
+                            val id = ContentHash.sha256Hex(bytes)
+                            if (id in seen) dupes++
+                            else when (val r = MaProfileReader.read(bytes, src.name)) {
+                                is MaProfileReader.Result.Error -> errors.add(src.displayName to MaImportError.of(r.code))
+                                is MaProfileReader.Result.Ok -> {
+                                    val p = r.profile
+                                    val has3D = p.format == "gdtf" && runCatching { GdtfLoader.hasThreeDModel(bytes) }.getOrDefault(false)
+                                    if (has3D) runCatching {
+                                        filesDir().mkdirs(); gdtfFile(id).writeBytes(bytes)
+                                    }
+                                    pending.add(MaLibraryEntry(id, p.format, p.manufacturer, p.fixture, p.shortName, p.author,
+                                        p.modes, src.name, bytes.size.toLong(), now(), has3D))
+                                    seen.add(id); added++
+                                    if (pending.size >= 100) { val merged = appendToIndex(pending); pending.clear(); onBatch(merged) }
                                 }
-                                pending.add(MaLibraryEntry(id, p.format, p.manufacturer, p.fixture, p.shortName, p.author,
-                                    p.modes, src.name, bytes.size.toLong(), now(), has3D))
-                                seen.add(id); added++
-                                if (pending.size >= 100) { val merged = appendToIndex(pending); pending.clear(); onBatch(merged) }
                             }
                         }
                     }
                 }
+            } finally {
+                // Source traitée (lue, refusée ou sautée) : le DERNIER candidat d'une archive
+                // ferme ici son archive (imbriquée, source, table, copie temporaire), pas à la
+                // fin du lot.
+                runCatching { src.finished() }
             }
             onProgress(i + 1, sources.size)
         }
@@ -485,21 +527,38 @@ class MaLibraryStore(private val root: File) {
         /**
          * Développe une archive (profondeur 0) déjà ouverte : candidats, ignorés, erreurs
          * d'archive (nommées d'après `archiveName`) ; `afterClose` est appelé au ménage
-         * (copie temporaire à effacer).
+         * (copie temporaire à effacer). Le ménage de l'archive est fait UNE fois, au plus
+         * tôt : par son DERNIER candidat dès qu'il est traité ([ZipEntryImportSource]), ou
+         * tout de suite si elle n'a aucun candidat (sa source est déjà fermée par la
+         * préparation) ; le ménage du lot n'est qu'un filet. `limits` : plafonds (tests).
          */
         fun planArchive(
             archiveName: String,
             src: ZipCentralReader.Source,
             isCancelled: () -> Boolean = { false },
+            limits: MaZipImport.Limits = MaZipImport.Limits(),
             afterClose: () -> Unit = {}
         ): MaImportPlan {
-            val p = MaZipImport.plan(archiveName, src, isCancelled)
+            val p = MaZipImport.plan(archiveName, src, isCancelled, limits)
             val session = p.session
+            var released = false
+            val release: () -> Unit = {
+                if (!released) {
+                    released = true
+                    runCatching { session?.close() }
+                    runCatching { afterClose() }
+                }
+            }
+            val sources = if (session == null) emptyList() else {
+                val last = p.candidates.lastIndex
+                p.candidates.mapIndexed { i, c -> ZipEntryImportSource(c, session, if (i == last) release else null) }
+            }
+            if (sources.isEmpty()) release()
             return MaImportPlan(
-                sources = if (session == null) emptyList() else p.candidates.map { ZipEntryImportSource(it, session) },
+                sources = sources,
                 ignored = p.ignored,
                 errors = p.errors.map { (n, e) -> n to MaImportError.of(e) },
-                cleanup = { runCatching { session?.close() }; afterClose() },
+                cleanup = release,
                 cancelled = p.cancelled
             )
         }
@@ -509,12 +568,15 @@ class MaLibraryStore(private val root: File) {
             file: File,
             archiveName: String = file.name,
             deleteAfter: Boolean = false,
-            isCancelled: () -> Boolean = { false }
+            isCancelled: () -> Boolean = { false },
+            limits: MaZipImport.Limits = MaZipImport.Limits()
         ): MaImportPlan {
             val src = runCatching { ZipCentralReader.FileSource.open(file) }.getOrNull()
-                ?: return MaImportPlan(emptyList(), 0, listOf(archiveName to MaImportError.ZipUnreadable),
-                    cleanup = { if (deleteAfter) file.delete() })
-            return planArchive(archiveName, src, isCancelled) { if (deleteAfter) file.delete() }
+            if (src == null) {
+                if (deleteAfter) file.delete()          // rien à lire : copie effacée tout de suite
+                return MaImportPlan(emptyList(), 0, listOf(archiveName to MaImportError.ZipUnreadable))
+            }
+            return planArchive(archiveName, src, isCancelled, limits) { if (deleteAfter) file.delete() }
         }
 
         /**

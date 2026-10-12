@@ -107,7 +107,7 @@ object MaZipImport {
     /**
      * Plan d'une archive : candidats (dans l'ordre du répertoire central, imbriquées
      * développées à leur place), ignorés, erreurs d'archive, et la [Session] qui lira les
-     * candidats (à fermer en fin d'import).
+     * candidats (à fermer dès le dernier candidat traité).
      */
     class Plan(
         val archiveName: String,
@@ -127,31 +127,55 @@ object MaZipImport {
         object Unreadable : EntryRead()
         /** Garde-fou 2 Gio atteint : lecture de l'archive ARRÊTÉE (erreur à nommer d'après l'archive). */
         data class Limit(val count: Int) : EntryRead()
-        /** Archive déjà arrêtée : candidat sauté sans bruit. */
+        /** Archive déjà arrêtée (garde-fou, déjà signalé) ou fermée : candidat sauté sans bruit. */
         object Skipped : EntryRead()
     }
 
-    /** Lecture des candidats d'UNE archive ; garde UNE archive imbriquée en mémoire. */
+    /**
+     * Lecture des candidats d'UNE archive ; garde UNE archive imbriquée en mémoire, jusqu'à
+     * [close] — que l'import fait dès le DERNIER candidat de l'archive traité : dans un lot
+     * de plusieurs archives, le pic reste « une archive imbriquée + une entrée » (§5.2) au
+     * lieu de croître d'une imbriquée (jusqu'à 64 Mo) par archive jusqu'à la fin du lot.
+     * `limitReported` : la préparation ([plan]) a déjà signalé `zipLimit` pour cette
+     * archive — UNE seule erreur d'archive : le plafond de 2 Gio atteint ensuite arrête la
+     * lecture SANS nouvelle erreur.
+     */
     class Session internal constructor(
         val archiveName: String,
-        private val src: ZipCentralReader.Source,
-        private val listing: ZipCentralReader.Listing.Ok,
+        src: ZipCentralReader.Source,
+        listing: ZipCentralReader.Listing.Ok,
         decompressedSoFar: Long,
-        private val limits: Limits = DEFAULT_LIMITS
+        private val limits: Limits = DEFAULT_LIMITS,
+        limitReported: Boolean = false
     ) : Closeable {
+        // Rendues par close() (source, table centrale, imbriquée) : plus rien ne les retient.
+        private var src: ZipCentralReader.Source? = src
+        private var listing: ZipCentralReader.Listing.Ok? = listing
         /** Octets RÉELLEMENT décompressés pour cette archive (tables d'imbriquées comprises), quelle que soit l'issue. */
         private val meter = ZipCentralReader.Meter().also { it.bytes = decompressedSoFar }
         private var stopped = false
+        private var limitReported = limitReported
         private var currentNested: Nested? = null
         private var nestedSource: ZipCentralReader.ByteSource? = null
 
         /** Total décompressé jusqu'ici (garde-fou 2 Gio ; lu par les tests). */
         val decompressed: Long get() = meter.bytes
 
+        /** Fermée : source, table centrale et imbriquée rendues (lu par les tests). */
+        var closed = false
+            private set
+
+        /** Une archive imbriquée est-elle gardée en mémoire ? (lu par les tests) */
+        val holdsNested: Boolean get() = nestedSource != null
+
         fun read(c: Candidate): EntryRead {
-            if (stopped) return EntryRead.Skipped
+            val src = this.src
+            val listing = this.listing
+            if (stopped || src == null || listing == null) return EntryRead.Skipped
             if (meter.bytes + minOf(c.declaredSize, limits.entryBytes) > limits.totalBytes) {
                 stopped = true
+                if (limitReported) return EntryRead.Skipped     // déjà signalée à la préparation
+                limitReported = true
                 return EntryRead.Limit(c.ordinal)
             }
             val (s, l) = if (c.nested == null) src to listing else {
@@ -174,9 +198,12 @@ object MaZipImport {
             }
         }
 
+        /** Rend l'imbriquée, la source (fichier fermé) et la table centrale ; idempotent. */
         override fun close() {
-            currentNested = null; nestedSource = null
-            (src as? Closeable)?.let { runCatching { it.close() } }
+            val s = src
+            closed = true
+            src = null; listing = null; currentNested = null; nestedSource = null
+            (s as? Closeable)?.let { runCatching { it.close() } }
         }
     }
 
@@ -273,6 +300,7 @@ object MaZipImport {
             closeSrc()
             return Plan(archiveName, candidates, ignored, errors, null)
         }
-        return Plan(archiveName, candidates, ignored, errors, Session(archiveName, src, listing, meter.bytes, limits))
+        return Plan(archiveName, candidates, ignored, errors,
+            Session(archiveName, src, listing, meter.bytes, limits, limitReported = limit))
     }
 }

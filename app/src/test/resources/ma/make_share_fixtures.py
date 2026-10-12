@@ -123,6 +123,9 @@ write("zips/no_profiles.zip", zip_bytes([("readme.txt", b"Pas de profil ici.\n")
                                          ("photo.jpg", b"\xff\xd8\xff\xe0" + bytes(64) + b"\xff\xd9")]))
 write("zips/corrupt.zip", b"PK\x03\x04" + bytes(range(200)))
 write("zips/huge_entry.zip", zip_bytes([("huge.xml", b"0" * (65 * 1048576))]))
+# zips/accented_names.zip (§5.2 « Noms des entrées » : UTF-8 SANS drapeau, CP437 sans drapeau,
+# UTF-8 avec drapeau) n'est PAS produit ici : copie conforme du web (make_fixtures.py,
+# SHA-256 dd49a5dc…0d15, vérifiée par MANIFEST.sha256). Son bilan attendu est recopié plus bas.
 
 ZIPS_EXPECTED = {
     "ma_profiles.zip": {"added": 9, "duplicates": 1, "ignored": 3, "errors": 7, "protected": 1, "progressTotal": 17,
@@ -135,6 +138,10 @@ ZIPS_EXPECTED = {
                             "empty": ["ma_profiles.zip › synthetic/ma2_only_virtual.xml"],
                             "protected": ["ma_profiles.zip › synthetic/protected.pxml"]}},
     "ma_profiles.zip#2": {"added": 0, "duplicates": 10, "ignored": 3, "errors": 7, "protected": 1},
+    "accented_names.zip": {"added": 3, "duplicates": 0, "ignored": 0, "errors": 0, "protected": 0,
+                           "entries": [{"fileName": "Éclairage@Dimmer@Rémi.xml", "author": "Rémi"},
+                                       {"fileName": "Café@Break@Noël.xml", "author": "Noël"},
+                                       {"fileName": "Zoé@LED Bar@Hélène.xml", "author": "Hélène"}]},
     "no_profiles.zip": {"added": 0, "duplicates": 0, "ignored": 2, "errors": 1, "protected": 0,
                         "lines": ["no_profiles.zip — Aucun profil MA ni GDTF dans cette archive."]},
     "corrupt.zip": {"added": 0, "duplicates": 0, "ignored": 0, "errors": 1, "protected": 0,

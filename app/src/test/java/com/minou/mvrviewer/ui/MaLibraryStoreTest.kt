@@ -1,6 +1,7 @@
 package com.minou.mvrviewer.ui
 
 import com.minou.mvrviewer.mvr.IncomingFileRouter
+import com.minou.mvrviewer.mvr.MaZipImport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -366,6 +367,92 @@ class MaLibraryStoreTest {
             assertTrue(lib.isEmpty())
             val lines = exp.getJSONArray("lines").let { a -> (0 until a.length()).map { a.getString(it) } }
             assertEquals(name, lines, r.errors.map { (n, e) -> line(n, e) })
+        }
+    }
+
+    /**
+     * Relecture du web (écart 1) — noms accentués SANS drapeau UTF-8 (Finder, Info-ZIP sur
+     * macOS) et en CP437 : nom de l'entrée de bibliothèque ET auteur EXACTS (zips/EXPECTED.json,
+     * oracle) ; avant : « Ã‰clairage@Dimmer@RÃ©mi.xml », auteur « RÃ©mi ».
+     */
+    @Test fun importAccentedNamesArchive() {
+        val (store, _) = tempStore()
+        val exp = zipExpected().getJSONObject("accented_names.zip")
+        val (r, lib, _) = importZip(store, "accented_names.zip")
+        assertEquals(exp.getInt("added"), r.added)
+        assertEquals(exp.getInt("duplicates"), r.duplicates)
+        assertEquals(exp.getInt("ignored"), r.ignored)
+        assertEquals(exp.getInt("errors"), r.errors.size)
+        assertEquals(exp.getInt("protected"), r.protectedCount)
+        val entries = exp.getJSONArray("entries").let { a ->
+            (0 until a.length()).map { a.getJSONObject(it).let { o -> o.getString("fileName") to o.getString("author") } }
+        }
+        assertEquals("Éclairage@Dimmer@Rémi.xml" to "Rémi", entries.first())
+        assertEquals(entries, lib.map { it.fileName to it.author })
+    }
+
+    /**
+     * Relecture du web (écart 3) — UNE seule erreur `zipLimit` par archive : plafond
+     * d'entrées signalé à la préparation, puis plafond décompressé atteint à la lecture →
+     * arrêt SANS seconde ligne « après 1 fichiers » (5 entrées, 1000 octets, comme le web).
+     */
+    @Test fun oneZipLimitLinePerArchive() {
+        val (store, _) = tempStore()
+        val plan = MaLibraryStore.planArchiveFile(fixtures("zips").resolve("ma_profiles.zip"),
+            limits = MaZipImport.Limits(totalBytes = 1000, entries = 5))
+        val (r, lib) = store.import(plan)
+        assertEquals(listOf("ma_profiles.zip — Archive trop grande : lecture arrêtée après 5 fichiers."),
+            r.errors.map { (n, e) -> line(n, e) })
+        assertEquals(0, r.added)
+        assertTrue(lib.isEmpty())
+    }
+
+    /**
+     * Relecture du web (écart 2) — lot de PLUSIEURS archives à imbriquée : chaque archive est
+     * FERMÉE dès son dernier candidat traité (imbriquée rendue, source fermée, copie
+     * temporaire effacée), pas à la fin du lot : au plus UNE imbriquée en mémoire à la fois.
+     */
+    @Test fun eachArchiveIsReleasedAfterItsLastCandidate() {
+        val dir = Files.createTempDirectory("marelease").toFile()
+        try {
+            val dimmer = fixtures("synthetic").resolve("ma2_dimmer.xml").readText()
+            fun variant(i: Int) = dimmer.trimEnd().removeSuffix("</MA>").plus("<!-- $i --></MA>\n").toByteArray()
+            fun zipOf(vararg entries: Pair<String, ByteArray>): ByteArray {
+                val out = java.io.ByteArrayOutputStream()
+                java.util.zip.ZipOutputStream(out).use { z ->
+                    for ((n, d) in entries) { z.putNextEntry(java.util.zip.ZipEntry(n)); z.write(d); z.closeEntry() }
+                }
+                return out.toByteArray()
+            }
+            // Candidats dans l'ordre : aᵢ › nested.zip › p.xml (imbriquée chargée), puis aᵢ › z.xml.
+            val files = (0..2).map { i ->
+                File(dir, "a$i.zip").apply {
+                    writeBytes(zipOf("nested.zip" to zipOf("p.xml" to variant(i), "pad.bin" to ByteArray(200_000)),
+                        "z.xml" to variant(10 + i)))
+                }
+            }
+            val b = MaImportPlan.Builder()
+            for (f in files) b.add(MaLibraryStore.planArchiveFile(f, deleteAfter = true))
+            val plan = b.build()
+            val sessions = plan.sources.mapNotNull { (it as? ZipEntryImportSource)?.session }.distinct()
+            assertEquals(3, sessions.size)
+            class Seen(val done: Int, val holding: Int, val closed: List<Boolean>, val kept: List<Boolean>)
+            val seen = ArrayList<Seen>()
+            val (store, _) = tempStore()
+            val (r, _) = store.import(plan, onProgress = { d, _ ->
+                seen.add(Seen(d, sessions.count { it.holdsNested }, sessions.map { it.closed }, files.map { it.exists() }))
+            })
+            assertEquals(listOf(6, 3, 0), listOf(r.added, r.ignored, r.errors.size))  // 3 pad.bin ignorés
+            assertTrue("au plus une imbriquée gardée : ${seen.map { it.holding }}", seen.all { it.holding <= 1 })
+            val t = true; val f = false
+            val closedAfter = listOf(
+                listOf(f, f, f), listOf(t, f, f), listOf(t, f, f), listOf(t, t, f), listOf(t, t, f), listOf(t, t, t)
+            )
+            assertEquals("fermée dès son dernier candidat", closedAfter, seen.filter { it.done > 0 }.map { it.closed })
+            // La copie temporaire part avec l'archive (fichier effacé dès sa fermeture).
+            assertEquals(closedAfter.map { c -> c.map { !it } }, seen.filter { it.done > 0 }.map { it.kept })
+        } finally {
+            dir.deleteRecursively()
         }
     }
 

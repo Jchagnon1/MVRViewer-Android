@@ -953,8 +953,8 @@ fun PlanScreen(
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
             available = calibration.isCalibrated, checked = options.showSatellite && satelliteCovered,
             onInvoke = {
-                if (satelliteCovered) options.toggleSatelliteByUser()
-                else SatelliteUi.toast(ctxPlan, SatelliteStatus.OutOfCoverage)
+                SatelliteUi.onToolTap(satelliteCovered, options::toggleSatelliteByUser)
+                    ?.let { SatelliteUi.toast(ctxPlan, it) }
             }, inMenu = false))
         add(ToolSpec(ToolId.EXPORT_PDF, stringResource(R.string.tool_export_pdf), Icons.Filled.PictureAsPdf,
             available = true, checked = exportMode, onInvoke = { exportMode = !exportMode }))
@@ -1851,7 +1851,7 @@ fun PlanScreen(
                 // la calibration GPS posée (géo-référence), comme le bouton.
                 showSatelliteToggle = calibration.isCalibrated,
                 satelliteCovered = satelliteCovered,
-                satelliteStatusText = satelliteStatusText(satelliteStatus),
+                satelliteStatus = satelliteStatus,
                 // Coloration câblage (phase 4) : proposée seulement s'il existe un
                 // câblage colorable ; le nav cycle entre les modes disponibles.
                 showColorModeSelector = hasSocaColoring || hasDmxColoring,
@@ -1987,8 +1987,8 @@ fun PlanScreen(
         // Avec lui, la mention OBLIGATOIRE de l'imagerie IGN (bas-droite) ; le
         // curseur est posé juste au-dessus d'elle pour ne jamais la recouvrir.
         val satShown = satellite
-        if (options.showSatellite && satShown != null) {
-            SatelliteAttribution(satShown.year, toolbarLayout, toolsPlan)
+        SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)?.let { credit ->
+            SatelliteAttribution(credit, toolbarLayout, toolsPlan)
             Surface(
                 color = Color.Black.copy(alpha = 0.4f), shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.align(Alignment.BottomCenter)

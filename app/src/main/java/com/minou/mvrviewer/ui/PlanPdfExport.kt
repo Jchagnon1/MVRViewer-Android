@@ -336,9 +336,10 @@ private fun DrawScope.drawPdfPage(
     // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte) dès que le fond est
     // dessiné dans la page : bas-droite de la zone image, 7 pt (même texte qu'à
     // l'écran ; sans année, la variante « (cartes.gouv.fr) » nomme la source).
+    // Même règle que l'écran (SatelliteUi.creditRes) : image dessinée ⇒ mention.
     val sat = src.satellite
-    if (v.showSatellite && sat != null && sat.bitmap.width > 0) {
-        drawSatelliteAttribution(measurer, SatelliteUi.attribution(ctx, sat.year), right, bottom)
+    SatelliteUi.creditRes(v.showSatellite, sat != null && sat.bitmap.width > 0, sat?.year)?.let { (res, args) ->
+        drawSatelliteAttribution(measurer, ctx.getString(res, *args.toTypedArray()), right, bottom)
     }
     drawRect(Color(0xFF888888), topLeft = Offset(left, top), size = Size(cw, ch), style = Stroke(0.8f))
 

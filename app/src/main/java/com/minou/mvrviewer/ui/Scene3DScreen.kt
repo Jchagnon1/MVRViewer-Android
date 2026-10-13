@@ -1902,8 +1902,8 @@ fun Scene3DScreen(
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
             available = calibration?.isCalibrated == true, checked = options.showSatellite && satelliteCovered,
             onInvoke = {
-                if (satelliteCovered) options.toggleSatelliteByUser()
-                else SatelliteUi.toast(ctx3dSat, SatelliteStatus.OutOfCoverage)
+                SatelliteUi.onToolTap(satelliteCovered, options::toggleSatelliteByUser)
+                    ?.let { SatelliteUi.toast(ctx3dSat, it) }
             }, inMenu = false))
         // Taille des étiquettes : cycle petite · moyenne · grande (même action que le
         // menu « Étiquettes »). Dockable ; hors menu « Outils » (déjà dans le menu).
@@ -2026,7 +2026,7 @@ fun Scene3DScreen(
                     showLabelsToggle = true,
                     showSatelliteToggle = calibration?.isCalibrated == true,
                     satelliteCovered = satelliteCovered,
-                    satelliteStatusText = satelliteStatusText(satelliteStatus),
+                    satelliteStatus = satelliteStatus,
                     background = options.background3D,
                     backgroundDefault = BackgroundColorStore.DEFAULT_3D,
                     backgroundPresets = bg3dPresets(),
@@ -2289,8 +2289,8 @@ fun Scene3DScreen(
             // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte), tant que le
             // quad satellite est affiché : bas-droite, au-dessus des barres du bas.
             val satShown = satellite
-            if (options.showSatellite && satShown != null) {
-                SatelliteAttribution(satShown.year, toolbarLayout, tools3D)
+            SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)?.let { credit ->
+                SatelliteAttribution(credit, toolbarLayout, tools3D)
             }
 
             // Cote de la mesure (bas-centre) : le chiffre est ici plutôt que sur

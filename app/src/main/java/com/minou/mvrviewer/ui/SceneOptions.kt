@@ -246,9 +246,9 @@ fun SceneOptionsMenu(
     // Fond IGN = France seulement : hors couverture, l'interrupteur reste VISIBLE
     // mais désactivé (le message d'état dit pourquoi).
     satelliteCovered: Boolean = true,
-    // Ligne d'état sous l'interrupteur (téléchargement, hors couverture, pas
-    // d'imagerie, erreur) ; null = rien à dire.
-    satelliteStatusText: String? = null,
+    // Statut du fond : ligne d'état sous l'interrupteur (téléchargement, pas
+    // d'imagerie, erreur), cf. SatelliteUi.menuRow.
+    satelliteStatus: SatelliteStatus = SatelliteStatus.Idle,
     // Section « Couleur du fond » : activée quand la vue fournit sa couleur
     // courante + un setter. Presets = (nom, ARGB). null → section masquée.
     background: Color? = null,
@@ -327,16 +327,17 @@ fun SceneOptionsMenu(
         }
         if (showSatelliteToggle) {
             HorizontalDivider()
-            check(stringResource(R.string.opt_satellite_map), options.showSatellite && satelliteCovered,
-                enabled = satelliteCovered) { options.toggleSatelliteByUser() }
-            // Hors couverture, le message le dit TOUJOURS (même réglage éteint) :
-            // c'est lui qui explique l'interrupteur grisé.
-            val satLine = if (!satelliteCovered) stringResource(R.string.sat_out_of_coverage) else satelliteStatusText
-            satLine?.let { msg ->
-                Text(msg, style = MaterialTheme.typography.bodySmall, color = Color(0xFF888888),
+            // Hors couverture : grisé, jamais coché, et le message le dit TOUJOURS
+            // (même réglage éteint) : c'est lui qui explique le grisé.
+            val satRow = SatelliteUi.menuRow(satelliteCovered, options.showSatellite, satelliteStatus)
+            check(stringResource(R.string.opt_satellite_map), satRow.checked,
+                enabled = satRow.enabled) { options.toggleSatelliteByUser() }
+            satRow.message?.let { (res, args) ->
+                Text(stringResource(res, *args.toTypedArray()), style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF888888),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).widthIn(max = 260.dp))
             }
-            if (options.showSatellite && satelliteCovered) {
+            if (satRow.opacity) {
                 // Opacité : curseur compact dans le menu (le glissé horizontal ne
                 // gêne pas le défilement vertical du menu).
                 Row(

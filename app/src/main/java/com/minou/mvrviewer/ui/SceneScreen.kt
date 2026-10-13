@@ -310,9 +310,7 @@ fun SceneScreen(
     // sans réseau). Les ancres ne sont pas observables : la lecture de calibTick
     // (chaque changement de calibration) et de `restored` (ancres relues du projet)
     // abonne ce calcul aux deux moments où elles changent.
-    val satelliteCovered = (calibTick to restored).let {
-        calibration.anchors.firstOrNull()?.let { a -> com.minou.mvrviewer.mvr.ignCovers(a.latitude, a.longitude) } == true
-    }
+    val satelliteCovered = (calibTick to restored).let { SatelliteUi.covered(calibration) }
     // Service par show : ses mémoires (URL « vide », échec récent) vivent avec lui.
     val satService = remember(scene) {
         val version = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull()
@@ -323,45 +321,26 @@ fun SceneScreen(
     var satActivationHandled by remember(scene) { mutableIntStateOf(options.satelliteActivations) }
     LaunchedEffect(options.showSatellite, calibTick, referencePlan, options.satelliteActivations) {
         val activation = options.satelliteActivations
-        val userAsked = activation != satActivationHandled
-        if (!options.showSatellite || !calibration.isCalibrated) {
-            satellite = null; satelliteStatus = SatelliteStatus.Idle
-            satActivationHandled = activation
-            return@LaunchedEffect
-        }
-        val a0 = calibration.anchors.first()
-        if (!com.minou.mvrviewer.mvr.ignCovers(a0.latitude, a0.longitude)) {
-            // Hors France : AUCUNE requête ; l'image d'un autre lieu est retirée. Le
-            // réglage mémorisé n'est pas effacé (revenu en France, l'image revient).
-            satellite = null; satelliteStatus = SatelliteStatus.OutOfCoverage
-            satActivationHandled = activation
-            if (userAsked) SatelliteUi.toast(ctx, SatelliteStatus.OutOfCoverage)
-            return@LaunchedEffect
-        }
-        val b = com.minou.mvrviewer.mvr.SatelliteFetcher.worldBounds(fixturesXY, referencePlan) ?: run {
-            satActivationHandled = activation; return@LaunchedEffect
-        }
-        val key = com.minou.mvrviewer.mvr.SatelliteFetcher.keyFor(calibration, b[0], b[1], b[2], b[3])
-        if (satellite?.key == key) {
-            satelliteStatus = SatelliteStatus.Ready; satActivationHandled = activation
-            return@LaunchedEffect
-        }
-        satelliteStatus = SatelliteStatus.Loading
-        val r = com.minou.mvrviewer.mvr.SatelliteFetcher.fetch(
-            satService, calibration, b[0], b[1], b[2], b[3], force = userAsked
+        // Déroulé PUR (SatelliteUi.refresh, testé en JVM) : hors France AUCUNE
+        // requête et l'image d'un autre lieu part (le réglage mémorisé reste : revenu
+        // en France, l'image revient) ; pas d'imagerie → image retirée ; échec
+        // réseau/serveur → l'image courante reste (comportement historique).
+        val r = SatelliteUi.refresh(
+            current = satellite, currentKey = satellite?.key, currentStatus = satelliteStatus,
+            show = options.showSatellite, calibrated = calibration.isCalibrated,
+            covered = SatelliteUi.covered(calibration),
+            userAsked = activation != satActivationHandled,
+            content = { com.minou.mvrviewer.mvr.SatelliteFetcher.worldBounds(fixturesXY, referencePlan) },
+            keyOf = { b -> com.minou.mvrviewer.mvr.SatelliteFetcher.keyFor(calibration, b[0], b[1], b[2], b[3]) },
+            load = { b, force ->
+                com.minou.mvrviewer.mvr.SatelliteFetcher.fetch(satService, calibration, b[0], b[1], b[2], b[3], force)
+            },
+            onLoading = { satelliteStatus = SatelliteStatus.Loading }
         )
-        when (r) {
-            is com.minou.mvrviewer.mvr.SatelliteResult.Ok -> satellite = r.overlay
-            // Pas d'imagerie ici / hors couverture : l'ancienne image (autre zone) part.
-            com.minou.mvrviewer.mvr.SatelliteResult.NoImagery,
-            com.minou.mvrviewer.mvr.SatelliteResult.OutOfCoverage -> satellite = null
-            // Échec réseau/serveur : l'image courante reste (comportement historique).
-            is com.minou.mvrviewer.mvr.SatelliteResult.Error -> Unit
-        }
-        val st = SatelliteUi.statusOf(r)
-        satelliteStatus = st
+        satellite = r.overlay
+        satelliteStatus = r.status
         satActivationHandled = activation
-        if (userAsked && st != SatelliteStatus.Ready) SatelliteUi.toast(ctx, st)
+        r.toast?.let { SatelliteUi.toast(ctx, it) }
     }
 
     // ---------------- SYNCHRO CLOUD ----------------

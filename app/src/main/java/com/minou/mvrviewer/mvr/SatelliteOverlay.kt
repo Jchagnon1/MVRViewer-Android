@@ -335,13 +335,23 @@ object SatelliteFetcher {
      * non blancs sur 4096). Hors couverture, l'IGN renvoie un JPEG 100 % blanc.
      */
     fun isBlankPixels(argb: IntArray, w: Int, h: Int, grid: Int = BLANK_GRID): Boolean {
-        if (w <= 0 || h <= 0 || grid <= 0 || argb.size < w * h) return false
+        if (w <= 0 || h <= 0 || argb.size < w * h) return false
+        return isBlankSampled(w, h, grid) { x, y -> argb[y * w + x] }
+    }
+
+    /**
+     * Cœur UNIQUE du test « image vide », commun au JVM et à Android : [pixelAt]
+     * lit le pixel ARGB (x, y) d'une image [w]×[h]. Seuls les [grid]×[grid] centres
+     * de cellule sont lus (plus proche voisin) : aucune image réduite à fabriquer.
+     */
+    fun isBlankSampled(w: Int, h: Int, grid: Int = BLANK_GRID, pixelAt: (x: Int, y: Int) -> Int): Boolean {
+        if (w <= 0 || h <= 0 || grid <= 0) return false
         var white = 0
         for (j in 0 until grid) {
             val y = min(h - 1, ((j + 0.5) * h / grid).toInt())
             for (i in 0 until grid) {
                 val x = min(w - 1, ((i + 0.5) * w / grid).toInt())
-                val c = argb[y * w + x]
+                val c = pixelAt(x, y)
                 val r = (c shr 16) and 0xFF; val g = (c shr 8) and 0xFF; val b = c and 0xFF
                 if (min(r, min(g, b)) >= 250) white++
             }
@@ -349,16 +359,14 @@ object SatelliteFetcher {
         return white >= BLANK_MIN_FRACTION * grid * grid - 1e-9
     }
 
-    /** [isBlankPixels] sur une image Android, réduite à 64 × 64 (plus proche voisin). */
-    fun isBlankBitmap(bmp: Bitmap): Boolean {
-        val g = BLANK_GRID
-        if (bmp.width <= 0 || bmp.height <= 0) return false
-        val small = if (bmp.width == g && bmp.height == g) bmp else Bitmap.createScaledBitmap(bmp, g, g, false)
-        val px = IntArray(g * g)
-        small.getPixels(px, 0, g, 0, 0, g, g)
-        if (small !== bmp) small.recycle()
-        return isBlankPixels(px, g, g, g)
-    }
+    /**
+     * Test « image vide » sur une image Android : MÊME échantillonnage que
+     * [isBlankPixels] ([isBlankSampled], testé en JVM), lu par `getPixel` aux
+     * 64 × 64 centres de cellule. Plus de `createScaledBitmap` : son choix de
+     * pixels (Skia) n'était pas testable, et il fabriquait une seconde image.
+     */
+    fun isBlankBitmap(bmp: Bitmap): Boolean =
+        isBlankSampled(bmp.width, bmp.height) { x, y -> bmp.getPixel(x, y) }
 
     /** Transport HTTP réel (HttpURLConnection) avec l'en-tête User-Agent de l'app. */
     class UrlConnectionHttp(private val userAgent: String) : SatelliteHttp {

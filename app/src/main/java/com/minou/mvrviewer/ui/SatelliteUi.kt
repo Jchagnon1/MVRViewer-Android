@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
@@ -25,9 +25,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.minou.mvrviewer.R
+import com.minou.mvrviewer.mvr.GeoCalibration
 import com.minou.mvrviewer.mvr.IgnImagery
 import com.minou.mvrviewer.mvr.SatelliteErrorKind
 import com.minou.mvrviewer.mvr.SatelliteResult
+import com.minou.mvrviewer.mvr.ignCovers
 
 /**
  * État du fond satellite vu par l'interface (SPEC-satellite-ign.md §5.1) :
@@ -44,6 +46,20 @@ sealed interface SatelliteStatus {
     data object Unavailable : SatelliteStatus
     data class Failed(val kind: SatelliteErrorKind, val status: Int? = null) : SatelliteStatus
 }
+
+/**
+ * Ligne « Fond satellite » du menu : interrupteur [checked] / [enabled], message
+ * d'état ([message] = ressource + arguments ; null = rien) et curseur d'opacité.
+ */
+data class SatelliteMenuRow(
+    val checked: Boolean,
+    val enabled: Boolean,
+    val message: Pair<Int, List<Any>>?,
+    val opacity: Boolean
+)
+
+/** Issue d'un passage du chargement : image à afficher, statut, Toast éventuel. */
+data class SatelliteRefresh<out T>(val overlay: T?, val status: SatelliteStatus, val toast: SatelliteStatus?)
 
 /**
  * Textes du fond satellite (SPEC-satellite-ign.md §4) — sélection PURE de la
@@ -77,9 +93,73 @@ object SatelliteUi {
         is SatelliteResult.Error -> SatelliteStatus.Failed(result.kind, result.status)
     }
 
-    fun attribution(ctx: android.content.Context, year: Int?): String {
-        val (res, args) = attributionRes(year)
-        return ctx.getString(res, *args.toTypedArray())
+    /**
+     * MENTION à poser (écran plan, écran 3D, page plan des PDF) : celle de
+     * [attributionRes] dès que l'image IGN est DESSINÉE ([show] et [imageDrawn]),
+     * null sinon. Règle UNIQUE : l'image ne part jamais sans sa mention.
+     */
+    fun creditRes(show: Boolean, imageDrawn: Boolean, year: Int?): Pair<Int, List<Any>>? =
+        if (show && imageDrawn) attributionRes(year) else null
+
+    /** 1re ancre de la calibration dans les emprises IGN (France) — pré-filtre sans réseau. */
+    fun covered(calib: GeoCalibration): Boolean =
+        calib.anchors.firstOrNull()?.let { ignCovers(it.latitude, it.longitude) } == true
+
+    /**
+     * Appui sur l'OUTIL « Fond satellite » (plan, 3D) : en France, bascule par geste
+     * ([toggle]) et rien à annoncer ; hors couverture, PAS de bascule (le réglage
+     * mémorisé est gardé pour un retour en France) et le statut à annoncer (Toast).
+     */
+    fun onToolTap(covered: Boolean, toggle: () -> Unit): SatelliteStatus? =
+        if (covered) { toggle(); null } else SatelliteStatus.OutOfCoverage
+
+    /**
+     * Ligne « Fond satellite » du menu (plan, 3D). Hors couverture : interrupteur
+     * VISIBLE mais grisé, jamais coché, et le message le dit TOUJOURS (même réglage
+     * éteint : c'est lui qui explique le grisé), sans curseur d'opacité.
+     */
+    fun menuRow(covered: Boolean, show: Boolean, status: SatelliteStatus): SatelliteMenuRow =
+        if (!covered) SatelliteMenuRow(
+            checked = false, enabled = false,
+            message = R.string.sat_out_of_coverage to emptyList(), opacity = false
+        )
+        else SatelliteMenuRow(checked = show, enabled = true, message = messageRes(status), opacity = show)
+
+    /**
+     * UN passage du chargement du fond (LaunchedEffect de SceneScreen), PUR et testé
+     * en JVM. [current] = image affichée (clé [currentKey]), [currentStatus] = statut.
+     * [content] calcule le contenu à couvrir (null = rien à couvrir), [keyOf] sa clé,
+     * [load] le télécharge (argument = forcer). [userAsked] : une activation par
+     * GESTE n'est pas encore traitée → demande forcée et Toast si elle n'aboutit
+     * pas ; une valeur restaurée ou reçue du partage reste silencieuse.
+     *  - réglage éteint ou pas de calibration → aucune image, statut inactif ;
+     *  - hors couverture → AUCUNE requête, image retirée (autre lieu) ;
+     *  - même contenu que l'image affichée → prête, sans réseau ;
+     *  - sinon [onLoading], puis : image reçue → affichée ; pas d'imagerie → retirée ;
+     *    échec réseau/serveur → l'image courante reste.
+     */
+    suspend fun <C : Any, T : Any> refresh(
+        current: T?, currentKey: String?, currentStatus: SatelliteStatus,
+        show: Boolean, calibrated: Boolean, covered: Boolean, userAsked: Boolean,
+        content: () -> C?, keyOf: (C) -> String,
+        load: suspend (content: C, force: Boolean) -> SatelliteResult<T>,
+        onLoading: () -> Unit = {}
+    ): SatelliteRefresh<T> {
+        if (!show || !calibrated) return SatelliteRefresh(null, SatelliteStatus.Idle, toast = null)
+        if (!covered) return SatelliteRefresh(
+            null, SatelliteStatus.OutOfCoverage, toast = SatelliteStatus.OutOfCoverage.takeIf { userAsked }
+        )
+        val c = content() ?: return SatelliteRefresh(current, currentStatus, toast = null)
+        if (current != null && currentKey == keyOf(c)) return SatelliteRefresh(current, SatelliteStatus.Ready, toast = null)
+        onLoading()
+        val r = load(c, userAsked)
+        val overlay = when (r) {
+            is SatelliteResult.Ok -> r.overlay
+            SatelliteResult.NoImagery, SatelliteResult.OutOfCoverage -> null
+            is SatelliteResult.Error -> current
+        }
+        val st = statusOf(r)
+        return SatelliteRefresh(overlay, st, toast = st.takeIf { userAsked && it != SatelliteStatus.Ready })
     }
 
     fun message(ctx: android.content.Context, status: SatelliteStatus): String? =
@@ -100,11 +180,6 @@ object SatelliteUi {
     }
 }
 
-/** Message d'état courant (ressource résolue), ou null. */
-@Composable
-fun satelliteStatusText(status: SatelliteStatus): String? =
-    SatelliteUi.messageRes(status)?.let { (res, args) -> stringResource(res, *args.toTypedArray()) }
-
 /**
  * MENTION à l'écran (§4.1), en bas à droite de la vue tant que l'image est
  * affichée — plan ET 3D (au-dessus de la SceneView : les overlays Compose y sont
@@ -113,9 +188,9 @@ fun satelliteStatusText(status: SatelliteStatus): String? =
  * du bas (flottante à 12 dp ; relevée à 72 dp quand une barre est ancrée en bas).
  */
 @Composable
-fun BoxScope.SatelliteAttribution(year: Int?, layout: ToolbarLayout, specs: List<ToolSpec>) {
+fun BoxScope.SatelliteAttribution(credit: Pair<Int, List<Any>>, layout: ToolbarLayout, specs: List<ToolSpec>) {
     val ctx = LocalContext.current
-    val (res, args) = SatelliteUi.attributionRes(year)
+    val (res, args) = credit
     val label = stringResource(res, *args.toTypedArray())
     Surface(
         color = Color.Black.copy(alpha = 0.55f), contentColor = Color.White,
@@ -153,11 +228,22 @@ internal fun DrawScope.drawSatelliteAttribution(
     measurer: TextMeasurer, label: String, right: Float, bottom: Float
 ) {
     val tl = measurer.measure(label, style = TextStyle(fontSize = 7.sp, color = Color.Black))
-    val padX = 3f; val padY = 1.5f; val inset = 3f
-    val w = tl.size.width + 2 * padX
-    val h = tl.size.height + 2 * padY
-    val x = right - inset - w
-    val y = bottom - inset - h
-    drawRect(Color.White.copy(alpha = 0.8f), topLeft = Offset(x, y), size = Size(w, h))
-    drawText(tl, topLeft = Offset(x + padX, y + padY))
+    val box = satelliteCreditBox(tl.size.width.toFloat(), tl.size.height.toFloat(), right, bottom)
+    drawRect(Color.White.copy(alpha = 0.8f), topLeft = box.topLeft, size = box.size)
+    drawText(tl, topLeft = Offset(box.left + CREDIT_PAD_X, box.top + CREDIT_PAD_Y))
+}
+
+private const val CREDIT_PAD_X = 3f
+private const val CREDIT_PAD_Y = 1.5f
+private const val CREDIT_INSET = 3f
+
+/**
+ * Pastille de la mention exportée (PUR, en points) pour un texte [textW]×[textH] :
+ * marges intérieures 3 × 1,5 pt, collée à 3 pt du coin bas-droit ([right], [bottom])
+ * de la zone image — donc toujours DANS la zone, par-dessus le fond.
+ */
+internal fun satelliteCreditBox(textW: Float, textH: Float, right: Float, bottom: Float): Rect {
+    val w = textW + 2 * CREDIT_PAD_X
+    val h = textH + 2 * CREDIT_PAD_Y
+    return Rect(right - CREDIT_INSET - w, bottom - CREDIT_INSET - h, right - CREDIT_INSET, bottom - CREDIT_INSET)
 }

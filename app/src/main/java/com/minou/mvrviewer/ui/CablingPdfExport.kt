@@ -180,6 +180,7 @@ internal fun cablingPlanView(
         labelOffset = 1f,
         background = Color.White,
         bgDark = false,
+        // Fond IGN : la page plan (drawPdfPage) y ajoute la mention obligatoire.
         showSatellite = satellite != null,
         satelliteOpacity = 0.55f,
         hiddenElements = emptySet(),

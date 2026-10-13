@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -40,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -143,8 +145,21 @@ class SceneOptions {
     var hideLabelsWhenZoomedOut by mutableStateOf(false)
     // Fond satellite géo-référencé (sous le plan / en 3D) — nécessite la
     // calibration GPS. Persisté par projet ; opacité de session (défaut 0.55).
+    // Source : IGN, en France seulement (SPEC-satellite-ign.md).
     var showSatellite by mutableStateOf(false)
     var satelliteOpacity by mutableFloatStateOf(0.55f)
+    /**
+     * Compteur d'ACTIVATIONS par l'utilisateur (outil, menu) : distingue un geste
+     * explicite — qui force une nouvelle demande et affiche un Toast en cas d'échec
+     * — d'une valeur restaurée avec le projet ou reçue du partage (silencieuses).
+     */
+    var satelliteActivations by mutableIntStateOf(0)
+
+    /** Bascule du fond satellite par un GESTE de l'utilisateur. */
+    fun toggleSatelliteByUser() {
+        showSatellite = !showSatellite
+        if (showSatellite) satelliteActivations++
+    }
     // Taille du marqueur « ma position » en 3D (multiplicateur, S 0.6 · M 1 · L 1.6).
     var gpsMarkerScale by mutableFloatStateOf(1f)
 }
@@ -228,6 +243,12 @@ fun SceneOptionsMenu(
     // posée) : la vue 3D n'a pas de contrôle flottant (SurfaceView), donc elle
     // pilote le satellite depuis ce menu, opacité comprise.
     showSatelliteToggle: Boolean = false,
+    // Fond IGN = France seulement : hors couverture, l'interrupteur reste VISIBLE
+    // mais désactivé (le message d'état dit pourquoi).
+    satelliteCovered: Boolean = true,
+    // Ligne d'état sous l'interrupteur (téléchargement, hors couverture, pas
+    // d'imagerie, erreur) ; null = rien à dire.
+    satelliteStatusText: String? = null,
     // Section « Couleur du fond » : activée quand la vue fournit sa couleur
     // courante + un setter. Presets = (nom, ARGB). null → section masquée.
     background: Color? = null,
@@ -306,8 +327,16 @@ fun SceneOptionsMenu(
         }
         if (showSatelliteToggle) {
             HorizontalDivider()
-            check(stringResource(R.string.opt_satellite_map), options.showSatellite) { options.showSatellite = !options.showSatellite }
-            if (options.showSatellite) {
+            check(stringResource(R.string.opt_satellite_map), options.showSatellite && satelliteCovered,
+                enabled = satelliteCovered) { options.toggleSatelliteByUser() }
+            // Hors couverture, le message le dit TOUJOURS (même réglage éteint) :
+            // c'est lui qui explique l'interrupteur grisé.
+            val satLine = if (!satelliteCovered) stringResource(R.string.sat_out_of_coverage) else satelliteStatusText
+            satLine?.let { msg ->
+                Text(msg, style = MaterialTheme.typography.bodySmall, color = Color(0xFF888888),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).widthIn(max = 260.dp))
+            }
+            if (options.showSatellite && satelliteCovered) {
                 // Opacité : curseur compact dans le menu (le glissé horizontal ne
                 // gêne pas le défilement vertical du menu).
                 Row(
@@ -455,10 +484,11 @@ private fun nav(label: String, icon: ImageVector, onClick: () -> Unit) {
 }
 
 @Composable
-private fun check(label: String, on: Boolean, onClick: () -> Unit) {
+private fun check(label: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label) },
         trailingIcon = { if (on) Icon(Icons.Filled.Check, contentDescription = null) },
+        enabled = enabled,
         onClick = onClick
     )
 }

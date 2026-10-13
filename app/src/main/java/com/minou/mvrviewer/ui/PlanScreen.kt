@@ -111,6 +111,10 @@ fun PlanScreen(
     calibration: com.minou.mvrviewer.mvr.GeoCalibration = remember { com.minou.mvrviewer.mvr.GeoCalibration() },
     projectKey: String? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
+    /** Statut du fond satellite (ligne d'état du menu). */
+    satelliteStatus: SatelliteStatus = SatelliteStatus.Idle,
+    /** 1re ancre dans les emprises IGN (France) : sinon, réglage désactivé. */
+    satelliteCovered: Boolean = true,
     onCalibrationChanged: () -> Unit = {},
     onTransformChanged: (com.minou.mvrviewer.mvr.ReferencePlanTransform) -> Unit = {},
     /**
@@ -944,9 +948,14 @@ fun PlanScreen(
                 if (calibrating) calibrating = false
                 else ProAccess.gate("calibrer la position GPS") { calibrating = true; measureMode = false }
             }))
+        // Fond IGN = France seulement : hors couverture, Toast et PAS de bascule (le
+        // réglage mémorisé est gardé pour un retour en France).
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
-            available = calibration.isCalibrated, checked = options.showSatellite,
-            onInvoke = { options.showSatellite = !options.showSatellite }, inMenu = false))
+            available = calibration.isCalibrated, checked = options.showSatellite && satelliteCovered,
+            onInvoke = {
+                if (satelliteCovered) options.toggleSatelliteByUser()
+                else SatelliteUi.toast(ctxPlan, SatelliteStatus.OutOfCoverage)
+            }, inMenu = false))
         add(ToolSpec(ToolId.EXPORT_PDF, stringResource(R.string.tool_export_pdf), Icons.Filled.PictureAsPdf,
             available = true, checked = exportMode, onInvoke = { exportMode = !exportMode }))
         // POINT D'ENTRÉE UNIQUE du plan de repère (Android n'a pas d'import en 3D) :
@@ -1841,6 +1850,8 @@ fun PlanScreen(
                 // il n'était accessible que par le bouton flottant. Dispo une fois
                 // la calibration GPS posée (géo-référence), comme le bouton.
                 showSatelliteToggle = calibration.isCalibrated,
+                satelliteCovered = satelliteCovered,
+                satelliteStatusText = satelliteStatusText(satelliteStatus),
                 // Coloration câblage (phase 4) : proposée seulement s'il existe un
                 // câblage colorable ; le nav cycle entre les modes disponibles.
                 showColorModeSelector = hasSocaColoring || hasDmxColoring,
@@ -1973,10 +1984,15 @@ fun PlanScreen(
         AnchoredToolbars(layout = toolbarLayout, specs = toolsPlan)
 
         // Opacité du fond satellite : curseur flottant (impossible dans un menu).
-        if (options.showSatellite && satellite != null) {
+        // Avec lui, la mention OBLIGATOIRE de l'imagerie IGN (bas-droite) ; le
+        // curseur est posé juste au-dessus d'elle pour ne jamais la recouvrir.
+        val satShown = satellite
+        if (options.showSatellite && satShown != null) {
+            SatelliteAttribution(satShown.year, toolbarLayout, toolsPlan)
             Surface(
                 color = Color.Black.copy(alpha = 0.4f), shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 78.dp).width(230.dp)
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = satelliteAttributionBottom(toolbarLayout, toolsPlan) + 24.dp).width(230.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {

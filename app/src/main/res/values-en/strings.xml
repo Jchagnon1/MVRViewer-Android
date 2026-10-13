@@ -365,6 +365,15 @@
     <string name="refplan_pdf_pages_fmt">%1$d-page PDF — page 1 used</string>
     <string name="refplan_segments_fmt">%1$d segments</string>
     <string name="refplan_truncated_fmt"> (+%1$d truncated)</string>
+    <string name="sat_attribution">Source: IGN – BD ORTHO® (cartes.gouv.fr)</string>
+    <string name="sat_attribution_year">Source: IGN – BD ORTHO®, imagery %1$d</string>
+    <string name="sat_error_decode">Satellite unavailable: unreadable image.</string>
+    <string name="sat_error_http">Satellite unavailable (IGN server error %1$d).</string>
+    <string name="sat_error_network">Satellite unavailable: network unreachable.</string>
+    <string name="sat_error_timeout">Satellite unavailable: the IGN server isn\'t responding. Try again later.</string>
+    <string name="sat_loading">Downloading satellite imagery…</string>
+    <string name="sat_out_of_coverage">Satellite background available in France only (IGN imagery).</string>
+    <string name="sat_unavailable">No IGN imagery for this area.</string>
     <string name="search_fixture_id_hint">Fixture ID</string>
     <string name="sel_fixtures_selected_fmt">%1$d fixtures selected</string>
     <string name="size_large">large</string>

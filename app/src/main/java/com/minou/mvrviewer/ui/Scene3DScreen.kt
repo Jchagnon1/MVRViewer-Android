@@ -354,6 +354,10 @@ fun Scene3DScreen(
     hiddenLayers: Set<String> = emptySet(),
     calibration: com.minou.mvrviewer.mvr.GeoCalibration? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
+    /** Statut du fond satellite (ligne d'état du menu). */
+    satelliteStatus: SatelliteStatus = SatelliteStatus.Idle,
+    /** 1re ancre dans les emprises IGN (France) : sinon, réglage désactivé. */
+    satelliteCovered: Boolean = true,
     // Câblage (phase 4/5) : sert UNIQUEMENT au texte des étiquettes 3D pour les
     // champs Socapex / Ligne DMX (mêmes tables que la vue plan). Hors ces deux
     // champs, la 3D n'utilise pas le câblage.
@@ -1826,6 +1830,7 @@ fun Scene3DScreen(
     // flottante et hors du menu « Outils » (inMenu=false) : soit ils ont déjà leur
     // bascule dédiée au menu (étiquettes, couleurs), soit ils sont déjà rendus
     // ailleurs dans le menu (navigation, synchro, presets caméra) — pas de double.
+    val ctx3dSat = androidx.compose.ui.platform.LocalContext.current
     val tools3D: List<ToolSpec> = buildList {
         add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
@@ -1893,9 +1898,13 @@ fun Scene3DScreen(
         // Fond satellite AUSSI dockable en 3D (le quad satellite géo-référencé existe
         // déjà à l'écran) : parité avec la vue plan. Disponible seulement une fois la
         // position calibrée ; bascule dédiée déjà au menu (inMenu=false, pas de double).
+        // Hors couverture IGN (France seulement) : Toast, PAS de bascule.
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
-            available = calibration?.isCalibrated == true, checked = options.showSatellite,
-            onInvoke = { options.showSatellite = !options.showSatellite }, inMenu = false))
+            available = calibration?.isCalibrated == true, checked = options.showSatellite && satelliteCovered,
+            onInvoke = {
+                if (satelliteCovered) options.toggleSatelliteByUser()
+                else SatelliteUi.toast(ctx3dSat, SatelliteStatus.OutOfCoverage)
+            }, inMenu = false))
         // Taille des étiquettes : cycle petite · moyenne · grande (même action que le
         // menu « Étiquettes »). Dockable ; hors menu « Outils » (déjà dans le menu).
         add(ToolSpec(ToolId.LABEL_SIZE, stringResource(R.string.tool_label_size), Icons.Filled.FormatSize,
@@ -2016,6 +2025,8 @@ fun Scene3DScreen(
                     // champs/taille que le plan (SceneOptions partagé).
                     showLabelsToggle = true,
                     showSatelliteToggle = calibration?.isCalibrated == true,
+                    satelliteCovered = satelliteCovered,
+                    satelliteStatusText = satelliteStatusText(satelliteStatus),
                     background = options.background3D,
                     backgroundDefault = BackgroundColorStore.DEFAULT_3D,
                     backgroundPresets = bg3dPresets(),
@@ -2274,6 +2285,13 @@ fun Scene3DScreen(
             // tant que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas
             // rendue.
             AnchoredToolbars(layout = toolbarLayout, specs = tools3D)
+
+            // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte), tant que le
+            // quad satellite est affiché : bas-droite, au-dessus des barres du bas.
+            val satShown = satellite
+            if (options.showSatellite && satShown != null) {
+                SatelliteAttribution(satShown.year, toolbarLayout, tools3D)
+            }
 
             // Cote de la mesure (bas-centre) : le chiffre est ici plutôt que sur
             // le trait, pour ne pas mesurer du texte dans le Canvas redessiné à

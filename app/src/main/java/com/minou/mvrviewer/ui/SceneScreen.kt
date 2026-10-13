@@ -303,12 +303,65 @@ fun SceneScreen(
     }
     var calibTick by remember(scene) { mutableIntStateOf(0) }
     var satellite by remember(scene) { mutableStateOf<com.minou.mvrviewer.mvr.SatelliteOverlay?>(null) }
-    LaunchedEffect(options.showSatellite, calibTick, referencePlan) {
-        if (!options.showSatellite || !calibration.isCalibrated) { satellite = null; return@LaunchedEffect }
-        val b = com.minou.mvrviewer.mvr.SatelliteFetcher.worldBounds(fixturesXY, referencePlan) ?: return@LaunchedEffect
+    // Statut du fond (SPEC-satellite-ign.md §5.1), hissé comme l'image : il nourrit
+    // la ligne d'état du menu (plan et 3D) et les Toasts.
+    var satelliteStatus by remember(scene) { mutableStateOf<SatelliteStatus>(SatelliteStatus.Idle) }
+    // Source IGN = France seulement : couverture jugée sur la 1re ancre (pré-filtre
+    // sans réseau). Les ancres ne sont pas observables : la lecture de calibTick
+    // (chaque changement de calibration) et de `restored` (ancres relues du projet)
+    // abonne ce calcul aux deux moments où elles changent.
+    val satelliteCovered = (calibTick to restored).let {
+        calibration.anchors.firstOrNull()?.let { a -> com.minou.mvrviewer.mvr.ignCovers(a.latitude, a.longitude) } == true
+    }
+    // Service par show : ses mémoires (URL « vide », échec récent) vivent avec lui.
+    val satService = remember(scene) {
+        val version = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull()
+        com.minou.mvrviewer.mvr.SatelliteFetcher.newService(com.minou.mvrviewer.mvr.SatelliteFetcher.userAgent(version))
+    }
+    // Dernière activation TRAITÉE : une activation non encore traitée = geste de
+    // l'utilisateur → demande forcée + Toast si ça n'aboutit pas.
+    var satActivationHandled by remember(scene) { mutableIntStateOf(options.satelliteActivations) }
+    LaunchedEffect(options.showSatellite, calibTick, referencePlan, options.satelliteActivations) {
+        val activation = options.satelliteActivations
+        val userAsked = activation != satActivationHandled
+        if (!options.showSatellite || !calibration.isCalibrated) {
+            satellite = null; satelliteStatus = SatelliteStatus.Idle
+            satActivationHandled = activation
+            return@LaunchedEffect
+        }
+        val a0 = calibration.anchors.first()
+        if (!com.minou.mvrviewer.mvr.ignCovers(a0.latitude, a0.longitude)) {
+            // Hors France : AUCUNE requête ; l'image d'un autre lieu est retirée. Le
+            // réglage mémorisé n'est pas effacé (revenu en France, l'image revient).
+            satellite = null; satelliteStatus = SatelliteStatus.OutOfCoverage
+            satActivationHandled = activation
+            if (userAsked) SatelliteUi.toast(ctx, SatelliteStatus.OutOfCoverage)
+            return@LaunchedEffect
+        }
+        val b = com.minou.mvrviewer.mvr.SatelliteFetcher.worldBounds(fixturesXY, referencePlan) ?: run {
+            satActivationHandled = activation; return@LaunchedEffect
+        }
         val key = com.minou.mvrviewer.mvr.SatelliteFetcher.keyFor(calibration, b[0], b[1], b[2], b[3])
-        if (satellite?.key == key) return@LaunchedEffect
-        com.minou.mvrviewer.mvr.SatelliteFetcher.fetch(calibration, b[0], b[1], b[2], b[3])?.let { satellite = it }
+        if (satellite?.key == key) {
+            satelliteStatus = SatelliteStatus.Ready; satActivationHandled = activation
+            return@LaunchedEffect
+        }
+        satelliteStatus = SatelliteStatus.Loading
+        val r = com.minou.mvrviewer.mvr.SatelliteFetcher.fetch(
+            satService, calibration, b[0], b[1], b[2], b[3], force = userAsked
+        )
+        when (r) {
+            is com.minou.mvrviewer.mvr.SatelliteResult.Ok -> satellite = r.overlay
+            // Pas d'imagerie ici / hors couverture : l'ancienne image (autre zone) part.
+            com.minou.mvrviewer.mvr.SatelliteResult.NoImagery,
+            com.minou.mvrviewer.mvr.SatelliteResult.OutOfCoverage -> satellite = null
+            // Échec réseau/serveur : l'image courante reste (comportement historique).
+            is com.minou.mvrviewer.mvr.SatelliteResult.Error -> Unit
+        }
+        val st = SatelliteUi.statusOf(r)
+        satelliteStatus = st
+        satActivationHandled = activation
+        if (userAsked && st != SatelliteStatus.Ready) SatelliteUi.toast(ctx, st)
     }
 
     // ---------------- SYNCHRO CLOUD ----------------
@@ -1018,6 +1071,8 @@ fun SceneScreen(
             hiddenLayers = hiddenLayers,
             calibration = calibration,
             satellite = satellite,
+            satelliteStatus = satelliteStatus,
+            satelliteCovered = satelliteCovered,
             // Câblage : uniquement pour le texte des étiquettes Socapex / Ligne DMX
             // en 3D (mêmes tables que la vue plan).
             cabling = cabling,
@@ -1100,6 +1155,8 @@ fun SceneScreen(
             calibration = calibration,
             projectKey = projectKey,
             satellite = satellite,
+            satelliteStatus = satelliteStatus,
+            satelliteCovered = satelliteCovered,
             hiddenLayers = hiddenLayers,
             onToggleLayer = { layer ->
                 // Calque DXF masqué = donnée PARTAGÉE (manifeste + audit,

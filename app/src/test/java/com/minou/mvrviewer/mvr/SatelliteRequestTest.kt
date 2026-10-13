@@ -1,5 +1,8 @@
 package com.minou.mvrviewer.mvr
 
+import com.minou.mvrviewer.ui.SatelliteStatus
+import com.minou.mvrviewer.ui.SatelliteUi
+import com.minou.mvrviewer.ui.TestRes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -7,340 +10,456 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import java.io.IOException
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.util.Locale
-import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.max
 
 /**
- * Requête d'export du fond satellite (ArcGIS World Imagery, EPSG:4326).
+ * Fond satellite IGN (BD ORTHO®, WMS 1.3.0, EPSG:4326) — vecteurs COMMUNS T1-T10 de
+ * SPEC-satellite-ign.md §9, mêmes valeurs que le web et iOS. Constante de la
+ * sphère : M_PER_DEG = π/180 × 6 371 000. Tolérance des coins : ±0,5 mm.
  *
- * Le serveur rend des pixels CARRÉS EN DEGRÉS : si `size` n'a pas le rapport
- * Δlon/Δlat en degrés, il ÉLARGIT l'emprise rendue (vérifié au curl). L'ancien
- * calcul prenait le rapport en mètres → image étirée nord-sud de ≈ 1/cos(lat),
- * puisque les coins étaient posés sur l'emprise DEMANDÉE. [rendu] reproduit ce
- * comportement du serveur ; tout est vérifié à 1 px près.
+ * Le piège (§1.2) : en WMS 1.3.0 avec EPSG:4326, le BBOX est lat,lon. L'inverser ne
+ * lève aucune erreur — l'IGN renvoie une image BLANCHE (mer au large de la Somalie).
  */
 class SatelliteRequestTest {
 
     private val m = SatelliteFetcher.M_PER_DEG
-    private fun cosd(lat: Double) = cos(lat * PI / 180.0)
 
-    /** Boîte de `ewM` × `nsM` mètres centrée sur (lat, lon). */
-    private fun boxM(lat: Double, lon: Double, ewM: Double, nsM: Double) = GeoBox(
-        lat - nsM / 2 / m, lon - ewM / 2 / (m * cosd(lat)),
-        lat + nsM / 2 / m, lon + ewM / 2 / (m * cosd(lat))
-    )
+    private fun <T> nn(v: T?): T { assertNotNull(v); return v!! }
 
-    private fun request(needed: GeoBox): Pair<GeoBox, SatelliteRequest> {
-        val area = assertNotNullAnd(SatelliteFetcher.areaFor(needed))
-        return area to assertNotNullAnd(SatelliteFetcher.requestForArea(area))
+    /** Paramètres de requête d'une URL (clés en majuscules, valeurs brutes). */
+    private fun query(url: String): Map<String, String> =
+        URI(url).rawQuery.split("&").associate { it.substringBefore("=") to it.substringAfter("=") }
+
+    /** BBOX d'une URL WMS relu dans l'ordre lat,lon (équivalent de parseWmsUrl). */
+    private fun parseBbox(url: String): GeoBox {
+        val n = query(url).getValue("BBOX").split(",").map { it.toDouble() }
+        return GeoBox(n[0], n[1], n[2], n[3])
     }
 
-    private fun <T> assertNotNullAnd(v: T?): T { assertNotNull(v); return v!! }
-
-    /** Emprise que le serveur REND pour (bbox, w, h) : pixels carrés en degrés, il
-     *  élargit l'axe trop court autour du centre (comportement mesuré au curl). */
-    private fun rendu(r: SatelliteRequest): GeoBox {
-        val b = r.bbox
-        val d = max(b.dLon / r.width, b.dLat / r.height)
-        val cLat = (b.minLat + b.maxLat) / 2; val cLon = (b.minLon + b.maxLon) / 2
-        return GeoBox(cLat - r.height * d / 2, cLon - r.width * d / 2, cLat + r.height * d / 2, cLon + r.width * d / 2)
-    }
-
-    /** Écart en PIXELS entre deux boîtes (pire bord), au pas de la requête. */
-    private fun ecartPx(a: GeoBox, b: GeoBox, degPerPx: Double) = listOf(
-        a.minLat - b.minLat, a.maxLat - b.maxLat, a.minLon - b.minLon, a.maxLon - b.maxLon
-    ).maxOf { abs(it) } / degPerPx
-
-    /** Vérifs communes : rapport en degrés, emprise ⊇ zone à < 1 px par axe, rendu = demandé. */
-    private fun verifieGeometrie(label: String, area: GeoBox, r: SatelliteRequest) {
-        val b = r.bbox
-        // Rapport w/h = Δlon/Δlat EN DEGRÉS (emprise finale), à 1 px près (en fait exact).
-        assertTrue("$label : w=${r.width} h=${r.height} rapport ${b.dLon / b.dLat}",
-            abs(r.width - r.height * b.dLon / b.dLat) <= 1.0)
-        assertEquals("$label : largeur", b.dLon, r.width * r.degPerPx, 1e-9 * b.dLon)
-        assertEquals("$label : hauteur", b.dLat, r.height * r.degPerPx, 1e-9 * b.dLat)
-        // Chaque axe à moins d'1 px de la zone voulue, et la couvre entièrement.
-        assertTrue("$label : couvre la zone", b.contains(area, 1e-12))
-        assertTrue("$label : Δlon en px", (b.dLon - area.dLon) / r.degPerPx < 1.0 + 1e-6)
-        assertTrue("$label : Δlat en px", (b.dLat - area.dLat) / r.degPerPx < 1.0 + 1e-6)
-        // Le serveur rend EXACTEMENT l'emprise demandée.
-        val e = ecartPx(rendu(r), b, r.degPerPx)
-        assertTrue("$label : rendu ≠ demandé de $e px", e < 1.0)
-        assertTrue("$label : taille ${r.width}×${r.height}",
-            r.width in SatelliteFetcher.MIN_PX..SatelliteFetcher.MAX_PX &&
-                r.height in SatelliteFetcher.MIN_PX..SatelliteFetcher.MAX_PX)
-    }
-
-    @Test fun rapportEnDegresAUnPixelPresAToutesLatitudes() {
-        // Équateur, Paris, 60° N, Gold Coast (hémisphère sud) ; zones larges et hautes.
-        for ((lat, lon) in listOf(0.0 to 37.5, 48.86 to 2.35, 60.0 to 24.94, -28.0 to 153.43)) {
-            for ((ew, ns) in listOf(200.0 to 150.0, 80.0 to 300.0, 250.0 to 250.0)) {
-                val (area, r) = request(boxM(lat, lon, ew, ns))
-                verifieGeometrie("lat=$lat ${ew}×$ns m", area, r)
-            }
-        }
-    }
-
-    @Test fun parisLeRapportNEstPasCeluiDesMetres() {
-        // 250 × 250 m à Paris : carré en mètres, mais PAS en degrés (Δlon = Δlat / cos).
-        val (_, r) = request(boxM(48.86, 2.35, 250.0, 250.0))
-        val ratio = r.width.toDouble() / r.height
-        assertEquals(1.0 / cosd(48.86), ratio, 0.01)
-        assertTrue("l'image doit être plus large que haute (w=${r.width} h=${r.height})", r.width > r.height * 1.4)
-    }
-
-    @Test fun resolutionSureEstOuestEtJamaisPlusFine() {
-        for (lat in listOf(0.0, 48.86, 60.0, -28.0)) {
-            for ((ew, ns) in listOf(5.0 to 5.0, 200.0 to 150.0, 2000.0 to 1500.0, 50.0 to 4000.0)) {
-                val (_, r) = request(boxM(lat, 10.0, ew, ns))
-                val c = cosd((r.bbox.minLat + r.bbox.maxLat) / 2)
-                val ewMpx = r.degPerPx * m * c
-                val nsMpx = r.degPerPx * m
-                assertTrue("lat=$lat ${ew}×$ns : $ewMpx m/px E-O", ewMpx >= SatelliteFetcher.TARGET_M_PER_PX - 1e-9)
-                assertTrue("N-S jamais plus fin que E-O", nsMpx >= ewMpx - 1e-12)
-            }
-        }
-    }
-
-    @Test fun petiteZoneEtendueA120Metres() {
-        val (area, r) = request(boxM(48.86, 2.35, 5.0, 5.0))
-        verifieGeometrie("5×5 m", area, r)
-        val c = cosd(48.86)
-        assertTrue(area.dLat * m >= 120.0 - 1e-6)
-        assertTrue(area.dLon * m * c >= 120.0 - 1e-6)
-        // 120 m à 0,3 m/px d'est en ouest = 400 px ; nord-sud : 120·cos/0,3 ≈ 264 px.
-        assertTrue("w=${r.width}", r.width in 400..401)
-        assertTrue("h=${r.height}", r.height in 263..265)
-        assertEquals(0.30, r.degPerPx * m * cosd((r.bbox.minLat + r.bbox.maxLat) / 2), 1e-9)
-    }
-
-    @Test fun plafondDePixelsRespecte() {
-        val (area, r) = request(boxM(48.86, 2.35, 2000.0, 1500.0))
-        verifieGeometrie("2000×1500 m", area, r)
-        assertEquals(SatelliteFetcher.MAX_PX, max(r.width, r.height))
-        // Au plafond : la résolution se dégrade, l'emprise est conservée.
-        assertEquals(max(area.dLat, area.dLon) / SatelliteFetcher.MAX_PX, r.degPerPx, 1e-15)
-    }
-
-    @Test fun zoneTresAllongeeEstOuestSansEtirement() {
-        // 3 km × 60 m : l'ancien plancher à 256 px déformait le rapport.
-        val (area, r) = request(boxM(48.86, 2.35, 3000.0, 60.0))
-        verifieGeometrie("3000×60 m", area, r)
-        assertEquals(SatelliteFetcher.MAX_PX, r.width)
-        assertTrue("h=${r.height}", r.height < 256)
-    }
-
-    @Test fun zoneTresAllongeeNordSudSansEtirement() {
-        val (area, r) = request(boxM(60.0, 24.94, 60.0, 3000.0))
-        verifieGeometrie("60×3000 m", area, r)
-        // Plafond sur le grand côté EN MÈTRES ramené à l'est-ouest (échelle de
-        // l'ancien calcul) : une zone haute a ≈ MAX_PX·cos(lat) px de haut.
-        val attendu = SatelliteFetcher.MAX_PX * cosd((area.minLat + area.maxLat) / 2)
-        assertTrue("h=${r.height} ≈ $attendu", abs(r.height - attendu) <= 1.0)
-        assertTrue("w=${r.width}", r.width < 256)
-    }
-
-    // ---------------------------------------------------------------------------
-    // Régressions du correctif 7b6ced7 (relecture), vérifiées sur le vrai serveur.
-    // ---------------------------------------------------------------------------
-
-    /**
-     * Copie FIDÈLE de l'ancien calcul (575783b) : degPerPx que le serveur RENDAIT,
-     * soit max(Δlon/w, Δlat/h) (il élargit l'axe court, pixels carrés en degrés).
-     */
-    private fun ancienDegPerPxRendu(needed: GeoBox): Double {
-        var minLat = needed.minLat; var maxLat = needed.maxLat
-        var minLon = needed.minLon; var maxLon = needed.maxLon
-        val padLat = (maxLat - minLat) * 0.08 + 1e-6
-        val padLon = (maxLon - minLon) * 0.08 + 1e-6
-        minLat -= padLat; maxLat += padLat; minLon -= padLon; maxLon += padLon
-        val cosLat = cos((minLat + maxLat) / 2.0 * PI / 180.0)
-        val minSpanM = 120.0
-        var latSpanM = (maxLat - minLat) * 111_320.0
-        var lonSpanM = (maxLon - minLon) * 111_320.0 * cosLat
-        if (latSpanM < minSpanM) {
-            val g = (minSpanM - latSpanM) / 2.0 / 111_320.0; minLat -= g; maxLat += g; latSpanM = minSpanM
-        }
-        if (lonSpanM < minSpanM) {
-            val g = (minSpanM - lonSpanM) / 2.0 / (111_320.0 * cosLat); minLon -= g; maxLon += g; lonSpanM = minSpanM
-        }
-        val majorM = max(latSpanM, lonSpanM)
-        val maxDim = (majorM / 0.30).coerceIn(256.0, 1024.0)
-        val aspect = lonSpanM / max(latSpanM, 1e-9)
-        val w = (if (aspect >= 1) maxDim else maxDim * aspect).coerceAtLeast(256.0).toInt()
-        val h = (if (aspect >= 1) maxDim / aspect else maxDim).coerceAtLeast(256.0).toInt()
-        return max((maxLon - minLon) / w, (maxLat - minLat) / h)
-    }
-
-    /**
-     * Défaut 1 : pour une zone HAUTE plafonnée (> 307 m nord-sud), 7b6ced7 demandait
-     * cos(lat) fois plus fin que l'ancien calcul. Mesuré au curl (200 × 480 m) :
-     * Australie (−30, 135) ancien 0,63 m/px → 200, 7b6ced7 0,544 → 500 ; idem
-     * Maroc (31,6, −7) et Inde (22, 78). Règle : JAMAIS plus fin que l'ancien.
-     */
-    @Test fun jamaisPlusFinQueLAncienCalcul() {
-        val lats = listOf(0.0, 22.0, -30.0, 31.6, 48.86, 60.0, 63.5, -45.0)
-        val tailles = listOf(
-            5.0 to 5.0, 100.0 to 80.0, 200.0 to 480.0, 80.0 to 300.0, 60.0 to 3000.0, 50.0 to 4000.0,
-            300.0 to 1200.0, 2000.0 to 1500.0, 3000.0 to 60.0, 480.0 to 200.0, 1000.0 to 1000.0, 400.0 to 500.0
+    // ---------------------------------------------------------------- T1
+    @Test fun t1UrlExacteConcorde() {
+        val area = GeoBox(48.8645, 2.3196, 48.8667, 2.3229)
+        val r = nn(SatelliteFetcher.requestForArea(area, maxPx = 2048))
+        assertEquals(1207, r.width)
+        assertEquals(1224, r.height)
+        assertEquals(0.2, r.mPerPx, 1e-12)
+        val lat0 = (r.bbox.minLat + r.bbox.maxLat) / 2
+        assertEquals(244.629, r.bbox.dLat * m, 1e-3)
+        assertEquals(241.385, r.bbox.dLon * m * Math.cos(Math.toRadians(lat0)), 1e-3)
+        assertEquals(
+            "https://data.geopf.fr/wms-r?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ORTHOIMAGERY.ORTHOPHOTOS" +
+                "&STYLES=&CRS=EPSG:4326&BBOX=48.8645000,2.3196000,48.8667000,2.3229000&WIDTH=1207&HEIGHT=1224" +
+                "&FORMAT=image/jpeg",
+            r.url
         )
-        for (lat in lats) for ((ew, ns) in tailles) {
-            val needed = boxM(lat, 10.0, ew, ns)
-            val (_, r) = request(needed)
-            val ancien = ancienDegPerPxRendu(needed)
-            // Tolérance : l'ancien code TRONQUAIT w et h (toInt, ≥ 256 px), ce qui le
-            // rendait plus grossier d'au plus 1 px sur 256 (0,4 %) — bien moins que
-            // l'écart d'un niveau de cache (×2) ou que l'erreur de 7b6ced7 (cos(lat)).
-            assertTrue("lat=$lat ${ew}×$ns : ${r.degPerPx * m} < ancien ${ancien * m} m/px",
-                r.degPerPx >= ancien * (1 - 1.0 / 256))
+    }
+
+    @Test fun t1PlafondAndroidA1024() {
+        // Même zone avec le plafond Android (1024) : le grand côté (nord-sud) est
+        // plafonné, la résolution suit, les pixels restent carrés au sol.
+        val r = nn(SatelliteFetcher.requestForArea(GeoBox(48.8645, 2.3196, 48.8667, 2.3229)))
+        assertEquals(1024, SatelliteFetcher.MAX_PX)
+        assertEquals(1024, r.height)
+        assertEquals(244.629 / 1024, r.mPerPx, 1e-5)
+        assertEquals(1011, r.width)
+    }
+
+    // ---------------------------------------------------------------- T2
+    @Test fun t2OrdreDesAxesLatPuisLon() {
+        val zones = listOf(
+            GeoBox(48.8645, 2.3196, 48.8667, 2.3229),       // Paris
+            GeoBox(43.2950, 5.3690, 43.2990, 5.3760),       // Marseille
+            GeoBox(41.9180, 8.7370, 41.9200, 8.7400),       // Ajaccio
+            GeoBox(50.6290, 3.0560, 50.6320, 3.0610),       // Lille
+            GeoBox(47.2160, -1.5560, 47.2190, -1.5510)      // Nantes (longitude négative)
+        )
+        for (z in zones) {
+            val r = nn(SatelliteFetcher.requestForArea(z))
+            val n = query(r.url).getValue("BBOX").split(",").map { it.toDouble() }
+            assertTrue("1er nombre = latitude : ${n[0]}", n[0] in 41.0..52.0)
+            assertTrue("2e nombre = longitude : ${n[1]}", n[1] in -6.0..10.0)
+            assertTrue("3e nombre = latitude : ${n[2]}", n[2] in 41.0..52.0)
+            assertTrue("4e nombre = longitude : ${n[3]}", n[3] in -6.0..10.0)
+            assertEquals(r.bbox, parseBbox(r.url))
+            assertEquals("EPSG:4326", query(r.url)["CRS"])
+            assertEquals("1.3.0", query(r.url)["VERSION"])
+            assertTrue(r.bbox.contains(z))
         }
     }
 
-    @Test fun zoneHauteRuraleMemeEchelleQueLAncien() {
-        // Le cas mesuré : 200 × 480 m en Australie rurale. Ancien = 0,629 m/px (200).
-        val needed = boxM(-30.0, 135.0, 200.0, 480.0)
-        val (area, r) = request(needed)
-        verifieGeometrie("Australie 200×480 m", area, r)
-        val ancien = ancienDegPerPxRendu(needed)
-        assertEquals(0.629, ancien * m, 0.002)
-        // Même échelle à 0,2 % près (constantes m/° : 111 320 avant, sphère de 6 371 km
-        // maintenant) ; 7b6ced7 était à 0,544 m/px (−13 %), soit cos(30°) fois plus fin.
-        assertEquals(ancien, r.degPerPx, ancien * 2e-3)
-        assertTrue("au-dessus du niveau 18 (≈ 0,597 m/px) : ${r.degPerPx * m}", r.degPerPx * m > 0.6)
-        assertTrue(r.height <= SatelliteFetcher.MAX_PX && r.width <= SatelliteFetcher.MAX_PX)
+    // ---------------------------------------------------------------- T3
+    @Test fun t3Plafond() {
+        val area = GeoBox(48.9200, 2.3500, 48.9290, 2.3700)
+        val web = nn(SatelliteFetcher.requestForArea(area, maxPx = 2048))
+        assertEquals(2048, web.width); assertEquals(1403, web.height)
+        assertEquals(0.713486, web.mPerPx, 1e-6)
+        val android = nn(SatelliteFetcher.requestForArea(area))
+        assertEquals(1024, android.width); assertEquals(702, android.height)
+        assertEquals(1.426972, android.mPerPx, 1e-6)
     }
 
-    /** Calibration à 1 ancre au Kenya rural (0, 37,5) : nord = +Y, 1000 mm/m. */
-    private fun calibKenya() = GeoCalibration().apply { addAnchor(GeoAnchor(0f, 0f, 0.0, 37.5)) }
-
-    /** Résolution du niveau 18 du cache (deg/px) : seuil mesuré en zone rurale. */
-    private val niveau18 = 360.0 / (256.0 * (1 shl 18))
-
-    /**
-     * Défaut 2 : contenu de 100 × 80 m au Kenya rural → 0,30 m/px → ArcGIS répond
-     * 500 (l'imagerie s'arrête au niveau 18) ; la 2e tentative renvoyait la MÊME URL.
-     * Désormais chaque essai est 2× plus grossier et a SES coins.
-     */
-    @Test fun essaisDeSecoursDePlusEnPlusGrossiersAvecLeursCoins() {
-        val calib = calibKenya()
-        val plans = SatelliteFetcher.plansFor(calib, -50_000f, -40_000f, 50_000f, 40_000f)
-        assertEquals(SatelliteFetcher.ATTEMPTS, plans.size)
-        assertEquals(plans.size, plans.map { it.request.url }.toSet().size)
-        assertEquals(plans[0].request.url, SatelliteFetcher.planFor(calib, -50_000f, -40_000f, 50_000f, 40_000f)!!.request.url)
-        for ((i, p) in plans.withIndex()) {
-            val r = p.request
-            assertEquals("essai $i : ×${1 shl i}", plans[0].request.degPerPx * (1 shl i), r.degPerPx, 1e-15)
-            // Coins = emprise de CET essai (pas celle du premier).
-            val b = r.bbox
-            val nw = calib.worldPosition(b.maxLat, b.minLon)!!
-            val se = calib.worldPosition(b.minLat, b.maxLon)!!
-            assertEquals(nw.first, p.nwX, 0f); assertEquals(nw.second, p.nwY, 0f)
-            assertEquals(se.first, p.seX, 0f); assertEquals(se.second, p.seY, 0f)
-            // Géométrie toujours exacte (rapport en degrés, rendu = demandé) et contenu couvert.
-            assertTrue(abs(r.width * r.degPerPx - b.dLon) < 1e-12 && abs(r.height * r.degPerPx - b.dLat) < 1e-12)
-            assertTrue(p.nwX <= -50_000f && p.seX >= 50_000f && p.seY <= -40_000f && p.nwY >= 40_000f)
-        }
-        // Le 1er essai est sous le niveau 18 (500 en zone rurale), le 2e au-dessus.
-        assertTrue(plans[0].request.degPerPx < niveau18 * 0.9)
-        assertTrue(plans[1].request.degPerPx > niveau18)
+    // ---------------------------------------------------------------- T4
+    @Test fun t4ArrondiVersLExterieurHemisphereSud() {
+        val area = GeoBox(-20.88000004, 55.44700001, -20.87779996, 55.44919999)
+        val r = nn(SatelliteFetcher.requestForArea(area, maxPx = 2048))
+        val q = query(r.url)
+        assertEquals("-20.8800001,55.4470000,-20.8777999,55.4492000", q["BBOX"])
+        assertEquals("1143", q["WIDTH"]); assertEquals("1224", q["HEIGHT"])
+        assertTrue("zone couverte", r.bbox.contains(area))
+        // Le BBOX ne dépend pas du plafond (seule la taille en dépend).
+        assertEquals(r.bbox, nn(SatelliteFetcher.requestForArea(area)).bbox)
     }
 
-    @Test fun premierEssaiReussiEtJamaisDeuxFoisLaMemeUrl() {
-        val plans = SatelliteFetcher.plansFor(calibKenya(), -50_000f, -40_000f, 50_000f, 40_000f)
-        // Serveur simulé d'après les mesures (seuil entre 0,90 et 0,99 × niveau 18) :
-        // 500 plus fin que 0,95 × niveau 18, image sinon.
-        val demandees = mutableListOf<String>()
-        val rural = SatelliteFetcher.firstSuccess<String>(plans) { p ->
-            demandees += p.request.url
-            if (p.request.degPerPx < niveau18 * 0.95) null else "image"
-        }
-        assertNotNull(rural)
-        assertEquals(plans[1], rural!!.first)
-        assertEquals(listOf(plans[0].request.url, plans[1].request.url), demandees)
-        // En ville (imagerie fine) : un seul appel, le plus fin.
-        demandees.clear()
-        val ville = SatelliteFetcher.firstSuccess<String>(plans) { p -> demandees += p.request.url; "image" }
-        assertEquals(plans[0], ville!!.first)
-        assertEquals(1, demandees.size)
-        // Rien nulle part : null après ATTEMPTS URL toutes DIFFÉRENTES.
-        demandees.clear()
-        assertNull(SatelliteFetcher.firstSuccess<String>(plans) { p -> demandees += p.request.url; null })
-        assertEquals(SatelliteFetcher.ATTEMPTS, demandees.size)
-        assertEquals(demandees.size, demandees.toSet().size)
+    @Test fun arrondiLaisseIntactesLesValeursRondes() {
+        val r = nn(SatelliteFetcher.requestForArea(GeoBox(48.1, 2.1, 48.1012, 2.1018)))
+        assertEquals("48.1000000,2.1000000,48.1012000,2.1018000", query(r.url)["BBOX"])
     }
 
-    @Test fun planchersAgrandissentLEmpriseAuLieuDEtirer() {
-        // 30 km × 50 m : la hauteur calculée tombe sous MIN_PX → emprise ÉLARGIE
-        // nord-sud (16 px), rapport toujours exact.
-        val (area, r) = request(boxM(48.86, 2.35, 30_000.0, 50.0))
-        assertEquals(SatelliteFetcher.MIN_PX, r.height)
-        assertTrue("élargie nord-sud", r.bbox.dLat > area.dLat * 1.5)
-        assertTrue(r.bbox.contains(area))
-        assertTrue(ecartPx(rendu(r), r.bbox, r.degPerPx) < 1.0)
-        assertEquals(r.bbox.dLon / r.bbox.dLat, r.width.toDouble() / r.height, 1e-9)
+    // ---------------------------------------------------------------- T5
+    @Test fun t5DeLaCalibrationAuxCoins() {
+        val calib = GeoCalibration().apply { addAnchor(GeoAnchor(0f, 0f, 48.8656, 2.3212)) }
+        val p = nn(SatelliteFetcher.planFor(calib, -50_000f, -40_000f, 50_000f, 40_000f))
+        val q = query(p.request.url)
+        assertEquals("48.8650604,2.3203797,48.8661396,2.3220203", q["BBOX"])
+        assertEquals("601", q["WIDTH"]); assertEquals("601", q["HEIGHT"])
+        val tol = 0.5f
+        assertEquals(-60_002.6f, p.nwX, tol); assertEquals(60_000.8f, p.nwY, tol)
+        assertEquals(60_002.6f, p.neX, tol); assertEquals(60_000.8f, p.neY, tol)
+        assertEquals(60_002.6f, p.seX, tol); assertEquals(-60_000.8f, p.seY, tol)
+        assertEquals(-60_002.6f, p.swX, tol); assertEquals(-60_000.8f, p.swY, tol)
+        val g = nn(calib.latLonOf(p.nwX, p.nwY))
+        assertEquals(48.8661396, g.first, 1e-9)
+        assertEquals(2.3203797, g.second, 1e-9)
     }
 
-    private fun calibParis() = GeoCalibration().apply {
+    @Test fun coinsSontCeuxDuBboxArrondiAvecDeuxAncres() {
         // 2 ancres : rotation ET échelle non triviales.
-        addAnchor(GeoAnchor(0f, 0f, 48.8656, 2.3212))
-        addAnchor(GeoAnchor(50_000f, 20_000f, 48.8658, 2.3218))
-    }
-
-    @Test fun coinsCalculesSurLEmpriseFinale() {
-        val calib = calibParis()
-        val p = assertNotNullAnd(SatelliteFetcher.planFor(calib, -40_000f, -25_000f, 90_000f, 60_000f))
-        val b = p.request.bbox
-        val nw = calib.worldPosition(b.maxLat, b.minLon)!!
-        val ne = calib.worldPosition(b.maxLat, b.maxLon)!!
-        val se = calib.worldPosition(b.minLat, b.maxLon)!!
-        val sw = calib.worldPosition(b.minLat, b.minLon)!!
+        val calib = GeoCalibration().apply {
+            addAnchor(GeoAnchor(0f, 0f, 48.8656, 2.3212))
+            addAnchor(GeoAnchor(50_000f, 20_000f, 48.8658, 2.3218))
+        }
+        val p = nn(SatelliteFetcher.planFor(calib, -40_000f, -25_000f, 90_000f, 60_000f))
+        val b = parseBbox(p.request.url)
+        assertEquals(p.request.bbox, b)
+        val nw = nn(calib.worldPosition(b.maxLat, b.minLon))
+        val se = nn(calib.worldPosition(b.minLat, b.maxLon))
         assertEquals(nw.first, p.nwX, 0f); assertEquals(nw.second, p.nwY, 0f)
-        assertEquals(ne.first, p.neX, 0f); assertEquals(ne.second, p.neY, 0f)
         assertEquals(se.first, p.seX, 0f); assertEquals(se.second, p.seY, 0f)
-        assertEquals(sw.first, p.swX, 0f); assertEquals(sw.second, p.swY, 0f)
-        // Retour en lat/lon : les coins SONT ceux de l'emprise finale (≈ 1 mm près).
-        val g = calib.latLonOf(p.nwX, p.nwY)!!
-        assertEquals(b.maxLat, g.first, 1e-8); assertEquals(b.minLon, g.second, 1e-8)
-        val h = calib.latLonOf(p.seX, p.seY)!!
-        assertEquals(b.minLat, h.first, 1e-8); assertEquals(b.maxLon, h.second, 1e-8)
         // Le contenu tient dans l'image.
         for ((x, y) in listOf(-40_000f to -25_000f, 90_000f to -25_000f, 90_000f to 60_000f, -40_000f to 60_000f)) {
-            val ll = calib.latLonOf(x, y)!!
+            val ll = nn(calib.latLonOf(x, y))
             assertTrue(ll.first in b.minLat..b.maxLat && ll.second in b.minLon..b.maxLon)
         }
-        // Image ↔ monde : pixels carrés EN DEGRÉS → en mètres, un pixel E-O vaut
-        // cos(lat) pixel N-S (côté NO→NE sur w px, côté NO→SO sur h px).
-        val ewMmPerPx = Math.hypot((p.neX - p.nwX).toDouble(), (p.neY - p.nwY).toDouble()) / p.request.width
-        val nsMmPerPx = Math.hypot((p.swX - p.nwX).toDouble(), (p.swY - p.nwY).toDouble()) / p.request.height
-        assertEquals(cosd(48.8656), ewMmPerPx / nsMmPerPx, 1e-4)
+        // Pixels CARRÉS AU SOL : un pixel vaut la même longueur sur les deux côtés.
+        val ewMm = Math.hypot((p.neX - p.nwX).toDouble(), (p.neY - p.nwY).toDouble()) / p.request.width
+        val nsMm = Math.hypot((p.swX - p.nwX).toDouble(), (p.swY - p.nwY).toDouble()) / p.request.height
+        assertEquals(1.0, ewMm / nsMm, 0.01)
+    }
+
+    @Test fun petiteZoneEtendueA120MetresA20Cm() {
+        val calib = GeoCalibration().apply { addAnchor(GeoAnchor(0f, 0f, 45.7640, 4.8357)) } // Lyon
+        val p = nn(SatelliteFetcher.planFor(calib, -2_500f, -2_500f, 2_500f, 2_500f))
+        val r = p.request
+        assertEquals(0.20, r.mPerPx, 1e-12)
+        assertTrue("w=${r.width}", r.width in 600..602)
+        assertTrue("h=${r.height}", r.height in 600..602)
     }
 
     @Test fun urlDecimaleIndependanteDeLaLangue() {
         val saved = Locale.getDefault()
         try {
             Locale.setDefault(Locale.FRANCE)
-            // Près de Greenwich : petites longitudes (Double.toString donnerait « 1.0E-4 »).
-            val (_, r) = request(boxM(51.4779, 0.0001, 100.0, 100.0))
+            // Près de Greenwich : petite longitude (Double.toString donnerait « 1.0E-4 »).
+            val r = nn(SatelliteFetcher.requestForArea(GeoBox(49.0000, 0.0001, 49.0010, 0.0015)))
             val url = r.url
-            assertTrue(url.startsWith(SatelliteFetcher.EXPORT_URL + "?"))
             assertFalse("pas de notation exponentielle : $url", url.contains("E-") || url.contains("E+"))
-            val q = URI(url).rawQuery.split("&").associate { it.substringBefore("=") to it.substringAfter("=") }
-            val bb = q.getValue("bbox").split(",").map { it.toDouble() }
-            assertEquals(listOf(r.bbox.minLon, r.bbox.minLat, r.bbox.maxLon, r.bbox.maxLat), bb)
-            assertEquals("${r.width},${r.height}", q["size"])
-            assertEquals("4326", q["bboxSR"]); assertEquals("4326", q["imageSR"])
-            assertEquals("image", q["f"])
+            val bb = query(url).getValue("BBOX")
+            assertEquals("49.0000000,0.0001000,49.0010000,0.0015000", bb)
+            assertFalse("pas de virgule décimale", bb.split(",").size != 4)
         } finally {
             Locale.setDefault(saved)
         }
     }
 
+    @Test fun urlGetFeatureInfoAuCentre() {
+        val r = nn(SatelliteFetcher.requestForArea(GeoBox(48.8645, 2.3196, 48.8667, 2.3229), maxPx = 2048))
+        val q = query(r.infoUrl)
+        assertTrue(r.infoUrl.startsWith("https://data.geopf.fr/wms-r?"))
+        assertEquals("GetFeatureInfo", q["REQUEST"])
+        assertEquals("ORTHOIMAGERY.ORTHOPHOTOS", q["LAYERS"])
+        assertEquals("ORTHOIMAGERY.ORTHOPHOTOS", q["QUERY_LAYERS"])
+        assertEquals("image/jpeg", q["FORMAT"])        // obligatoire, sinon 400
+        assertEquals("text/plain", q["INFO_FORMAT"])
+        assertEquals("1", q["FEATURE_COUNT"])
+        assertEquals(q["BBOX"], query(r.url)["BBOX"])
+        assertEquals("603", q["I"]); assertEquals("612", q["J"])
+        assertEquals("1207", q["WIDTH"]); assertEquals("1224", q["HEIGHT"])
+    }
+
+    // ---------------------------------------------------------------- T6
+    @Test fun t6PreFiltreDeCouverture() {
+        val dedans = listOf(
+            48.8566 to 2.3522,      // Paris
+            41.9192 to 8.7386,      // Ajaccio
+            14.6037 to -61.0730,    // Fort-de-France
+            -20.8789 to 55.4481,    // Saint-Denis de La Réunion
+            -12.7806 to 45.2279,    // Mamoudzou
+            4.9372 to -52.3260,     // Cayenne
+            46.7811 to -56.1764,    // Saint-Pierre
+            43.7384 to 7.4246,      // Monaco
+            46.2044 to 6.1432       // Genève (emprise métropolitaine : l'image décidera)
+        )
+        val dehors = listOf(
+            52.5163 to 13.3777,     // Berlin
+            -22.2758 to 166.4580,   // Nouméa
+            -17.5350 to -149.5696,  // Papeete
+            51.5074 to -0.1278,     // Londres
+            40.7128 to -74.0060     // New York
+        )
+        for ((lat, lon) in dedans) assertTrue("$lat,$lon couvert", ignCovers(lat, lon))
+        for ((lat, lon) in dehors) assertFalse("$lat,$lon hors couverture", ignCovers(lat, lon))
+        assertFalse(ignCovers(Double.NaN, 2.0))
+        assertEquals("ign-fr", ImagerySources.forPoint(48.8566, 2.3522)?.id)
+        assertNull(ImagerySources.forPoint(52.5163, 13.3777))
+    }
+
+    // ---------------------------------------------------------------- T7
+    private fun image(w: Int = 256, h: Int = 256, bg: Int = 0xFFFFFFFF.toInt()) = IntArray(w * h) { bg }
+    private fun IntArray.fill(x0: Int, y0: Int, size: Int, c: Int = 0xFF000000.toInt(), w: Int = 256) {
+        for (y in y0 until y0 + size) for (x in x0 until x0 + size) this[y * w + x] = c
+    }
+
+    @Test fun t7ImageVide() {
+        assertTrue("blanc pur", SatelliteFetcher.isBlankPixels(image(), 256, 256))
+        val petit = image().apply { fill(96, 96, 16) }      // 16 échantillons / 4096
+        assertTrue("carré 16×16 → vide", SatelliteFetcher.isBlankPixels(petit, 256, 256))
+        val grand = image().apply { fill(100, 100, 26) }    // ≈ 1 %
+        assertFalse("carré 26×26 → gardée", SatelliteFetcher.isBlankPixels(grand, 256, 256))
+        val cote = image().apply { for (y in 0 until 256) for (x in 0 until 128) this[y * 256 + x] = 0xFF000000.toInt() }
+        assertFalse("moitié noire (côte) → gardée", SatelliteFetcher.isBlankPixels(cote, 256, 256))
+        assertFalse("fond 249 → gardée (seuil 250)",
+            SatelliteFetcher.isBlankPixels(image(bg = 0xFFF9F9F9.toInt()), 256, 256))
+        assertTrue("fond 250 → vide", SatelliteFetcher.isBlankPixels(image(bg = 0xFFFAFAFA.toInt()), 256, 256))
+        val quadrants = IntArray(256 * 256) { i ->
+            val x = i % 256; val y = i / 256
+            when {
+                x < 128 && y < 128 -> 0xFFCC3333.toInt()
+                x >= 128 && y < 128 -> 0xFF33CC33.toInt()
+                x < 128 -> 0xFF3333CC.toInt()
+                else -> 0xFFCCCC33.toInt()
+            }
+        }
+        assertFalse("quadrants de la doublure → gardée", SatelliteFetcher.isBlankPixels(quadrants, 256, 256))
+        // Déjà à 64 × 64 (cas Android après createScaledBitmap) : 20 non blancs = vide, 21 = gardée.
+        val g20 = IntArray(64 * 64) { if (it < 20) 0xFF000000.toInt() else -1 }
+        val g21 = IntArray(64 * 64) { if (it < 21) 0xFF000000.toInt() else -1 }
+        assertTrue(SatelliteFetcher.isBlankPixels(g20, 64, 64))
+        assertFalse(SatelliteFetcher.isBlankPixels(g21, 64, 64))
+    }
+
+    // ---------------------------------------------------------------- T8
+    private val featureInfoConcorde = """
+        Results for FeatureType 'http://ORTHOIMAGERY.ORTHOPHOTOS.GRAPHE-MOSAIQUAGE:graphe_bdortho_75':
+        --------------------------------------------
+        dep = 75
+        pva = 2024
+        res = 20
+        echelle = 50
+        date_vol = 2024-08-22Z
+        ordre_debu = 719
+        ordre_fin = 9999
+        geom = [GEOMETRY (Polygon) with 4316 points]
+        --------------------------------------------
+    """.trimIndent()
+
+    @Test fun t8AnneeDePriseDeVue() {
+        assertEquals(2024, IgnImagery.parseCaptureYear(featureInfoConcorde, 2026))
+        val sansDate = featureInfoConcorde.lines().filterNot { it.contains("date_vol") }
+            .joinToString("\n").replace("pva = 2024", "pva = 2023")
+        assertEquals(2023, IgnImagery.parseCaptureYear(sansDate, 2026))
+        assertNull(IgnImagery.parseCaptureYear("no features were found", 2026))
+        assertNull(IgnImagery.parseCaptureYear("date_vol = 1850-01-01Z", 2026))
+        assertNull(IgnImagery.parseCaptureYear("", 2026))
+        assertNull(IgnImagery.parseCaptureYear(null, 2026))
+        // Fins de ligne Windows, année future proche admise, trop lointaine refusée.
+        assertEquals(2023, IgnImagery.parseCaptureYear("dep = 93\r\npva = 2023\r\n", 2026))
+        assertEquals(2027, IgnImagery.parseCaptureYear("date_vol = 2027-01-02Z", 2026))
+        assertNull(IgnImagery.parseCaptureYear("date_vol = 2028-01-02Z", 2026))
+    }
+
+    // ---------------------------------------------------------------- T9
+    private fun text(lang: TestRes, p: Pair<Int, List<Any>>) = lang.res(p.first, p.second)
+
+    @Test fun t9Mention() {
+        assertEquals("Source : IGN – BD ORTHO®, prise de vue 2024", text(TestRes.FR, SatelliteUi.attributionRes(2024)))
+        assertEquals("Source: IGN – BD ORTHO®, imagery 2024", text(TestRes.EN, SatelliteUi.attributionRes(2024)))
+        assertEquals("Source : IGN – BD ORTHO® (cartes.gouv.fr)", text(TestRes.FR, SatelliteUi.attributionRes(null)))
+        assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", text(TestRes.EN, SatelliteUi.attributionRes(null)))
+        assertEquals("https://cartes.gouv.fr/rechercher-une-donnee/dataset/IGNF_BD-ORTHO", IgnImagery.DATASET_URL)
+    }
+
+    @Test fun messagesDuReglageExacts() {
+        fun fr(s: SatelliteStatus) = SatelliteUi.messageRes(s)?.let { text(TestRes.FR, it) }
+        fun en(s: SatelliteStatus) = SatelliteUi.messageRes(s)?.let { text(TestRes.EN, it) }
+        assertNull(fr(SatelliteStatus.Idle)); assertNull(fr(SatelliteStatus.Ready))
+        assertEquals("Téléchargement du satellite…", fr(SatelliteStatus.Loading))
+        assertEquals("Downloading satellite imagery…", en(SatelliteStatus.Loading))
+        assertEquals("Fond satellite disponible en France uniquement (imagerie IGN).", fr(SatelliteStatus.OutOfCoverage))
+        assertEquals("Satellite background available in France only (IGN imagery).", en(SatelliteStatus.OutOfCoverage))
+        assertEquals("Pas d'imagerie IGN pour cette zone.", fr(SatelliteStatus.Unavailable))
+        assertEquals("No IGN imagery for this area.", en(SatelliteStatus.Unavailable))
+        val timeout = SatelliteStatus.Failed(SatelliteErrorKind.TIMEOUT)
+        assertEquals("Satellite indisponible : le serveur de l'IGN ne répond pas. Réessayez plus tard.", fr(timeout))
+        assertEquals("Satellite unavailable: the IGN server isn't responding. Try again later.", en(timeout))
+        val net = SatelliteStatus.Failed(SatelliteErrorKind.NETWORK)
+        assertEquals("Satellite indisponible : réseau injoignable.", fr(net))
+        assertEquals("Satellite unavailable: network unreachable.", en(net))
+        val http = SatelliteStatus.Failed(SatelliteErrorKind.HTTP, 502)
+        assertEquals("Satellite indisponible (erreur 502 du serveur de l'IGN).", fr(http))
+        assertEquals("Satellite unavailable (IGN server error 502).", en(http))
+        val dec = SatelliteStatus.Failed(SatelliteErrorKind.DECODE)
+        assertEquals("Satellite indisponible : image illisible.", fr(dec))
+        assertEquals("Satellite unavailable: unreadable image.", en(dec))
+        // Statut tiré du résultat typé.
+        assertEquals(SatelliteStatus.OutOfCoverage, SatelliteUi.statusOf(SatelliteResult.OutOfCoverage))
+        assertEquals(SatelliteStatus.Unavailable, SatelliteUi.statusOf(SatelliteResult.NoImagery))
+        assertEquals(http, SatelliteUi.statusOf(SatelliteResult.Error(SatelliteErrorKind.HTTP, 502)))
+        assertEquals(SatelliteStatus.Ready, SatelliteUi.statusOf(SatelliteResult.Ok("x")))
+    }
+
+    // ---------------------------------------------------------------- T10
+    /** Doublure du service IGN : GetMap → corps « IMG » / « BLANK », GetFeatureInfo → texte. */
+    private class FakeIgn {
+        val calls = mutableListOf<String>()
+        var getMap: (String) -> SatelliteHttpReply = { SatelliteHttpReply(200, "image/jpeg", "IMG".toByteArray()) }
+        var featureInfo: (String) -> SatelliteHttpReply = { SatelliteHttpReply(200, "text/plain;charset=UTF-8", ByteArray(0)) }
+        val http = SatelliteHttp { url, _ ->
+            calls += url
+            if ("REQUEST=GetFeatureInfo" in url) featureInfo(url) else getMap(url)
+        }
+        val getMaps get() = calls.count { "REQUEST=GetMap" in it }
+        val infos get() = calls.count { "REQUEST=GetFeatureInfo" in it }
+    }
+
+    private var clock = 1_000_000L
+    private fun service(f: FakeIgn) = SatelliteService(
+        http = f.http,
+        decode = { b -> String(b).takeIf { it == "IMG" || it == "BLANK" } },
+        isBlank = { it == "BLANK" },
+        now = { clock },
+        currentYear = { 2026 }
+    )
+    private fun calibAt(lat: Double, lon: Double) = GeoCalibration().apply { addAnchor(GeoAnchor(0f, 0f, lat, lon)) }
+    private val paris = calibAt(48.8656, 2.3212)
+    private fun SatelliteService<String>.go(c: GeoCalibration = paris, force: Boolean = false) =
+        load(c, -50_000f, -40_000f, 50_000f, 40_000f, force)
+
+    @Test fun t10HorsCouvertureAucuneRequete() {
+        val f = FakeIgn()
+        val r = service(f).go(calibAt(52.5163, 13.3777))   // Berlin
+        assertEquals(SatelliteResult.OutOfCoverage, r)
+        assertEquals(0, f.calls.size)
+        assertEquals(SatelliteResult.OutOfCoverage, service(f).go(GeoCalibration()))
+        assertEquals(0, f.calls.size)
+    }
+
+    @Test fun t10ImageBlancheMemoriseeRelanceSeulementForcee() {
+        val f = FakeIgn().apply { getMap = { SatelliteHttpReply(200, "image/jpeg", "BLANK".toByteArray()) } }
+        val s = service(f)
+        assertEquals(SatelliteResult.NoImagery, s.go())
+        assertEquals(1, f.getMaps); assertEquals(0, f.infos)
+        clock += 3_600_000
+        assertEquals(SatelliteResult.NoImagery, s.go())
+        assertEquals("pas de relance sans geste", 1, f.getMaps)
+        assertEquals(SatelliteResult.NoImagery, s.go(force = true))
+        assertEquals("relance avec force", 2, f.getMaps)
+        assertEquals(0, f.infos)
+    }
+
+    @Test fun t10ImageNormaleAvecAnnee() {
+        val f = FakeIgn().apply {
+            featureInfo = { SatelliteHttpReply(200, "text/plain", featureInfoConcorde.toByteArray()) }
+        }
+        val r = service(f).go()
+        assertTrue(r is SatelliteResult.Ok)
+        val ok = (r as SatelliteResult.Ok).overlay
+        assertEquals("IMG", ok.image)
+        assertEquals(2024, ok.year)
+        assertEquals(1, f.getMaps); assertEquals(1, f.infos)
+        assertTrue("GetMap d'abord", "REQUEST=GetMap" in f.calls[0])
+        assertEquals(query(f.calls[0])["BBOX"], query(f.calls[1])["BBOX"])
+        assertEquals("48.8650604,2.3203797,48.8661396,2.3220203", query(f.calls[0])["BBOX"])
+    }
+
+    @Test fun t10GetFeatureInfoEnEchecNeBloquePasLImage() {
+        for (fail in listOf<(String) -> SatelliteHttpReply>(
+            { throw SocketTimeoutException() },
+            { throw IOException("réseau") },
+            { SatelliteHttpReply(400, "text/xml", ByteArray(0)) },
+            { SatelliteHttpReply(200, "text/plain", "no features were found".toByteArray()) }
+        )) {
+            val f = FakeIgn().apply { featureInfo = fail }
+            val r = service(f).go()
+            assertTrue(r is SatelliteResult.Ok)
+            assertNull((r as SatelliteResult.Ok).overlay.year)
+        }
+    }
+
+    @Test fun t10ReponsesEnErreur() {
+        // 200 mais pas une image (ServiceException XML) → http(200).
+        val xml = FakeIgn().apply { getMap = { SatelliteHttpReply(200, "text/xml", "<x/>".toByteArray()) } }
+        assertEquals(SatelliteResult.Error(SatelliteErrorKind.HTTP, 200), service(xml).go())
+        // 502 → erreur, AUCUNE autre taille demandée.
+        val gw = FakeIgn().apply { getMap = { SatelliteHttpReply(502, "text/html", ByteArray(0)) } }
+        assertEquals(SatelliteResult.Error(SatelliteErrorKind.HTTP, 502), service(gw).go())
+        assertEquals(1, gw.calls.size)
+        // 400 (ServiceExceptionReport) → http(400).
+        val bad = FakeIgn().apply { getMap = { SatelliteHttpReply(400, "text/xml", ByteArray(0)) } }
+        assertEquals(SatelliteResult.Error(SatelliteErrorKind.HTTP, 400), service(bad).go())
+        // Réseau injoignable.
+        val net = FakeIgn().apply { getMap = { throw IOException("hôte inconnu") } }
+        assertEquals(SatelliteResult.Error(SatelliteErrorKind.NETWORK), service(net).go())
+        // Image illisible.
+        val junk = FakeIgn().apply { getMap = { SatelliteHttpReply(200, "image/jpeg", "???".toByteArray()) } }
+        assertEquals(SatelliteResult.Error(SatelliteErrorKind.DECODE), service(junk).go())
+        assertEquals(0, junk.infos)
+    }
+
+    @Test fun t10DelaiPasDeRelanceAvant30s() {
+        val f = FakeIgn().apply { getMap = { throw SocketTimeoutException("30 s") } }
+        val s = service(f)
+        val timeout = SatelliteResult.Error(SatelliteErrorKind.TIMEOUT)
+        assertEquals(timeout, s.go())
+        assertEquals(1, f.calls.size)
+        clock += 10_000
+        assertEquals(timeout, s.go())
+        assertEquals("pas de relance avant 30 s", 1, f.calls.size)
+        assertEquals(timeout, s.go(force = true))
+        assertEquals("un geste explicite relance", 2, f.calls.size)
+        clock += 31_000
+        assertEquals(timeout, s.go())
+        assertEquals(3, f.calls.size)
+        // Le serveur revient : l'image passe et la mémoire d'échec est effacée.
+        clock += 31_000
+        f.getMap = { SatelliteHttpReply(200, "image/jpeg", "IMG".toByteArray()) }
+        assertTrue(s.go() is SatelliteResult.Ok)
+    }
+
+    // ---------------------------------------------------------------- divers
+    @Test fun userAgentIdentifieLApp() {
+        assertEquals("MVRViewer/1.9.0 (Android)", SatelliteFetcher.userAgent("1.9.0"))
+        assertEquals("MVRViewer/? (Android)", SatelliteFetcher.userAgent(null))
+    }
+
     @Test fun cleDeCacheCoherenteAvecLaRequete() {
-        val calib = calibParis()
+        val calib = GeoCalibration().apply {
+            addAnchor(GeoAnchor(0f, 0f, 48.8656, 2.3212))
+            addAnchor(GeoAnchor(50_000f, 20_000f, 48.8658, 2.3218))
+        }
         val k1 = SatelliteFetcher.keyFor(calib, -40_000f, -25_000f, 90_000f, 60_000f)
         val k2 = SatelliteFetcher.keyFor(calib, -40_000f, -25_000f, 90_000f, 60_000f)
         val u1 = SatelliteFetcher.planFor(calib, -40_000f, -25_000f, 90_000f, 60_000f)!!.request.url
@@ -354,8 +473,25 @@ class SatelliteRequestTest {
 
     @Test fun casInvalidesRendentNull() {
         assertNull(SatelliteFetcher.planFor(GeoCalibration(), 0f, 0f, 1000f, 1000f))
-        assertNull(SatelliteFetcher.areaFor(boxM(88.0, 0.0, 100.0, 100.0)))
+        assertNull(SatelliteFetcher.areaFor(GeoBox(87.9, 0.0, 88.1, 0.1)))
         assertNull(SatelliteFetcher.areaFor(GeoBox(Double.NaN, 0.0, 1.0, 1.0)))
-        assertNull(SatelliteFetcher.areaFor(boxM(10.0, 179.9999, 200.0, 200.0)))
+        assertNull(SatelliteFetcher.areaFor(GeoBox(10.0, 179.9990, 10.001, 179.99999)))
+        assertNull(SatelliteFetcher.requestForArea(GeoBox(48.0, 2.0, 48.0, 2.1)))
+        assertNull(SatelliteFetcher.requestForArea(GeoBox(48.0, 2.0, 48.1, Double.NaN)))
+    }
+
+    /**
+     * Plus AUCUNE trace de l'ancienne imagerie mondiale sans clé dans le code (ni
+     * URL, ni texte) : ses conditions interdisent une app vendue. Les mots sont
+     * reconstitués ici pour que ce test ne se trouve pas lui-même.
+     */
+    @Test fun aucuneTraceDeLAncienneSource() {
+        val root = listOf(File("src"), File("app/src")).first { File(it, "main").isDirectory }
+        val forbidden = Regex(listOf("arc" + "gis", "es" + "ri", "World" + "_Imagery").joinToString("|"), RegexOption.IGNORE_CASE)
+        val hits = root.walkTopDown()
+            .filter { it.isFile && it.extension in setOf("kt", "xml", "java", "json", "txt", "md") }
+            .flatMap { f -> f.readLines().mapIndexedNotNull { i, l -> if (forbidden.containsMatchIn(l)) "${f.path}:${i + 1}: $l" else null } }
+            .toList()
+        assertTrue("traces restantes :\n" + hits.joinToString("\n"), hits.isEmpty())
     }
 }

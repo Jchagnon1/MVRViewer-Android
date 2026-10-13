@@ -92,6 +92,7 @@ internal class PlanViewCapture(
 /**
  * Données lourdes communes à toutes les pages (fils de fer, tracés DXF, satellite).
  * Elles ne dépendent pas du cadrage : on ne les reconstruit donc pas par page.
+ * Le satellite (image IGN) porte son année : la page dessine la mention.
  */
 internal class PlanExportSource(
     val data: PlanData,
@@ -331,6 +332,13 @@ private fun DrawScope.drawPdfPage(
                 drawLegend(src, v, measurer, Offset(left + 10f, top + 10f))
             }
         }
+    }
+    // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte) dès que le fond est
+    // dessiné dans la page : bas-droite de la zone image, 7 pt (même texte qu'à
+    // l'écran ; sans année, la variante « (cartes.gouv.fr) » nomme la source).
+    val sat = src.satellite
+    if (v.showSatellite && sat != null && sat.bitmap.width > 0) {
+        drawSatelliteAttribution(measurer, SatelliteUi.attribution(ctx, sat.year), right, bottom)
     }
     drawRect(Color(0xFF888888), topLeft = Offset(left, top), size = Size(cw, ch), style = Stroke(0.8f))
 

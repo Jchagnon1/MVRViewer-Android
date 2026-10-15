@@ -237,6 +237,38 @@ fun SceneScreen(
     // chaque bascule CABLING ↔ PLAN — un état local ne survivrait pas au passage par le
     // câblage. Non nulle = la vue plan est en mode affectation vers ce circuit / départ.
     var assignTarget by remember(projectKey) { mutableStateOf<CablingAssignTarget?>(null) }
+    // MÉMOIRE de l'écran Câblage (SPEC-cablage-plan §7) : l'écran est refermé à
+    // chaque passage par le plan ; onglet, position par onglet et voie travaillée
+    // vivent ICI, le temps de la session du projet (objet non observé : écrit au
+    // défilement, relu seulement à l'apparition d'une liste).
+    val cablingMemory = remember(projectKey) { CablingScreenMemoryState() }
+    // SEUL point d'écriture de la cible : chaque voie ouverte sur le plan (entrée,
+    // ◀, ▶) devient la « dernière voie active », celle que l'écran Câblage remettra
+    // sous les yeux ; son libellé est FIGÉ ici (gardé si la voie disparaît).
+    fun setAssignVoie(voie: CablingVoie) {
+        assignTarget = CablingAssignTarget.forVoie(voie, cabling.distributors, dmxCabling.distributors)
+        cablingMemory.rememberWorkedVoie(voie)
+    }
+    // ◀ ▶ de la barre : voie précédente / suivante DANS LA MÊME FAMILLE, sans
+    // bouclage ; sans effet au bout ou si la voie a disparu.
+    fun stepAssign(step: Int) {
+        val t = assignTarget ?: return
+        val order = when (t.kind) {
+            CablingAssignTarget.Kind.SOCA -> CablingVoieNavigator.voies(cabling.toDTO())
+            CablingAssignTarget.Kind.DMX -> CablingVoieNavigator.voies(dmxCabling.toDTO())
+        }
+        CablingVoieNavigator.neighbor(t.voie, step, order)?.let { setAssignVoie(it) }
+    }
+    // « Terminé » (barre, flèche du plan, retour système) : quitte le mode et
+    // rouvre l'écran Câblage SUR LA DERNIÈRE VOIE ACTIVE (bon onglet, voie mise
+    // sous les yeux et surlignée une fois).
+    fun finishAssign() {
+        assignTarget = null
+        mode = SceneMode.CABLING
+    }
+    // Le plan quitté par un autre chemin (menu, autre vue) : le mode affectation
+    // est TOUJOURS désarmé — sinon une réouverture normale hériterait de la cible.
+    LaunchedEffect(mode) { if (mode != SceneMode.PLAN) assignTarget = null }
     var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
     fun hiddenSig(s: Set<String>) = AuditCoding.encodeLayers(s)
     LaunchedEffect(projectKey) {
@@ -1007,7 +1039,12 @@ fun SceneScreen(
     // L'Accueil (HomeScreen) n'a AUCUN handler : seul lui laisse l'OS réduire l'appli.
     BackHandler(enabled = mode == SceneMode.THREE_D) { onClose() }
     // Retour matériel depuis une sous-vue → 3D, et sortie du mode affectation (E2).
-    BackHandler(enabled = mode != SceneMode.THREE_D) { assignTarget = null; mode = SceneMode.THREE_D }
+    // Pendant une AFFECTATION sur le plan, le retour vaut « Terminé » : retour à
+    // l'écran Câblage sur la dernière voie (SPEC-cablage-plan §2.3).
+    BackHandler(enabled = mode != SceneMode.THREE_D) {
+        if (mode == SceneMode.PLAN && assignTarget != null) finishAssign()
+        else { assignTarget = null; mode = SceneMode.THREE_D }
+    }
     BackHandler(enabled = showAccount || showShare || showHistory || showJoin) {
         showAccount = false; showShare = false; showHistory = false; showJoin = false
     }
@@ -1163,16 +1200,23 @@ fun SceneScreen(
             // d'étiquette Socapex / Ligne DMX. Objets déjà hissés ici (L87/L90).
             cabling = cabling,
             dmxCabling = dmxCabling,
-            // AFFECTATION SUR LE PLAN (E2) : cible hissée + « Terminé » (revient au câblage).
+            // AFFECTATION SUR LE PLAN (SPEC-cablage-plan) : cible hissée, « Terminé »
+            // (revient au câblage sur la dernière voie), ◀ ▶, croix (reste sur le
+            // plan), charge de la barre avec les mêmes sources que l'écran Câblage.
             assignTarget = assignTarget,
-            onAssignDone = { assignTarget = null; mode = SceneMode.CABLING },
+            onAssignDone = { finishAssign() },
+            onStepAssign = { stepAssign(it) },
+            onExitAssign = { assignTarget = null },
+            power = power,
+            customResolver = customResolver,
+            onShow3D = { assignTarget = null; mode = SceneMode.THREE_D },
             onShowAccount = sync?.let { { showAccount = true } },
             onShareProject = sync?.let { { ProAccess.gate("partager un projet") { showShare = true } } },
             onShowHistory = sync?.let { { showHistory = true } },
             onJoinProject = sync?.let { { showJoin = true } },
-            // Retour à la 3D = aussi une sortie du mode affectation (échappatoire) :
-            // sinon rouvrir le plan le retrouverait armé sans bandeau attendu.
-            onBack = { assignTarget = null; mode = SceneMode.THREE_D },
+            // Flèche haut-gauche : pendant une affectation, elle vaut « Terminé »
+            // (retour à l'écran Câblage) ; sinon retour à la 3D.
+            onBack = { if (assignTarget != null) finishAssign() else mode = SceneMode.THREE_D },
             onShowPatch = { mode = SceneMode.PATCH },
             // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
             onEditFixture = { editFixture = it },
@@ -1255,7 +1299,8 @@ fun SceneScreen(
             hiddenLayers = hiddenLayers,
             // AFFECTATION SUR LE PLAN (E2) : un « Sélectionner sur le plan » sur un
             // circuit / départ bascule en vue plan MODE AFFECTATION vers cette cible.
-            onSelectOnPlan = { t -> assignTarget = t; mode = SceneMode.PLAN },
+            onSelectOnPlan = { t -> setAssignVoie(t.voie); mode = SceneMode.PLAN },
+            memory = cablingMemory,
             onBack = { mode = SceneMode.THREE_D },
             modifier = modifier
         )

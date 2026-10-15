@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -125,6 +129,12 @@ fun CablingScreen(
     // « Sélectionner sur le plan » sur un circuit / départ. SceneScreen bascule alors
     // en vue plan MODE AFFECTATION vers cette cible.
     onSelectOnPlan: (CablingAssignTarget) -> Unit = {},
+    /**
+     * MÉMOIRE de l'écran (SPEC-cablage-plan §7) : l'écran est refermé à chaque
+     * passage par le plan, sa mémoire vit dans SceneScreen (onglet, position par
+     * onglet, voie travaillée à remettre sous les yeux au retour).
+     */
+    memory: CablingScreenMemoryState = remember { CablingScreenMemoryState() },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -155,8 +165,11 @@ fun CablingScreen(
     // Onglet actif : 0 = câblage électrique (distributeurs/charges), 1 = câblage
     // DMX (lignes/multipaires), 2 = puissances par type. On règle la conso SANS
     // quitter l'écran ; revenir au câblage montre les charges recalculées (les
-    // votes remontent `power.version`, qui re-clé `fixtures`).
-    var tab by remember { mutableIntStateOf(0) }
+    // votes remontent `power.version`, qui re-clé `fixtures`). L'onglet de
+    // départ est le DERNIER ouvert (mémoire hissée) — il était perdu à chaque
+    // bascule câblage ↔ plan : on revenait sur « Électrique » en câblant du DMX.
+    var tab by remember { mutableIntStateOf(CablingScreenTab.opening(null, memory.tab).index) }
+    fun selectTab(i: Int) { tab = i; memory.tab = CablingScreenTab.fromIndex(i) }
 
     // ---- EXPORT PDF (phase 5) : dossier complet + 3 exports séparés ----------
     val ctxCabling = LocalContext.current
@@ -310,15 +323,16 @@ fun CablingScreen(
         // multipaires), et le réglage des PUISSANCES par type — pour corriger une
         // conso sans sortir de l'écran de câblage.
         TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.cabling_tab_elec)) })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("DMX") })
-            Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text(stringResource(R.string.cabling_tab_power)) })
+            Tab(selected = tab == 0, onClick = { selectTab(0) }, text = { Text(stringResource(R.string.cabling_tab_elec)) })
+            Tab(selected = tab == 1, onClick = { selectTab(1) }, text = { Text("DMX") })
+            Tab(selected = tab == 2, onClick = { selectTab(2) }, text = { Text(stringResource(R.string.cabling_tab_power)) })
         }
 
         if (tab == 1) {
             DmxCablingPanel(scene, mvrBytes, overrides, gdtfOverrides, dmxCabling,
                 customResolver = customResolver,
                 onSelectOnPlan = onSelectOnPlan,
+                memory = memory,
                 modifier = Modifier.weight(1f).fillMaxWidth())
             return@Column
         }
@@ -370,20 +384,58 @@ fun CablingScreen(
                 )
             }
         } else {
+            // Une LIGNE de liste par ligne repère (en-tête, phase, circuit), clé =
+            // identifiant de ligne : la liste sait défiler jusqu'à la voie
+            // travaillée sur le plan et retenir la ligne en tête (SPEC §7).
+            val dists = cabling.distributors.toList()
+            val rows = remember(dists) { CablingListRows.power(dists) }
+            val distById = remember(dists) { dists.associateBy { it.id } }
+            val listState = rememberLazyListState()
+            val flash = remember { CablingFlash() }
+            CablingListMemoryEffects(listState, rows, memory, CablingScreenTab.CABLING, flash)
+            val cardFill = MaterialTheme.colorScheme.surface
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)
             ) {
-                items(cabling.distributors, key = { it.id }) { d ->
-                    DistributorCard(
-                        dist = d, cabling = cabling, settings = cabling.settings,
-                        wattsOf = wattsOf, fixtureLabel = fixtureLabel,
-                        onAssign = { circuit -> picker = d.id to circuit },
-                        onSelectOnPlan = onSelectOnPlan,
-                        onEdit = { editDist = d.id },
-                        onDelete = { cabling.removeDistributor(d.id) }
-                    )
+                itemsIndexed(rows, key = { _, r -> r.id }) { i, row ->
+                    when (row) {
+                        is CablingListRow.Header -> {
+                            val d = distById[row.distId] ?: return@itemsIndexed
+                            Box(Modifier.padding(top = if (i == 0) 0.dp else 12.dp).fillMaxWidth()
+                                .cardSegment(Color(d.colorArgb), cardFill, CardSeg.TOP)) {
+                                DistributorHeader(
+                                    dist = d, cabling = cabling, settings = cabling.settings, wattsOf = wattsOf,
+                                    onEdit = { editDist = d.id },
+                                    onDelete = { cabling.removeDistributor(d.id) }
+                                )
+                            }
+                        }
+                        is CablingListRow.Phase -> {
+                            val d = distById[row.distId] ?: return@itemsIndexed
+                            Box(Modifier.fillMaxWidth().cardSegment(Color(d.colorArgb), cardFill, CardSeg.MIDDLE)) {
+                                Text(
+                                    stringResource(R.string.cabling_phase_fmt, row.phase),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color(d.colorArgb),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 2.dp)
+                                )
+                            }
+                        }
+                        is CablingListRow.Voie -> {
+                            val d = distById[row.voie.distId] ?: return@itemsIndexed
+                            val id = row.id
+                            Box(Modifier.fillMaxWidth().cardSegment(Color(d.colorArgb), cardFill,
+                                if (row.last) CardSeg.BOTTOM else CardSeg.MIDDLE) { flash.alphaOf(id) }) {
+                                Box(Modifier.padding(start = 12.dp, end = 12.dp, bottom = if (row.last) 10.dp else 0.dp)) {
+                                    CircuitRow(d, row.voie.index, cabling, cabling.settings, wattsOf, fixtureLabel,
+                                        onAssign = { circuit -> picker = d.id to circuit }, onSelectOnPlan = onSelectOnPlan)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -414,16 +466,17 @@ fun CablingScreen(
     }
 }
 
-/** Carte d'un distributeur : circuits groupés par phase + charges + total. */
+/**
+ * En-tête de la carte d'un distributeur (ligne repère `hdr#<id>`) : pastille,
+ * nom, total, actions et totaux de phase. Les phases et les circuits suivent,
+ * chacun sur sa propre ligne de liste (CablingListRows.power).
+ */
 @Composable
-private fun DistributorCard(
+private fun DistributorHeader(
     dist: Distributor,
     cabling: PowerCablingState,
     settings: CablingSettings,
     wattsOf: (String) -> Int?,
-    fixtureLabel: Map<String, String>,
-    onAssign: (Int) -> Unit,
-    onSelectOnPlan: (CablingAssignTarget) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -432,78 +485,57 @@ private fun DistributorCard(
     val total = PowerCablingCalc.distributorTotalW(dist, assignments, settings, wattsOf)
     val phaseLoads = PowerCablingCalc.phaseLoads(dist, assignments, settings, wattsOf)
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(2.dp, color),
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            // En-tête : pastille couleur, nom, total, actions.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(18.dp).clip(CircleShape).background(color)
-                        .border(1.dp, Color(0x55000000), CircleShape)
-                )
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(dist.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        stringResource(if (dist.kind == DistributorKind.SOCA) R.string.label_field_socapex else R.string.cabling_line_pc16) + (
-                            stringResource(R.string.cabling_total_fmt, total)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.common_edit)) }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete),
-                        tint = MaterialTheme.colorScheme.error)
-                }
-            }
-            // Totaux de phase (aide à l'équilibrage) — 3 pour une soca, sinon les
-            // phases réellement utilisées.
-            val usedPhases = (1..dist.circuitCount).map { dist.phaseOf(it) }.toSet()
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                phaseLoads.filter { it.phase in usedPhases }.forEach { pl ->
-                    val over = pl.overloaded
-                    AssistChip(
-                        onClick = {},
-                        enabled = false,
-                        label = {
-                            Text(
-                                "L${pl.phase}: ${pl.totalW} W" + if (settings.phaseLimitW > 0) " / ${settings.phaseLimitW}" else "",
-                                color = if (over) MaterialTheme.colorScheme.onError else Color.Unspecified
-                            )
-                        },
-                        colors = AssistChipDefaults.assistChipColors(
-                            disabledContainerColor = if (over) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                            disabledLabelColor = if (over) MaterialTheme.colorScheme.onError
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    )
-                }
-            }
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            // Circuits GROUPÉS PAR PHASE.
-            for (phase in usedPhases.sorted()) {
+    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp)) {
+        // En-tête : pastille couleur, nom, total, actions.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(18.dp).clip(CircleShape).background(color)
+                    .border(1.dp, Color(0x55000000), CircleShape)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(dist.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    stringResource(R.string.cabling_phase_fmt, phase),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = color,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                    stringResource(if (dist.kind == DistributorKind.SOCA) R.string.label_field_socapex else R.string.cabling_line_pc16) + (
+                        stringResource(R.string.cabling_total_fmt, total)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                for (c in 1..dist.circuitCount) {
-                    if (dist.phaseOf(c) != phase) continue
-                    CircuitRow(dist, c, cabling, settings, wattsOf, fixtureLabel, onAssign, onSelectOnPlan)
-                }
+            }
+            IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.common_edit)) }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete),
+                    tint = MaterialTheme.colorScheme.error)
             }
         }
+        // Totaux de phase (aide à l'équilibrage) — 3 pour une soca, sinon les
+        // phases réellement utilisées.
+        val usedPhases = (1..dist.circuitCount).map { dist.phaseOf(it) }.toSet()
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            phaseLoads.filter { it.phase in usedPhases }.forEach { pl ->
+                val over = pl.overloaded
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = {
+                        Text(
+                            "L${pl.phase}: ${pl.totalW} W" + if (settings.phaseLimitW > 0) " / ${settings.phaseLimitW}" else "",
+                            color = if (over) MaterialTheme.colorScheme.onError else Color.Unspecified
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(
+                        disabledContainerColor = if (over) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        disabledLabelColor = if (over) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                )
+            }
+        }
+        HorizontalDivider(Modifier.padding(top = 4.dp))
     }
 }
 
@@ -542,30 +574,9 @@ private fun CircuitRow(
                 "${load.totalW} / ${settings.circuitLimitW} W",
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = if (over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                fontWeight = if (over) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (over) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.padding(vertical = 10.dp)
             )
-            IconButton(onClick = { onAssign(circuit) }) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.cabling_assign_fixtures_cd))
-            }
-            // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
-            // affectation vers CE circuit. Conserve l'affectation par la liste (bouton +).
-            IconButton(onClick = {
-                // Garde en AMONT : ne pas armer le mode affectation du plan pour rien.
-                ProAccess.gate("affecter le câblage") {
-                    onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.SOCA, dist.id, circuit))
-                }
-            }) {
-                Icon(Icons.Filled.Map, contentDescription = stringResource(R.string.cabling_select_on_plan_cd))
-            }
-            // VIDER LE CIRCUIT : retire toutes les affectations de CE circuit (pas
-            // les autres). Une ligne PC16 (SOLO) n'ayant qu'un circuit, le même
-            // bouton la vide entièrement. Masqué si le circuit est déjà vide.
-            if (fx.isNotEmpty()) {
-                IconButton(onClick = { confirmClear = true }) {
-                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.cabling_clear_circuit_cd),
-                        tint = MaterialTheme.colorScheme.error)
-                }
-            }
         }
         // Projecteurs affectés à ce circuit (chips à retirer d'un tap).
         if (fx.isEmpty()) {
@@ -589,6 +600,30 @@ private fun CircuitRow(
                 }
             }
         }
+        // Trois actions sur UNE ligne, ordre iOS : « Sélectionner sur le plan »
+        // (le chemin le plus direct), « Affecter des projecteurs », puis « Vider le
+        // circuit » s'il porte un projecteur — libellés courts si la place manque.
+        val danger = MaterialTheme.colorScheme.error
+        val accent = MaterialTheme.colorScheme.primary
+        val sOnPlan = stringResource(R.string.cabling_select_on_plan_cd)
+        val sOnPlanShort = stringResource(R.string.cabling_action_on_plan_short)
+        val sAssign = stringResource(R.string.cabling_assign_fixtures_cd)
+        val sAssignShort = stringResource(R.string.cabling_action_assign_short)
+        val sClear = stringResource(R.string.cabling_clear_circuit_cd)
+        val sClearShort = stringResource(R.string.common_clear)
+        CablingRowActions(buildList {
+            // AFFECTER EN SÉLECTIONNANT SUR LE PLAN : bascule en vue plan, mode
+            // affectation vers CE circuit. Garde Pro en AMONT (ne pas armer pour rien).
+            add(CablingRowAction(Icons.Filled.TouchApp, sOnPlan, sOnPlanShort, accent) {
+                ProAccess.gate("affecter le câblage") {
+                    onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.SOCA, dist.id, circuit))
+                }
+            })
+            add(CablingRowAction(Icons.Filled.AddCircleOutline, sAssign, sAssignShort, accent) { onAssign(circuit) })
+            // VIDER LE CIRCUIT : retire toutes les affectations de CE circuit (pas
+            // les autres). Masqué si le circuit est déjà vide.
+            if (fx.isNotEmpty()) add(CablingRowAction(Icons.Filled.Delete, sClear, sClearShort, danger) { confirmClear = true })
+        }, Modifier.fillMaxWidth().padding(bottom = 2.dp))
     }
 
     if (confirmClear) {

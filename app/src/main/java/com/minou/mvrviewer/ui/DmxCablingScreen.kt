@@ -20,6 +20,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -92,6 +96,8 @@ fun DmxCablingPanel(
     // AFFECTATION SUR LE PLAN (E2) : bascule la vue plan en mode affectation vers le
     // départ DMX choisi. Voir CablingScreen / PlanScreen.
     onSelectOnPlan: (CablingAssignTarget) -> Unit = {},
+    /** Mémoire de l'écran Câblage (onglet « DMX ») — cf. CablingScreen. */
+    memory: CablingScreenMemoryState = remember { CablingScreenMemoryState() },
     modifier: Modifier = Modifier
 ) {
     // Résolution des empreintes GDTF HORS thread principal (parse des .gdtf) via la
@@ -155,20 +161,50 @@ fun DmxCablingPanel(
                     modifier = Modifier.padding(32.dp)
                 )
             }
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(dmx.distributors, key = { it.id }) { d ->
-                    DmxDistributorCard(
-                        dist = d, dmx = dmx, channelsOf = channelsOf, universeOf = universeOf,
-                        fixtureLabel = fixtureLabel,
-                        onAssign = { core -> picker = d.id to core },
-                        onSelectOnPlan = onSelectOnPlan,
-                        onEdit = { editDist = d.id },
-                        onDelete = { dmx.removeDistributor(d.id) }
-                    )
+            else -> {
+                // Une LIGNE de liste par ligne repère (en-tête, départ), clé =
+                // identifiant de ligne : défilement jusqu'à la voie travaillée sur le
+                // plan et ligne en tête retenue (SPEC-cablage-plan §7).
+                val dists = dmx.distributors.toList()
+                val rows = remember(dists) { CablingListRows.dmx(dists) }
+                val distById = remember(dists) { dists.associateBy { it.id } }
+                val listState = rememberLazyListState()
+                val flash = remember { CablingFlash() }
+                CablingListMemoryEffects(listState, rows, memory, CablingScreenTab.DMX, flash)
+                val cardFill = MaterialTheme.colorScheme.surface
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp)
+                ) {
+                    itemsIndexed(rows, key = { _, r -> r.id }) { i, row ->
+                        when (row) {
+                            is CablingListRow.Header -> {
+                                val d = distById[row.distId] ?: return@itemsIndexed
+                                Box(Modifier.padding(top = if (i == 0) 0.dp else 12.dp).fillMaxWidth()
+                                    .cardSegment(Color(d.colorArgb), cardFill, CardSeg.TOP)) {
+                                    DmxDistributorHeader(
+                                        dist = d, dmx = dmx, channelsOf = channelsOf,
+                                        onEdit = { editDist = d.id },
+                                        onDelete = { dmx.removeDistributor(d.id) }
+                                    )
+                                }
+                            }
+                            is CablingListRow.Voie -> {
+                                val d = distById[row.voie.distId] ?: return@itemsIndexed
+                                val id = row.id
+                                Box(Modifier.fillMaxWidth().cardSegment(Color(d.colorArgb), cardFill,
+                                    if (row.last) CardSeg.BOTTOM else CardSeg.MIDDLE) { flash.alphaOf(id) }) {
+                                    Box(Modifier.padding(start = 12.dp, end = 12.dp, bottom = if (row.last) 10.dp else 0.dp)) {
+                                        DmxCoreRow(d, row.voie.index, dmx, channelsOf, universeOf, fixtureLabel,
+                                            Color(d.colorArgb), onAssign = { core -> picker = d.id to core },
+                                            onSelectOnPlan = onSelectOnPlan)
+                                    }
+                                }
+                            }
+                            is CablingListRow.Phase -> Unit
+                        }
+                    }
                 }
             }
         }
@@ -202,16 +238,15 @@ fun DmxCablingPanel(
     }
 }
 
-/** Carte d'une ligne DMX : ses départs, l'empreinte cumulée + alertes discrètes. */
+/**
+ * En-tête de la carte d'une ligne DMX (ligne repère `hdr#<id>`) : pastille, nom,
+ * empreinte totale, actions. Les départs suivent, chacun sur sa ligne de liste.
+ */
 @Composable
-private fun DmxDistributorCard(
+private fun DmxDistributorHeader(
     dist: DmxDistributor,
     dmx: DmxCablingState,
     channelsOf: (String) -> Int?,
-    universeOf: (String) -> Int?,
-    fixtureLabel: Map<String, String>,
-    onAssign: (Int) -> Unit,
-    onSelectOnPlan: (CablingAssignTarget) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -219,40 +254,30 @@ private fun DmxDistributorCard(
     val assignments = dmx.assignments.values.toList()
     val total = DmxCablingCalc.distributorTotalChannels(dist, assignments, channelsOf)
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(2.dp, color),
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(18.dp).clip(CircleShape).background(color)
-                        .border(1.dp, Color(0x55000000), CircleShape)
+    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(18.dp).clip(CircleShape).background(color)
+                    .border(1.dp, Color(0x55000000), CircleShape)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(dist.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                val kindTxt = if (dist.kind == DmxDistributorKind.MULTI)
+                    stringResource(R.string.dmx_multicore_cores_fmt, dist.coreCount) else stringResource(R.string.dmx_single_line_label)
+                Text(
+                    stringResource(R.string.dmx_total_channels_fmt, kindTxt, total),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(dist.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    val kindTxt = if (dist.kind == DmxDistributorKind.MULTI)
-                        stringResource(R.string.dmx_multicore_cores_fmt, dist.coreCount) else stringResource(R.string.dmx_single_line_label)
-                    Text(
-                        stringResource(R.string.dmx_total_channels_fmt, kindTxt, total),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.common_edit)) }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete),
-                        tint = MaterialTheme.colorScheme.error)
-                }
             }
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            for (core in 1..dist.coreCount) {
-                DmxCoreRow(dist, core, dmx, channelsOf, universeOf, fixtureLabel, color, onAssign, onSelectOnPlan)
+            IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.common_edit)) }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.common_delete),
+                    tint = MaterialTheme.colorScheme.error)
             }
         }
+        HorizontalDivider(Modifier.padding(top = 4.dp))
     }
 }
 
@@ -291,28 +316,9 @@ private fun DmxCoreRow(
                 "${load.totalChannels} / ${DmxCablingCalc.UNIVERSE_CHANNELS}",
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = if (load.over512) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                fontWeight = if (load.over512) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (load.over512) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.padding(vertical = 10.dp)
             )
-            IconButton(onClick = { onAssign(core) }) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.cabling_assign_fixtures_cd))
-            }
-            // AFFECTER EN SÉLECTIONNANT SUR LE PLAN (E2) : bascule en vue plan, mode
-            // affectation vers CE départ. Conserve l'affectation par la liste (bouton +).
-            IconButton(onClick = {
-                ProAccess.gate("affecter le câblage") {
-                    onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.DMX, dist.id, core))
-                }
-            }) {
-                Icon(Icons.Filled.Map, contentDescription = stringResource(R.string.cabling_select_on_plan_cd))
-            }
-            // VIDER LE DÉPART : retire toutes les affectations de CE départ (pas les
-            // autres). Masqué si le départ est déjà vide.
-            if (fx.isNotEmpty()) {
-                IconButton(onClick = { confirmClear = true }) {
-                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.dmx_clear_core_cd),
-                        tint = MaterialTheme.colorScheme.error)
-                }
-            }
         }
         // Alertes DISCRÈTES (sans blocage) : dépassement de 512, univers mélangés.
         if (load.over512) {
@@ -343,6 +349,29 @@ private fun DmxCoreRow(
                 }
             }
         }
+        // Trois actions sur UNE ligne, ordre iOS : « Sélectionner sur le plan »,
+        // « Affecter des projecteurs », « Vider le départ » (s'il porte un
+        // projecteur) — libellés courts si la place manque.
+        val danger = MaterialTheme.colorScheme.error
+        val accent = MaterialTheme.colorScheme.primary
+        val sOnPlan = stringResource(R.string.cabling_select_on_plan_cd)
+        val sOnPlanShort = stringResource(R.string.cabling_action_on_plan_short)
+        val sAssign = stringResource(R.string.cabling_assign_fixtures_cd)
+        val sAssignShort = stringResource(R.string.cabling_action_assign_short)
+        val sClear = stringResource(R.string.dmx_clear_core_cd)
+        val sClearShort = stringResource(R.string.common_clear)
+        CablingRowActions(buildList {
+            // AFFECTER EN SÉLECTIONNANT SUR LE PLAN : vue plan, mode affectation
+            // vers CE départ. Garde Pro en AMONT.
+            add(CablingRowAction(Icons.Filled.TouchApp, sOnPlan, sOnPlanShort, accent) {
+                ProAccess.gate("affecter le câblage") {
+                    onSelectOnPlan(CablingAssignTarget(CablingAssignTarget.Kind.DMX, dist.id, core))
+                }
+            })
+            add(CablingRowAction(Icons.Filled.AddCircleOutline, sAssign, sAssignShort, accent) { onAssign(core) })
+            // VIDER LE DÉPART : retire toutes les affectations de CE départ.
+            if (fx.isNotEmpty()) add(CablingRowAction(Icons.Filled.Delete, sClear, sClearShort, danger) { confirmClear = true })
+        }, Modifier.fillMaxWidth().padding(bottom = 2.dp))
     }
 
     if (confirmClear) {

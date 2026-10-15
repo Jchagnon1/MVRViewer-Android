@@ -1,0 +1,1976 @@
+{
+  "schema": "mvrviewer.port-vectors.cabling-plan/1",
+  "spec": "SPEC-cablage-plan.md (dépôt iOS)",
+  "source": {
+    "repository": "MVRViewer iOS (~/Desktop/MVRViewer/MVRViewer)",
+    "branch": "feature/ux-iso-classes",
+    "commit": "85a3668",
+    "files": [
+      "MVRViewer/Models/CablingPlanAssist.swift", "MVRViewer/Models/PowerCabling.swift",
+      "MVRViewer/Models/DMXCabling.swift", "MVRViewer/Models/CablingColorMode.swift",
+      "MVRViewer/Models/PanelPlacementMath.swift", "MVRViewer/Models/ProjectNavigation.swift",
+      "MVRViewer/Localizable.xcstrings"
+    ],
+    "generator": "tests/fixtures/_ios-gen/gen.sh (swiftc macOS, -swift-version 5 -default-isolation MainActor, comme l'app)",
+    "compiler": "Apple Swift version 6.3.3"
+  },
+  "conventions": {
+    "voie": "{kind: \"power\"|\"dmx\", distId, index} ; index = circuit (électrique) ou départ (DMX), À PARTIR DE 1",
+    "rowId": "power#<distId>#<circuit> | dmx#<distId>#<départ> | summary | summary#unknown | hdr#<distId> | phase#<distId>#<phase>",
+    "tab": "valeurs iOS FIGÉES : \"cabling\" (onglet « Électrique »), \"dmx\", \"powers\" (« Puissances ») — chaque plateforme fait correspondre ses propres onglets",
+    "inputs": "entrées au format de la synchro (sections powerCabling / dmxCabling), décodées par le décodeur iOS RÉEL (tolérant)",
+    "assignmentsOrder": "ordre iOS : une affectation va en FIN de liste, un retrait conserve l'ordre des autres, le cadre réécrit en fin de liste tout ce qu'il contient. Le contrat synchronisé ne dépend PAS de l'ordre (un projecteur n'a jamais qu'une affectation) : comparer au minimum comme ENSEMBLE fixture → (distributor, circuit|core) ; l'ordre identique est recommandé, pas exigé (Android range les affectations dans une table par projecteur)",
+    "colorArgb": "entier ARGB 32 bits NON signé, tel qu'iOS l'écrit ; une plateforme en Int signé compare (v & 0xFFFFFFFF)",
+    "uncabledArgb": 4285756275,
+    "tolerance": "tout est EXACT (entiers, chaînes, booléens, ordre des listes) ; dictionnaires = objets à clés triées, comparer sans tenir compte de l'ordre des clés",
+    "provenance": "tout vient du code iOS compilé, sauf les blocs marqués \"provenance\": \"transcription\" (mise en texte d'une vue SwiftUI)"
+  },
+  "voieOrder": [
+    {
+      "id": "power-soca-solo-soca",
+      "note": "SPEC §9 : Soca A (6) + Ligne A (solo) + Soca B = 13 voies ; après Soca A · C6 vient Ligne A · C1 puis Soca B · C1 ; pas de bouclage ; voie disparue ou d'une autre famille : ni précédente ni suivante.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [
+          {"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]},
+          {"id": "L", "name": "Ligne A", "kind": "solo", "colorArgb": 4280191205, "circuitPhases": [1]},
+          {"id": "B", "name": "Soca B", "kind": "soca", "colorArgb": 4282622023, "circuitPhases": [1, 1, 2, 2, 3, 3]}
+        ],
+        "assignments": []
+      },
+      "expect": {
+        "decodedDistributors": [
+          {"id": "A", "kind": "soca", "circuitPhases": [1, 1, 2, 2, 3, 3], "circuitCount": 6},
+          {"id": "L", "kind": "solo", "circuitPhases": [1], "circuitCount": 1},
+          {"id": "B", "kind": "soca", "circuitPhases": [1, 1, 2, 2, 3, 3], "circuitCount": 6}
+        ],
+        "voies": [
+          {"kind": "power", "distId": "A", "index": 1, "rowId": "power#A#1", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 2, "rowId": "power#A#2", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 3, "rowId": "power#A#3", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 4, "rowId": "power#A#4", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 5, "rowId": "power#A#5", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 6, "rowId": "power#A#6", "tab": "cabling"},
+          {"kind": "power", "distId": "L", "index": 1, "rowId": "power#L#1", "tab": "cabling"},
+          {"kind": "power", "distId": "B", "index": 1, "rowId": "power#B#1", "tab": "cabling"},
+          {"kind": "power", "distId": "B", "index": 2, "rowId": "power#B#2", "tab": "cabling"},
+          {"kind": "power", "distId": "B", "index": 3, "rowId": "power#B#3", "tab": "cabling"},
+          {"kind": "power", "distId": "B", "index": 4, "rowId": "power#B#4", "tab": "cabling"},
+          {"kind": "power", "distId": "B", "index": 5, "rowId": "power#B#5", "tab": "cabling"},
+          {"kind": "power", "distId": "B", "index": 6, "rowId": "power#B#6", "tab": "cabling"}
+        ],
+        "neighbors": [
+          {"from": {"kind": "power", "distId": "A", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "power", "distId": "A", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 2}},
+          {"from": {"kind": "power", "distId": "A", "index": 2}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 1}},
+          {"from": {"kind": "power", "distId": "A", "index": 2}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 3}},
+          {"from": {"kind": "power", "distId": "A", "index": 3}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 2}},
+          {"from": {"kind": "power", "distId": "A", "index": 3}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 4}},
+          {"from": {"kind": "power", "distId": "A", "index": 4}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 3}},
+          {"from": {"kind": "power", "distId": "A", "index": 4}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 5}},
+          {"from": {"kind": "power", "distId": "A", "index": 5}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 4}},
+          {"from": {"kind": "power", "distId": "A", "index": 5}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 6}},
+          {"from": {"kind": "power", "distId": "A", "index": 6}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 5}},
+          {"from": {"kind": "power", "distId": "A", "index": 6}, "step": 1, "expect": {"kind": "power", "distId": "L", "index": 1}},
+          {"from": {"kind": "power", "distId": "L", "index": 1}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 6}},
+          {"from": {"kind": "power", "distId": "L", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "B", "index": 1}},
+          {"from": {"kind": "power", "distId": "B", "index": 1}, "step": -1, "expect": {"kind": "power", "distId": "L", "index": 1}},
+          {"from": {"kind": "power", "distId": "B", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "B", "index": 2}},
+          {"from": {"kind": "power", "distId": "B", "index": 2}, "step": -1, "expect": {"kind": "power", "distId": "B", "index": 1}},
+          {"from": {"kind": "power", "distId": "B", "index": 2}, "step": 1, "expect": {"kind": "power", "distId": "B", "index": 3}},
+          {"from": {"kind": "power", "distId": "B", "index": 3}, "step": -1, "expect": {"kind": "power", "distId": "B", "index": 2}},
+          {"from": {"kind": "power", "distId": "B", "index": 3}, "step": 1, "expect": {"kind": "power", "distId": "B", "index": 4}},
+          {"from": {"kind": "power", "distId": "B", "index": 4}, "step": -1, "expect": {"kind": "power", "distId": "B", "index": 3}},
+          {"from": {"kind": "power", "distId": "B", "index": 4}, "step": 1, "expect": {"kind": "power", "distId": "B", "index": 5}},
+          {"from": {"kind": "power", "distId": "B", "index": 5}, "step": -1, "expect": {"kind": "power", "distId": "B", "index": 4}},
+          {"from": {"kind": "power", "distId": "B", "index": 5}, "step": 1, "expect": {"kind": "power", "distId": "B", "index": 6}},
+          {"from": {"kind": "power", "distId": "B", "index": 6}, "step": -1, "expect": {"kind": "power", "distId": "B", "index": 5}},
+          {"from": {"kind": "power", "distId": "B", "index": 6}, "step": 1, "expect": null},
+          {"from": {"kind": "power", "distId": "ghost", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "power", "distId": "ghost", "index": 1}, "step": 1, "expect": null},
+          {"from": {"kind": "power", "distId": "A", "index": 7}, "step": -1, "expect": null},
+          {"from": {"kind": "power", "distId": "A", "index": 7}, "step": 1, "expect": null},
+          {"from": {"kind": "power", "distId": "A", "index": 0}, "step": -1, "expect": null},
+          {"from": {"kind": "power", "distId": "A", "index": 0}, "step": 1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "A", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "A", "index": 1}, "step": 1, "expect": null}
+        ],
+        "exists": [
+          {"voie": {"kind": "power", "distId": "A", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 2}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 3}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 4}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 5}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 6}, "exists": true},
+          {"voie": {"kind": "power", "distId": "L", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "B", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "B", "index": 2}, "exists": true},
+          {"voie": {"kind": "power", "distId": "B", "index": 3}, "exists": true},
+          {"voie": {"kind": "power", "distId": "B", "index": 4}, "exists": true},
+          {"voie": {"kind": "power", "distId": "B", "index": 5}, "exists": true},
+          {"voie": {"kind": "power", "distId": "B", "index": 6}, "exists": true},
+          {"voie": {"kind": "power", "distId": "ghost", "index": 1}, "exists": false},
+          {"voie": {"kind": "power", "distId": "A", "index": 7}, "exists": false},
+          {"voie": {"kind": "power", "distId": "A", "index": 0}, "exists": false},
+          {"voie": {"kind": "dmx", "distId": "A", "index": 1}, "exists": false}
+        ]
+      }
+    },
+    {
+      "id": "power-custom-phases",
+      "note": "Phases personnalisées [3,2,1,3,2,1] : ◀ ▶ suivent les NUMÉROS de circuit 1…6 (l'écran, lui, groupe par phase).",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [3, 2, 1, 3, 2, 1]}],
+        "assignments": []
+      },
+      "expect": {
+        "decodedDistributors": [{"id": "A", "kind": "soca", "circuitPhases": [3, 2, 1, 3, 2, 1], "circuitCount": 6}],
+        "voies": [
+          {"kind": "power", "distId": "A", "index": 1, "rowId": "power#A#1", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 2, "rowId": "power#A#2", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 3, "rowId": "power#A#3", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 4, "rowId": "power#A#4", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 5, "rowId": "power#A#5", "tab": "cabling"},
+          {"kind": "power", "distId": "A", "index": 6, "rowId": "power#A#6", "tab": "cabling"}
+        ],
+        "neighbors": [
+          {"from": {"kind": "power", "distId": "A", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "power", "distId": "A", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 2}},
+          {"from": {"kind": "power", "distId": "A", "index": 2}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 1}},
+          {"from": {"kind": "power", "distId": "A", "index": 2}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 3}},
+          {"from": {"kind": "power", "distId": "A", "index": 3}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 2}},
+          {"from": {"kind": "power", "distId": "A", "index": 3}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 4}},
+          {"from": {"kind": "power", "distId": "A", "index": 4}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 3}},
+          {"from": {"kind": "power", "distId": "A", "index": 4}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 5}},
+          {"from": {"kind": "power", "distId": "A", "index": 5}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 4}},
+          {"from": {"kind": "power", "distId": "A", "index": 5}, "step": 1, "expect": {"kind": "power", "distId": "A", "index": 6}},
+          {"from": {"kind": "power", "distId": "A", "index": 6}, "step": -1, "expect": {"kind": "power", "distId": "A", "index": 5}},
+          {"from": {"kind": "power", "distId": "A", "index": 6}, "step": 1, "expect": null}
+        ],
+        "exists": [
+          {"voie": {"kind": "power", "distId": "A", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 2}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 3}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 4}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 5}, "exists": true},
+          {"voie": {"kind": "power", "distId": "A", "index": 6}, "exists": true}
+        ]
+      }
+    },
+    {
+      "id": "power-decode-tolerance",
+      "note": "Décodage tolérant iOS (JSON abîmé) : circuitPhases vide ou absent → défaut du type (soca 6, solo 1) ; type inconnu → solo ; type inconnu AVEC phases → la longueur des phases fait foi. NB Android retombe sur « soca » pour un type inconnu (DistributorKind.from) : écart à corriger au portage.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [
+          {"id": "S", "name": "Soca vide", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": []},
+          {"id": "O", "name": "Solo sans phases", "kind": "solo", "colorArgb": 4280191205},
+          {"id": "X", "name": "Type inconnu", "kind": "xyz", "colorArgb": 4282622023, "circuitPhases": []},
+          {"id": "Y", "name": "Type inconnu 3 phases", "kind": "xyz", "colorArgb": 4294675456, "circuitPhases": [1, 2, 3]},
+          {"id": "Z", "name": "Sans type", "colorArgb": 4287505578}
+        ],
+        "assignments": []
+      },
+      "expect": {
+        "decodedDistributors": [
+          {"id": "S", "kind": "soca", "circuitPhases": [1, 1, 2, 2, 3, 3], "circuitCount": 6},
+          {"id": "O", "kind": "solo", "circuitPhases": [1], "circuitCount": 1},
+          {"id": "X", "kind": "xyz", "circuitPhases": [1], "circuitCount": 1},
+          {"id": "Y", "kind": "xyz", "circuitPhases": [1, 2, 3], "circuitCount": 3},
+          {"id": "Z", "kind": "solo", "circuitPhases": [1], "circuitCount": 1}
+        ],
+        "voies": [
+          {"kind": "power", "distId": "S", "index": 1, "rowId": "power#S#1", "tab": "cabling"},
+          {"kind": "power", "distId": "S", "index": 2, "rowId": "power#S#2", "tab": "cabling"},
+          {"kind": "power", "distId": "S", "index": 3, "rowId": "power#S#3", "tab": "cabling"},
+          {"kind": "power", "distId": "S", "index": 4, "rowId": "power#S#4", "tab": "cabling"},
+          {"kind": "power", "distId": "S", "index": 5, "rowId": "power#S#5", "tab": "cabling"},
+          {"kind": "power", "distId": "S", "index": 6, "rowId": "power#S#6", "tab": "cabling"},
+          {"kind": "power", "distId": "O", "index": 1, "rowId": "power#O#1", "tab": "cabling"},
+          {"kind": "power", "distId": "X", "index": 1, "rowId": "power#X#1", "tab": "cabling"},
+          {"kind": "power", "distId": "Y", "index": 1, "rowId": "power#Y#1", "tab": "cabling"},
+          {"kind": "power", "distId": "Y", "index": 2, "rowId": "power#Y#2", "tab": "cabling"},
+          {"kind": "power", "distId": "Y", "index": 3, "rowId": "power#Y#3", "tab": "cabling"},
+          {"kind": "power", "distId": "Z", "index": 1, "rowId": "power#Z#1", "tab": "cabling"}
+        ],
+        "neighbors": [
+          {"from": {"kind": "power", "distId": "S", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "power", "distId": "S", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "S", "index": 2}},
+          {"from": {"kind": "power", "distId": "S", "index": 2}, "step": -1, "expect": {"kind": "power", "distId": "S", "index": 1}},
+          {"from": {"kind": "power", "distId": "S", "index": 2}, "step": 1, "expect": {"kind": "power", "distId": "S", "index": 3}},
+          {"from": {"kind": "power", "distId": "S", "index": 3}, "step": -1, "expect": {"kind": "power", "distId": "S", "index": 2}},
+          {"from": {"kind": "power", "distId": "S", "index": 3}, "step": 1, "expect": {"kind": "power", "distId": "S", "index": 4}},
+          {"from": {"kind": "power", "distId": "S", "index": 4}, "step": -1, "expect": {"kind": "power", "distId": "S", "index": 3}},
+          {"from": {"kind": "power", "distId": "S", "index": 4}, "step": 1, "expect": {"kind": "power", "distId": "S", "index": 5}},
+          {"from": {"kind": "power", "distId": "S", "index": 5}, "step": -1, "expect": {"kind": "power", "distId": "S", "index": 4}},
+          {"from": {"kind": "power", "distId": "S", "index": 5}, "step": 1, "expect": {"kind": "power", "distId": "S", "index": 6}},
+          {"from": {"kind": "power", "distId": "S", "index": 6}, "step": -1, "expect": {"kind": "power", "distId": "S", "index": 5}},
+          {"from": {"kind": "power", "distId": "S", "index": 6}, "step": 1, "expect": {"kind": "power", "distId": "O", "index": 1}},
+          {"from": {"kind": "power", "distId": "O", "index": 1}, "step": -1, "expect": {"kind": "power", "distId": "S", "index": 6}},
+          {"from": {"kind": "power", "distId": "O", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "X", "index": 1}},
+          {"from": {"kind": "power", "distId": "X", "index": 1}, "step": -1, "expect": {"kind": "power", "distId": "O", "index": 1}},
+          {"from": {"kind": "power", "distId": "X", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "Y", "index": 1}},
+          {"from": {"kind": "power", "distId": "Y", "index": 1}, "step": -1, "expect": {"kind": "power", "distId": "X", "index": 1}},
+          {"from": {"kind": "power", "distId": "Y", "index": 1}, "step": 1, "expect": {"kind": "power", "distId": "Y", "index": 2}},
+          {"from": {"kind": "power", "distId": "Y", "index": 2}, "step": -1, "expect": {"kind": "power", "distId": "Y", "index": 1}},
+          {"from": {"kind": "power", "distId": "Y", "index": 2}, "step": 1, "expect": {"kind": "power", "distId": "Y", "index": 3}},
+          {"from": {"kind": "power", "distId": "Y", "index": 3}, "step": -1, "expect": {"kind": "power", "distId": "Y", "index": 2}},
+          {"from": {"kind": "power", "distId": "Y", "index": 3}, "step": 1, "expect": {"kind": "power", "distId": "Z", "index": 1}},
+          {"from": {"kind": "power", "distId": "Z", "index": 1}, "step": -1, "expect": {"kind": "power", "distId": "Y", "index": 3}},
+          {"from": {"kind": "power", "distId": "Z", "index": 1}, "step": 1, "expect": null}
+        ],
+        "exists": [
+          {"voie": {"kind": "power", "distId": "S", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "S", "index": 2}, "exists": true},
+          {"voie": {"kind": "power", "distId": "S", "index": 3}, "exists": true},
+          {"voie": {"kind": "power", "distId": "S", "index": 4}, "exists": true},
+          {"voie": {"kind": "power", "distId": "S", "index": 5}, "exists": true},
+          {"voie": {"kind": "power", "distId": "S", "index": 6}, "exists": true},
+          {"voie": {"kind": "power", "distId": "O", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "X", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "Y", "index": 1}, "exists": true},
+          {"voie": {"kind": "power", "distId": "Y", "index": 2}, "exists": true},
+          {"voie": {"kind": "power", "distId": "Y", "index": 3}, "exists": true},
+          {"voie": {"kind": "power", "distId": "Z", "index": 1}, "exists": true}
+        ]
+      }
+    },
+    {
+      "id": "dmx-multi-simple",
+      "note": "SPEC §9 : Multi (3 départs) + DMX B (simple) : D1, D2, D3 puis DMX B ; pas de bouclage.",
+      "family": "dmx",
+      "input": {
+        "distributors": [
+          {"id": "M", "name": "Multi A", "kind": "multi", "colorArgb": 4287505578, "cores": 3},
+          {"id": "S", "name": "DMX B", "kind": "simple", "colorArgb": 4278234305, "cores": 1}
+        ],
+        "assignments": []
+      },
+      "expect": {
+        "decodedDistributors": [{"id": "M", "kind": "multi", "cores": 3, "coreCount": 3}, {"id": "S", "kind": "simple", "cores": 1, "coreCount": 1}],
+        "voies": [
+          {"kind": "dmx", "distId": "M", "index": 1, "rowId": "dmx#M#1", "tab": "dmx"},
+          {"kind": "dmx", "distId": "M", "index": 2, "rowId": "dmx#M#2", "tab": "dmx"},
+          {"kind": "dmx", "distId": "M", "index": 3, "rowId": "dmx#M#3", "tab": "dmx"},
+          {"kind": "dmx", "distId": "S", "index": 1, "rowId": "dmx#S#1", "tab": "dmx"}
+        ],
+        "neighbors": [
+          {"from": {"kind": "dmx", "distId": "M", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "M", "index": 1}, "step": 1, "expect": {"kind": "dmx", "distId": "M", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "M", "index": 2}, "step": -1, "expect": {"kind": "dmx", "distId": "M", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "M", "index": 2}, "step": 1, "expect": {"kind": "dmx", "distId": "M", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "M", "index": 3}, "step": -1, "expect": {"kind": "dmx", "distId": "M", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "M", "index": 3}, "step": 1, "expect": {"kind": "dmx", "distId": "S", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "S", "index": 1}, "step": -1, "expect": {"kind": "dmx", "distId": "M", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "S", "index": 1}, "step": 1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "M", "index": 4}, "step": -1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "M", "index": 4}, "step": 1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "M", "index": 0}, "step": -1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "M", "index": 0}, "step": 1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "X", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "X", "index": 1}, "step": 1, "expect": null},
+          {"from": {"kind": "power", "distId": "M", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "power", "distId": "M", "index": 1}, "step": 1, "expect": null}
+        ],
+        "exists": [
+          {"voie": {"kind": "dmx", "distId": "M", "index": 1}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "M", "index": 2}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "M", "index": 3}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "S", "index": 1}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "M", "index": 4}, "exists": false},
+          {"voie": {"kind": "dmx", "distId": "M", "index": 0}, "exists": false},
+          {"voie": {"kind": "dmx", "distId": "X", "index": 1}, "exists": false},
+          {"voie": {"kind": "power", "distId": "M", "index": 1}, "exists": false}
+        ]
+      }
+    },
+    {
+      "id": "dmx-decode-tolerance",
+      "note": "Décodage tolérant iOS : ligne simple = toujours 1 départ (même cores: 4) ; multipaire sans cores, à 0 ou négatif → 4 ; type inconnu → simple.",
+      "family": "dmx",
+      "input": {
+        "distributors": [
+          {"id": "S", "name": "Simple 4", "kind": "simple", "colorArgb": 4278234305, "cores": 4},
+          {"id": "M0", "name": "Multi 0", "kind": "multi", "colorArgb": 4287505578, "cores": 0},
+          {"id": "Mn", "name": "Multi absent", "kind": "multi", "colorArgb": 4287505578},
+          {"id": "Mneg", "name": "Multi -2", "kind": "multi", "colorArgb": 4287505578, "cores": -2},
+          {"id": "U", "name": "Inconnu", "kind": "xyz", "colorArgb": 4294675456, "cores": 6}
+        ],
+        "assignments": []
+      },
+      "expect": {
+        "decodedDistributors": [
+          {"id": "S", "kind": "simple", "cores": 1, "coreCount": 1},
+          {"id": "M0", "kind": "multi", "cores": 4, "coreCount": 4},
+          {"id": "Mn", "kind": "multi", "cores": 4, "coreCount": 4},
+          {"id": "Mneg", "kind": "multi", "cores": 4, "coreCount": 4},
+          {"id": "U", "kind": "xyz", "cores": 1, "coreCount": 1}
+        ],
+        "voies": [
+          {"kind": "dmx", "distId": "S", "index": 1, "rowId": "dmx#S#1", "tab": "dmx"},
+          {"kind": "dmx", "distId": "M0", "index": 1, "rowId": "dmx#M0#1", "tab": "dmx"},
+          {"kind": "dmx", "distId": "M0", "index": 2, "rowId": "dmx#M0#2", "tab": "dmx"},
+          {"kind": "dmx", "distId": "M0", "index": 3, "rowId": "dmx#M0#3", "tab": "dmx"},
+          {"kind": "dmx", "distId": "M0", "index": 4, "rowId": "dmx#M0#4", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mn", "index": 1, "rowId": "dmx#Mn#1", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mn", "index": 2, "rowId": "dmx#Mn#2", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mn", "index": 3, "rowId": "dmx#Mn#3", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mn", "index": 4, "rowId": "dmx#Mn#4", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mneg", "index": 1, "rowId": "dmx#Mneg#1", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mneg", "index": 2, "rowId": "dmx#Mneg#2", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mneg", "index": 3, "rowId": "dmx#Mneg#3", "tab": "dmx"},
+          {"kind": "dmx", "distId": "Mneg", "index": 4, "rowId": "dmx#Mneg#4", "tab": "dmx"},
+          {"kind": "dmx", "distId": "U", "index": 1, "rowId": "dmx#U#1", "tab": "dmx"}
+        ],
+        "neighbors": [
+          {"from": {"kind": "dmx", "distId": "S", "index": 1}, "step": -1, "expect": null},
+          {"from": {"kind": "dmx", "distId": "S", "index": 1}, "step": 1, "expect": {"kind": "dmx", "distId": "M0", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 1}, "step": -1, "expect": {"kind": "dmx", "distId": "S", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 1}, "step": 1, "expect": {"kind": "dmx", "distId": "M0", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 2}, "step": -1, "expect": {"kind": "dmx", "distId": "M0", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 2}, "step": 1, "expect": {"kind": "dmx", "distId": "M0", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 3}, "step": -1, "expect": {"kind": "dmx", "distId": "M0", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 3}, "step": 1, "expect": {"kind": "dmx", "distId": "M0", "index": 4}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 4}, "step": -1, "expect": {"kind": "dmx", "distId": "M0", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "M0", "index": 4}, "step": 1, "expect": {"kind": "dmx", "distId": "Mn", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 1}, "step": -1, "expect": {"kind": "dmx", "distId": "M0", "index": 4}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 1}, "step": 1, "expect": {"kind": "dmx", "distId": "Mn", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 2}, "step": -1, "expect": {"kind": "dmx", "distId": "Mn", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 2}, "step": 1, "expect": {"kind": "dmx", "distId": "Mn", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 3}, "step": -1, "expect": {"kind": "dmx", "distId": "Mn", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 3}, "step": 1, "expect": {"kind": "dmx", "distId": "Mn", "index": 4}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 4}, "step": -1, "expect": {"kind": "dmx", "distId": "Mn", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "Mn", "index": 4}, "step": 1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 1}, "step": -1, "expect": {"kind": "dmx", "distId": "Mn", "index": 4}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 1}, "step": 1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 2}, "step": -1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 2}, "step": 1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 3}, "step": -1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 2}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 3}, "step": 1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 4}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 4}, "step": -1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 3}},
+          {"from": {"kind": "dmx", "distId": "Mneg", "index": 4}, "step": 1, "expect": {"kind": "dmx", "distId": "U", "index": 1}},
+          {"from": {"kind": "dmx", "distId": "U", "index": 1}, "step": -1, "expect": {"kind": "dmx", "distId": "Mneg", "index": 4}},
+          {"from": {"kind": "dmx", "distId": "U", "index": 1}, "step": 1, "expect": null}
+        ],
+        "exists": [
+          {"voie": {"kind": "dmx", "distId": "S", "index": 1}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "M0", "index": 1}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "M0", "index": 2}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "M0", "index": 3}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "M0", "index": 4}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mn", "index": 1}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mn", "index": 2}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mn", "index": 3}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mn", "index": 4}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mneg", "index": 1}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mneg", "index": 2}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mneg", "index": 3}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "Mneg", "index": 4}, "exists": true},
+          {"voie": {"kind": "dmx", "distId": "U", "index": 1}, "exists": true}
+        ]
+      }
+    }
+  ],
+  "labels": [
+    {"fn": "power", "name": "Soca A", "circuit": 3, "expect": "Soca A · C3"},
+    {"fn": "power", "name": "Ligne A", "circuit": 1, "expect": "Ligne A · C1"},
+    {"fn": "power", "name": "", "circuit": 2, "expect": "Socapex · C2"},
+    {"fn": "power", "name": "  ", "circuit": 1, "expect": "Socapex · C1"},
+    {"fn": "power", "name": "\t", "circuit": 4, "expect": "Socapex · C4"},
+    {"fn": "power", "name": "\u00a0", "circuit": 5, "expect": "Socapex · C5"},
+    {"fn": "power", "name": " Soca A ", "circuit": 3, "expect": " Soca A  · C3"},
+    {"fn": "power", "name": "Soca 12", "circuit": 6, "expect": "Soca 12 · C6"},
+    {"fn": "dmx", "name": "DMX A", "core": 2, "coreCount": 4, "expect": "DMX A · D2"},
+    {"fn": "dmx", "name": "Multi A", "core": 1, "coreCount": 2, "expect": "Multi A · D1"},
+    {"fn": "dmx", "name": "DMX B", "core": 1, "coreCount": 1, "expect": "DMX B"},
+    {"fn": "dmx", "name": "", "core": 1, "coreCount": 1, "expect": "DMX"},
+    {"fn": "dmx", "name": "  ", "core": 3, "coreCount": 4, "expect": "DMX · D3"},
+    {"fn": "dmx", "name": " Multi ", "core": 2, "coreCount": 2, "expect": " Multi  · D2"},
+    {"fn": "dmx", "name": "DMX C", "core": 1, "coreCount": 0, "expect": "DMX C"}
+  ],
+  "sequences": [
+    {
+      "id": "power-toggle-assign-remove-move",
+      "note": "SPEC §9 : f1 touché sur Soca A · C3 → affecté ; retouché → retiré ; f2 (sur Soca B · C2) touché sur Soca A · C3 → DÉPLACÉ (une seule affectation). Un ajout va EN FIN de liste ; un retrait garde l'ordre des autres.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [
+          {"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]},
+          {"id": "B", "name": "Soca B", "kind": "soca", "colorArgb": 4282622023, "circuitPhases": [1, 1, 2, 2, 3, 3]}
+        ],
+        "assignments": [{"fixture": "f2", "distributor": "B", "circuit": 2}]
+      },
+      "steps": [
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "power", "distId": "A", "index": 3}},
+          "expect": {
+            "result": "assigned",
+            "unchanged": false,
+            "assignments": [{"fixture": "f2", "distributor": "B", "circuit": 2}, {"fixture": "f1", "distributor": "A", "circuit": 3}],
+            "fixturesOnVoie": ["f1"],
+            "colorByFixture": {"f1": 4293212469, "f2": 4282622023},
+            "labelByFixture": {"f1": "Soca A · C3", "f2": "Soca B · C2"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "power", "distId": "A", "index": 3}},
+          "expect": {
+            "result": "removed",
+            "unchanged": false,
+            "assignments": [{"fixture": "f2", "distributor": "B", "circuit": 2}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f2": 4282622023},
+            "labelByFixture": {"f2": "Soca B · C2"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f2", "voie": {"kind": "power", "distId": "A", "index": 3}},
+          "expect": {
+            "result": "assigned",
+            "unchanged": false,
+            "assignments": [{"fixture": "f2", "distributor": "A", "circuit": 3}],
+            "fixturesOnVoie": ["f2"],
+            "colorByFixture": {"f2": 4293212469},
+            "labelByFixture": {"f2": "Soca A · C3"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f3", "voie": {"kind": "power", "distId": "A", "index": 3}},
+          "expect": {
+            "result": "assigned",
+            "unchanged": false,
+            "assignments": [{"fixture": "f2", "distributor": "A", "circuit": 3}, {"fixture": "f3", "distributor": "A", "circuit": 3}],
+            "fixturesOnVoie": ["f2", "f3"],
+            "colorByFixture": {"f2": 4293212469, "f3": 4293212469},
+            "labelByFixture": {"f2": "Soca A · C3", "f3": "Soca A · C3"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f2", "voie": {"kind": "power", "distId": "B", "index": 2}},
+          "expect": {
+            "result": "assigned",
+            "unchanged": false,
+            "assignments": [{"fixture": "f3", "distributor": "A", "circuit": 3}, {"fixture": "f2", "distributor": "B", "circuit": 2}],
+            "fixturesOnVoie": ["f2"],
+            "colorByFixture": {"f2": 4282622023, "f3": 4293212469},
+            "labelByFixture": {"f2": "Soca B · C2", "f3": "Soca A · C3"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f2", "voie": {"kind": "power", "distId": "B", "index": 2}},
+          "expect": {
+            "result": "removed",
+            "unchanged": false,
+            "assignments": [{"fixture": "f3", "distributor": "A", "circuit": 3}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f3": 4293212469},
+            "labelByFixture": {"f3": "Soca A · C3"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "power-frame-assign",
+      "note": "SPEC §9 : cadre {f1, f2, f3, f3} sur Soca A · C1 → trois affectations, sans doublon, f9 (hors cadre) intact. Le cadre ne retire jamais ; il RÉÉCRIT en fin de liste ce qu'il contient (même déjà sur la voie). Cadre vide : vrai, rien ne change.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [
+          {"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]},
+          {"id": "B", "name": "Soca B", "kind": "soca", "colorArgb": 4282622023, "circuitPhases": [1, 1, 2, 2, 3, 3]}
+        ],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 1},
+          {"fixture": "f2", "distributor": "B", "circuit": 4},
+          {"fixture": "f9", "distributor": "B", "circuit": 2}
+        ]
+      },
+      "steps": [
+        {
+          "do": {"op": "frame", "fixtures": ["f1", "f2", "f3", "f3"], "voie": {"kind": "power", "distId": "A", "index": 1}},
+          "expect": {
+            "result": true,
+            "unchanged": false,
+            "assignments": [
+              {"fixture": "f9", "distributor": "B", "circuit": 2},
+              {"fixture": "f1", "distributor": "A", "circuit": 1},
+              {"fixture": "f2", "distributor": "A", "circuit": 1},
+              {"fixture": "f3", "distributor": "A", "circuit": 1}
+            ],
+            "fixturesOnVoie": ["f1", "f2", "f3"],
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469, "f3": 4293212469, "f9": 4282622023},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C1", "f3": "Soca A · C1", "f9": "Soca B · C2"}
+          }
+        },
+        {
+          "do": {"op": "frame", "fixtures": [], "voie": {"kind": "power", "distId": "A", "index": 2}},
+          "expect": {
+            "result": true,
+            "unchanged": true,
+            "assignments": [
+              {"fixture": "f9", "distributor": "B", "circuit": 2},
+              {"fixture": "f1", "distributor": "A", "circuit": 1},
+              {"fixture": "f2", "distributor": "A", "circuit": 1},
+              {"fixture": "f3", "distributor": "A", "circuit": 1}
+            ],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469, "f3": 4293212469, "f9": 4282622023},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C1", "f3": "Soca A · C1", "f9": "Soca B · C2"}
+          }
+        },
+        {
+          "do": {"op": "frame", "fixtures": ["f1"], "voie": {"kind": "power", "distId": "A", "index": 1}},
+          "expect": {
+            "result": true,
+            "unchanged": false,
+            "assignments": [
+              {"fixture": "f9", "distributor": "B", "circuit": 2},
+              {"fixture": "f2", "distributor": "A", "circuit": 1},
+              {"fixture": "f3", "distributor": "A", "circuit": 1},
+              {"fixture": "f1", "distributor": "A", "circuit": 1}
+            ],
+            "fixturesOnVoie": ["f1", "f2", "f3"],
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469, "f3": 4293212469, "f9": 4282622023},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C1", "f3": "Soca A · C1", "f9": "Soca B · C2"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "power-voie-missing",
+      "note": "SPEC §6/§9 : voie disparue (Soca B supprimée, cible Soca B · C2 ; circuits 0 et 7 ; voie DMX contre le câblage électrique) : ni le toucher ni le cadre n'écrivent RIEN.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}, {"fixture": "f2", "distributor": "A", "circuit": 2}]
+      },
+      "steps": [
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "power", "distId": "B", "index": 2}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}, {"fixture": "f2", "distributor": "A", "circuit": 2}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C2"}
+          }
+        },
+        {
+          "do": {"op": "frame", "fixtures": ["f1", "f2", "f3"], "voie": {"kind": "power", "distId": "B", "index": 2}},
+          "expect": {
+            "result": false,
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}, {"fixture": "f2", "distributor": "A", "circuit": 2}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C2"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "power", "distId": "A", "index": 7}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}, {"fixture": "f2", "distributor": "A", "circuit": 2}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C2"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "power", "distId": "A", "index": 0}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}, {"fixture": "f2", "distributor": "A", "circuit": 2}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C2"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "dmx", "distId": "A", "index": 1}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}, {"fixture": "f2", "distributor": "A", "circuit": 2}],
+            "fixturesOnVoie": null,
+            "colorByFixture": {"f1": 4293212469, "f2": 4293212469},
+            "labelByFixture": {"f1": "Soca A · C1", "f2": "Soca A · C2"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "dmx-toggle-assign-move-remove",
+      "note": "Une entrée DMX → un départ : D1 → affecté, D2 → déplacé, D2 → retiré ; ligne simple S1 ; cadre sur D3.",
+      "family": "dmx",
+      "input": {
+        "distributors": [
+          {"id": "M", "name": "Multi", "kind": "multi", "colorArgb": 4287505578, "cores": 4},
+          {"id": "S", "name": "DMX B", "kind": "simple", "colorArgb": 4278234305, "cores": 1}
+        ],
+        "assignments": []
+      },
+      "steps": [
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "dmx", "distId": "M", "index": 1}},
+          "expect": {
+            "result": "assigned",
+            "unchanged": false,
+            "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}],
+            "fixturesOnVoie": ["f1"],
+            "colorByFixture": {"f1": 4287505578},
+            "labelByFixture": {"f1": "Multi · D1"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "dmx", "distId": "M", "index": 2}},
+          "expect": {
+            "result": "assigned",
+            "unchanged": false,
+            "assignments": [{"fixture": "f1", "distributor": "M", "core": 2}],
+            "fixturesOnVoie": ["f1"],
+            "colorByFixture": {"f1": 4287505578},
+            "labelByFixture": {"f1": "Multi · D2"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "dmx", "distId": "M", "index": 2}},
+          "expect": {"result": "removed", "unchanged": false, "assignments": [], "fixturesOnVoie": [], "colorByFixture": {}, "labelByFixture": {}}
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f2", "voie": {"kind": "dmx", "distId": "S", "index": 1}},
+          "expect": {
+            "result": "assigned",
+            "unchanged": false,
+            "assignments": [{"fixture": "f2", "distributor": "S", "core": 1}],
+            "fixturesOnVoie": ["f2"],
+            "colorByFixture": {"f2": 4278234305},
+            "labelByFixture": {"f2": "DMX B"}
+          }
+        },
+        {
+          "do": {"op": "frame", "fixtures": ["f1", "f2", "f3", "f1"], "voie": {"kind": "dmx", "distId": "M", "index": 3}},
+          "expect": {
+            "result": true,
+            "unchanged": false,
+            "assignments": [
+              {"fixture": "f1", "distributor": "M", "core": 3},
+              {"fixture": "f2", "distributor": "M", "core": 3},
+              {"fixture": "f3", "distributor": "M", "core": 3}
+            ],
+            "fixturesOnVoie": ["f1", "f2", "f3"],
+            "colorByFixture": {"f1": 4287505578, "f2": 4287505578, "f3": 4287505578},
+            "labelByFixture": {"f1": "Multi · D3", "f2": "Multi · D3", "f3": "Multi · D3"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "dmx-voie-missing",
+      "note": "SPEC §9 : départ D3 d'une multipaire ramenée à 2 départs, ligne X absente, départ 2 d'une ligne simple, voie électrique contre le câblage DMX : refus, rien n'est écrit.",
+      "family": "dmx",
+      "input": {
+        "distributors": [
+          {"id": "M", "name": "Multi", "kind": "multi", "colorArgb": 4287505578, "cores": 2},
+          {"id": "S", "name": "DMX B", "kind": "simple", "colorArgb": 4278234305, "cores": 1}
+        ],
+        "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}]
+      },
+      "steps": [
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "dmx", "distId": "M", "index": 3}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4287505578},
+            "labelByFixture": {"f1": "Multi · D1"}
+          }
+        },
+        {
+          "do": {"op": "frame", "fixtures": ["f1"], "voie": {"kind": "dmx", "distId": "M", "index": 3}},
+          "expect": {
+            "result": false,
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4287505578},
+            "labelByFixture": {"f1": "Multi · D1"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "dmx", "distId": "X", "index": 1}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4287505578},
+            "labelByFixture": {"f1": "Multi · D1"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "dmx", "distId": "S", "index": 2}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}],
+            "fixturesOnVoie": [],
+            "colorByFixture": {"f1": 4287505578},
+            "labelByFixture": {"f1": "Multi · D1"}
+          }
+        },
+        {
+          "do": {"op": "toggle", "fixture": "f1", "voie": {"kind": "power", "distId": "M", "index": 1}},
+          "expect": {
+            "result": "voieMissing",
+            "unchanged": true,
+            "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}],
+            "fixturesOnVoie": null,
+            "colorByFixture": {"f1": 4287505578},
+            "labelByFixture": {"f1": "Multi · D1"}
+          }
+        }
+      ]
+    }
+  ],
+  "status": [
+    {
+      "id": "power-overload-unknown",
+      "note": "SPEC §9 : Soca A · C3 avec 2 000 W + 1 800 W + un inconnu → « 3 800 / 3 680 W », surcharge, « ? », L2, 3 projecteurs.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 3},
+          {"fixture": "f2", "distributor": "A", "circuit": 3},
+          {"fixture": "f3", "distributor": "A", "circuit": 3}
+        ]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 3},
+      "metricsByFixture": {"f1": 2000, "f2": 1800},
+      "expect": {
+        "label": "Soca A · C3",
+        "colorArgb": 4293212469,
+        "phase": 2,
+        "fixtureCount": 3,
+        "load": 3800,
+        "limit": 3680,
+        "isOver": true,
+        "unknownCount": 1,
+        "hasPrevious": true,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "3\u202f800 / 3\u202f680 W", "en": "3,800 / 3,680 W"},
+        "overloadMark": true,
+        "unknownMark": {"key": "Conso inconnue", "args": [], "fr": "Conso inconnue", "en": "Unknown power draw"},
+        "phaseText": "L2",
+        "countText": {"key": "%lld projecteurs", "args": [3], "fr": "3 projecteurs", "en": "3 fixtures"},
+        "previousEnabled": true,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "power-pending",
+      "note": "Consos pas encore résolues (nil) : la barre montre la voie, sans charge (sablier).",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 3},
+          {"fixture": "f2", "distributor": "A", "circuit": 3},
+          {"fixture": "f3", "distributor": "A", "circuit": 3}
+        ]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 1},
+      "metricsByFixture": null,
+      "expect": {
+        "label": "Soca A · C1",
+        "colorArgb": 4293212469,
+        "phase": 1,
+        "fixtureCount": 0,
+        "load": null,
+        "limit": 3680,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": false,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": null,
+        "loadPending": true,
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": "L1",
+        "countText": {"key": "Touchez pour affecter", "args": [], "fr": "Touchez pour affecter", "en": "Tap to assign"},
+        "previousEnabled": false,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "power-missing-circuit",
+      "note": "Circuit 7 d'une Socapex : voie disparue, pas d'état (« Voie supprimée »).",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 3},
+          {"fixture": "f2", "distributor": "A", "circuit": 3},
+          {"fixture": "f3", "distributor": "A", "circuit": 3}
+        ]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 7},
+      "metricsByFixture": {},
+      "expect": null,
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": true,
+        "missingText": {"key": "Voie supprimée", "args": [], "fr": "Voie supprimée", "en": "Run deleted"}
+      }
+    },
+    {
+      "id": "power-missing-dist",
+      "note": "Distributeur absent : voie disparue.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 3},
+          {"fixture": "f2", "distributor": "A", "circuit": 3},
+          {"fixture": "f3", "distributor": "A", "circuit": 3}
+        ]
+      },
+      "voie": {"kind": "power", "distId": "B", "index": 1},
+      "metricsByFixture": {},
+      "expect": null,
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": true,
+        "missingText": {"key": "Voie supprimée", "args": [], "fr": "Voie supprimée", "en": "Run deleted"}
+      }
+    },
+    {
+      "id": "power-at-limit",
+      "note": "Exactement à la limite (3 680 W) : PAS de surcharge (strictement au-delà).",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 3},
+          {"fixture": "f2", "distributor": "A", "circuit": 3},
+          {"fixture": "f3", "distributor": "A", "circuit": 3}
+        ]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 3},
+      "metricsByFixture": {"f1": 1880, "f2": 1800, "f3": 0},
+      "expect": {
+        "label": "Soca A · C3",
+        "colorArgb": 4293212469,
+        "phase": 2,
+        "fixtureCount": 3,
+        "load": 3680,
+        "limit": 3680,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": true,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "3\u202f680 / 3\u202f680 W", "en": "3,680 / 3,680 W"},
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": "L2",
+        "countText": {"key": "%lld projecteurs", "args": [3], "fr": "3 projecteurs", "en": "3 fixtures"},
+        "previousEnabled": true,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "power-just-over",
+      "note": "3 681 W : surcharge.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 3},
+          {"fixture": "f2", "distributor": "A", "circuit": 3},
+          {"fixture": "f3", "distributor": "A", "circuit": 3}
+        ]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 3},
+      "metricsByFixture": {"f1": 1881, "f2": 1800, "f3": 0},
+      "expect": {
+        "label": "Soca A · C3",
+        "colorArgb": 4293212469,
+        "phase": 2,
+        "fixtureCount": 3,
+        "load": 3681,
+        "limit": 3680,
+        "isOver": true,
+        "unknownCount": 0,
+        "hasPrevious": true,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "3\u202f681 / 3\u202f680 W", "en": "3,681 / 3,680 W"},
+        "overloadMark": true,
+        "unknownMark": null,
+        "phaseText": "L2",
+        "countText": {"key": "%lld projecteurs", "args": [3], "fr": "3 projecteurs", "en": "3 fixtures"},
+        "previousEnabled": true,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "power-no-limit",
+      "note": "Limite de circuit à 0 (réglage) : jamais de surcharge.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 0, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 1},
+      "metricsByFixture": {"f1": 5000},
+      "expect": {
+        "label": "Soca A · C1",
+        "colorArgb": 4293212469,
+        "phase": 1,
+        "fixtureCount": 1,
+        "load": 5000,
+        "limit": 0,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": false,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "5\u202f000 / 0 W", "en": "5,000 / 0 W"},
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": "L1",
+        "countText": {"key": "%lld projecteurs", "args": [1], "fr": "1 projecteur", "en": "1 fixture"},
+        "previousEnabled": false,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "power-solo-last",
+      "note": "Ligne solo : pas de phase affichée ; dernière voie → ▶ grisé ; 1 projecteur.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [
+          {"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]},
+          {"id": "L", "name": "Ligne A", "kind": "solo", "colorArgb": 4280191205, "circuitPhases": [1]}
+        ],
+        "assignments": [{"fixture": "f1", "distributor": "L", "circuit": 1}]
+      },
+      "voie": {"kind": "power", "distId": "L", "index": 1},
+      "metricsByFixture": {"f1": 500},
+      "expect": {
+        "label": "Ligne A · C1",
+        "colorArgb": 4280191205,
+        "phase": null,
+        "fixtureCount": 1,
+        "load": 500,
+        "limit": 3680,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": true,
+        "hasNext": false
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "500 / 3\u202f680 W", "en": "500 / 3,680 W"},
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": null,
+        "countText": {"key": "%lld projecteurs", "args": [1], "fr": "1 projecteur", "en": "1 fixture"},
+        "previousEnabled": true,
+        "nextEnabled": false
+      }
+    },
+    {
+      "id": "power-empty-voie",
+      "note": "Voie vide : « Touchez pour affecter », charge 0.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": []
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 4},
+      "metricsByFixture": {},
+      "expect": {
+        "label": "Soca A · C4",
+        "colorArgb": 4293212469,
+        "phase": 2,
+        "fixtureCount": 0,
+        "load": 0,
+        "limit": 3680,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": true,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "0 / 3\u202f680 W", "en": "0 / 3,680 W"},
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": "L2",
+        "countText": {"key": "Touchez pour affecter", "args": [], "fr": "Touchez pour affecter", "en": "Tap to assign"},
+        "previousEnabled": true,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "power-thousands",
+      "note": "12 projecteurs à 1 200 W : séparateur de milliers de la langue (fr : espace fine insécable U+202F).",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]}],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 2},
+          {"fixture": "f2", "distributor": "A", "circuit": 2},
+          {"fixture": "f3", "distributor": "A", "circuit": 2},
+          {"fixture": "f4", "distributor": "A", "circuit": 2},
+          {"fixture": "f5", "distributor": "A", "circuit": 2},
+          {"fixture": "f6", "distributor": "A", "circuit": 2},
+          {"fixture": "f7", "distributor": "A", "circuit": 2},
+          {"fixture": "f8", "distributor": "A", "circuit": 2},
+          {"fixture": "f9", "distributor": "A", "circuit": 2},
+          {"fixture": "f10", "distributor": "A", "circuit": 2},
+          {"fixture": "f11", "distributor": "A", "circuit": 2},
+          {"fixture": "f12", "distributor": "A", "circuit": 2}
+        ]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 2},
+      "metricsByFixture": {
+        "f1": 1200,
+        "f10": 1200,
+        "f11": 1200,
+        "f12": 1200,
+        "f2": 1200,
+        "f3": 1200,
+        "f4": 1200,
+        "f5": 1200,
+        "f6": 1200,
+        "f7": 1200,
+        "f8": 1200,
+        "f9": 1200
+      },
+      "expect": {
+        "label": "Soca A · C2",
+        "colorArgb": 4293212469,
+        "phase": 1,
+        "fixtureCount": 12,
+        "load": 14400,
+        "limit": 3680,
+        "isOver": true,
+        "unknownCount": 0,
+        "hasPrevious": true,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "14\u202f400 / 3\u202f680 W", "en": "14,400 / 3,680 W"},
+        "overloadMark": true,
+        "unknownMark": null,
+        "phaseText": "L1",
+        "countText": {"key": "%lld projecteurs", "args": [12], "fr": "12 projecteurs", "en": "12 fixtures"},
+        "previousEnabled": true,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "power-custom-phase",
+      "note": "Phase personnalisée : C1 sur L3.",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [{"id": "A", "name": "", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [3, 2, 1, 3, 2, 1]}],
+        "assignments": [{"fixture": "f1", "distributor": "A", "circuit": 1}]
+      },
+      "voie": {"kind": "power", "distId": "A", "index": 1},
+      "metricsByFixture": {"f1": 100},
+      "expect": {
+        "label": "Socapex · C1",
+        "colorArgb": 4293212469,
+        "phase": 3,
+        "fixtureCount": 1,
+        "load": 100,
+        "limit": 3680,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": false,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "100 / 3\u202f680 W", "en": "100 / 3,680 W"},
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": "L3",
+        "countText": {"key": "%lld projecteurs", "args": [1], "fr": "1 projecteur", "en": "1 fixture"},
+        "previousEnabled": false,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "dmx-over-universe",
+      "note": "SPEC §9 : départ DMX 300 + 250 canaux → « 550 / 512 canaux », surcharge ; dernier départ → ▶ grisé.",
+      "family": "dmx",
+      "input": {
+        "distributors": [{"id": "M", "name": "DMX A", "kind": "multi", "colorArgb": 7, "cores": 2}],
+        "assignments": [{"fixture": "f1", "distributor": "M", "core": 2}, {"fixture": "f2", "distributor": "M", "core": 2}]
+      },
+      "voie": {"kind": "dmx", "distId": "M", "index": 2},
+      "metricsByFixture": {"f1": 300, "f2": 250},
+      "expect": {
+        "label": "DMX A · D2",
+        "colorArgb": 7,
+        "phase": null,
+        "fixtureCount": 2,
+        "load": 550,
+        "limit": 512,
+        "isOver": true,
+        "unknownCount": 0,
+        "hasPrevious": true,
+        "hasNext": false
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "550 / 512 canaux", "en": "550 / 512 channels"},
+        "overloadMark": true,
+        "unknownMark": null,
+        "phaseText": null,
+        "countText": {"key": "%lld projecteurs", "args": [2], "fr": "2 projecteurs", "en": "2 fixtures"},
+        "previousEnabled": true,
+        "nextEnabled": false
+      }
+    },
+    {
+      "id": "dmx-at-universe",
+      "note": "Exactement 512 canaux : pas de surcharge.",
+      "family": "dmx",
+      "input": {
+        "distributors": [{"id": "M", "name": "DMX A", "kind": "multi", "colorArgb": 4287505578, "cores": 2}],
+        "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}, {"fixture": "f2", "distributor": "M", "core": 1}]
+      },
+      "voie": {"kind": "dmx", "distId": "M", "index": 1},
+      "metricsByFixture": {"f1": 500, "f2": 12},
+      "expect": {
+        "label": "DMX A · D1",
+        "colorArgb": 4287505578,
+        "phase": null,
+        "fixtureCount": 2,
+        "load": 512,
+        "limit": 512,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": false,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "512 / 512 canaux", "en": "512 / 512 channels"},
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": null,
+        "countText": {"key": "%lld projecteurs", "args": [2], "fr": "2 projecteurs", "en": "2 fixtures"},
+        "previousEnabled": false,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "dmx-simple-unknown",
+      "note": "Ligne simple « DMX B » : libellé sans départ ; empreinte inconnue (comptée 0) → « ? ».",
+      "family": "dmx",
+      "input": {
+        "distributors": [
+          {"id": "M", "name": "Multi A", "kind": "multi", "colorArgb": 4287505578, "cores": 2},
+          {"id": "S", "name": "DMX B", "kind": "simple", "colorArgb": 4278234305, "cores": 1}
+        ],
+        "assignments": [{"fixture": "f1", "distributor": "S", "core": 1}]
+      },
+      "voie": {"kind": "dmx", "distId": "S", "index": 1},
+      "metricsByFixture": {},
+      "expect": {
+        "label": "DMX B",
+        "colorArgb": 4278234305,
+        "phase": null,
+        "fixtureCount": 1,
+        "load": 0,
+        "limit": 512,
+        "isOver": false,
+        "unknownCount": 1,
+        "hasPrevious": true,
+        "hasNext": false
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "0 / 512 canaux", "en": "0 / 512 channels"},
+        "overloadMark": false,
+        "unknownMark": {"key": "Empreinte inconnue", "args": [], "fr": "Empreinte inconnue", "en": "Unknown footprint"},
+        "phaseText": null,
+        "countText": {"key": "%lld projecteurs", "args": [1], "fr": "1 projecteur", "en": "1 fixture"},
+        "previousEnabled": true,
+        "nextEnabled": false
+      }
+    },
+    {
+      "id": "dmx-pending",
+      "note": "Empreintes pas encore résolues.",
+      "family": "dmx",
+      "input": {
+        "distributors": [{"id": "M", "name": "Multi A", "kind": "multi", "colorArgb": 4287505578, "cores": 3}],
+        "assignments": [{"fixture": "f1", "distributor": "M", "core": 2}]
+      },
+      "voie": {"kind": "dmx", "distId": "M", "index": 2},
+      "metricsByFixture": null,
+      "expect": {
+        "label": "Multi A · D2",
+        "colorArgb": 4287505578,
+        "phase": null,
+        "fixtureCount": 1,
+        "load": null,
+        "limit": 512,
+        "isOver": false,
+        "unknownCount": 0,
+        "hasPrevious": true,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": null,
+        "loadPending": true,
+        "overloadMark": false,
+        "unknownMark": null,
+        "phaseText": null,
+        "countText": {"key": "%lld projecteurs", "args": [1], "fr": "1 projecteur", "en": "1 fixture"},
+        "previousEnabled": true,
+        "nextEnabled": true
+      }
+    },
+    {
+      "id": "dmx-missing-core",
+      "note": "Départ 3 d'une multipaire à 2 départs : voie disparue.",
+      "family": "dmx",
+      "input": {"distributors": [{"id": "M", "name": "Multi A", "kind": "multi", "colorArgb": 4287505578, "cores": 2}], "assignments": []},
+      "voie": {"kind": "dmx", "distId": "M", "index": 3},
+      "metricsByFixture": {},
+      "expect": null,
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": true,
+        "missingText": {"key": "Voie supprimée", "args": [], "fr": "Voie supprimée", "en": "Run deleted"}
+      }
+    },
+    {
+      "id": "dmx-thousands",
+      "note": "Empreinte de 2 741 canaux (texte qui doit tenir sur une ligne).",
+      "family": "dmx",
+      "input": {
+        "distributors": [{"id": "M", "name": "", "kind": "multi", "colorArgb": 4287505578, "cores": 2}],
+        "assignments": [{"fixture": "f1", "distributor": "M", "core": 1}]
+      },
+      "voie": {"kind": "dmx", "distId": "M", "index": 1},
+      "metricsByFixture": {"f1": 2741},
+      "expect": {
+        "label": "DMX · D1",
+        "colorArgb": 4287505578,
+        "phase": null,
+        "fixtureCount": 1,
+        "load": 2741,
+        "limit": 512,
+        "isOver": true,
+        "unknownCount": 0,
+        "hasPrevious": false,
+        "hasNext": true
+      },
+      "display": {
+        "provenance": "transcription de PlanView.assignPanel / assignLoadView / assignCountView ; nombres = Int.formatted() de Foundation (fr_FR, en_US), phrases = catalogue iOS",
+        "voieMissing": false,
+        "loadText": {"fr": "2\u202f741 / 512 canaux", "en": "2,741 / 512 channels"},
+        "overloadMark": true,
+        "unknownMark": null,
+        "phaseText": null,
+        "countText": {"key": "%lld projecteurs", "args": [1], "fr": "1 projecteur", "en": "1 fixture"},
+        "previousEnabled": false,
+        "nextEnabled": true
+      }
+    }
+  ],
+  "memory": [
+    {
+      "id": "memory-last-worked-voie-once",
+      "note": "SPEC §9 : voies travaillées D2 puis D3 → onglet DMX ; retour sur D3 surligné UNE fois, puis simple reprise de D3 ; l'onglet électrique n'est pas concerné.",
+      "initialState": {"tab": "cabling", "positionByTab": {}, "pendingFocus": null},
+      "steps": [
+        {
+          "do": {"op": "rememberWorkedVoie", "voie": {"kind": "dmx", "distId": "M", "index": 2}},
+          "expectState": {
+            "tab": "dmx",
+            "positionByTab": {"dmx": {"type": "row", "rowId": "dmx#M#2"}},
+            "pendingFocus": {"kind": "dmx", "distId": "M", "index": 2}
+          }
+        },
+        {
+          "do": {"op": "rememberWorkedVoie", "voie": {"kind": "dmx", "distId": "M", "index": 3}},
+          "expectState": {
+            "tab": "dmx",
+            "positionByTab": {"dmx": {"type": "row", "rowId": "dmx#M#3"}},
+            "pendingFocus": {"kind": "dmx", "distId": "M", "index": 3}
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "cabling"},
+          "expect": null,
+          "expectState": {
+            "tab": "dmx",
+            "positionByTab": {"dmx": {"type": "row", "rowId": "dmx#M#3"}},
+            "pendingFocus": {"kind": "dmx", "distId": "M", "index": 3}
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "dmx"},
+          "expect": {"rowId": "dmx#M#3", "highlight": true},
+          "expectState": {"tab": "dmx", "positionByTab": {"dmx": {"type": "row", "rowId": "dmx#M#3"}}, "pendingFocus": null}
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "dmx"},
+          "expect": {"rowId": "dmx#M#3", "highlight": false},
+          "expectState": {"tab": "dmx", "positionByTab": {"dmx": {"type": "row", "rowId": "dmx#M#3"}}, "pendingFocus": null}
+        }
+      ]
+    },
+    {
+      "id": "memory-position-per-tab",
+      "note": "SPEC §9 : chaque onglet garde SA position ; « tout en haut » retenu → rien à reprendre ; ligne vide ignorée.",
+      "initialState": {"tab": "cabling", "positionByTab": {}, "pendingFocus": null},
+      "steps": [
+        {
+          "do": {"op": "takeRestore", "tab": "cabling"},
+          "expect": null,
+          "expectState": {"tab": "cabling", "positionByTab": {}, "pendingFocus": null}
+        },
+        {
+          "do": {"op": "remember", "tab": "cabling", "position": {"type": "row", "rowId": "power#A#4"}},
+          "expectState": {"tab": "cabling", "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#4"}}, "pendingFocus": null}
+        },
+        {
+          "do": {"op": "remember", "tab": "dmx", "position": {"type": "row", "rowId": "dmx#M#1"}},
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#4"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        },
+        {
+          "do": {"op": "remember", "tab": "cabling", "position": {"type": "row", "rowId": ""}},
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#4"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "cabling"},
+          "expect": {"rowId": "power#A#4", "highlight": false},
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#4"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "dmx"},
+          "expect": {"rowId": "dmx#M#1", "highlight": false},
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#4"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        },
+        {
+          "do": {"op": "remember", "tab": "cabling", "position": {"type": "listTop"}},
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "listTop"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "cabling"},
+          "expect": null,
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "listTop"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "memory-family-switch",
+      "note": "Voie électrique puis voie DMX travaillées : la DERNIÈRE voie active gagne (onglet DMX, mise en évidence) ; l'onglet électrique reprend sa voie sans mise en évidence.",
+      "initialState": {"tab": "cabling", "positionByTab": {}, "pendingFocus": null},
+      "steps": [
+        {
+          "do": {"op": "rememberWorkedVoie", "voie": {"kind": "power", "distId": "A", "index": 5}},
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#5"}},
+            "pendingFocus": {"kind": "power", "distId": "A", "index": 5}
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "dmx"},
+          "expect": null,
+          "expectState": {
+            "tab": "cabling",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#5"}},
+            "pendingFocus": {"kind": "power", "distId": "A", "index": 5}
+          }
+        },
+        {
+          "do": {"op": "rememberWorkedVoie", "voie": {"kind": "dmx", "distId": "M", "index": 1}},
+          "expectState": {
+            "tab": "dmx",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#5"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": {"kind": "dmx", "distId": "M", "index": 1}
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "cabling"},
+          "expect": {"rowId": "power#A#5", "highlight": false},
+          "expectState": {
+            "tab": "dmx",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#5"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": {"kind": "dmx", "distId": "M", "index": 1}
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "dmx"},
+          "expect": {"rowId": "dmx#M#1", "highlight": true},
+          "expectState": {
+            "tab": "dmx",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#5"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        },
+        {
+          "do": {"op": "takeRestore", "tab": "powers"},
+          "expect": null,
+          "expectState": {
+            "tab": "dmx",
+            "positionByTab": {"cabling": {"type": "row", "rowId": "power#A#5"}, "dmx": {"type": "row", "rowId": "dmx#M#1"}},
+            "pendingFocus": null
+          }
+        }
+      ]
+    }
+  ],
+  "tabOpening": [
+    {"requested": null, "remembered": null, "expect": "cabling"},
+    {"requested": null, "remembered": "cabling", "expect": "cabling"},
+    {"requested": null, "remembered": "dmx", "expect": "dmx"},
+    {"requested": null, "remembered": "powers", "expect": "powers"},
+    {"requested": "cabling", "remembered": null, "expect": "cabling"},
+    {"requested": "cabling", "remembered": "cabling", "expect": "cabling"},
+    {"requested": "cabling", "remembered": "dmx", "expect": "cabling"},
+    {"requested": "cabling", "remembered": "powers", "expect": "cabling"},
+    {"requested": "dmx", "remembered": null, "expect": "dmx"},
+    {"requested": "dmx", "remembered": "cabling", "expect": "dmx"},
+    {"requested": "dmx", "remembered": "dmx", "expect": "dmx"},
+    {"requested": "dmx", "remembered": "powers", "expect": "dmx"},
+    {"requested": "powers", "remembered": null, "expect": "powers"},
+    {"requested": "powers", "remembered": "cabling", "expect": "powers"},
+    {"requested": "powers", "remembered": "dmx", "expect": "powers"},
+    {"requested": "powers", "remembered": "powers", "expect": "powers"}
+  ],
+  "returnAnchor": [
+    {
+      "highlight": true,
+      "rowHeight": 340.0,
+      "visibleHeight": 256.0,
+      "expect": "top",
+      "note": "paysage iPhone : voie de 12 projecteurs plus haute que la zone visible → en haut"
+    },
+    {"highlight": true, "rowHeight": 340.0, "visibleHeight": 620.0, "expect": "center", "note": "portrait : elle tient → centrée"},
+    {"highlight": true, "rowHeight": 120.0, "visibleHeight": 256.0, "expect": "center", "note": "petite voie en paysage → centrée"},
+    {"highlight": true, "rowHeight": 233.0, "visibleHeight": 256.0, "expect": "top", "note": "233 + 24 = 257 > 256 → en haut"},
+    {
+      "highlight": true,
+      "rowHeight": 232.0,
+      "visibleHeight": 256.0,
+      "expect": "center",
+      "note": "232 + 24 = 256 ≤ 256 → centrée (limite incluse)"
+    },
+    {"highlight": true, "rowHeight": null, "visibleHeight": 256.0, "expect": "top", "note": "hauteur de ligne inconnue → en haut"},
+    {"highlight": true, "rowHeight": 120.0, "visibleHeight": null, "expect": "top", "note": "zone visible inconnue → en haut"},
+    {"highlight": true, "rowHeight": 0.0, "visibleHeight": 256.0, "expect": "top", "note": "hauteur nulle → en haut"},
+    {
+      "highlight": false,
+      "rowHeight": 50.0,
+      "visibleHeight": 600.0,
+      "expect": "top",
+      "note": "simple reprise (pas de mise en évidence) → toujours en haut"
+    }
+  ],
+  "listGeometry": {
+    "note": "Modèle iOS (CablingListGeometry) de la ligne en tête — recommandé, pas obligatoire : Android/web peuvent lire leur liste autrement, mais doivent retenir la même ligne. positionHeaderAllowed = variante permise quand un en-tête est en tête (SPEC §7).",
+    "sequences": [
+      {
+        "id": "geometry-top-row-from-real-frames",
+        "note": "SPEC §9 : en-tête à −80…−40, phase à −40…0 (affleure : sortie), C1 à 0…160 → C1 ; puis en-tête de Soca B à −10…30 et sa ligne L1 à 52…67 → L1 (iOS) ou l'en-tête lui-même (Android/web, permis).",
+        "steps": [
+          {
+            "do": {"op": "report", "rowId": "hdr#A", "minY": -80.0, "maxY": -40.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "phase#A#1", "minY": -40.0, "maxY": 0.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "power#A#1", "minY": 0.0, "maxY": 160.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "power#A#2", "minY": 160.0, "maxY": 300.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "phase#A#2", "minY": 300.0, "maxY": 340.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "power#A#3", "minY": 700.0, "maxY": 860.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "scrolled", "visibleMinY": 0.0, "visibleMaxY": 620.0, "isAtListTop": false},
+            "expect": {
+              "topRow": "power#A#1",
+              "position": {"type": "row", "rowId": "power#A#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#A#1"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#A#1", "minY": -200.0, "maxY": -40.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#A#2",
+              "position": {"type": "row", "rowId": "power#A#2"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#A#2"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#A#2", "minY": -40.0, "maxY": 100.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#A#2",
+              "position": {"type": "row", "rowId": "power#A#2"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#A#2"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "phase#A#2", "minY": 100.0, "maxY": 140.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#A#2",
+              "position": {"type": "row", "rowId": "power#A#2"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#A#2"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "hdr#B", "minY": -10.0, "maxY": 30.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#A#2",
+              "position": {"type": "row", "rowId": "power#A#2"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#A#2"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "phase#B#1", "minY": 52.0, "maxY": 67.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#A#2",
+              "position": {"type": "row", "rowId": "power#A#2"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#A#2"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#B#1", "minY": 100.0, "maxY": 260.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#A#2",
+              "position": {"type": "row", "rowId": "power#A#2"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#A#2"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#A#2", "minY": -300.0, "maxY": -10.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "hdr#B",
+              "position": {"type": "row", "rowId": "phase#B#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#B"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "phase#A#2", "minY": -500.0, "maxY": -480.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "hdr#B",
+              "position": {"type": "row", "rowId": "phase#B#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#B"}
+            }
+          },
+          {
+            "do": {"op": "current", "rowId": "power#A#2"},
+            "expect": {"frame": {"minY": -300.0, "maxY": -10.0, "layoutWidth": 370.0, "height": 290.0}}
+          }
+        ]
+      },
+      {
+        "id": "geometry-list-top",
+        "note": "Liste tout en haut : on retient « en haut », pas une voie ; liste démontée → plus de position (la dernière connue n'est pas écrasée).",
+        "steps": [
+          {
+            "do": {"op": "report", "rowId": "summary", "minY": 20.0, "maxY": 60.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "hdr#A", "minY": 90.0, "maxY": 130.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "power#A#1", "minY": 180.0, "maxY": 340.0, "layoutWidth": 370.0},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "scrolled", "visibleMinY": 0.0, "visibleMaxY": 620.0, "isAtListTop": true},
+            "expect": {"topRow": "summary", "position": {"type": "listTop"}, "positionHeaderAllowed": {"type": "listTop"}}
+          },
+          {"do": {"op": "reset"}, "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}}
+        ]
+      },
+      {
+        "id": "geometry-rotation-stale",
+        "note": "SPEC §9 : rotation qui ne re-mesure que l'en-tête de Soca B et son C1 → la mesure portrait de Soca 1 · C5 est périmée, même au retour en portrait ; une ligne re-mesurée redevient valable.",
+        "steps": [
+          {
+            "do": {"op": "scrolled", "visibleMinY": 0.0, "visibleMaxY": 620.0, "isAtListTop": false},
+            "expect": {"topRow": null, "position": null, "positionHeaderAllowed": null}
+          },
+          {
+            "do": {"op": "report", "rowId": "power#S1#5", "minY": -20.0, "maxY": 120.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#S1#5",
+              "position": {"type": "row", "rowId": "power#S1#5"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#S1#5"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#S1#6", "minY": 120.0, "maxY": 260.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#S1#5",
+              "position": {"type": "row", "rowId": "power#S1#5"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#S1#5"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "hdr#SB", "minY": 300.0, "maxY": 340.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#S1#5",
+              "position": {"type": "row", "rowId": "power#S1#5"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#S1#5"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#SB#1", "minY": 400.0, "maxY": 540.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "power#S1#5",
+              "position": {"type": "row", "rowId": "power#S1#5"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#S1#5"}
+            }
+          },
+          {
+            "do": {"op": "scrolled", "visibleMinY": 0.0, "visibleMaxY": 256.0, "isAtListTop": false},
+            "expect": {
+              "topRow": "power#S1#5",
+              "position": {"type": "row", "rowId": "power#S1#5"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "power#S1#5"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "hdr#SB", "minY": -30.0, "maxY": 10.0, "layoutWidth": 750.0},
+            "expect": {
+              "topRow": "hdr#SB",
+              "position": {"type": "row", "rowId": "hdr#SB"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#SB"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#SB#1", "minY": 10.0, "maxY": 110.0, "layoutWidth": 750.0},
+            "expect": {
+              "topRow": "hdr#SB",
+              "position": {"type": "row", "rowId": "power#SB#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#SB"}
+            }
+          },
+          {"do": {"op": "current", "rowId": "power#S1#5"}, "expect": {"frame": null}},
+          {
+            "do": {"op": "scrolled", "visibleMinY": 0.0, "visibleMaxY": 620.0, "isAtListTop": false},
+            "expect": {
+              "topRow": "hdr#SB",
+              "position": {"type": "row", "rowId": "power#SB#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#SB"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "hdr#SB", "minY": -10.0, "maxY": 30.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "hdr#SB",
+              "position": {"type": "row", "rowId": "hdr#SB"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#SB"}
+            }
+          },
+          {
+            "do": {"op": "report", "rowId": "power#SB#1", "minY": 30.0, "maxY": 170.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "hdr#SB",
+              "position": {"type": "row", "rowId": "power#SB#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#SB"}
+            }
+          },
+          {"do": {"op": "current", "rowId": "power#S1#5"}, "expect": {"frame": null}},
+          {
+            "do": {"op": "report", "rowId": "power#S1#6", "minY": -140.0, "maxY": -12.0, "layoutWidth": 370.0},
+            "expect": {
+              "topRow": "hdr#SB",
+              "position": {"type": "row", "rowId": "power#SB#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#SB"}
+            }
+          },
+          {
+            "do": {"op": "current", "rowId": "power#S1#6"},
+            "expect": {"frame": {"minY": -140.0, "maxY": -12.0, "layoutWidth": 370.0, "height": 128.0}}
+          },
+          {
+            "do": {"op": "remove", "rowId": "power#S1#6"},
+            "expect": {
+              "topRow": "hdr#SB",
+              "position": {"type": "row", "rowId": "power#SB#1"},
+              "positionHeaderAllowed": {"type": "row", "rowId": "hdr#SB"}
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "assignBar": {
+    "note": "PanelPlacementMath.assignBarInsets — unités : pt iOS = dp Android = px CSS ; largeur de barre 300 ; marge droite 16",
+    "cases": [
+      {
+        "id": "portrait",
+        "note": "portrait 402 × 734 : marge basse 84",
+        "compactHeight": false,
+        "container": {"x": 0.0, "y": 106.0, "width": 402.0, "height": 734.0},
+        "barWidth": 300.0,
+        "legend": null,
+        "expect": {"bottom": 84.0, "leadingShift": 0.0}
+      },
+      {
+        "id": "landscape",
+        "note": "hauteur compacte 750 × 325 : contre le bas (8)",
+        "compactHeight": true,
+        "container": {"x": 62.0, "y": 56.0, "width": 750.0, "height": 325.0},
+        "barWidth": 300.0,
+        "legend": null,
+        "expect": {"bottom": 8.0, "leadingShift": 0.0}
+      },
+      {
+        "id": "portrait-legend",
+        "note": "légende dépliée 250 × 344 montant à y = 440 → bas de la barre à 430 (840 − 410)",
+        "compactHeight": false,
+        "container": {"x": 0.0, "y": 106.0, "width": 402.0, "height": 734.0},
+        "barWidth": 300.0,
+        "legend": {"x": 20.0, "y": 440.0, "width": 250.0, "height": 344.0},
+        "expect": {"bottom": 410.0, "leadingShift": 0.0}
+      },
+      {
+        "id": "portrait-short-legend",
+        "note": "légende courte : la barre ne descend jamais sous la marge ordinaire",
+        "compactHeight": false,
+        "container": {"x": 0.0, "y": 106.0, "width": 402.0, "height": 734.0},
+        "barWidth": 300.0,
+        "legend": {"x": 20.0, "y": 790.0, "width": 120.0, "height": 30.0},
+        "expect": {"bottom": 84.0, "leadingShift": 0.0}
+      },
+      {
+        "id": "landscape-legend",
+        "note": "paysage, légende bord droit 332 (centre 437) → barre décalée de 55 à droite",
+        "compactHeight": true,
+        "container": {"x": 62.0, "y": 56.0, "width": 750.0, "height": 325.0},
+        "barWidth": 300.0,
+        "legend": {"x": 82.0, "y": 120.0, "width": 250.0, "height": 230.0},
+        "expect": {"bottom": 8.0, "leadingShift": 55.0}
+      },
+      {
+        "id": "landscape-wide-legend",
+        "note": "paysage, pas la place à droite (marge 16) → la barre remonte au-dessus de la légende",
+        "compactHeight": true,
+        "container": {"x": 62.0, "y": 56.0, "width": 750.0, "height": 325.0},
+        "barWidth": 300.0,
+        "legend": {"x": 82.0, "y": 120.0, "width": 500.0, "height": 230.0},
+        "expect": {"bottom": 271.0, "leadingShift": 0.0}
+      },
+      {
+        "id": "ipad",
+        "note": "iPad : la légende ne touche pas la barre centrée → rien ne bouge",
+        "compactHeight": false,
+        "container": {"x": 0.0, "y": 74.0, "width": 1024.0, "height": 1270.0},
+        "barWidth": 300.0,
+        "legend": {"x": 20.0, "y": 900.0, "width": 250.0, "height": 344.0},
+        "expect": {"bottom": 84.0, "leadingShift": 0.0}
+      },
+      {
+        "id": "empty-legend",
+        "note": "légende de taille nulle : ignorée",
+        "compactHeight": false,
+        "container": {"x": 0.0, "y": 106.0, "width": 402.0, "height": 734.0},
+        "barWidth": 300.0,
+        "legend": {"x": 20.0, "y": 440.0, "width": 0.0, "height": 0.0},
+        "expect": {"bottom": 84.0, "leadingShift": 0.0}
+      }
+    ]
+  },
+  "colors": [
+    {
+      "id": "power-colors-labels-legend",
+      "family": "power",
+      "input": {
+        "settings": {"voltage": 230, "circuitLimitW": 3680, "phaseLimitW": 0},
+        "distributors": [
+          {"id": "A", "name": "Soca A", "kind": "soca", "colorArgb": 4293212469, "circuitPhases": [1, 1, 2, 2, 3, 3]},
+          {"id": "L", "name": "Ligne A", "kind": "solo", "colorArgb": 4280191205, "circuitPhases": [1]},
+          {"id": "B", "name": "Soca B", "kind": "soca", "colorArgb": 4282622023, "circuitPhases": [1, 1, 2, 2, 3, 3]}
+        ],
+        "assignments": [
+          {"fixture": "f1", "distributor": "A", "circuit": 1},
+          {"fixture": "f2", "distributor": "L", "circuit": 1},
+          {"fixture": "f3", "distributor": "ghost", "circuit": 1},
+          {"fixture": "f4", "distributor": "A", "circuit": 3}
+        ]
+      },
+      "fixtures": ["f1", "f2", "f3", "f4", "f5"],
+      "expect": {
+        "colorByFixture": {"f1": 4293212469, "f2": 4280191205, "f4": 4293212469},
+        "labelByFixture": {"f1": "Soca A · C1", "f2": "Ligne A · C1", "f4": "Soca A · C3"},
+        "legend": [{"id": "A", "name": "Soca A", "argb": 4293212469}, {"id": "L", "name": "Ligne A", "argb": 4280191205}],
+        "planColorByFixture": {"f1": 4293212469, "f2": 4280191205, "f3": 4285756275, "f4": 4293212469, "f5": 4285756275},
+        "planColorProvenance": "transcription : PlanView colore un projecteur absent du dictionnaire avec cablingUnassignedArgb = 0xFF737373"
+      }
+    },
+    {
+      "id": "dmx-colors-labels-legend",
+      "family": "dmx",
+      "input": {
+        "distributors": [
+          {"id": "M", "name": "Multi A", "kind": "multi", "colorArgb": 4287505578, "cores": 3},
+          {"id": "S", "name": "DMX B", "kind": "simple", "colorArgb": 4278234305, "cores": 1},
+          {"id": "E", "name": "", "kind": "multi", "colorArgb": 4294675456, "cores": 2}
+        ],
+        "assignments": [
+          {"fixture": "f1", "distributor": "M", "core": 2},
+          {"fixture": "f2", "distributor": "S", "core": 1},
+          {"fixture": "f3", "distributor": "E", "core": 2},
+          {"fixture": "f4", "distributor": "ghost", "core": 1}
+        ]
+      },
+      "fixtures": ["f1", "f2", "f3", "f4", "f5"],
+      "expect": {
+        "colorByFixture": {"f1": 4287505578, "f2": 4278234305, "f3": 4294675456},
+        "labelByFixture": {"f1": "Multi A · D2", "f2": "DMX B", "f3": "DMX · D2"},
+        "legend": [
+          {"id": "M", "name": "Multi A", "argb": 4287505578},
+          {"id": "S", "name": "DMX B", "argb": 4278234305},
+          {"id": "E", "name": "", "argb": 4294675456}
+        ],
+        "planColorByFixture": {"f1": 4287505578, "f2": 4278234305, "f3": 4294675456, "f4": 4285756275, "f5": 4285756275},
+        "planColorProvenance": "transcription : PlanView colore un projecteur absent du dictionnaire avec cablingUnassignedArgb = 0xFF737373"
+      }
+    }
+  ],
+  "texts": [
+    {"fr": "Électrique", "en": "Electrical", "note": "titre de l'onglet (ancien « Câblage »)"},
+    {"fr": "Sélectionner sur le plan", "en": "Select on the plan"},
+    {"fr": "Sur le plan", "en": "On the plan", "note": "libellé court"},
+    {"fr": "Affecter des projecteurs", "en": "Assign fixtures"},
+    {"fr": "Affecter", "en": "Assign", "note": "libellé court"},
+    {"fr": "Vider le circuit", "en": "Clear the circuit"},
+    {"fr": "Vider le départ", "en": "Clear the core"},
+    {"fr": "Vider", "en": "Clear", "note": "libellé court"},
+    {"fr": "Quitter l'affectation", "en": "Exit assignment", "note": "croix de la barre (accessibilité)"},
+    {"fr": "Voie précédente", "en": "Previous run"},
+    {"fr": "Voie suivante", "en": "Next run"},
+    {"fr": "Sélection par cadre", "en": "Rectangle selection"},
+    {"fr": "Touchez pour affecter", "en": "Tap to assign"},
+    {
+      "fr": "%lld projecteurs",
+      "en": "%lld fixtures",
+      "frPlural": {"one": "%lld projecteur", "other": "%lld projecteurs"},
+      "enPlural": {"one": "%lld fixture", "other": "%lld fixtures"}
+    },
+    {
+      "fr": "%@ / %@ canaux",
+      "en": "%1$@ / %2$@ channels",
+      "note": "charge DMX ; la charge électrique s'écrit « 2 900 / 3 680 W » (W non traduit)"
+    },
+    {
+      "fr": "%lld canaux",
+      "en": "%lld channels",
+      "frPlural": {"one": "%lld canal", "other": "%lld canaux"},
+      "enPlural": {"one": "%lld channel", "other": "%lld channels"}
+    },
+    {"fr": "Surcharge", "en": "Overload", "note": "accessibilité du triangle"},
+    {"fr": "Conso inconnue", "en": "Unknown power draw"},
+    {"fr": "Empreinte inconnue", "en": "Unknown footprint"},
+    {"fr": "Terminé", "en": "Done"},
+    {"fr": "Voie supprimée", "en": "Run deleted"}
+  ]
+}

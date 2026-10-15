@@ -73,6 +73,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.foundation.layout.offset as layoutOffset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -172,6 +177,19 @@ fun PlanScreen(
      */
     assignTarget: CablingAssignTarget? = null,
     onAssignDone: () -> Unit = {},
+    /** ◀ ▶ de la barre : voie précédente (−1) / suivante (+1), même famille (SceneScreen). */
+    onStepAssign: (Int) -> Unit = {},
+    /** Croix de la barre : quitte le mode affectation et RESTE sur le plan. */
+    onExitAssign: () -> Unit = {},
+    /**
+     * Conso par projecteur pour la charge de la barre d'affectation — MÊMES
+     * sources que l'écran Câblage (bibliothèque de puissances, spec de géométrie
+     * des types custom). null = charge électrique jamais résolue (sablier).
+     */
+    power: PowerLibraryState? = null,
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
+    /** Entrée « Vue 3D » du menu (sort aussi d'une affectation) ; défaut = [onBack]. */
+    onShow3D: (() -> Unit)? = null,
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
     onShowHistory: (() -> Unit)? = null,
@@ -255,11 +273,12 @@ fun PlanScreen(
     val hasDmxColoring = dmxColorByFixture.isNotEmpty()
     // Mode EFFECTIF : un mode dont le câblage a disparu (ou vide) retombe sur le
     // calque — aligné iOS (appearanceFor → couleur de calque si la carte est vide).
-    val effectiveColorMode = when (options.planColorMode) {
-        PlanColorMode.SOCAPEX -> if (hasSocaColoring) PlanColorMode.SOCAPEX else PlanColorMode.LAYER
-        PlanColorMode.DMX_LINE -> if (hasDmxColoring) PlanColorMode.DMX_LINE else PlanColorMode.LAYER
-        PlanColorMode.LAYER -> PlanColorMode.LAYER
-    }
+    // MODE AFFECTATION (SPEC-cablage-plan §3) : le plan est coloré D'OFFICE selon
+    // la famille de la voie (Socapex / Ligne DMX), quel que soit le choix du menu
+    // — un projecteur non câblé est gris, même si aucun ne l'est encore. En
+    // sortant du mode, le choix du menu revient.
+    val effectiveColorMode = CablingAssignColoring.effectiveMode(
+        options.planColorMode, assignTarget?.kind, hasSocaColoring, hasDmxColoring)
     val cablingColorMap: Map<String, Color>? = when (effectiveColorMode) {
         PlanColorMode.SOCAPEX -> socaColorByFixture
         PlanColorMode.DMX_LINE -> dmxColorByFixture
@@ -268,11 +287,14 @@ fun PlanScreen(
     // ANNEAU 2e DIMENSION (E3) : l'AUTRE table de couleur que le remplissage —
     // Socapex → anneau DMX, DMX → anneau Socapex. Projecteur absent de la table
     // (non affecté dans l'autre dimension) → pas d'anneau ; aucun en mode Calque.
-    val cablingRingColorMap: Map<String, Color>? = when (effectiveColorMode) {
-        PlanColorMode.SOCAPEX -> dmxColorByFixture
-        PlanColorMode.DMX_LINE -> socaColorByFixture
-        PlanColorMode.LAYER -> null
-    }
+    // PAS d'anneau de 2e dimension pendant une affectation (une seule lecture).
+    val cablingRingColorMap: Map<String, Color>? =
+        if (!CablingAssignColoring.showsSecondRing(effectiveColorMode, assignTarget != null)) null
+        else when (effectiveColorMode) {
+            PlanColorMode.SOCAPEX -> dmxColorByFixture
+            PlanColorMode.DMX_LINE -> socaColorByFixture
+            PlanColorMode.LAYER -> null
+        }
     // Légende câblage : distributeurs RÉELLEMENT utilisés (au moins une affectation)
     // dans le mode courant, dans l'ordre du modèle. Vide hors mode câblage.
     // Spec canonique — légende : UNIQUEMENT les distributeurs ayant au moins une
@@ -634,6 +656,49 @@ fun PlanScreen(
         }
     }
 
+    // ---- BARRE D'AFFECTATION : état de la voie (charge, compte, ◀ ▶) ----------
+    // Conso / empreinte par projecteur : MÊMES sources que l'écran Câblage
+    // (conso = bibliothèque de puissances via la spec de géométrie ; empreinte =
+    // resolveDmxFootprints, hors thread principal). Calculées seulement pour la
+    // famille de la voie ; `null` tant que non résolues → sablier dans la barre.
+    val assignKind = assignTarget?.kind
+    val wattsByFixture: Map<String, Int>? = remember(
+        scene, overrides.version, power, power?.version, customResolver.version, assignKind
+    ) {
+        val pw = power
+        if (assignKind != CablingAssignTarget.Kind.SOCA || pw == null) null
+        else scene.fixtures.mapNotNull { f ->
+            val uuid = f.uuid ?: return@mapNotNull null
+            pw.effective(effectiveGeometrySpec(f, overrides, customResolver)).watts?.let { uuid to it }
+        }.toMap()
+    }
+    val footprintByFixture by produceState<Map<String, Int>?>(
+        null, scene, mvrBytes, overrides.version, gdtfOverrides?.version, customResolver.version,
+        assignKind == CablingAssignTarget.Kind.DMX
+    ) {
+        if (assignKind == CablingAssignTarget.Kind.DMX) {
+            value = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides ?: GdtfOverrides(), customResolver)
+                .mapNotNull { f -> f.channels?.let { f.uuid to it } }.toMap()
+        }
+    }
+    // État de la voie RECALCULÉ à chaque toucher (lecture de `.version`) : charge,
+    // surcharge, compte, ◀ ▶. `null` = la voie n'existe plus (« Voie supprimée »).
+    val assignStatus: CablingVoieStatus? = remember(
+        assignTarget, cabling.version, dmxCabling.version, wattsByFixture, footprintByFixture
+    ) {
+        val t = assignTarget
+        when (t?.kind) {
+            CablingAssignTarget.Kind.SOCA -> CablingVoieStatus.power(t.voie, cabling.toDTO(), wattsByFixture)
+            CablingAssignTarget.Kind.DMX -> CablingVoieStatus.dmx(t.voie, dmxCabling.toDTO(), footprintByFixture)
+            null -> null
+        }
+    }
+    // Cadres (repère racine, px) du plan, de la légende et de la barre : place de
+    // la barre (dégagement de la légende) et réserve du cadrage.
+    var planBoundsPx by remember { mutableStateOf(Rect.Zero) }
+    var legendBoundsPx by remember { mutableStateOf<Rect?>(null) }
+    var assignBarTopPx by remember { mutableStateOf(0f) }
+
     // ---- Mesure entre deux points ----
     // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
     // cote ne doit pas changer quand on déplace ou zoome le plan entre les deux
@@ -808,26 +873,19 @@ fun PlanScreen(
     // sinon on l'affecte (ce qui le DÉPLACE au besoin depuis un autre circuit). DMX :
     // symétrique via `dmxCabling`. La coloration réactive (lecture de `.version`) donne
     // le retour visuel immédiat. On NE touche PAS à `selected` (indépendant du câblage).
+    // Voie disparue (distributeur supprimé ici ou par un coéquipier, index hors
+    // bornes) : RIEN n'est écrit — ni sauvegarde, ni synchro (SPEC §6) ; la barre
+    // dit « Voie supprimée » et le retour haptique est un avertissement.
     fun toggleAssign(fx: String) {
         val t = assignTarget ?: return
-        val removed: Boolean = when (t.kind) {
-            CablingAssignTarget.Kind.SOCA -> {
-                val cur = cabling.assignmentOf(fx)
-                if (cur != null && cur.distributor == t.distributorId && cur.circuit == t.index) {
-                    cabling.unassign(fx); true
-                } else { cabling.assign(setOf(fx), t.distributorId, t.index); false }
-            }
-            CablingAssignTarget.Kind.DMX -> {
-                val cur = dmxCabling.assignmentOf(fx)
-                if (cur != null && cur.distributor == t.distributorId && cur.core == t.index) {
-                    dmxCabling.unassign(fx); true
-                } else { dmxCabling.assign(setOf(fx), t.distributorId, t.index); false }
-            }
+        val result = when (t.kind) {
+            CablingAssignTarget.Kind.SOCA -> cabling.toggleOnVoie(fx, t.voie)
+            CablingAssignTarget.Kind.DMX -> dmxCabling.toggleOnVoie(fx, t.voie)
         }
-        // RETOUR HAPTIQUE court, différencié affectation vs retrait. N'est appelée
+        // RETOUR HAPTIQUE, différencié affectation / retrait / refus. N'est appelée
         // QUE quand un projecteur est réellement touché (le hit-test a trouvé une
         // cible) → aucun retour sur un tap dans le vide.
-        assignHaptic(hapticView, assigned = !removed)
+        cablingHaptic(hapticView, CablingHaptic.of(result))
     }
 
     /**
@@ -1001,13 +1059,34 @@ fun PlanScreen(
             onInvoke = { showBackgroundDialog = true }, inMenu = false))
     }
 
-    Box(modifier = modifier.fillMaxSize().background(planBg)) {
+    // CADRAGE en mode affectation : au premier affichage de la barre (une fois
+    // qu'elle est mesurée), le plan est recadré AU-DESSUS d'elle — la hauteur
+    // qu'elle occupe en bas est retirée de la zone de cadrage, bornée à 60 %.
+    // Seulement si l'utilisateur n'a pas encore bougé le plan.
+    var assignFitDone by remember { mutableStateOf(false) }
+    LaunchedEffect(assignTarget != null, assignBarTopPx, planBoundsPx, canvas) {
+        if (assignTarget == null || assignFitDone) return@LaunchedEffect
+        val pb = planBoundsPx
+        if (pb.height <= 0f || canvas.x <= 0f || canvas.y <= 0f) return@LaunchedEffect
+        if (assignBarTopPx <= pb.top || assignBarTopPx >= pb.bottom) return@LaunchedEffect
+        assignFitDone = true
+        if (scale != 1f || offset != Offset.Zero) return@LaunchedEffect
+        val reserve = CablingAssignBarPlacement.reserve(pb.top, pb.bottom, assignBarTopPx)
+        val (s, dy) = CablingAssignBarPlacement.fitAbove(canvas.x, canvas.y, data.spanX, data.spanY, reserve)
+        scale = s
+        offset = Offset(0f, dy)
+    }
+
+    Box(modifier = modifier.fillMaxSize().background(planBg)
+        .onGloballyPositioned { planBoundsPx = it.boundsInRoot() }) {
         Canvas(
             modifier = Modifier.fillMaxSize()
-                // En mode rectangle (ou affectation E2), le glissé trace le cadre de
-                // sélection ; sinon il déplace/zoome le plan (comme le mode dédié iOS).
+                // En mode rectangle, le glissé trace le cadre de sélection ; sinon il
+                // déplace/zoome le plan (comme le mode dédié iOS). En AFFECTATION, le
+                // cadre s'arme par le bouton cadre de la barre (= rectMode) : le plan
+                // reste libre au doigt entre deux touchers.
                 .pointerInput(scene, rectMode, assignMode, maskMode, soloMode, hiddenElements, soloElements, assignTarget) {
-                    if (rectMode || assignMode) {
+                    if (rectMode) {
                         detectDragGestures(
                             onDragStart = { rectStart = it; rectEnd = it },
                             onDrag = { change, _ -> rectEnd = change.position },
@@ -1029,15 +1108,17 @@ fun PlanScreen(
                                             if (s.x in l..r && s.y in t..bo) enclos.add(f.key)
                                         }
                                         if (enclos.isNotEmpty()) {
-                                            when (tgt.kind) {
+                                            // Jamais de retrait par le cadre ; voie disparue :
+                                            // rien n'est écrit (garde du module pur).
+                                            val written = when (tgt.kind) {
                                                 CablingAssignTarget.Kind.SOCA ->
-                                                    cabling.assign(enclos, tgt.distributorId, tgt.index)
+                                                    cabling.assignFrameOnVoie(enclos, tgt.voie)
                                                 CablingAssignTarget.Kind.DMX ->
-                                                    dmxCabling.assign(enclos, tgt.distributorId, tgt.index)
+                                                    dmxCabling.assignFrameOnVoie(enclos, tgt.voie)
                                             }
                                             // Rectangle en mode affectation : UN seul retour
                                             // haptique à la fin (pas un par projecteur).
-                                            assignHaptic(hapticView, assigned = true)
+                                            cablingHaptic(hapticView, CablingHaptic.ofFrame(written))
                                         }
                                     } else if (maskMode) {
                                         // Le cadre MASQUE tout ce qu'il contient
@@ -1655,9 +1736,9 @@ fun PlanScreen(
                 }
             }
 
-            // Cadre de sélection en cours (rectangle OU affectation E2).
+            // Cadre de sélection en cours (rectangle, ou cadre armé de la barre d'affectation).
             val a = rectStart; val b = rectEnd
-            if ((rectMode || assignMode) && a != null && b != null) {
+            if (rectMode && a != null && b != null) {
                 val tl = Offset(min(a.x, b.x), min(a.y, b.y))
                 val sz = androidx.compose.ui.geometry.Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y))
                 drawRect(Color(0x33FFC400), topLeft = tl, size = sz)
@@ -1721,80 +1802,42 @@ fun PlanScreen(
                 style = MaterialTheme.typography.bodySmall
             )
         }
+        // Pendant une affectation, la flèche vaut « Terminé » : retour à l'écran
+        // Câblage sur la dernière voie (SceneScreen), comme le « Terminé » de la barre.
         IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.nav_view_3d), tint = inkColor)
+            Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(if (assignMode) R.string.common_done else R.string.nav_view_3d),
+                tint = inkColor)
         }
 
-        // BANDEAU D'AFFECTATION (E2) : en haut, la cible visée + un bouton « Terminé ».
-        // Le libellé est RÉACTIF (relit cabling/dmxCabling.distributors → un renommage
-        // de distributeur se reflète aussitôt). « Terminé » quitte le mode et revient
-        // au câblage (onAssignDone, hissé dans SceneScreen).
-        val at = assignTarget
-        if (assignMode && at != null) {
-            // Bandeau d'affectation : « <nom> C<index> » (élec) / « <nom> D<index> »
-            // (DMX), espace + lettre, SANS point médian — identique à iOS
-            // (PlanAssignTarget.indexTag) ; le « D<index> » s'affiche toujours,
-            // même pour une ligne DMX simple (1 départ).
-            val targetLabel = when (at.kind) {
-                CablingAssignTarget.Kind.SOCA -> {
-                    val name = cabling.distributors.firstOrNull { it.id == at.distributorId }?.name ?: "Socapex"
-                    "$name C${at.index}"
-                }
-                CablingAssignTarget.Kind.DMX -> {
-                    val name = dmxCabling.distributors.firstOrNull { it.id == at.distributorId }?.name ?: "DMX"
-                    "$name D${at.index}"
-                }
-            }
-            Surface(
-                color = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(10.dp),
-                shadowElevation = 4.dp,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 2.dp, bottom = 2.dp)
-                ) {
-                    Text(
-                        // + NOMBRE de projecteurs actuellement affectés à la cible
-                        // (recalculé à chaque affectation/retrait via assignedToTarget).
-                        stringResource(R.string.assign_banner_fmt, targetLabel, assignedToTarget.size),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
-                    )
-                    androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
-                    androidx.compose.material3.TextButton(
-                        onClick = onAssignDone,
-                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                    ) { Text(stringResource(R.string.common_done)) }
-                }
-            }
-        }
+        // (La barre d'affectation est posée EN BAS, plus loin : CablingAssignBar.)
 
         // Légende : couleur de chaque calque de projecteurs + compte (comme iOS).
+        // La légende ne compte QUE les projecteurs réellement affichés : filtrée
+        // par le CACHÉ EFFECTIF (masquage + solo), elle reflète exactement ce que
+        // l'utilisateur voit — et donc ce qu'il exporte. Un calque entièrement
+        // masqué ou hors-solo disparaît de la légende. Calcul HISSÉ hors du bloc :
+        // la barre d'affectation doit savoir si la légende est affichée (dégagement).
+        val legend = remember(data, effectiveHidden) {
+            data.fixtures.asSequence()
+                .filter { it.key !in effectiveHidden }
+                .groupingBy { it.layer }.eachCount()
+                .toList().sortedByDescending { it.second }
+        }
+        // En mode CÂBLAGE (ou d'office en affectation), la légende passe de
+        // « couleur → calque » à « couleur → distributeur » (ceux réellement utilisés).
+        val legendCablingMode = effectiveColorMode != PlanColorMode.LAYER
+        val legendShown = options.showLegend &&
+            (if (legendCablingMode) cablingLegend.isNotEmpty() else legend.isNotEmpty())
         if (options.showLegend) {
-            // La légende ne compte QUE les projecteurs réellement affichés : filtrée
-            // par le CACHÉ EFFECTIF (masquage + solo), elle reflète exactement ce que
-            // l'utilisateur voit — et donc ce qu'il exporte. Un calque entièrement
-            // masqué ou hors-solo disparaît de la légende.
-            val legend = remember(data, effectiveHidden) {
-                data.fixtures.asSequence()
-                    .filter { it.key !in effectiveHidden }
-                    .groupingBy { it.layer }.eachCount()
-                    .toList().sortedByDescending { it.second }
-            }
-            // En mode CÂBLAGE, la légende passe de « couleur → calque » à
-            // « couleur → distributeur » (uniquement ceux réellement utilisés).
-            val cablingMode = effectiveColorMode != PlanColorMode.LAYER
-            val show = if (cablingMode) cablingLegend.isNotEmpty() else legend.isNotEmpty()
+            val cablingMode = legendCablingMode
+            val show = legendShown
             if (show) {
                 Surface(
                     color = Color.White.copy(alpha = 0.92f), contentColor = Color(0xFF222222),
                     shape = RoundedCornerShape(10.dp), shadowElevation = 3.dp,
                     modifier = Modifier.align(Alignment.TopStart).padding(top = 100.dp, start = 8.dp)
+                        .onGloballyPositioned { legendBoundsPx = it.boundsInRoot() }
                 ) {
                     androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                         if (cablingMode) {
@@ -1834,7 +1877,7 @@ fun PlanScreen(
         Box(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
             SceneOptionsMenu(
                 options = options, tint = inkColor,
-                onShow3D = onBack, onShowPatch = onShowPatch,
+                onShow3D = onShow3D ?: onBack, onShowPatch = onShowPatch,
                 onShowMaLibrary = onShowMaLibrary,
                 onShowAccount = onShowAccount, onShareProject = onShareProject,
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
@@ -2169,6 +2212,38 @@ fun PlanScreen(
             }
             }
         }
+        // ---- BARRE D'AFFECTATION (SPEC-cablage-plan §4) ----
+        // En BAS, centrée, déplaçable : 84 dp au-dessus du bas en portrait, contre
+        // le bas (8 dp) en hauteur compacte ; elle dégage la légende dépliée (à
+        // droite si la place le permet, sinon au-dessus) — CablingAssignBarPlacement.
+        val barTarget = assignTarget
+        if (barTarget != null) {
+            val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+            val compact = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 480
+            val dens = androidx.compose.ui.platform.LocalDensity.current
+            fun Rect.toDp() = Rect(left / dens.density, top / dens.density, right / dens.density, bottom / dens.density)
+            val insets = CablingAssignBarPlacement.assignBarInsets(
+                compact, planBoundsPx.toDp(), CablingAssignBarPlacement.BAR_WIDTH,
+                if (legendShown) legendBoundsPx?.toDp() else null
+            )
+            val bar = CablingAssignBarUi.display(barTarget, assignStatus, locale)
+            CablingAssignBar(
+                display = bar,
+                frameActive = rectMode,
+                onPrevious = { cablingHaptic(hapticView, CablingHaptic.STEP); onStepAssign(-1) },
+                onNext = { cablingHaptic(hapticView, CablingHaptic.STEP); onStepAssign(1) },
+                onToggleFrame = { rectMode = !rectMode },
+                onDone = { rectMode = false; onAssignDone() },
+                onExit = { rectMode = false; onExitAssign() },
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = insets.bottom.dp)
+                    .layoutOffset(x = insets.leadingShift.dp)
+                    // Cadre d'ANCRAGE (sans le décalage choisi au doigt) : sert à
+                    // réserver sa hauteur au cadrage du plan.
+                    .onGloballyPositioned { assignBarTopPx = it.positionInRoot().y }
+            )
+        }
+
         // ---- Panneau d'export PDF « en construction » ----
         // Volontairement à part des modes de toucher : composer le document ne
         // s'approprie aucun geste, on continue de cadrer le plan librement entre
@@ -2444,24 +2519,6 @@ fun PlanScreen(
             }
         }
     }
-}
-
-/**
- * Retour HAPTIQUE court du mode affectation câblage (E2). Différencie l'AFFECTATION
- * (retour plus ferme) du RETRAIT (tick plus léger), à l'image d'iOS (.medium vs
- * .light). Utilise les constantes système (aucune permission VIBRATE requise).
- * CONFIRM n'existe qu'à partir d'API 30 (minSdk 28) → repli sur LONG_PRESS ;
- * CONTEXT_CLICK (retrait) est disponible dès l'API 23.
- */
-private fun assignHaptic(view: android.view.View, assigned: Boolean) {
-    val constant = if (assigned) {
-        if (android.os.Build.VERSION.SDK_INT >= 30)
-            android.view.HapticFeedbackConstants.CONFIRM
-        else android.view.HapticFeedbackConstants.LONG_PRESS
-    } else {
-        android.view.HapticFeedbackConstants.CONTEXT_CLICK
-    }
-    view.performHapticFeedback(constant)
 }
 
 /**

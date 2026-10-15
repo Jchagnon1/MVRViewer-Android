@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MVR Viewer</string>
-    <string name="assign_banner_fmt">Affectation → %1$s · %2$d projecteur(s)</string>
     <string name="background_title_2d">Couleur du fond 2D</string>
     <string name="background_title_3d">Couleur du fond 3D</string>
+    <string name="cabling_action_assign_short">Affecter</string>
+    <string name="cabling_action_on_plan_short">Sur le plan</string>
+    <string name="cabling_bar_load_channels">%1$s / %2$s canaux</string>
+    <string name="cabling_bar_load_w">%1$s / %2$s W</string>
+    <string name="cabling_exit_assign">Quitter l\'affectation</string>
+    <string name="cabling_frame_select">Sélection par cadre</string>
+    <string name="cabling_next_voie">Voie suivante</string>
+    <string name="cabling_overload">Surcharge</string>
+    <string name="cabling_prev_voie">Voie précédente</string>
+    <string name="cabling_tap_to_assign">Touchez pour affecter</string>
+    <string name="cabling_voie_deleted">Voie supprimée</string>
     <string name="cabling_already_elsewhere">déjà câblé ailleurs → déplacer</string>
     <string name="cabling_already_here">déjà sur ce circuit</string>
     <string name="cabling_assign_fixtures_cd">Affecter des projecteurs</string>
@@ -41,7 +51,7 @@
     <string name="cabling_select_on_plan_cd">Sélectionner sur le plan</string>
     <string name="cabling_settings_summary_fmt">%1$d V · circuit %2$d W · </string>
     <string name="cabling_settings_title">Réglages du câblage</string>
-    <string name="cabling_tab_elec">Élec</string>
+    <string name="cabling_tab_elec">Électrique</string>
     <string name="cabling_tab_power">Puissances</string>
     <string name="cabling_total_fmt"> · total %1$d W</string>
     <string name="cabling_unassigned">Non câblé</string>
@@ -671,5 +681,13 @@
     <plurals name="ma_protected_count">
         <item quantity="one">dont %1$d profil protégé (.pxml)</item>
         <item quantity="other">dont %1$d profils protégés (.pxml)</item>
+    </plurals>
+    <plurals name="cabling_bar_fixtures">
+        <item quantity="one">%1$d projecteur</item>
+        <item quantity="other">%1$d projecteurs</item>
+    </plurals>
+    <plurals name="cabling_channels">
+        <item quantity="one">%1$d canal</item>
+        <item quantity="other">%1$d canaux</item>
     </plurals>
 </resources>

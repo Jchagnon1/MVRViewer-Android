@@ -48,7 +48,11 @@ enum class DistributorKind(val raw: String) {
     SOCA("soca"), SOLO("solo");
 
     companion object {
-        fun from(raw: String): DistributorKind = entries.firstOrNull { it.raw == raw } ?: SOCA
+        /**
+         * Type inconnu (ou absent) → SOLO, comme iOS (`kindResolved`) et le web
+         * (vecteur `power-decode-tolerance`). Ne concerne qu'un JSON abîmé.
+         */
+        fun from(raw: String): DistributorKind = entries.firstOrNull { it.raw == raw } ?: SOLO
     }
 }
 
@@ -74,7 +78,11 @@ data class Distributor(
     val colorArgb: Int,
     val circuitPhases: List<Int>
 ) {
-    val circuitCount: Int get() = circuitPhases.size
+    /**
+     * Nombre de circuits : la longueur de [circuitPhases] fait foi ; tableau vide
+     * (JSON dégradé) → le standard du type (règle iOS `circuitCount`).
+     */
+    val circuitCount: Int get() = if (circuitPhases.isEmpty()) defaultCircuitCount(kind) else circuitPhases.size
 
     /**
      * Phase (1|2|3) d'un circuit 1-based. Un index hors bornes retombe sur la

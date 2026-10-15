@@ -20,6 +20,8 @@ object PanelLayoutStore {
         REF_PLAN_PLACEMENT_PLAN("refPlanPlacementPlan"),
         LABELS_PLAN("labelsPlan"),
         EXPORT_PLAN("exportPlan"),
+        /** Barre d'affectation du câblage sur le plan (clé iOS `cablingAssignPlan`). */
+        CABLING_ASSIGN_PLAN("cablingAssignPlan"),
     }
 
     data class Placement(val dx: Float = 0f, val dy: Float = 0f, val collapsed: Boolean = false) {

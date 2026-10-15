@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MVR Viewer</string>
-    <string name="assign_banner_fmt">Assigning → %1$s · %2$d fixture(s)</string>
     <string name="background_title_2d">2D background colour</string>
     <string name="background_title_3d">3D background colour</string>
+    <string name="cabling_action_assign_short">Assign</string>
+    <string name="cabling_action_on_plan_short">On the plan</string>
+    <string name="cabling_bar_load_channels">%1$s / %2$s channels</string>
+    <string name="cabling_bar_load_w">%1$s / %2$s W</string>
+    <string name="cabling_exit_assign">Exit assignment</string>
+    <string name="cabling_frame_select">Rectangle selection</string>
+    <string name="cabling_next_voie">Next run</string>
+    <string name="cabling_overload">Overload</string>
+    <string name="cabling_prev_voie">Previous run</string>
+    <string name="cabling_tap_to_assign">Tap to assign</string>
+    <string name="cabling_voie_deleted">Run deleted</string>
     <string name="cabling_already_elsewhere">already cabled elsewhere → move</string>
     <string name="cabling_already_here">already on this circuit</string>
     <string name="cabling_assign_fixtures_cd">Assign fixtures</string>
@@ -41,7 +51,7 @@
     <string name="cabling_select_on_plan_cd">Select on the plan</string>
     <string name="cabling_settings_summary_fmt">%1$d V · circuit %2$d W · </string>
     <string name="cabling_settings_title">Cabling settings</string>
-    <string name="cabling_tab_elec">Power</string>
+    <string name="cabling_tab_elec">Electrical</string>
     <string name="cabling_tab_power">Power draw</string>
     <string name="cabling_total_fmt"> · total %1$d W</string>
     <string name="cabling_unassigned">Not cabled</string>
@@ -117,7 +127,7 @@
     <string name="dmx_already_here">already on this line</string>
     <string name="dmx_analysing">Analysing DMX footprints…</string>
     <string name="dmx_assigned_fmt">%1$d / %2$d fixture(s) cabled in DMX</string>
-    <string name="dmx_clear_core_cd">Clear the line</string>
+    <string name="dmx_clear_core_cd">Clear the core</string>
     <string name="dmx_clear_core_msg2">The other lines are untouched.</string>
     <string name="dmx_clear_core_msg_fmt">Remove the %1$d fixture(s) from %2$s of « %3$s »? </string>
     <string name="dmx_clear_core_q">Clear the line?</string>
@@ -664,5 +674,13 @@
     <plurals name="ma_protected_count">
         <item quantity="one">including %1$d protected profile (.pxml)</item>
         <item quantity="other">including %1$d protected profiles (.pxml)</item>
+    </plurals>
+    <plurals name="cabling_bar_fixtures">
+        <item quantity="one">%1$d fixture</item>
+        <item quantity="other">%1$d fixtures</item>
+    </plurals>
+    <plurals name="cabling_channels">
+        <item quantity="one">%1$d channel</item>
+        <item quantity="other">%1$d channels</item>
     </plurals>
 </resources>

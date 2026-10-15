@@ -156,4 +156,24 @@ class DmxCablingState {
     }
 
     fun assignmentOf(fixture: String): DmxCablingAssignment? = assignments[fixture]
+
+    // ---- Affectation SUR LE PLAN (SPEC-cablage-plan §6) ----------------------
+
+    /** TOUCHER sur un départ : même décision que [CablingPlanAssign.toggle] (DMX). */
+    fun toggleOnVoie(fixture: String, voie: CablingVoie): CablingToggleResult {
+        if (!CablingPlanAssign.existsDmx(voie, distributors)) return CablingToggleResult.VOIE_MISSING
+        val cur = assignments[fixture]
+        return if (cur != null && cur.distributor == voie.distId && cur.core == voie.index) {
+            unassign(fixture); CablingToggleResult.REMOVED
+        } else {
+            assign(setOf(fixture), voie.distId, voie.index); CablingToggleResult.ASSIGNED
+        }
+    }
+
+    /** CADRE sur un départ : jamais de retrait ; `false` (rien d'écrit) si le départ a disparu. */
+    fun assignFrameOnVoie(fixtures: List<String>, voie: CablingVoie): Boolean {
+        if (!CablingPlanAssign.existsDmx(voie, distributors)) return false
+        assign(LinkedHashSet(fixtures), voie.distId, voie.index)
+        return true
+    }
 }

@@ -404,6 +404,27 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
         if (t !in fp.specs || fw.edgesBySpec[t] == null) return false
         return (fw.radiusBySpec[t] ?: 0f) * det > 7f
     }
+    // ---- Passe 0 (câblage) : PASTILLE pleine sous la silhouette ----
+    // SPEC-cablage-plan §3 : en mode câblage (ou d'office en affectation), chaque
+    // projecteur CÂBLÉ porte une pastille pleine de la couleur de son
+    // distributeur (85 %, liseré couleur de fond), SOUS son symbole ; un
+    // projecteur non câblé n'en a pas (symbole gris). Les silhouettes étant
+    // tracées par TYPE (une passe pour tous les clones), c'est cette pastille qui
+    // porte la couleur quand on est assez près pour les voir — sans elle, la
+    // couleur ne tenait qu'à un point de 3 px.
+    val cablingFill = s.cablingColor
+    if (s.colorMode != PlanColorMode.LAYER && silhouettesOn && !cablingFill.isNullOrEmpty()) {
+        s.data.fixtures.forEach { f ->
+            if (f.key in s.hiddenElements) return@forEach
+            val col = cablingFill[f.key] ?: return@forEach
+            if (!silhouetteVisible(f.spec)) return@forEach
+            val p = s.toDraw(f.px, f.py)
+            val r = ((f.spec?.trim()?.let { fw?.radiusBySpec?.get(it) } ?: 0f) * bs).coerceIn(7f, 48f)
+            if (p.x !in -r..w + r || p.y !in -r..h + r) return@forEach
+            drawCircle(col.copy(alpha = 0.85f), radius = r, center = p)
+            drawCircle(s.planBg, radius = r, center = p, style = Stroke(1.5f))
+        }
+    }
     if (silhouettesOn && fp != null) {
         withTransform({
             translate(s.centerPx.x, s.centerPx.y)

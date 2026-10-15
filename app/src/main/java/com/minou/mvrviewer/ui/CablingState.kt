@@ -144,6 +144,35 @@ class PowerCablingState {
 
     fun assignmentOf(fixture: String): CablingAssignment? = assignments[fixture]
 
+    // ---- Affectation SUR LE PLAN (SPEC-cablage-plan §6) ----------------------
+
+    /**
+     * TOUCHER un projecteur sur la voie [voie] (même décision que
+     * [CablingPlanAssign.toggle], vérifiée par les vecteurs) : voie disparue →
+     * RIEN n'est écrit (ni sauvegarde, ni synchro) ; déjà sur la voie → retiré ;
+     * sinon → (dé)placé. Un seul commit.
+     */
+    fun toggleOnVoie(fixture: String, voie: CablingVoie): CablingToggleResult {
+        if (!CablingPlanAssign.existsPower(voie, distributors)) return CablingToggleResult.VOIE_MISSING
+        val cur = assignments[fixture]
+        return if (cur != null && cur.distributor == voie.distId && cur.circuit == voie.index) {
+            unassign(fixture); CablingToggleResult.REMOVED
+        } else {
+            assign(setOf(fixture), voie.distId, voie.index); CablingToggleResult.ASSIGNED
+        }
+    }
+
+    /**
+     * CADRE sur la voie [voie] : ajoute / déplace tout ce qu'il contient, sans
+     * jamais retirer. `false` (et rien d'écrit) si la voie a disparu ; un cadre
+     * vide rend `true` sans rien écrire.
+     */
+    fun assignFrameOnVoie(fixtures: List<String>, voie: CablingVoie): Boolean {
+        if (!CablingPlanAssign.existsPower(voie, distributors)) return false
+        assign(LinkedHashSet(fixtures), voie.distId, voie.index)
+        return true
+    }
+
     // ---- Réglages -----------------------------------------------------------
 
     fun applySettings(s: CablingSettings) { settings = s; commit() }
@@ -159,8 +188,37 @@ class PowerCablingState {
  * (distributorId, index) suffit à router vers `PowerCablingState.assign` ou
  * `DmxCablingState.assign`.
  */
-data class CablingAssignTarget(val kind: Kind, val distributorId: String, val index: Int) {
+data class CablingAssignTarget(
+    val kind: Kind,
+    val distributorId: String,
+    val index: Int,
+    /**
+     * Libellé FIGÉ de la voie (« Soca A · C3 », « Multi A · D2 », « DMX B »,
+     * [CablingVoieLabel]), calculé à la création de la cible et à chaque ◀ ▶ :
+     * la barre le garde tel quel si la voie disparaît pendant l'affectation.
+     */
+    val label: String = ""
+) {
     enum class Kind { SOCA, DMX }
+
+    /** La VOIE ciblée : ordre ◀ ▶, toucher, mémoire de l'écran Câblage. */
+    val voie: CablingVoie get() = CablingVoie(kind, distributorId, index)
+
+    companion object {
+        /** Cible d'une voie, avec son libellé FIGÉ (iOS `ContentView.planAssignTarget(for:)`). */
+        fun forVoie(voie: CablingVoie, power: List<Distributor>, dmx: List<com.minou.mvrviewer.sync.DmxDistributor>): CablingAssignTarget =
+            when (voie.kind) {
+                Kind.SOCA -> {
+                    val name = power.firstOrNull { it.id == voie.distId }?.name ?: ""
+                    CablingAssignTarget(voie.kind, voie.distId, voie.index, CablingVoieLabel.power(name, voie.index))
+                }
+                Kind.DMX -> {
+                    val d = dmx.firstOrNull { it.id == voie.distId }
+                    CablingAssignTarget(voie.kind, voie.distId, voie.index,
+                        CablingVoieLabel.dmx(d?.name ?: "", voie.index, d?.coreCount ?: 1))
+                }
+            }
+    }
 }
 
 /** Palette ARGB des distributeurs (repérage visuel), indexée par ordre d'ajout. */

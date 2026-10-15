@@ -13,19 +13,20 @@ import com.minou.mvrviewer.sync.PowerCablingDTO
  * (base seule quand la ligne n'a qu'un départ).
  */
 internal object CablingLabels {
-    /** Étiquette Socapex : « <nom, ou "Socapex"> · C<circuit 1-based> ». */
-    fun soca(distName: String, circuit: Int): String =
-        "${distName.ifBlank { "Socapex" }} · C$circuit"
+    /**
+     * Étiquette Socapex : « <nom, ou "Socapex"> · C<circuit 1-based> ». Délègue
+     * au libellé FIGÉ de la voie ([CablingVoieLabel], vecteurs `labels`) : un nom
+     * fait d'espaces ou de tabulations compte comme vide, un nom non vide est
+     * gardé tel quel.
+     */
+    fun soca(distName: String, circuit: Int): String = CablingVoieLabel.power(distName, circuit)
 
     /**
      * Étiquette DMX : base = (nom, ou « DMX »). GATE sur `coreCount`, PAS sur le
      * kind : une multipaire réduite à 1 départ redevient une ligne simple → base
      * seule ; multipaire (coreCount > 1) → base + « · D<cœur 1-based> ».
      */
-    fun dmx(distName: String, coreCount: Int, core: Int): String {
-        val base = distName.ifBlank { "DMX" }
-        return if (coreCount > 1) "$base · D$core" else base
-    }
+    fun dmx(distName: String, coreCount: Int, core: Int): String = CablingVoieLabel.dmx(distName, core, coreCount)
 }
 
 /**

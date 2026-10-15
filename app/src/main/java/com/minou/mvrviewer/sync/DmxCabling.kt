@@ -140,9 +140,11 @@ object DmxCablingCodec {
             val id = d.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val kind = DmxDistributorKind.from(d.optString("kind"))
             // Une ligne simple est FORCÉE à 1 départ ; une multipaire garde son N
-            // (≥ 1), défaut 4 si le champ manque (JSON abîmé).
+            // s'il vaut au moins 1, sinon (absent, 0, négatif : JSON abîmé) le
+            // défaut 4 — règle iOS, vecteur `dmx-decode-tolerance`.
+            val rawCores = d.optInt("cores", 0)
             val cores = if (kind == DmxDistributorKind.SIMPLE) 1
-                else maxOf(1, d.optInt("cores", defaultDmxCores(kind)))
+                else if (rawCores >= 1) rawCores else defaultDmxCores(kind)
             DmxDistributor(id, d.optString("name"), kind, d.optInt("colorArgb"), cores)
         }
         val aArr = o.optJSONArray("assignments") ?: JSONArray()

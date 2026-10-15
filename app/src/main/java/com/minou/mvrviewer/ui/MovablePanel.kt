@@ -4,6 +4,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -63,6 +64,12 @@ import kotlin.math.roundToInt
 fun MovablePanel(
     id: PanelLayoutStore.PanelID,
     modifier: Modifier = Modifier,
+    /**
+     * En-tête gardé dans la barre quand le panneau est RÉDUIT (ex. la voie de la
+     * barre d'affectation : « réduite, elle n'est plus que son en-tête, titre à
+     * sa taille normale », SPEC-cablage-plan §4). null = barre nue (historique).
+     */
+    collapsedHeader: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -149,7 +156,14 @@ fun MovablePanel(
                     tint = Color(0xFF9E9E9E),
                     modifier = Modifier.padding(start = 10.dp).size(16.dp)
                 )
-                Box(Modifier.weight(1f))
+                if (placement.collapsed && collapsedHeader != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f).padding(start = 8.dp)
+                    ) { collapsedHeader() }
+                } else {
+                    Box(Modifier.weight(1f))
+                }
                 IconButton(
                     onClick = {
                         placement = placement.copy(collapsed = !placement.collapsed)

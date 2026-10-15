@@ -263,12 +263,18 @@ fun SceneScreen(
         }
         CablingVoieNavigator.neighbor(t.voie, step, order)?.let { setAssignVoie(it) }
     }
+    // PANNEAUX FLOTTANTS ouverts (Position GPS, Plan importé, Réglage des étiquettes —
+    // SPEC-menus-android §3.6–3.8) : hissés ici pour que le menu, les outils, les
+    // crochets et la fin d'un import les ouvrent pareil dans les deux vues. Chaque
+    // vue a les siens : une bascule 3D ↔ plan les referme.
+    var panels by remember { mutableStateOf(ScenePanels()) }
     // PAS UNIQUE d'écriture de la navigation : réducteur pur (SceneNav), puis
     // effets. Une affectation désarmée par le réducteur (plan quitté par un autre
     // chemin, « Terminé », ←, croix) efface TOUJOURS la cible — sinon une
     // réouverture normale du plan en hériterait.
     fun navigate(e: SceneNavEvent) {
         val r = SceneNav.reduce(nav, e)
+        if (r.state.base != nav.base) panels = ScenePanels.afterBaseChange()
         nav = r.state
         if (!r.state.assigning) assignTarget = null
         if (r.closeProject) onClose()
@@ -301,9 +307,14 @@ fun SceneScreen(
     LaunchedEffect(Unit) {
         val start = DebugHooks.takeAutoPlanStart()
         if (start != PlanStartAction.NONE) openPlanWith(start)
-        val dest = DebugHooks.takeAutoDest() ?: return@LaunchedEffect
+        val dest = DebugHooks.takeAutoDest()
+        val autoPanels = DebugHooks.takeAutoPanels()
+        if (dest == null && autoPanels == null) return@LaunchedEffect
         kotlinx.coroutines.delay(2000)
-        open(dest)
+        // Panneaux de la vue courante (tranche B) : celui du plan importé n'apparaît
+        // que s'il y a un plan (relu du projet pendant l'attente).
+        autoPanels?.let { panels = it }
+        dest?.let { open(it) }
     }
     var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
     fun hiddenSig(s: Set<String>) = AuditCoding.encodeLayers(s)
@@ -1066,6 +1077,108 @@ fun SceneScreen(
         }
     }
 
+    // ---- PLAN IMPORTÉ, hissé ici (SPEC-menus-android §3.7, A29) : import, centrage,
+    // traitement, persistance débouncée du placement et partage — appelables depuis
+    // les DEUX vues (un réglage fait en 3D est enregistré et partagé comme un réglage
+    // fait dans le plan). ----
+
+    // Import / retrait par l'utilisateur : persiste la géométrie, masque d'emblée les
+    // calques éteints/gelés du DXF, téléverse (DXP1) et pousse le manifeste.
+    fun setReferencePlan(rp: ReferencePlan?) {
+        referencePlan = rp
+        refPlanTransformVersion++
+        // À l'import : masquer d'emblée les calques éteints/gelés du DXF.
+        if (rp != null && hiddenLayers.isEmpty() && rp.plan.defaultHiddenLayers.isNotEmpty()) {
+            hiddenLayers = rp.plan.defaultHiddenLayers.toSet()
+        }
+        // Import / retrait par l'utilisateur → persiste la géométrie DXF.
+        scope.launch(Dispatchers.IO) {
+            if (rp != null) ProjectStore.saveReferencePlan(ctx, projectKey, rp, null)
+            else ProjectStore.removeReferencePlan(ctx, projectKey)
+        }
+        // SYNCHRO : téléverse le plan (format d'échange DXP1) + pousse le manifeste.
+        sync?.let { s ->
+            scope.launch {
+                // Même garde qu'en pushAllLocalState : un plan IMAGE (DxfPlan
+                // vide) ne doit ni téléverser un blob vide, ni effacer le SHA
+                // du DXF vectoriel déjà partagé. Retrait explicite (rp == null)
+                // = seul cas où l'on remet le SHA à null.
+                refPlanSha = when {
+                    rp == null -> null
+                    !rp.plan.isEmpty -> s.uploadRefPlan(RefPlanInterop.encode(rp.plan))
+                    else -> refPlanSha
+                }
+                // R2 — l'import d'une IMAGE ne doit jamais envoyer un
+                // placement recalculé : il ferait « sauter » le DXF chez
+                // les coéquipiers. On garde donc l'anti-écho ET le champ
+                // du manifeste sur le dernier placement PARTAGÉ.
+                if (rp?.raster == null) rp?.transform?.let { lastTransformSig = transformSig(it) }
+                s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey),
+                    manifestTransform(rp?.transform),
+                    hiddenLayers.toList(), options.showSatellite, refPlanSha)
+            }
+        }
+    }
+
+    // Import : sélecteur « */* » (le DXF n'a pas de type MIME fiable), routage selon
+    // le CONTENU hors thread principal, centrage sur la scène, puis le panneau
+    // « Plan importé » s'ouvre dans la vue d'où l'import a été lancé.
+    var importingRefPlan by remember { mutableStateOf(false) }
+    // Lecture, centrage et pose dans UNE coroutine de la scène : un effet clé sur
+    // l'URI choisie s'annulait lui-même en remettant la clé à null avant la fin
+    // (constat émulateur : le plan n'était jamais posé).
+    fun importPickedRefPlan(uri: android.net.Uri) {
+        importingRefPlan = true
+        scope.launch {
+            try {
+                val imported = withContext(Dispatchers.IO) { RefPlanImport.read(ctx, uri) }
+                val (plan, raster) = imported?.let { RefPlanImport.ready(it) } ?: return@launch
+                // Centre de la scène = celui de la vue plan (même fonction, même scène rendue).
+                val center = withContext(Dispatchers.Default) { planData(visibleScene, overrides).let { it.cx to it.cy } }
+                setReferencePlan(ReferencePlan(plan, RefPlanImport.initialTransform(center.first, center.second, plan), raster))
+                panels = panels.open(ScenePanel.REF_PLAN)
+            } finally {
+                importingRefPlan = false
+            }
+        }
+    }
+    val refPlanLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) importPickedRefPlan(uri) }
+    fun importRefPlan() {
+        ProAccess.gate(RefPlanPanelRules.IMPORT_PRO_REASON) { refPlanLauncher.launch(arrayOf("*/*")) }
+    }
+
+    // PERSISTANCE DÉBOUNCÉE du placement (glissé, flèches, homothétie… dans l'une ou
+    // l'autre vue) : la version commune est incrémentée À CHAQUE retouche (elle
+    // redessine les deux vues sans délai) ; l'écriture disque et le journal + push
+    // (commitTransform, anti-écho) partent 500 ms après la dernière.
+    LaunchedEffect(refPlanTransformVersion) {
+        if (refPlanTransformVersion == 0 || !restored) return@LaunchedEffect
+        val rp = referencePlan ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(500)
+        val t = rp.transform.copy()
+        withContext(Dispatchers.IO) { ProjectStore.saveTransform(ctx, projectKey, t) }
+        commitTransform(t)
+    }
+
+    // « Réinitialiser la calibration » (panneau Position GPS, nouveau sur Android) :
+    // calibration vidée, persistée, puis journalisée et poussée par le chemin normal.
+    fun resetCalibration() {
+        ProAccess.gate(GeoPanelContent.PRO_REASON) {
+            calibration.reset()
+            scope.launch(Dispatchers.IO) { ProjectStore.saveCalibration(ctx, projectKey, emptyList(), null) }
+            calibTick++
+        }
+    }
+    // Calques du plan DXF : donnée PARTAGÉE (manifeste + audit, appliquée chez tous) :
+    // édition, donc Pro. Un gratuit continue de RECEVOIR les calques masqués par l'équipe.
+    fun toggleRefPlanLayer(layer: String) {
+        ProAccess.gate(RefPlanPanelRules.LAYERS_PRO_REASON) {
+            hiddenLayers = if (layer in hiddenLayers) hiddenLayers - layer else hiddenLayers + layer
+        }
+    }
+
     // « Rejoindre un projet » (ancien ⋯, jusqu'à la tranche C ; l'accueil le garde).
     var showJoin by remember { mutableStateOf(false) }
 
@@ -1134,6 +1247,20 @@ fun SceneScreen(
             satellite = satellite,
             satelliteStatus = satelliteStatus,
             satelliteCovered = satelliteCovered,
+            // Panneaux (tranche B) : Position GPS, Plan importé, Réglage des étiquettes.
+            panels = panels,
+            onPanels = { panels = it },
+            // Plan importé depuis la 3D : import (Pro), réglages (version commune →
+            // persistance et partage ici), calques, retrait.
+            onImportRefPlan = { importRefPlan() },
+            importingRefPlan = importingRefPlan,
+            onRefPlanTouched = { refPlanTransformVersion++ },
+            onToggleRefPlanLayer = { toggleRefPlanLayer(it) },
+            onRemoveRefPlan = { setReferencePlan(null); panels = panels.close(ScenePanel.REF_PLAN) },
+            // Calibrations depuis la 3D : le plan s'ouvre prêt à poser (Pro AVANT).
+            onCalibrateThreePoint = { openPlanWith(PlanStartAction.THREE_POINT) },
+            onCalibrateHere = { openPlanWith(PlanStartAction.HERE_ANCHOR) },
+            onResetCalibration = { resetCalibration() },
             // Câblage : uniquement pour le texte des étiquettes Socapex / Ligne DMX
             // en 3D (mêmes tables que la vue plan).
             cabling = cabling,
@@ -1186,65 +1313,24 @@ fun SceneScreen(
             soloElements = soloElements,
             onSetSoloElements = { soloElements = it },
             referencePlan = referencePlan,
-            onSetReferencePlan = { rp ->
-                referencePlan = rp
-                refPlanTransformVersion++
-                // À l'import : masquer d'emblée les calques éteints/gelés du DXF.
-                if (rp != null && hiddenLayers.isEmpty() && rp.plan.defaultHiddenLayers.isNotEmpty()) {
-                    hiddenLayers = rp.plan.defaultHiddenLayers.toSet()
-                }
-                // Import / retrait par l'utilisateur → persiste la géométrie DXF.
-                scope.launch(Dispatchers.IO) {
-                    if (rp != null) ProjectStore.saveReferencePlan(ctx, projectKey, rp, null)
-                    else ProjectStore.removeReferencePlan(ctx, projectKey)
-                }
-                // SYNCHRO : téléverse le plan (format d'échange DXP1) + pousse le manifeste.
-                sync?.let { s ->
-                    scope.launch {
-                        // Même garde qu'en pushAllLocalState : un plan IMAGE (DxfPlan
-                        // vide) ne doit ni téléverser un blob vide, ni effacer le SHA
-                        // du DXF vectoriel déjà partagé. Retrait explicite (rp == null)
-                        // = seul cas où l'on remet le SHA à null.
-                        refPlanSha = when {
-                            rp == null -> null
-                            !rp.plan.isEmpty -> s.uploadRefPlan(RefPlanInterop.encode(rp.plan))
-                            else -> refPlanSha
-                        }
-                        // R2 — l'import d'une IMAGE ne doit jamais envoyer un
-                        // placement recalculé : il ferait « sauter » le DXF chez
-                        // les coéquipiers. On garde donc l'anti-écho ET le champ
-                        // du manifeste sur le dernier placement PARTAGÉ.
-                        if (rp?.raster == null) rp?.transform?.let { lastTransformSig = transformSig(it) }
-                        s.pushManifest(fileName, ProjectStore.dxfName(ctx, projectKey),
-                            manifestTransform(rp?.transform),
-                            hiddenLayers.toList(), options.showSatellite, refPlanSha)
-                    }
-                }
-            },
+            // Plan importé (tranche B) : import et persistance hissés ici ; le plan
+            // redessine sur la version commune, le panneau l'incrémente.
+            refPlanTransformVersion = refPlanTransformVersion,
+            onImportRefPlan = { importRefPlan() },
+            importingRefPlan = importingRefPlan,
+            onRefPlanTouched = { refPlanTransformVersion++ },
+            onRemoveRefPlan = { setReferencePlan(null); panels = panels.close(ScenePanel.REF_PLAN) },
+            panels = panels,
+            onPanels = { panels = it },
+            onResetCalibration = { resetCalibration() },
             calibration = calibration,
             projectKey = projectKey,
             satellite = satellite,
             satelliteStatus = satelliteStatus,
             satelliteCovered = satelliteCovered,
             hiddenLayers = hiddenLayers,
-            onToggleLayer = { layer ->
-                // Calque DXF masqué = donnée PARTAGÉE (manifeste + audit,
-                // appliquée chez tous) : édition, donc Pro. Un gratuit continue
-                // de RECEVOIR et voir les calques masqués par l'équipe.
-                ProAccess.gate("modifier les calques du plan importé") {
-                    hiddenLayers = if (layer in hiddenLayers) hiddenLayers - layer else hiddenLayers + layer
-                }
-            },
+            onToggleLayer = { layer -> toggleRefPlanLayer(layer) },
             onCalibrationChanged = { calibTick++ },
-            // Push + journal du placement, sauf s'il vient d'être APPLIQUÉ à
-            // distance. DÉBOUNCÉ (persistance) — ce n'est donc PAS lui qui
-            // rafraîchit l'affichage.
-            onTransformChanged = { t -> commitTransform(t) },
-            // R7 — rafraîchissement IMMÉDIAT : la version est incrémentée dès la
-            // retouche, sans délai ni condition de projet. C'est elle qui fait
-            // reconstruire le plan de repère en 3D (quad matriciel ET traits DXF),
-            // la transformée étant un objet muté EN PLACE que Compose n'observe pas.
-            onTransformTouched = { refPlanTransformVersion++ },
             gdtfOverrides = gdtfOverrides,
             // Overrides de patch : NOM effectif des étiquettes 2D, de la recherche
             // plan et de la fiche de sélection (renommage).

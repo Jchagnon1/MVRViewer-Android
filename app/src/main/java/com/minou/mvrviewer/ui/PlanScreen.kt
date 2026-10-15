@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.Palette
@@ -78,6 +79,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.layout.offset as layoutOffset
 import androidx.compose.ui.graphics.Color
@@ -93,7 +95,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
-import com.minou.mvrviewer.mvr.GeoCalibrationStatus
 import com.minou.mvrviewer.mvr.Vec2
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
@@ -116,7 +117,23 @@ fun PlanScreen(
     mvrBytes: ByteArray,
     options: SceneOptions,
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
-    onSetReferencePlan: (com.minou.mvrviewer.mvr.ReferencePlan?) -> Unit = {},
+    /**
+     * PLAN IMPORTÉ (SPEC-menus-android §3.7), hissé dans SceneScreen : la
+     * transformée est mutée EN PLACE, [refPlanTransformVersion] (commune aux deux
+     * vues) dit quand redessiner ; le panneau l'incrémente par [onRefPlanTouched]
+     * (SceneScreen persiste, débouncé, et partage). [onImportRefPlan] lance
+     * l'import (Pro, garde dans SceneScreen) ; [importingRefPlan] = lecture en cours.
+     */
+    refPlanTransformVersion: Int = 0,
+    onImportRefPlan: () -> Unit = {},
+    importingRefPlan: Boolean = false,
+    onRefPlanTouched: () -> Unit = {},
+    onRemoveRefPlan: () -> Unit = {},
+    /** Panneaux flottants ouverts (Position GPS, Plan importé, Réglage des étiquettes). */
+    panels: ScenePanels = ScenePanels(),
+    onPanels: (ScenePanels) -> Unit = {},
+    /** « Réinitialiser la calibration » (Pro, garde dans SceneScreen). */
+    onResetCalibration: () -> Unit = {},
     calibration: com.minou.mvrviewer.mvr.GeoCalibration = remember { com.minou.mvrviewer.mvr.GeoCalibration() },
     projectKey: String? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
@@ -125,15 +142,6 @@ fun PlanScreen(
     /** 1re ancre dans les emprises IGN (France) : sinon, réglage désactivé. */
     satelliteCovered: Boolean = true,
     onCalibrationChanged: () -> Unit = {},
-    onTransformChanged: (com.minou.mvrviewer.mvr.ReferencePlanTransform) -> Unit = {},
-    /**
-     * R7 — signal IMMÉDIAT « le placement du plan vient de changer », émis à
-     * chaque retouche, sans débounce ni condition de projet. Il sert à faire
-     * repeindre les autres vues (le quad matriciel ET les traits DXF en 3D), la
-     * transformée étant un objet muté en place que Compose n'observe pas.
-     * `onTransformChanged` reste, lui, l'événement DÉBOUNCÉ de persistance/push.
-     */
-    onTransformTouched: () -> Unit = {},
     hiddenLayers: Set<String> = emptySet(),
     /** Ouvre le panneau « Classes… ». null = ce fichier n'a aucune classe. */
     onShowClasses: (() -> Unit)? = null,
@@ -452,78 +460,10 @@ fun PlanScreen(
         }
     }
 
-    // Import d'un plan de repère DXF + réglage de son placement. La transformée
-    // est un objet mutable non observable → dxfVersion force le redraw.
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var dxfVersion by remember { mutableIntStateOf(0) }
-    var importing by remember { mutableStateOf(false) }
-    var pickedUri by remember { mutableStateOf<android.net.Uri?>(null) }
-    var showDxfPanel by remember { mutableStateOf(false) }
-    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
-    ) { uri -> if (uri != null) { pickedUri = uri; importing = true } }
-    LaunchedEffect(pickedUri) {
-        val uri = pickedUri ?: return@LaunchedEffect
-        // POINT D'ENTRÉE UNIQUE du plan de repère : le sélecteur est en « */* »
-        // (le DXF n'a pas de type MIME fiable), c'est donc ICI qu'on route selon
-        // le CONTENU — image / PDF → plan matriciel, tout le reste → parseur DXF
-        // (chemin historique strictement inchangé).
-        val imported = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                val cr = context.contentResolver
-                val name = com.minou.mvrviewer.mvr.RasterPlanLoader.displayName(cr, uri)
-                val fmt = com.minou.mvrviewer.mvr.RasterPlanLoader.sniff(cr, uri, name)
-                when (fmt) {
-                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.DXF ->
-                        cr.openInputStream(uri)?.use { com.minou.mvrviewer.mvr.DxfParser.parse(it) }
-                            ?.let { ImportedRefPlan(dxf = it) }
-                    // TAILLE D'ARRIVÉE : elle vient du FICHIER (MediaBox du PDF en
-                    // points, pixels d'origine de l'image à 96 dpi neutre), jamais
-                    // de l'emprise de la scène — le même document doit arriver
-                    // identique quel que soit le show ouvert.
-                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PDF ->
-                        com.minou.mvrviewer.mvr.RasterPlanLoader.renderPdfFirstPage(cr, uri)?.let { pdf ->
-                            ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                // Le nom part dans le MANIFESTE du projet : on n'y met
-                                // JAMAIS une chaîne traduite (sinon un téléphone anglais et
-                                // un français n'enregistrent pas la même valeur). Vide =
-                                // « pas de nom de fichier », le libellé se choisit à
-                                // l'affichage (RasterPlan.displayName).
-                                pdf.bitmap, name.orEmpty(), com.minou.mvrviewer.mvr.RasterPlan.Kind.PDF,
-                                pdf.pageCount, pdf.pointWidth.toFloat(), pdf.pointHeight.toFloat()))
-                        }
-                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG,
-                    com.minou.mvrviewer.mvr.RasterPlanLoader.Format.JPEG -> {
-                        val png = fmt == com.minou.mvrviewer.mvr.RasterPlanLoader.Format.PNG
-                        com.minou.mvrviewer.mvr.RasterPlanLoader.loadImage(cr, uri, png)?.let { img ->
-                            ImportedRefPlan(raster = com.minou.mvrviewer.mvr.RasterPlanLoader.place(
-                                img.bitmap, name.orEmpty(),
-                                if (png) com.minou.mvrviewer.mvr.RasterPlan.Kind.PNG
-                                else com.minou.mvrviewer.mvr.RasterPlan.Kind.JPEG,
-                                1, img.srcWidthPx.toFloat(), img.srcHeightPx.toFloat()))
-                        }
-                    }
-                }
-            }.getOrNull()
-        }
-        importing = false
-        pickedUri = null
-        // Un plan matriciel porte un DxfPlan VIDE dont les bornes sont celles de
-        // l'image : le centrage ci-dessous, les flèches de déplacement et les
-        // sorties anticipées `plan.isEmpty` marchent alors sans cas particulier.
-        val raster = imported?.raster
-        val plan = imported?.dxf ?: raster?.let { com.minou.mvrviewer.mvr.emptyDxfPlanFor(it) }
-        if (plan != null && (raster != null || !plan.isEmpty)) {
-            // Centrer le plan importé sur le centre de la scène MVR (repère monde).
-            val tf = com.minou.mvrviewer.mvr.ReferencePlanTransform(
-                offsetX = (data.cx - plan.centerX).toDouble(),
-                offsetY = (-data.cy - plan.centerY).toDouble()
-            )
-            onSetReferencePlan(com.minou.mvrviewer.mvr.ReferencePlan(plan, tf, raster))
-            showDxfPanel = true
-            dxfVersion++
-        }
-    }
+    // Plan de repère : l'IMPORT, le centrage, la persistance débouncée et le partage
+    // du placement vivent dans SceneScreen (SPEC-menus-android §3.7, appelables aussi
+    // depuis la 3D). La transformée est mutée EN PLACE : la version commune
+    // (refPlanTransformVersion) est lue au dessin pour le redessiner.
 
     // ---- Tracés PRÉ-CONSTRUITS (cf. PlanPathCache) ----
     // Tout ce qui ne dépend pas du zoom/pan est fabriqué UNE fois, hors thread
@@ -718,7 +658,13 @@ fun PlanScreen(
     var assignBarAnchorPx by remember { mutableStateOf(Rect.Zero) }
     // Mention du fond satellite et curseur d'opacité : cadres SANS montée (px).
     var satMentionAnchorPx by remember { mutableStateOf(Rect.Zero) }
-    var satSliderAnchorPx by remember { mutableStateOf(Rect.Zero) }
+    // Cadres (px racine) qui bornent les panneaux du bas-gauche (Position GPS, Plan
+    // importé, Réglage des étiquettes — PanelPlacementMath.floatingPanelSlot) :
+    // en haut le titre et la recherche, en bas la fiche / bannière et les aides.
+    var titlePillPx by remember { mutableStateOf(Rect.Zero) }
+    var searchFieldPx by remember { mutableStateOf(Rect.Zero) }
+    var selectionBarPx by remember { mutableStateOf(Rect.Zero) }
+    var bottomAidPx by remember { mutableStateOf(Rect.Zero) }
 
     // ---- Mesure entre deux points ----
     // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
@@ -819,31 +765,9 @@ fun PlanScreen(
         return if (wsum > 0) lat / wsum to lon / wsum else null
     }
 
-    // R7 — RAFRAÎCHISSEMENT 3D RÉELLEMENT IMMÉDIAT. La transformée du plan est un
-    // objet muté EN PLACE : seule une VERSION dit aux autres vues qu'il faut
-    // redessiner. Cette notification est donc émise SANS DÉLAI et SANS condition
-    // de projectKey — l'ancien montage ne la déclenchait qu'après le débounce de
-    // persistance (500 ms), et jamais du tout sans projet enregistré.
-    // Le débounce reste, lui, sur l'ÉCRITURE disque + le push cloud plus bas.
-    val rpLive = referencePlan
-    LaunchedEffect(dxfVersion, rpLive) {
-        if (rpLive != null) onTransformTouched()
-    }
-
-    // Persistance projet : réenregistre le placement du plan DXF (glissé/rotation/
-    // échelle → dxfVersion) et la calibration, débouncé, quand ça change.
+    // Persistance projet de la calibration posée ici (le placement du plan importé,
+    // lui, est persisté et partagé par SceneScreen — SPEC-menus-android §3.7, A29).
     if (projectKey != null) {
-        val rpForSave = referencePlan
-        LaunchedEffect(dxfVersion, rpForSave) {
-            if (rpForSave != null) {
-                kotlinx.coroutines.delay(500)
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.minou.mvrviewer.mvr.ProjectStore.saveTransform(ctxPlan, projectKey, rpForSave.transform)
-                }
-                // SYNCHRO : après le débounce, pousse le placement au cloud (item 5).
-                onTransformChanged(rpForSave.transform)
-            }
-        }
         LaunchedEffect(calibVersion) {
             if (calibVersion > 0) {
                 // Copie sur le thread principal (la calibration est mutée ici même).
@@ -992,9 +916,9 @@ fun PlanScreen(
     var showCustomize by remember { mutableStateOf(false) }
     // N11 — sélecteur de couleur du fond ouvert par un bouton DOCKÉ (outil BACKGROUND).
     var showBackgroundDialog by remember { mutableStateOf(false) }
-    // N11 — réglages/champs d'étiquette ouverts par l'outil DOCKÉ labelSettings
-    // (parité iOS catalogPlan) : même contenu que la section « Étiquettes » du menu.
-    var showLabelSettingsDialog by remember { mutableStateOf(false) }
+    // Panneaux flottants (Position GPS, Plan importé, Réglage des étiquettes) : leur
+    // état est hissé dans SceneScreen ([panels]) — menu, outils et crochets les
+    // ouvrent de la même façon dans les deux vues.
 
     // ---- ASSISTANT 3 POINTS : ouverture, fermeture, application ----------------
     // Cadre d'ANCRAGE du panneau (px racine) : sa hauteur est réservée au cadrage.
@@ -1075,6 +999,17 @@ fun PlanScreen(
         showLocation = true
         closeThreePoint()
     }
+    /**
+     * Pose « je suis ici » : UNE fonction, partagée par le panneau Position GPS,
+     * l'outil `calibrate` et le lancement `PlanStartAction.HERE_ANCHOR`
+     * (SPEC-menus-android §3.6). La position s'allume ; le toucher suivant pose
+     * le point (repart de zéro après un relevé 3 points, sinon point suivant).
+     * La garde Pro est posée par l'appelant.
+     */
+    fun armHereAnchor() {
+        showLocation = true
+        if (!calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
+    }
 
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue plan : UNE liste consommée à la
     // fois par les 4 barres ancrables (AnchoredToolbars) ET la section « Outils » du
@@ -1115,24 +1050,31 @@ fun PlanScreen(
             available = true, checked = showLocation, onInvoke = {
                 showLocation = !showLocation; if (!showLocation) calibrating = false
             }))
+        // Calibrations : leur place est le panneau Position GPS (SPEC-menus-android
+        // §3.6) ; les outils restent ancrables mais quittent la section « Outils » du ⋯.
         add(ToolSpec(ToolId.CALIBRATE, stringResource(R.string.tool_calibrate), Icons.Filled.Place,
             available = showLocation, checked = calibrating, onInvoke = {
                 // Calibration GPS = donnée de show PARTAGÉE (poussée, journalisée,
                 // destructive pour l'équipe) : Pro. Désarmer reste libre.
                 if (calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
-                else ProAccess.gate("calibrer la position GPS") {
+                else ProAccess.gate(GeoPanelContent.PRO_REASON) {
                     // Rappel éventuellement différé (achat) : armer, jamais rebasculer.
-                    if (!calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
+                    armHereAnchor()
                 }
-            }))
+            }, inMenu = false))
         // Calibration GUIDÉE EN 3 POINTS (SPEC-calibration-3-points) : même place que
         // « je suis ici ». Disponible sans « Ma position » : l'assistant démarre
         // lui-même le GPS. Fonction Pro (calibration = donnée partagée).
         add(ToolSpec(ToolId.CALIBRATE_3, stringResource(R.string.tool_calibrate_3), Icons.Filled.TrackChanges,
             available = true, checked = cal3Session != null || cal3Starting, onInvoke = {
                 if (cal3Session != null || cal3Starting) closeThreePoint()
-                else ProAccess.gate("calibrer la position GPS") { startThreePoint() }
-            }))
+                else ProAccess.gate(GeoPanelContent.PRO_REASON) { startThreePoint() }
+            }, inMenu = false))
+        // Panneau « Position GPS » (tranche B) : ouvre / referme (actif = jaune) ;
+        // l'entrée du ⋯ « Position GPS… » est rendue par le menu (pas de doublon).
+        add(ToolSpec(ToolId.GEO_PANEL, stringResource(R.string.geo_panel_title), Icons.Filled.LocationOn,
+            available = true, checked = panels.geo,
+            onInvoke = { onPanels(panels.toggle(ScenePanel.GEO)) }, inMenu = false))
         // Fond IGN = France seulement : hors couverture, Toast et PAS de bascule (le
         // réglage mémorisé est gardé pour un retour en France).
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
@@ -1150,15 +1092,13 @@ fun PlanScreen(
         add(ToolSpec(ToolId.DXF,
             stringResource(if (referencePlan == null) R.string.tool_import_ref_plan else R.string.tool_ref_plan),
             Icons.Filled.Layers,
-            available = true, checked = referencePlan != null && showDxfPanel, busy = importing,
+            available = true, checked = referencePlan != null && panels.refPlan, busy = importingRefPlan,
             onInvoke = {
-                if (referencePlan == null) {
-                    ProAccess.gate("importer un plan") { importLauncher.launch(arrayOf("*/*")) }
-                } else if (showDxfPanel) {
-                    showDxfPanel = false
-                } else {
-                    ProAccess.gate("régler le plan importé") { showDxfPanel = true }
-                }
+                // Deux états jusqu'à la tranche E : importer (Pro, garde dans
+                // SceneScreen) ; sinon ouvrir / fermer le panneau, SANS garde
+                // désormais (lecture pour tous, décision 6).
+                if (referencePlan == null) onImportRefPlan()
+                else onPanels(panels.toggle(ScenePanel.REF_PLAN))
             }))
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
         add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,
@@ -1169,7 +1109,7 @@ fun PlanScreen(
         // menu). Dockable ; hors menu « Outils » (déjà accessible au menu).
         add(ToolSpec(ToolId.LABEL_SETTINGS, stringResource(R.string.tool_label_settings), Icons.Filled.Tune,
             available = true, checked = null,
-            onInvoke = { showLabelSettingsDialog = true }, inMenu = false))
+            onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }, inMenu = false))
         add(ToolSpec(ToolId.LAYER_COLORS, stringResource(R.string.opt_layer_colors), Icons.Filled.Palette,
             available = true, checked = options.layerColors,
             onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
@@ -1195,10 +1135,7 @@ fun PlanScreen(
         when (takeStartAction()) {
             PlanStartAction.EXPORT_PDF -> exportMode = true
             PlanStartAction.THREE_POINT -> if (cal3Session == null && !cal3Starting) startThreePoint()
-            PlanStartAction.HERE_ANCHOR -> {
-                showLocation = true
-                if (!calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
-            }
+            PlanStartAction.HERE_ANCHOR -> armHereAnchor()
             PlanStartAction.NONE -> {}
         }
     }
@@ -1775,7 +1712,7 @@ fun PlanScreen(
             // Dépendances de REDESSIN portées par des états mutables NON
             // observables : la transformée du plan DXF et la table des décalages
             // d'étiquettes. Les lire ici suffit à re-déclencher le dessin.
-            dxfVersion.let { }
+            refPlanTransformVersion.let { }
             labelDragVersion.let { }
 
             // DESSIN COMMUN écran ↔ PDF. Tout ce qui compose le document (fond
@@ -2009,6 +1946,7 @@ fun PlanScreen(
             contentColor = inkColor,
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.align(Alignment.TopStart).padding(top = 52.dp, start = 56.dp)
+                .onGloballyPositioned { titlePillPx = it.boundsInRoot() }
         ) {
             Text(
                 stringResource(R.string.plan_title_fmt, scene.fixtures.size),
@@ -2101,6 +2039,54 @@ fun PlanScreen(
                 }
             }
         }
+        // Actions de la section « Placement sur le plan » du panneau d'étiquettes
+        // (SPEC-menus-android §3.8) — elles vivent ici, avec les étiquettes saisies
+        // et leurs décalages.
+        val labelPlacement = LabelPlacementActions(
+            // Sélection GROUPÉE d'étiquettes : les projecteurs déjà sélectionnés
+            // (rectangle / multi-sélection), ou toute la famille « même type GDTF
+            // sur le même calque » que l'étiquette armée — dans un plan réel, les
+            // projecteurs d'un pont. Grisés sans sélection / sans étiquette saisie.
+            onLabelsOfSelection = if (selected.isEmpty() || !options.showLabels) null else {
+                {
+                    activeLabelKeys = labelKeysForFixtures(
+                        selected.mapNotNull { data.fixtures.getOrNull(it) },
+                        options.labelFields, options.labelDetached, cablingText
+                    )
+                }
+            },
+            onLabelsSameType = if (activeLabelKeys.isEmpty()) null else {
+                {
+                    val origin = labelBlockFixtureKey(activeLabelKeys.first())
+                    activeLabelKeys = labelKeysForFixtures(
+                        // N'arme que le visible : effectiveHidden (pas hiddenElements
+                        // brut) — sinon « étiquettes du même type » embrasse des
+                        // projecteurs soloés hors écran.
+                        sameTypeSameLayer(data, origin).filter { it.key !in effectiveHidden },
+                        options.labelFields, options.labelDetached, cablingText
+                    )
+                }
+            },
+            armedCount = activeLabelKeys.size,
+            onTurnOff = { activeLabelKeys = emptySet() },
+            // Blocs séparés : les étiquettes saisies sont relâchées par l'effet
+            // qui surveille `labelDetached`.
+            onSetDetached = { options.labelDetached = it },
+            // Filet de sécurité : remise à zéro de TOUS les décalages posés au
+            // doigt (et effacement immédiat sur disque, sinon la réouverture les
+            // ferait revenir).
+            onResetOffsets = {
+                labelShift.clear()
+                // La table vidée fait désormais autorité : une relecture encore
+                // en vol ne doit pas ressusciter les décalages.
+                labelsLoaded[0] = true
+                activeLabelKeys = emptySet()
+                labelDragVersion++
+                if (projectKey != null) {
+                    com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(ctxPlan, projectKey, emptyMap())
+                }
+            }
+        )
         Box(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
             SceneOptionsMenu(
                 options = options, tint = inkColor,
@@ -2112,69 +2098,21 @@ fun PlanScreen(
                 onShowLayers = onShowLayers,
                 // Outils de la vue plan exposés DANS le menu (N10) : dérivés de la
                 // MÊME description unifiée que les barres (toolsPlan) → plus de
-                // duplication. Mêmes actions, mêmes bascules, mêmes conditions.
+                // duplication. Les calibrations n'y sont plus (panneau Position GPS).
                 tools = toolsPlan.toMenuTools(),
-                // Ligne d'état « Calibration » (iOS GeoCalibrationStatus), relue à
-                // chaque ouverture du menu (la calibration n'est pas observable).
-                calibrationStatus = {
-                    calibVersion.let { }
-                    val st = GeoCalibrationStatus.of(calibration, locFeed.denied)
-                    ThreePointDisplay.statusText(st).text() to st.isWarning
-                },
                 onCustomizeToolbar = { showCustomize = true },
                 showLabelsToggle = true, showStructureToggle = true,
                 showLegendToggle = true,
-                // Fond satellite AUSSI dans le menu (avec son curseur d'opacité) —
-                // il n'était accessible que par le bouton flottant. Dispo une fois
-                // la calibration GPS posée (géo-référence), comme le bouton.
-                showSatelliteToggle = calibration.isCalibrated,
-                satelliteCovered = satelliteCovered,
-                satelliteStatus = satelliteStatus,
+                // Entrées provisoires (tranche B, jusqu'au menu de la tranche C) : les
+                // panneaux remplacent le satellite, son curseur, la ligne d'état de la
+                // calibration et les options d'étiquettes du menu.
+                onShowLabelSettings = { onPanels(panels.open(ScenePanel.LABELS)) },
+                onShowGeoPanel = { onPanels(panels.open(ScenePanel.GEO)) },
                 // Coloration câblage (phase 4) : proposée seulement s'il existe un
                 // câblage colorable ; le nav cycle entre les modes disponibles.
                 showColorModeSelector = hasSocaColoring || hasDmxColoring,
                 colorModeHasSoca = hasSocaColoring,
                 colorModeHasDmx = hasDmxColoring,
-                // Filet de sécurité : remise à zéro de TOUS les décalages posés
-                // au doigt (et effacement immédiat sur disque, pas seulement en
-                // mémoire, sinon la réouverture les ferait revenir).
-                // Sélection GROUPÉE d'étiquettes : les projecteurs déjà
-                // sélectionnés (rectangle / multi-sélection), ou toute la famille
-                // « même type GDTF sur le même calque » que l'étiquette armée —
-                // c'est-à-dire, dans un plan réel, les projecteurs d'un pont.
-                onSelectLabelsOfSelection = if (selected.isEmpty() || !options.showLabels) null else {
-                    {
-                        activeLabelKeys = labelKeysForFixtures(
-                            selected.mapNotNull { data.fixtures.getOrNull(it) },
-                            options.labelFields, options.labelDetached, cablingText
-                        )
-                    }
-                },
-                onSelectLabelsSameType = if (activeLabelKeys.isEmpty()) null else {
-                    {
-                        val origin = labelBlockFixtureKey(activeLabelKeys.first())
-                        activeLabelKeys = labelKeysForFixtures(
-                            // N'arme que le visible : effectiveHidden (pas hiddenElements
-                            // brut) — sinon le zoom « étiquettes du même type » embrasse
-                            // des projecteurs soloés hors écran.
-                            sameTypeSameLayer(data, origin).filter { it.key !in effectiveHidden },
-                            options.labelFields, options.labelDetached, cablingText
-                        )
-                    }
-                },
-                onResetLabelOffsets = {
-                    labelShift.clear()
-                    // La table vidée fait désormais autorité : une relecture
-                    // encore en vol ne doit pas ressusciter les décalages.
-                    labelsLoaded[0] = true
-                    activeLabelKeys = emptySet()
-                    labelDragVersion++
-                    if (projectKey != null) {
-                        com.minou.mvrviewer.mvr.ProjectStore.saveLabelOffsetsAsync(
-                            ctxPlan, projectKey, emptyMap()
-                        )
-                    }
-                },
                 background = options.background2D,
                 backgroundDefault = BackgroundColorStore.DEFAULT_2D,
                 backgroundPresets = bg2dPresets(),
@@ -2245,6 +2183,7 @@ fun PlanScreen(
                 unfocusedPlaceholderColor = inkColor.copy(alpha = 0.6f)
             ),
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
+                .onGloballyPositioned { searchFieldPx = it.boundsInRoot() }
         )
 
         // N11 — BARRE FLOTTANTE historique (bas-gauche) : rendue par DÉFAUT
@@ -2261,11 +2200,10 @@ fun PlanScreen(
         // que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas rendue.
         AnchoredToolbars(layout = toolbarLayout, specs = toolsPlan)
 
-        // Opacité du fond satellite : curseur flottant (impossible dans un menu).
-        // Avec lui, la mention OBLIGATOIRE de l'imagerie IGN (bas-droite) ; le
-        // curseur est posé juste au-dessus d'elle pour ne jamais la recouvrir.
-        // Les deux MONTENT ensemble au-dessus du panneau 3 points ou de la barre
-        // d'affectation (iOS satelliteAttributionLift) : jamais cachés dessous.
+        // Mention OBLIGATOIRE de l'imagerie IGN (bas-droite). Elle MONTE au-dessus du
+        // panneau 3 points ou de la barre d'affectation (iOS satelliteAttributionLift) :
+        // jamais cachée dessous. L'opacité se règle dans le panneau Position GPS
+        // SEULEMENT (décision 8) : plus de curseur flottant.
         val satShown = satellite
         val (satLift, satMentionOnTop) = run {
             val dpd = labelDensity.density
@@ -2276,197 +2214,17 @@ fun PlanScreen(
             }
             val mention = satMentionAnchorPx.inDp()
             val lift = SatelliteUi.overlayLift(
-                mention, satSliderAnchorPx.inDp(), satObstacles,
+                mention, null, satObstacles,
                 topLimit = planBoundsPx.top / dpd + 60f
             )
             lift.dp to SatelliteUi.mentionOnTop(mention, lift, satObstacles)
         }
-        SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)?.let { credit ->
+        val satCredit = SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)
+        satCredit?.let { credit ->
             SatelliteAttribution(credit, toolbarLayout, toolsPlan, lift = satLift,
                 onAnchor = { satMentionAnchorPx = it }, onTop = satMentionOnTop)
-            Surface(
-                color = Color.Black.copy(alpha = 0.4f), shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.align(Alignment.BottomCenter)
-                    .padding(bottom = satelliteAttributionBottom(toolbarLayout, toolsPlan) + 24.dp).width(230.dp)
-                    // Cadre SANS montée (mesuré avant le décalage), puis la montée.
-                    .onGloballyPositioned { satSliderAnchorPx = it.anchorBounds() }
-                    .layoutOffset(y = -satLift)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
-                    Icon(Icons.Filled.Public, contentDescription = null, tint = Color.White, modifier = Modifier.width(18.dp))
-                    androidx.compose.material3.Slider(
-                        value = options.satelliteOpacity,
-                        onValueChange = { options.satelliteOpacity = it },
-                        valueRange = 0.05f..1f,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                    )
-                    Text("${(options.satelliteOpacity * 100).toInt()}%",
-                        color = Color.White, style = MaterialTheme.typography.labelSmall)
-                }
-            }
         }
 
-        // Panneau de placement du plan DXF importé.
-        val rpPanel = referencePlan
-        if (rpPanel != null && showDxfPanel) {
-            val tf = rpPanel.transform
-            val step = max(200.0, rpPanel.plan.width * 0.05)
-            fun bump() { dxfVersion++ }
-            MovablePanel(
-                id = PanelLayoutStore.PanelID.REF_PLAN_PLACEMENT_PLAN,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
-            ) {
-            Surface(
-                color = Color.White, contentColor = Color(0xFF111111),
-                shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
-                shadowElevation = 8.dp,
-                modifier = Modifier.width(230.dp)
-            ) {
-                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
-                    val rast = rpPanel.raster
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            if (rast != null) stringResource(R.string.refplan_kind_fmt, stringResource(rast.labelRes)) else stringResource(R.string.refplan_dxf_fmt, rpPanel.plan.unitLabel),
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.weight(1f))
-                        androidx.compose.material3.TextButton(onClick = { onSetReferencePlan(null); showDxfPanel = false }) {
-                            Text(stringResource(R.string.common_remove), color = Color(0xFFC62828))
-                        }
-                    }
-                    if (rast != null) {
-                        Text("${rast.bitmap.width} × ${rast.bitmap.height} px",
-                            style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        // Un PDF multi-pages n'utilise QUE la page 1 : le dire, sinon
-                        // l'utilisateur croit son plan tronqué par un bug.
-                        if (rast.pageCount > 1) {
-                            Text(stringResource(R.string.refplan_pdf_pages_fmt, rast.pageCount),
-                                style = MaterialTheme.typography.bodySmall, color = Color(0xFFB26A00))
-                        }
-                    } else {
-                        Text(stringResource(R.string.refplan_segments_fmt, rpPanel.plan.segmentCount) + if (rpPanel.plan.truncatedSegments > 0) stringResource(R.string.refplan_truncated_fmt, rpPanel.plan.truncatedSegments) else "",
-                            style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666))
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.common_visible), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        androidx.compose.material3.Switch(checked = tf.visible, onCheckedChange = { tf.visible = it; bump() })
-                    }
-                    // Déplacement (mm monde) : libellé au-dessus + 4 flèches.
-                    val pad = androidx.compose.foundation.layout.PaddingValues(2.dp)
-                    Text(stringResource(R.string.common_move), style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetX -= step; bump() }) { Text("←") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetX += step; bump() }) { Text("→") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetY += step; bump() }) { Text("↑") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.offsetY -= step; bump() }) { Text("↓") }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(stringResource(R.string.common_rotation), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.rotationDeg -= 5; bump() }) { Text("−5°") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.rotationDeg += 5; bump() }) { Text("+5°") }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(stringResource(R.string.common_rotation_vertical), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.tiltDeg = (tf.tiltDeg - 5).coerceIn(-90.0, 90.0); bump() }) { Text("−5°") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.tiltDeg = (tf.tiltDeg + 5).coerceIn(-90.0, 90.0); bump() }) { Text("+5°") }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(stringResource(R.string.common_scale), modifier = Modifier.width(72.dp), style = MaterialTheme.typography.bodyMedium)
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.scale /= 1.1; bump() }) { Text("÷") }
-                        androidx.compose.material3.OutlinedButton(contentPadding = pad, colors = panelButtonColors(), modifier = Modifier.weight(1f), onClick = { tf.scale *= 1.1; bump() }) { Text("×") }
-                    }
-
-                    // ---- HOMOTHÉTIE (mise à l'échelle PROPORTIONNELLE) ----
-                    // Un SEUL facteur appliqué aux deux axes : jamais de déformation.
-                    // Le curseur travaille en log10 (×0,1 → ×10) pour rester lisible
-                    // aux deux bouts ; le champ accepte n'importe quelle valeur de la
-                    // plage. Même panneau que le DXF → le réglage vaut pour les DEUX
-                    // (le rendu ne lit plus `scale` mais `effScale = scale × homothety`).
-                    var homoLog by remember(rpPanel) { mutableFloatStateOf(homothetySlider(tf.homothety)) }
-                    var homoText by remember(rpPanel) { mutableStateOf(formatHomothety(tf.homothety)) }
-                    fun applyHomothety(v: Double, syncSlider: Boolean, syncText: Boolean) {
-                        val c = v.coerceIn(HOMOTHETY_MIN, HOMOTHETY_MAX)
-                        tf.homothety = c
-                        if (syncSlider) homoLog = homothetySlider(c)
-                        if (syncText) homoText = formatHomothety(c)
-                        bump()
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 6.dp)) {
-                        Text(stringResource(R.string.common_uniform_scale), style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f))
-                        androidx.compose.material3.TextButton(
-                            contentPadding = pad, colors = panelTextButtonColors(),
-                            onClick = { applyHomothety(1.0, syncSlider = true, syncText = true) }
-                        ) { Text(stringResource(R.string.common_reset), style = MaterialTheme.typography.labelSmall) }
-                    }
-                    androidx.compose.material3.Slider(
-                        value = homoLog,
-                        onValueChange = { v ->
-                            homoLog = v
-                            applyHomothety(Math.pow(10.0, v.toDouble()), syncSlider = false, syncText = true)
-                        },
-                        valueRange = -1f..1f,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("×", style = MaterialTheme.typography.bodyMedium)
-                        androidx.compose.material3.OutlinedTextField(
-                            value = homoText,
-                            onValueChange = { s ->
-                                homoText = s
-                                // Saisie libre : on n'applique que si le texte est un
-                                // nombre valide, sinon on laisse l'utilisateur finir de
-                                // taper (« 1, » n'est pas encore une valeur).
-                                s.replace(',', '.').toDoubleOrNull()?.let {
-                                    if (it > 0.0) applyHomothety(it, syncSlider = true, syncText = false)
-                                }
-                            },
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyMedium,
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    // Calques du plan DXF : masquer/afficher (rend lisible un plan
-                    // d'architecte surchargé). L'état est persisté et synchronisé.
-                    val dxfLayers = remember(rpPanel) {
-                        rpPanel.plan.layerCounts.entries.sortedByDescending { it.value }
-                    }
-                    if (dxfLayers.isNotEmpty()) {
-                        Text(stringResource(R.string.refplan_layers_fmt, dxfLayers.size), style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
-                        androidx.compose.foundation.layout.Column(
-                            Modifier.heightIn(max = 150.dp).verticalScroll(rememberScrollState())
-                        ) {
-                            dxfLayers.forEach { (layer, count) ->
-                                Row(verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().clickable { onToggleLayer(layer) }) {
-                                    Checkbox(
-                                        checked = layer !in hiddenLayers,
-                                        onCheckedChange = { onToggleLayer(layer) },
-                                        modifier = Modifier.size(30.dp)
-                                    )
-                                    rpPanel.plan.layerColors[layer]?.let { lc ->
-                                        androidx.compose.foundation.layout.Box(
-                                            Modifier.size(11.dp).clip(RoundedCornerShape(2.dp))
-                                                .background(dxfDisplayColor(lc, bgDark)))
-                                    }
-                                    Text(layer, style = MaterialTheme.typography.bodySmall, maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f).padding(start = 6.dp))
-                                    Text("$count", style = MaterialTheme.typography.labelSmall, color = Color(0xFF888888))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            }
-        }
         // ---- BARRE D'AFFECTATION (SPEC-cablage-plan §4) ----
         // En BAS, centrée, déplaçable : 84 dp au-dessus du bas en portrait, contre
         // le bas (8 dp) en hauteur compacte. La légende Android est EN HAUT : la
@@ -2699,12 +2457,13 @@ fun PlanScreen(
             )
         }
 
-        // Aide de calibrage.
+        // Aide de calibrage (armée aussi depuis le panneau Position GPS).
         if (calibrating) {
             Surface(
                 color = Color(0xFFFFC400), contentColor = Color(0xFF111111),
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
+                    .onGloballyPositioned { bottomAidPx = it.boundsInRoot() }
             ) {
                 Text(
                     if (gps == null) stringResource(R.string.calib_waiting_gps)
@@ -2724,6 +2483,7 @@ fun PlanScreen(
                 color = MEASURE_COLOR, contentColor = Color.White,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
+                    .onGloballyPositioned { bottomAidPx = it.boundsInRoot() }
             ) {
                 Text(
                     when {
@@ -2751,6 +2511,7 @@ fun PlanScreen(
                 color = Color.White, contentColor = Color(0xFF111111),
                 shape = RoundedCornerShape(12.dp), shadowElevation = 6.dp,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+                    .onGloballyPositioned { selectionBarPx = it.boundsInRoot() }
             ) {
                 Text(
                     buildString {
@@ -2769,6 +2530,7 @@ fun PlanScreen(
                 color = Color(0xFFFFC400), contentColor = Color(0xFF111111),
                 shape = RoundedCornerShape(12.dp), shadowElevation = 6.dp,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+                    .onGloballyPositioned { selectionBarPx = it.boundsInRoot() }
             ) {
                 Text(
                     stringResource(R.string.sel_fixtures_selected_fmt, selected.size),
@@ -2803,102 +2565,78 @@ fun PlanScreen(
             )
         }
 
-        // N11 — réglages/champs d'étiquette ouverts par l'outil LABEL_SETTINGS
-        // docké. PANNEAU FLOTTANT, plus un AlertDialog : la règle iOS « une
-        // fenêtre ne cache jamais ce qu'elle règle » vaut ici aussi — cocher un
-        // champ doit se voir immédiatement sur les étiquettes du plan derrière,
-        // et le dialogue modal voilait précisément ce qu'on réglait.
-        if (showLabelSettingsDialog) {
-            MovablePanel(
-                id = PanelLayoutStore.PanelID.LABELS_PLAN,
-                modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp)
-            ) {
-                LabelSettingsPanel(options = options,
-                                   onDismiss = { showLabelSettingsDialog = false })
-            }
+        // ---- PANNEAUX DU BAS-GAUCHE (SPEC-menus-android §3.6–3.8) : Position GPS,
+        // Plan importé, Réglage des étiquettes. Chacun MONTE au-dessus de ce qui
+        // occupe le bas de sa colonne (fiche / bannière, aides, barre d'affectation,
+        // panneau 3 points, mention IGN lue sans sa montée) et sa hauteur est bornée
+        // sous le titre et la recherche (PanelPlacementMath.floatingPanelSlot). ----
+        val panelTop = listOf(titlePillPx, searchFieldPx)
+        val panelBottom = buildList {
+            if (selectionBar != PlanSelectionBar.NONE) add(selectionBarPx)
+            if (calibrating || measureMode) add(bottomAidPx)
+            if (assignTarget != null) add(assignBarAnchorPx)
+            if (cal3Session != null) add(cal3PanelAnchorPx)
+            if (satCredit != null) add(satMentionAnchorPx)
         }
-    }
-}
-
-/**
- * Réglages des étiquettes (outil DOCKABLE labelSettings, parité iOS catalogPlan) :
- * activation, CHAMPS affichés (plusieurs à la fois) avec l'option « bloc séparé »
- * par champ, et taille (cycle petite · moyenne · grande). Agit directement sur le
- * même [SceneOptions] partagé que la section « Étiquettes » du menu — aucun état
- * dupliqué, les deux points d'accès restent cohérents.
- */
-@Composable
-private fun LabelSettingsPanel(options: SceneOptions, onDismiss: () -> Unit) {
-    val sizeName = when {
-        options.labelSize <= 0.75f -> stringResource(R.string.size_small)
-        options.labelSize >= 1.3f -> stringResource(R.string.size_large)
-        else -> stringResource(R.string.size_medium)
-    }
-    // PANNEAU FLOTTANT (plus un AlertDialog) : le plan reste visible ET
-    // manipulable derrière — on voit chaque champ apparaître sur les
-    // étiquettes en le cochant. Hauteur BORNÉE (grille dense oblige) : le
-    // panneau ne doit pas manger la vue qu'il règle (règle DESIGN_UI §2).
-    Surface(
-        color = Color.White, contentColor = Color(0xFF111111),
-        shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
-        shadowElevation = 8.dp,
-        modifier = Modifier.width(250.dp)
-    ) {
-        androidx.compose.foundation.layout.Column(modifier = Modifier.padding(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.tool_label_settings),
-                    style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                androidx.compose.material3.TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.common_close))
-                }
-            }
-            androidx.compose.foundation.layout.Column(
-                modifier = Modifier.fillMaxWidth()
-                    .heightIn(max = 320.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = options.showLabels, onCheckedChange = { options.showLabels = it })
-                    Text(stringResource(R.string.opt_show_labels))
-                }
-                if (options.showLabels) {
-                    androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    Text(stringResource(R.string.opt_label_content), style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp))
-                    LabelContent.entries.forEach { c ->
-                        val on = c in options.labelFields
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = on, onCheckedChange = {
-                                options.labelFields =
-                                    if (on) options.labelFields - c else options.labelFields + c
-                                if (on) options.labelDetached = options.labelDetached - c
-                            })
-                            Text(stringResource(c.labelRes))
-                        }
-                        if (on) {
-                            val loose = c in options.labelDetached
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(start = 24.dp)
-                            ) {
-                                Checkbox(checked = loose, onCheckedChange = {
-                                    options.labelDetached =
-                                        if (loose) options.labelDetached - c else options.labelDetached + c
-                                })
-                                Text(stringResource(R.string.opt_label_detached_cap), style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
+        if (panels.labels) BottomLeadingPanel(
+            PanelLayoutStore.PanelID.LABELS_PLAN, planBoundsPx.top, panelTop, panelBottom,
+            Modifier.zIndex(panels.zIndex(ScenePanel.LABELS))
+        ) { maxH ->
+            LabelSettingsPanel(options = options, surface = ProjectSurface.PLAN, placement = labelPlacement,
+                onClose = { onPanels(panels.close(ScenePanel.LABELS)) }, maxContentHeight = maxH)
+        }
+        val rpPanel = referencePlan
+        if (panels.refPlan && rpPanel != null) BottomLeadingPanel(
+            PanelLayoutStore.PanelID.REF_PLAN_PLAN_LEADING, planBoundsPx.top, panelTop, panelBottom,
+            Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN))
+        ) { maxH ->
+            RefPlanPanel(
+                plan = rpPanel, surface = ProjectSurface.PLAN, hiddenLayers = hiddenLayers, bgDark = bgDark,
+                onTouched = onRefPlanTouched, onToggleLayer = onToggleLayer, onRemove = onRemoveRefPlan,
+                onClose = { onPanels(panels.close(ScenePanel.REF_PLAN)) }, maxContentHeight = maxH
+            )
+        }
+        if (panels.geo) BottomLeadingPanel(
+            PanelLayoutStore.PanelID.GEO_POSITION_PLAN, planBoundsPx.top, panelTop, panelBottom,
+            Modifier.zIndex(panels.zIndex(ScenePanel.GEO))
+        ) { maxH ->
+            GeoPositionPanel(
+                // `calibVersion` lu : la calibration (non observable) vient d'être posée ici.
+                content = GeoPanelContent.make(ProjectSurface.PLAN, calibVersion.let { calibration.isCalibrated },
+                    options.showSatellite, satelliteCovered, satelliteStatus),
+                showLocation = showLocation,
+                onShowLocation = { on -> showLocation = on; if (!on) calibrating = false },
+                onToggleSatellite = {
+                    SatelliteUi.onToolTap(satelliteCovered, options::toggleSatelliteByUser)
+                        ?.let { SatelliteUi.toast(ctxPlan, it) }
+                },
+                opacity = options.satelliteOpacity, onOpacity = { options.satelliteOpacity = it },
+                markerScale = options.gpsMarkerScale, onMarkerScale = { options.gpsMarkerScale = it },
+                statusText = {
+                    calibVersion.let { }
+                    val (t, warning) = GeoPanelContent.status(calibration, locFeed.denied)
+                    t.text() to warning
+                },
+                // Les calibrations ferment le panneau (l'assistant occupe le bas, l'aide
+                // d'ancre aussi) puis se lancent ; Pro vérifié avant.
+                onThreePoints = {
+                    ProAccess.gate(GeoPanelContent.PRO_REASON) {
+                        onPanels(panels.close(ScenePanel.GEO))
+                        if (cal3Session == null && !cal3Starting) startThreePoint()
                     }
-                    androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    androidx.compose.material3.TextButton(onClick = {
-                        options.labelSize = when {
-                            options.labelSize <= 0.75f -> 1f
-                            options.labelSize >= 1.3f -> 0.7f
-                            else -> 1.4f
-                        }
-                    }) { Text(stringResource(R.string.opt_size_fmt, sizeName)) }
-                }
-            }
+                },
+                onHereAnchor = {
+                    ProAccess.gate(GeoPanelContent.PRO_REASON) {
+                        onPanels(panels.close(ScenePanel.GEO))
+                        armHereAnchor()
+                    }
+                },
+                // Garde Pro dans SceneScreen ; si la calibration a bien été vidée, le
+                // plan se redessine (repères, point bleu).
+                onResetCalibration = { onResetCalibration(); if (!calibration.isCalibrated) calibVersion++ },
+                onClose = { onPanels(panels.close(ScenePanel.GEO)) },
+                maxContentHeight = maxH
+            )
         }
     }
 }
@@ -3575,16 +3313,6 @@ internal fun formatHomothety(v: Double): String {
     return s.trimEnd('0').trimEnd('.').ifEmpty { "1" }
 }
 
-/**
- * Résultat brut d'un import de plan de repère : SOIT une géométrie DXF, SOIT une
- * image (JPEG / PNG / page 1 d'un PDF). Sert uniquement à faire remonter le
- * routage fait hors thread principal jusqu'au composable.
- */
-private class ImportedRefPlan(
-    val dxf: com.minou.mvrviewer.mvr.DxfPlan? = null,
-    val raster: com.minou.mvrviewer.mvr.RasterPlan? = null
-)
-
 internal class PlanData(
     val fixtures: List<PlanFixture>,
     val structure: List<Pair<Float, Float>>,
@@ -3646,7 +3374,3 @@ private fun panelButtonColors() = ButtonDefaults.outlinedButtonColors(
     contentColor = Color(0xFF111111)
 )
 
-@Composable
-private fun panelTextButtonColors() = ButtonDefaults.textButtonColors(
-    contentColor = Color(0xFF1E88E5)
-)

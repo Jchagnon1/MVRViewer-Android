@@ -24,6 +24,21 @@ object PanelLayoutStore {
         CABLING_ASSIGN_PLAN("cablingAssignPlan"),
         /** Assistant de calibration GPS en 3 points (clé iOS `geoCalibration3Plan`). */
         GEO_CALIBRATION_3_PLAN("geoCalibration3Plan"),
+        // ---- Rangement des menus, tranche B (SPEC-menus-android §3.6–3.8) ----
+        /** Panneau « Position GPS » de la 3D (clé iOS `geoPosition3D`). */
+        GEO_POSITION_3D("geoPosition3D"),
+        /** Panneau « Position GPS » du plan (clé iOS `geoPositionPlan`). */
+        GEO_POSITION_PLAN("geoPositionPlan"),
+        /** Panneau « Plan importé » de la 3D (clé iOS `referencePlan3D`). */
+        REF_PLAN_3D("referencePlan3D"),
+        /**
+         * Panneau « Plan importé » du plan, désormais en BAS-GAUCHE : nouvelle clé
+         * (propre à Android, §8 D13) — l'ancienne [REF_PLAN_PLACEMENT_PLAN], mesurée
+         * depuis le coin bas-droit, reste dans l'énumération sans usage.
+         */
+        REF_PLAN_PLAN_LEADING("refPlanPlacementPlanLeading"),
+        /** Panneau « Réglage des étiquettes » de la 3D (clé iOS `labels3D`). */
+        LABELS_3D("labels3D"),
     }
 
     data class Placement(val dx: Float = 0f, val dy: Float = 0f, val collapsed: Boolean = false) {

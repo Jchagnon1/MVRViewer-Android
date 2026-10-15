@@ -362,8 +362,12 @@ class SatelliteScreenTest {
     @Test fun cablageMentionALEcranPlanEt3D() {
         for (f in listOf("ui/PlanScreen.kt", "ui/Scene3DScreen.kt")) {
             val c = code(f)
+            // La mention est lue dans une valeur (elle sert aussi d'obstacle aux
+            // panneaux du bas-gauche, tranche B des menus), puis posée.
+            val v = Regex("""val (satCredit\w*) = SatelliteUi\.creditRes\(\s*options\.showSatellite[^)]*\)""").find(c)
+            assertTrue("$f : mention calculée", v != null)
             assertTrue("$f : mention à l'écran",
-                Regex("""SatelliteUi\.creditRes\(\s*options\.showSatellite[^)]*\)\s*\?\.let\s*\{\s*credit\s*->\s*SatelliteAttribution\(credit""")
+                Regex("""${v!!.groupValues[1]}\?\.let\s*\{\s*credit\s*->\s*SatelliteAttribution\(credit""")
                     .containsMatchIn(c))
         }
     }
@@ -374,11 +378,14 @@ class SatelliteScreenTest {
             assertTrue("$f : outil → onToolTap + Toast",
                 Regex("""SatelliteUi\.onToolTap\(\s*satelliteCovered\s*,\s*options::toggleSatelliteByUser\s*\)\s*\?\.let\s*\{\s*SatelliteUi\.toast\(""")
                     .containsMatchIn(c))
-            assertCalls(f, c, "satelliteCovered = satelliteCovered", "satelliteStatus = satelliteStatus")
+            // Le satellite a quitté le ⋯ pour le panneau Position GPS (tranche B des
+            // menus) : même couverture, même statut.
+            assertCalls(f, c, "options.showSatellite, satelliteCovered, satelliteStatus)")
         }
-        val menu = code("ui/SceneOptions.kt")
-        assertCalls("menu ⋯", menu, "SatelliteUi.menuRow(satelliteCovered, options.showSatellite, satelliteStatus)",
-            "enabled = satRow.enabled", "satRow.message", "if (satRow.opacity)")
+        val panel = code("ui/GeoPositionPanel.kt")
+        assertCalls("panneau Position GPS", panel, "checked = content.satelliteChecked, enabled = content.satelliteEnabled",
+            "content.satelliteMessage", "GeoPanelRow.SATELLITE_OPACITY ->", "message = R.string.sat_out_of_coverage to emptyList()")
+        assertFalse("plus de satellite dans le ⋯", code("ui/SceneOptions.kt").contains("SatelliteUi.menuRow("))
     }
 
     @Test fun cablageChargementEtToastDansSceneScreen() {

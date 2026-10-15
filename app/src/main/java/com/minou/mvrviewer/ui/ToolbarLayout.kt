@@ -35,7 +35,10 @@ enum class ToolId {
     // Navigation / actions dockables (vue 3D) — présentes aussi au menu
     PATCH, UNIVERSE, CABLING, GDTF_SHARE, PLAN_VIEW, ACCOUNT, SHARE_PROJECT, HISTORY,
     // Spécifiques plan
-    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, CALIBRATE_3, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE, LABEL_SETTINGS;
+    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, CALIBRATE_3, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE, LABEL_SETTINGS,
+    // Rangement des menus (SPEC-menus-android §4.6) — chacun créé dans sa tranche.
+    /** Panneau « Position GPS » (tranche B), 3D et plan. */
+    GEO_PANEL;
 
     /**
      * Identifiant STABLE persisté (JSON) — MÊME chaîne camelCase que la `rawValue`
@@ -85,6 +88,8 @@ enum class ToolId {
             STRUCTURE -> "structure"
             LEGEND -> "legend"
             COLOR_MODE -> "colorMode"
+            // Valeur iOS (`ToolId.geoPanel`).
+            GEO_PANEL -> "geoPanel"
         }
 
     companion object {

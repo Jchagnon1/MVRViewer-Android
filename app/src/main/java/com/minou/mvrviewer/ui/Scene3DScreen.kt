@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Label
@@ -69,7 +71,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -369,6 +373,21 @@ fun Scene3DScreen(
     satelliteStatus: SatelliteStatus = SatelliteStatus.Idle,
     /** 1re ancre dans les emprises IGN (France) : sinon, réglage désactivé. */
     satelliteCovered: Boolean = true,
+    // ---- Rangement des menus, tranche B (SPEC-menus-android §3.6–3.8) ----
+    /** Panneaux flottants ouverts (état hissé dans SceneScreen, commun aux deux vues). */
+    panels: ScenePanels = ScenePanels(),
+    onPanels: (ScenePanels) -> Unit = {},
+    /** Import d'un plan (DXF, image, PDF) — Pro, garde dans SceneScreen. */
+    onImportRefPlan: () -> Unit = {},
+    importingRefPlan: Boolean = false,
+    /** Le panneau « Plan importé » a muté la transformée : version commune +1. */
+    onRefPlanTouched: () -> Unit = {},
+    onToggleRefPlanLayer: (String) -> Unit = {},
+    onRemoveRefPlan: () -> Unit = {},
+    /** Calibrations depuis la 3D : ouvrent le plan prêt à poser (Pro vérifié avant). */
+    onCalibrateThreePoint: () -> Unit = {},
+    onCalibrateHere: () -> Unit = {},
+    onResetCalibration: () -> Unit = {},
     // Câblage (phase 4/5) : sert UNIQUEMENT au texte des étiquettes 3D pour les
     // champs Socapex / Ligne DMX (mêmes tables que la vue plan). Hors ces deux
     // champs, la 3D n'utilise pas le câblage.
@@ -509,7 +528,10 @@ fun Scene3DScreen(
     val markerRoot = rememberNode(engine)
     val markerMaterial = remember(materialLoader) { materialLoader.createUnlitColorInstance(0xFF2979FF.toInt()) }
     var showLocation by remember { mutableStateOf(false) }
-    val gps by rememberUserLocation(showLocation)
+    // Flux complet (position + refus) : la ligne d'état du panneau Position GPS dit
+    // « Localisation refusée » comme dans le plan.
+    val locFeed3D = rememberUserLocationFeed(showLocation)
+    val gps by locFeed3D.location
     // Chaînes de statut localisées, résolues ICI (contexte composable) puis
     // utilisées dans des effets/coroutines qui, eux, ne peuvent pas appeler stringResource.
     val sStatusLoading3D = stringResource(R.string.status_loading_3d)
@@ -1601,6 +1623,15 @@ fun Scene3DScreen(
     // repère fiable — e.x/e.y sont dans un repère décalé) vers le repère de la
     // SceneView = celui de worldToScreenPoint (comme la position d'un geste Compose).
     var scenePos by remember { mutableStateOf(Offset.Zero) }
+    // Cadres (px racine) qui bornent les panneaux du bas-gauche (tranche B,
+    // PanelPlacementMath.floatingPanelSlot) : haut de la scène (sous la barre du
+    // haut) et champ de recherche ; en bas la pastille de sélection, le bandeau de
+    // mesure et la mention IGN.
+    var sceneBoxPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var searchField3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var selectionPill3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var measureBand3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var satMention3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
 
     // Recherche d'un projecteur par N° / nom → le sélectionne (la surbrillance le
     // montre s'il est à l'écran ; sinon l'utilisateur oriente l'orbite pour le
@@ -1862,6 +1893,11 @@ fun Scene3DScreen(
         add(ToolSpec(ToolId.GPS, stringResource(R.string.tool_gps_3d), Icons.Filled.MyLocation,
             available = calibration?.isCalibrated == true, checked = showLocation,
             onInvoke = { showLocation = !showLocation }))
+        // Panneau « Position GPS » (tranche B) : ouvre / referme (actif = jaune) ;
+        // l'entrée « Position GPS… » du ⋯ est rendue par le menu (pas de doublon).
+        add(ToolSpec(ToolId.GEO_PANEL, stringResource(R.string.geo_panel_title), Icons.Filled.LocationOn,
+            available = true, checked = panels.geo,
+            onInvoke = { onPanels(panels.toggle(ScenePanel.GEO)) }, inMenu = false))
         add(ToolSpec(ToolId.GPS_MARKER_SIZE, stringResource(R.string.tool_marker_size), Icons.Filled.PhotoSizeSelectSmall,
             available = calibration?.isCalibrated == true && showLocation, checked = null, onInvoke = {
                 options.gpsMarkerScale = when {
@@ -1910,16 +1946,11 @@ fun Scene3DScreen(
                 SatelliteUi.onToolTap(satelliteCovered, options::toggleSatelliteByUser)
                     ?.let { SatelliteUi.toast(ctx3dSat, it) }
             }, inMenu = false))
-        // Taille des étiquettes : cycle petite · moyenne · grande (même action que le
-        // menu « Étiquettes »). Dockable ; hors menu « Outils » (déjà dans le menu).
-        add(ToolSpec(ToolId.LABEL_SIZE, stringResource(R.string.tool_label_size), Icons.Filled.FormatSize,
-            available = true, checked = null, onInvoke = {
-                options.labelSize = when {
-                    options.labelSize <= 0.75f -> 1f
-                    options.labelSize >= 1.3f -> 0.7f
-                    else -> 1.4f
-                }
-            }, inMenu = false))
+        // « Réglage des étiquettes » (outil `labelSize`, comme iOS) : ouvre / referme
+        // le panneau (champs, taille, écart). Dockable ; hors « Outils » (entrée du ⋯).
+        add(ToolSpec(ToolId.LABEL_SIZE, stringResource(R.string.tool_label_size), Icons.Filled.Tune,
+            available = true, checked = panels.labels,
+            onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }, inMenu = false))
         // Couleur du fond : ouvre le sélecteur (le menu garde ses presets). Dockable.
         add(ToolSpec(ToolId.BACKGROUND, stringResource(R.string.menu_section_background), Icons.Filled.FormatColorFill,
             available = true, checked = null,
@@ -2028,12 +2059,15 @@ fun Scene3DScreen(
                     // Panneau des calques (LOD d'interaction par calque).
                     onShowLayers = onShowLayers,
                     onShowClasses = onShowClasses,
-                    // Étiquettes de projecteurs aussi en 3D : même bascule + mêmes
-                    // champs/taille que le plan (SceneOptions partagé).
+                    // Étiquettes de projecteurs aussi en 3D : même bascule que le plan ;
+                    // champs, taille et écart dans le panneau (SceneOptions partagé).
                     showLabelsToggle = true,
-                    showSatelliteToggle = calibration?.isCalibrated == true,
-                    satelliteCovered = satelliteCovered,
-                    satelliteStatus = satelliteStatus,
+                    // Entrées provisoires (tranche B, jusqu'au menu de la tranche C) : les
+                    // panneaux de la 3D ne seraient sinon joignables que par crochet.
+                    onShowLabelSettings = { onPanels(panels.open(ScenePanel.LABELS)) },
+                    onShowGeoPanel = { onPanels(panels.open(ScenePanel.GEO)) },
+                    onImportRefPlan = onImportRefPlan,
+                    onAdjustRefPlan = if (referencePlan == null) null else ({ onPanels(panels.open(ScenePanel.REF_PLAN)) }),
                     background = options.background3D,
                     backgroundDefault = BackgroundColorStore.DEFAULT_3D,
                     backgroundPresets = bg3dPresets(),
@@ -2050,7 +2084,7 @@ fun Scene3DScreen(
             )
         }
         Box(modifier = Modifier.fillMaxSize().background(options.background3D)
-            .onGloballyPositioned { scenePos = it.positionInWindow() }) {
+            .onGloballyPositioned { scenePos = it.positionInWindow(); sceneBoxPx = it.boundsInRoot() }) {
             Scene(
                 modifier = Modifier.fillMaxSize(),
                 engine = engine,
@@ -2279,6 +2313,7 @@ fun Scene3DScreen(
                     unfocusedPlaceholderColor = Color.White.copy(alpha = 0.6f)
                 ),
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).width(180.dp)
+                    .onGloballyPositioned { searchField3DPx = it.boundsInRoot() }
             )
 
             // N11 — BARRE FLOTTANTE historique (bas-gauche) : rendue par DÉFAUT
@@ -2298,8 +2333,9 @@ fun Scene3DScreen(
             // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte), tant que le
             // quad satellite est affiché : bas-droite, au-dessus des barres du bas.
             val satShown = satellite
-            SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)?.let { credit ->
-                SatelliteAttribution(credit, toolbarLayout, tools3D)
+            val satCredit3D = SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)
+            satCredit3D?.let { credit ->
+                SatelliteAttribution(credit, toolbarLayout, tools3D, onAnchor = { satMention3DPx = it })
             }
 
             // Cote de la mesure (bas-centre) : le chiffre est ici plutôt que sur
@@ -2324,6 +2360,7 @@ fun Scene3DScreen(
                 Surface(
                     color = MEASURE_3D_COLOR, shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
+                        .onGloballyPositioned { measureBand3DPx = it.boundsInRoot() }
                 ) {
                     Text(
                         txt, color = Color.White,
@@ -2342,6 +2379,7 @@ fun Scene3DScreen(
                 Surface(
                     color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
+                        .onGloballyPositioned { selectionPill3DPx = it.boundsInRoot() }
                 ) {
                     Text(
                         label, color = Color.White,
@@ -2349,6 +2387,66 @@ fun Scene3DScreen(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                     )
                 }
+            }
+
+            // ---- PANNEAUX DU BAS-GAUCHE (SPEC-menus-android §3.6–3.8) : Position GPS,
+            // Plan importé, Réglage des étiquettes. Chacun MONTE au-dessus de la
+            // pastille de sélection, du bandeau de mesure et de la mention IGN de sa
+            // colonne ; sa hauteur est bornée sous le haut de la scène et la recherche. ----
+            val panelTop3D = listOf(searchField3DPx)
+            val panelBottom3D = buildList {
+                if (!measureMode && selected.isNotEmpty()) add(selectionPill3DPx)
+                if (measureMode) add(measureBand3DPx)
+                if (satCredit3D != null) add(satMention3DPx)
+            }
+            if (panels.labels) BottomLeadingPanel(
+                PanelLayoutStore.PanelID.LABELS_3D, sceneBoxPx.top, panelTop3D, panelBottom3D,
+                Modifier.zIndex(panels.zIndex(ScenePanel.LABELS))
+            ) { maxH ->
+                LabelSettingsPanel(options = options, surface = ProjectSurface.SCENE_3D, placement = null,
+                    onClose = { onPanels(panels.close(ScenePanel.LABELS)) }, maxContentHeight = maxH)
+            }
+            val rpPanel3D = referencePlan
+            if (panels.refPlan && rpPanel3D != null) BottomLeadingPanel(
+                PanelLayoutStore.PanelID.REF_PLAN_3D, sceneBoxPx.top, panelTop3D, panelBottom3D,
+                Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN))
+            ) { maxH ->
+                RefPlanPanel(
+                    plan = rpPanel3D, surface = ProjectSurface.SCENE_3D, hiddenLayers = hiddenLayers,
+                    bgDark = BackgroundColorStore.isDark(options.background3D),
+                    onTouched = onRefPlanTouched, onToggleLayer = onToggleRefPlanLayer, onRemove = onRemoveRefPlan,
+                    onClose = { onPanels(panels.close(ScenePanel.REF_PLAN)) }, maxContentHeight = maxH
+                )
+            }
+            if (panels.geo) BottomLeadingPanel(
+                PanelLayoutStore.PanelID.GEO_POSITION_3D, sceneBoxPx.top, panelTop3D, panelBottom3D,
+                Modifier.zIndex(panels.zIndex(ScenePanel.GEO))
+            ) { maxH ->
+                val calibrated3D = calibration?.isCalibrated == true
+                GeoPositionPanel(
+                    content = GeoPanelContent.make(ProjectSurface.SCENE_3D, calibrated3D,
+                        options.showSatellite, satelliteCovered, satelliteStatus),
+                    showLocation = showLocation,
+                    onShowLocation = { showLocation = it },
+                    onToggleSatellite = {
+                        SatelliteUi.onToolTap(satelliteCovered, options::toggleSatelliteByUser)
+                            ?.let { SatelliteUi.toast(ctx3dSat, it) }
+                    },
+                    opacity = options.satelliteOpacity, onOpacity = { options.satelliteOpacity = it },
+                    markerScale = options.gpsMarkerScale, onMarkerScale = { options.gpsMarkerScale = it },
+                    statusText = {
+                        val (t, warning) = GeoPanelContent.status(
+                            calibration ?: com.minou.mvrviewer.mvr.GeoCalibration(), locFeed3D.denied)
+                        t.text() to warning
+                    },
+                    // Depuis la 3D : le panneau se ferme, le plan s'ouvre prêt à poser
+                    // (Pro vérifié par SceneScreen AVANT l'ouverture du plan).
+                    onThreePoints = { onCalibrateThreePoint() },
+                    onHereAnchor = { onCalibrateHere() },
+                    onResetCalibration = { onResetCalibration() },
+                    onClose = { onPanels(panels.close(ScenePanel.GEO)) },
+                    maxContentHeight = maxH
+                )
             }
 
             // ---- Décor 3D importé : panneau de placement + messages ----
@@ -2393,13 +2491,15 @@ fun Scene3DScreen(
                     }
                 )
             }
-            // Chargement d'un modèle : état explicite, jamais un gel silencieux.
-            if (importingModel || modelBusy) {
+            // Chargement d'un modèle ou d'un plan importé (tranche B : l'import du plan
+            // se lance aussi depuis la 3D) : état explicite, jamais un gel silencieux.
+            if (importingModel || modelBusy || importingRefPlan) {
                 Surface(
                     color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
                 ) {
-                    Text(stringResource(R.string.model_loading), color = Color.White,
+                    Text(stringResource(if (importingModel || modelBusy) R.string.model_loading else R.string.refplan_reading),
+                        color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
                 }

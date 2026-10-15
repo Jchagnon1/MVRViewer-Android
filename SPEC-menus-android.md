@@ -6,8 +6,8 @@ fait foi pour la structure, les libellés et les règles gratuit/Pro) et
 Android, ce qui existe aujourd'hui (inventaire), ce qui change, ce qui manque,
 et dans quel ordre l'implémenter.
 
-État : **tranche A réalisée** (2026-10-15, voir *Réalisé* sous la tranche A, §10) ;
-tranches B à E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
+État : **tranches A et B réalisées** (2026-10-15, voir *Réalisé* sous chaque
+tranche, §10) ; tranches C à E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
 Base : branche `feature/v1.7-tilt-formats`, commit `e110bbc`
 (539 tests unitaires verts + 4 tests réseau ignorés). Relu et corrigé après
 critique (re-parcours du code, décisions, disparitions, sûreté des
@@ -1296,6 +1296,7 @@ Noms de ressources proposés ; « (pl.) » = `<plurals>` one / other.
 | `refplan_panel_title` | Plan importé | Imported plan |
 | `refplan_show` | Afficher le plan | Show the plan |
 | `refplan_remove` | Retirer le plan | Remove the plan |
+| `refplan_reading` | Lecture du plan… | Reading the plan… |
 | `labels_section_appearance` | Apparence | Appearance |
 | `labels_size` | Taille | Size |
 | `labels_offset` | Écart au projecteur | Offset from the fixture |
@@ -1357,6 +1358,8 @@ Titres d'outils repris de clés de ce tableau : `geoPanel` = `geo_panel_title`, 
 | `opt_layer_colors` | Couleurs par calque | inchangé | Colours per layer *(était « Colour by layer »)* |
 | `opt_hide_when_zoomed_out` | Masquer si trop dézoomé | Masquer les étiquettes trop dézoomées | Hide labels when zoomed too far out |
 | `search_fixture_id_hint` | N° projecteur | N° de projecteur | Fixture number |
+| `size_small`, `size_medium`, `size_large` (tranche B) | petite / moyenne / grande | Petite / Moyenne / Grande (segments) | Small / Medium / Large |
+| `gap_near`, `gap_normal`, `gap_far` (tranche B) | proche / normal / loin | Proche / Normal / Loin (segments) | Near / Normal / Far |
 | `sel_fixtures_selected_fmt` | « %1$d projecteurs sélectionnés » | → pluriel `sel_fixtures_selected` : 1 projecteur sélectionné / %1$d projecteurs sélectionnés | 1 fixture selected / %1$d fixtures selected |
 | `plan_export_views_fmt` | %1$d vue(s) | → pluriel : 1 vue / %1$d vues | %1$d view / %1$d views |
 | `plan_export_ready_fmt` | PDF prêt · %1$d page(s) | → pluriel : PDF prêt · 1 page / … %1$d pages | (pluriel en) |
@@ -1692,26 +1695,97 @@ Tests unitaires (`GeoPanelContentTest`, `ProGateTest`, `RefPlanPanelRulesTest`,
   du plan (`mini.mvr` + `mini.dxf`).
 
 Contrôle à l'écran (`mini.mvr` / `mini.dxf`, `--ez MVR_PRO false` puis `true`) :
-- [ ] 3D et plan : panneau Position GPS réductible, borné sous la barre du
+- [x] 3D et plan : panneau Position GPS réductible, borné sous la barre du
       haut (3D) / le titre et la recherche (plan), au-dessus de la pastille
       de sélection et de la bannière actuelles, en portrait et en paysage
       (la borne passe sur la pastille « Vue » et le bloc d'état en C) ;
-- [ ] chaque panneau 3D s'ouvre par l'ancien ⋯ (entrées provisoires) ;
-- [ ] satellite + opacité en gratuit ; plus aucun curseur flottant ;
-- [ ] « Je suis ici » depuis la 3D → plan, aide d'ancre, pose → « 1 point
+- [x] chaque panneau 3D s'ouvre par l'ancien ⋯ (entrées provisoires) ;
+- [x] satellite + opacité en gratuit ; plus aucun curseur flottant —
+      *rejoué en Pro ; ni l'interrupteur ni le curseur n'ont de garde
+      (`GeoPositionPanel`, réglages de lecture)* ;
+- [x] « Je suis ici » depuis la 3D → plan, aide d'ancre, pose → « 1 point
       posé… » ; « Réinitialiser la calibration » → « Non calibré » ;
-- [ ] 3 points depuis la 3D et le plan : l'assistant se lance (déroulé
-      inchangé) ; gratuit → écran Pro **avant** l'ouverture du plan ;
-- [ ] Plan importé en gratuit : tout lisible, chaque bouton / interrupteur /
+- [x] 3 points depuis la 3D et le plan : l'assistant se lance (déroulé
+      inchangé) ; gratuit → écran Pro **avant** l'ouverture du plan —
+      *vérifié depuis la 3D (Pro : assistant ouvert dans le plan ; gratuit :
+      écran Pro, la 3D reste) ; depuis le plan, même garde, même fonction
+      `startThreePoint` que l'outil* ;
+- [x] Plan importé en gratuit : tout lisible, chaque bouton / interrupteur /
       curseur / calque ouvre l'écran Pro, rien ne bouge, un seul écran Pro par
       glissé ; en Pro : modifications visibles ; en 3D, la rotation verticale
-      se voit ;
-- [ ] import d'un plan depuis la 3D (Pro) : panneau 3D ouvert, plan centré
+      se voit — *glissé de l'homothétie en gratuit : un écran Pro, curseur
+      et manifeste inchangés ; « une rafale = un écran » prouvé en JVM
+      (`ProGateTest`)* ;
+- [x] import d'un plan depuis la 3D (Pro) : panneau 3D ouvert, plan centré
       comme depuis le plan ; un réglage fait en 3D est retrouvé après
-      fermeture / réouverture du projet et part au projet partagé ;
-- [ ] panneau d'étiquettes 3D et plan : champs, taille, écart ; plan :
+      fermeture / réouverture du projet et part au projet partagé — *centrage
+      (−500, −500) sur `mini.mvr`, rotation et rotation verticale relues du
+      manifeste après réouverture ; le partage n'a pas été rejoué à l'écran
+      (pas de projet partagé sur l'émulateur) : même chemin `commitTransform`
+      qu'avant, appelé par l'effet débouncé de `SceneScreen`* ;
+- [x] panneau d'étiquettes 3D et plan : champs, taille, écart ; plan :
       sélection, même type, désactiver, blocs séparés, replacer ;
-- [ ] en anglais.
+- [x] en anglais (et en français).
+
+*Réalisé (tranche B, 2026-10-15)* — 595 tests unitaires verts + 4 ignorés
+(559 après A ; 36 nouveaux : `GeoPanelContentTest`, `ProGateTest`,
+`RefPlanPanelRulesTest`, `LabelSettingsSectionsTest`, `FloatingPanelSlotTest` ;
+`PlanScreenRulesTest` et `SatelliteScreenTest` suivent le satellite et la ligne
+d'état dans le panneau), APK construit, contrôle à l'émulateur Medium_Phone
+(mémoire 2 Go, démarré en 20 s).
+
+- Code : `GeoPositionPanel.kt` (`GeoPanelRow`, `GeoPanelContent.make` pur,
+  `GeoPanelContent.status`, composable), `RefPlanPanel.kt`
+  (`RefPlanPanelRules`, `RefPlanImport` : lecture, plan prêt, placement
+  initial ; composable), `LabelSettingsPanel.kt` (`LabelSettingsSections`,
+  `LabelPlacementActions`, composable ; l'ancien panneau privé du plan est
+  supprimé), `ProGate.kt` (`ProRefusalThrottle`, `ProGate.setter`) +
+  `ProAccess.gatedSetter`, `ScenePanels.kt` (état des panneaux ouverts,
+  `BottomLeadingPanel`, habillage commun `FloatingPanelCard`),
+  `PanelPlacementMath.floatingPanelSlot` (portage iOS, mêmes cas de test).
+- `ToolId.GEO_PANEL` (« geoPanel ») dans les deux catalogues, hors section
+  *Outils* ; l'outil `labelSize` (3D) ouvre / referme le panneau d'étiquettes ;
+  `calibrate` et `threePointCalibration` (plan) quittent la section *Outils* ;
+  l'outil `importDXF` importe, sinon ouvre / ferme le panneau **sans garde**.
+- **Hissé dans `SceneScreen`** : `setReferencePlan` (persistance, DXP1,
+  manifeste, calques éteints du DXF), import (`importRefPlan`, garde « importer
+  un plan », centrage par `planData` de la scène rendue), persistance débouncée
+  du placement sur `refPlanTransformVersion` (500 ms, puis `commitTransform`),
+  `resetCalibration` (garde, calibration vidée, enregistrée, `calibTick++`),
+  `toggleRefPlanLayer`. Le plan ne fait plus que redessiner sur la version.
+- `ScenePanels` (dans `SceneScreen`) : une bascule 3D ↔ plan referme les
+  panneaux ; le **dernier ouvert passe devant** (`front`, `zIndex`) — constat
+  émulateur : les trois partagent le coin bas-gauche et un panneau ouvert après
+  un autre s'ouvrait derrière lui.
+- Place : `BottomLeadingPanel` mesure la place naturelle avant la montée ; en
+  haut la barre 3D (haut de la scène) + la recherche, ou le titre + la
+  recherche du plan ; en bas la pastille de sélection, le bandeau de mesure,
+  la fiche / bannière et les aides du plan, la barre d'affectation, le panneau
+  3 points et la mention IGN (lue sans sa montée). La carte entière est bornée
+  (en-tête compris), seul le contenu défile ; largeur 264 dp imposée aussi à
+  la colonne de `MovablePanel`.
+- Textes : clés §7.1 de la tranche + `refplan_reading` (« Lecture du plan… »,
+  iOS, indicateur pendant un import lancé depuis la 3D) ; `size_*` / `gap_*`
+  passent à la majuscule (segments « Petite · Moyenne · Grande », « Proche ·
+  Normal · Loin ») ; `tool_label_size` = « Réglage des étiquettes » (l'outil
+  ouvre le panneau), `opt_hide_when_zoomed_out` = libellé iOS ; supprimées :
+  `opt_size_fmt`, `opt_gap_fmt`, `opt_label_detached`,
+  `opt_label_detached_cap`, `opt_satellite_map`.
+- Crochets `MVR_AUTO_GEOPANEL`, `MVR_AUTO_REFPLAN_PANEL`,
+  `MVR_AUTO_LABELS_PANEL` (`--es … 1` ou `--ez … true`) ; étiquettes de test
+  `geoPanel`, `refPlanPanel`, `labelsPanel`.
+- **Défaut corrigé avant livraison** : l'import hissé était d'abord un effet
+  clé sur l'URI choisie ; remettre la clé à null avant la fin l'annulait à la
+  suspension suivante — le plan n'était jamais posé. Désormais une coroutine
+  de la scène (`importPickedRefPlan`).
+- Constats (hors tranche) : la barre de préhension de `MovablePanel` s'étire
+  sur toute la largeur de l'écran pour les autres panneaux (assistant 3
+  points, modèles importés, export PDF) — corrigé ici pour les trois panneaux
+  du bas-gauche seulement ; ART signale `Scene3DScreen` au-delà de sa limite
+  de compilation (méthode interprétée, existant) ; `SatelliteUi.menuRow` n'a
+  plus d'appelant (gardé, testé) ; l'écran Pro reste en français dans les deux
+  langues (existant).
+- Captures : `~/.mvrviewer-tools/scratch/android-menus/B/`.
 
 ### Tranche C — Menu ⋯ unique, pastille, rangée du haut, pile bas-droite, état
 

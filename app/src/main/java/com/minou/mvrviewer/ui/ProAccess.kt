@@ -165,6 +165,20 @@ object ProAccess {
         return false
     }
 
+    /** Anti-rafale partagé par tous les réglages gardés de l'app (iOS `refusalThrottle`). */
+    val refusalThrottle = ProRefusalThrottle()
+
+    /**
+     * RÉGLAGE Pro (curseur, interrupteur, champ) — SPEC-menus-android §1.2 / §4.5 :
+     * écrit ([set]) si Pro ; pour un gratuit, la valeur ne bouge pas et le PREMIER
+     * changement d'une rafale ouvre l'écran Pro (les suivants, dans les 0,8 s
+     * glissantes, sont muets : un glissé n'ouvre jamais deux écrans).
+     * @return vrai si la valeur a été écrite.
+     */
+    fun gatedSetter(reason: String, set: () -> Unit): Boolean =
+        ProGate.setter(reason, isPro, refusalThrottle, System.nanoTime() / 1_000_000L,
+            refuse = { r -> paywallReason = r; showPaywall = true }, set = set)
+
     // MARK: - Licence par compte
 
     /**

@@ -52,6 +52,54 @@ object PanelPlacementMath {
     /** Écart entre deux éléments empilés du bas (iOS `cornerStackGap`, 8 pt = 8 dp). */
     const val CORNER_STACK_GAP = 8f
 
+    /** Plus petite hauteur utile d'un panneau flottant : l'en-tête et deux lignes (iOS, 120 pt = 120 dp). */
+    const val FLOATING_PANEL_MIN_HEIGHT = 120f
+
+    /**
+     * Place d'un panneau flottant du bas-gauche : [lift] = de combien il monte
+     * au-dessus de sa place naturelle, [maxHeight] = sa hauteur maximale (null :
+     * rien de mesuré, aucune borne).
+     */
+    data class FloatingPanelSlot(val lift: Float, val maxHeight: Float?)
+
+    /**
+     * Place d'un panneau flottant du bas-gauche (Position GPS, Plan importé,
+     * Réglage des étiquettes) ENTRE ce qui occupe le haut de sa colonne et ce qui
+     * occupe le bas — portage exact de `PanelPlacementMath.floatingPanelSlot` iOS
+     * (SPEC-menus §5.5, SPEC-menus-android §3.6) : une fenêtre ne cache jamais ce
+     * qu'elle règle, et un panneau ne chevauche pas les éléments permanents.
+     *
+     * [natural] = repère de la place NATURELLE du panneau (sa colonne en largeur,
+     * son bas), mesuré SANS la montée : la place ne se nourrit jamais d'elle-même.
+     * Seuls les obstacles qui croisent la colonne comptent (vides ignorés). Le
+     * panneau ne couvre JAMAIS ce qui occupe le bas ; sans place (paysage, fiche
+     * ouverte), il garde [minHeight] et c'est son haut qui passe sur le haut de
+     * l'écran (on le replie ou on le tire d'un geste). Unités libres mais communes.
+     */
+    fun floatingPanelSlot(
+        natural: Rect, topObstacles: List<Rect>, bottomObstacles: List<Rect>,
+        topLimit: Float, gap: Float = CORNER_STACK_GAP, minHeight: Float = FLOATING_PANEL_MIN_HEIGHT
+    ): FloatingPanelSlot {
+        if (natural.width <= 0f || !natural.left.isFinite() || !natural.right.isFinite() ||
+            !natural.bottom.isFinite()
+        ) return FloatingPanelSlot(0f, null)
+        fun usable(r: Rect) = r.width > 0f && r.height > 0f &&
+            r.left.isFinite() && r.top.isFinite() && r.right.isFinite() && r.bottom.isFinite() &&
+            // Même colonne : chevauchement horizontal strict.
+            r.right > natural.left && r.left < natural.right
+        val naturalBottom = natural.bottom
+        // Bas : au-dessus de ce qui occupe le bas de la colonne.
+        var bottom = naturalBottom
+        for (o in bottomObstacles) if (usable(o) && o.top < bottom + gap) bottom = minOf(bottom, o.top - gap)
+        // Haut : sous ce qui occupe le haut de la colonne.
+        var top = if (topLimit.isFinite()) maxOf(0f, topLimit) else 0f
+        for (o in topObstacles) if (usable(o) && o.bottom + gap > top) top = o.bottom + gap
+        // Jamais hors de l'écran par le haut, même sans place.
+        bottom = maxOf(bottom, minHeight)
+        val room = bottom - top
+        return FloatingPanelSlot(lift = maxOf(0f, naturalBottom - bottom), maxHeight = maxOf(room, minHeight))
+    }
+
     /**
      * De combien un élément ([anchor], cadre SANS montée) doit MONTER pour
      * qu'aucun [obstacles] de sa colonne ne le recouvre — portage exact de

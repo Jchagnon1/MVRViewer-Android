@@ -246,9 +246,9 @@
     <string name="fx_render_type">Render type</string>
     <string name="fx_standard_fmt">Standard: %1$s</string>
     <string name="fx_type_channels_fmt">%1$s  ·  %2$d channels</string>
-    <string name="gap_far">far</string>
-    <string name="gap_near">near</string>
-    <string name="gap_normal">normal</string>
+    <string name="gap_far">Far</string>
+    <string name="gap_near">Near</string>
+    <string name="gap_normal">Normal</string>
     <string name="gdtf_connected">Connected.</string>
     <string name="gdtf_connecting">Connecting…</string>
     <string name="gdtf_download_failed">Download failed.</string>
@@ -362,20 +362,15 @@
     <string name="nav_view_3d">3D view</string>
     <string name="nav_view_plan">Plan view</string>
     <string name="opt_coloring_fmt">Colouring: %1$s</string>
-    <string name="opt_gap_fmt">Offset: %1$s</string>
-    <string name="opt_hide_when_zoomed_out">Hide when zoomed far out</string>
+    <string name="opt_hide_when_zoomed_out">Hide labels when zoomed too far out</string>
     <string name="opt_label_content">Content</string>
-    <string name="opt_label_detached">separate block</string>
-    <string name="opt_label_detached_cap">Separate block</string>
     <string name="opt_labels">Labels</string>
     <string name="opt_labels_of_selection">Labels of the selection</string>
     <string name="opt_labels_same_type">Labels of the same type (this layer)</string>
     <string name="opt_layer_colors">Colour by layer</string>
     <string name="opt_legend">Legend</string>
     <string name="opt_reset_label_offsets">Reset label positions</string>
-    <string name="opt_satellite_map">Satellite background (map)</string>
     <string name="opt_show_labels">Show labels</string>
-    <string name="opt_size_fmt">Size: %1$s</string>
     <string name="opt_structure">Set / structure</string>
     <string name="patch_count_hint">%1$d / %2$d fixture(s) · tap to edit</string>
     <string name="patch_duplicate_id_cd">Duplicate ID</string>
@@ -438,9 +433,9 @@
     <string name="sat_unavailable">No IGN imagery for this area.</string>
     <string name="search_fixture_id_hint">Fixture ID</string>
     <string name="sel_fixtures_selected_fmt">%1$d fixtures selected</string>
-    <string name="size_large">large</string>
-    <string name="size_medium">medium</string>
-    <string name="size_small">small</string>
+    <string name="size_large">Large</string>
+    <string name="size_medium">Medium</string>
+    <string name="size_small">Small</string>
     <string name="status_gdtf_suffix_fmt"> · %1$d GDTF fixtures</string>
     <string name="status_loading_3d">loading 3D…</string>
     <string name="status_objects_3d_fmt">%1$d 3D objects</string>
@@ -514,7 +509,7 @@
     <string name="model_import_formats_title">Supported formats</string>
     <string name="model_import_formats_choose">Choose a file…</string>
     <string name="tool_label_settings">Label settings</string>
-    <string name="tool_label_size">Label size</string>
+    <string name="tool_label_size">Label settings</string>
     <string name="tool_marker_size">Marker size</string>
     <string name="tool_mask">Hide items</string>
     <string name="tool_measure">Measure a distance</string>
@@ -756,4 +751,30 @@
     <string name="models_gdtf_signed_in">GDTF Share: signed in</string>
     <string name="models_gdtf_sign_in">Sign in to GDTF Share…</string>
     <string name="layers_title">Layers</string>
+
+    <!-- Menus tidy-up, slice B (SPEC-menus-android §7.1): GPS position, Imported plan and Label settings panels. -->
+    <string name="menu_display">Display</string>
+    <string name="menu_gps_position">GPS position…</string>
+    <string name="menu_label_settings">Label settings…</string>
+    <string name="menu_adjust_imported_plan">Adjust the imported plan…</string>
+    <string name="geo_panel_title">GPS position</string>
+    <string name="geo_show_my_position">Show my position</string>
+    <string name="geo_calibrate_first">Calibrate first (below) to show your position and the satellite.</string>
+    <string name="geo_opacity">Opacity</string>
+    <string name="geo_dot_size">GPS dot size</string>
+    <string name="geo_section_calibration">Calibration</string>
+    <string name="geo_here_quick">I am here (quick)…</string>
+    <string name="geo_here_caption">Tap the plan where you stand. A second point corrects orientation and scale.</string>
+    <string name="geo_reset_calibration">Reset the calibration</string>
+    <string name="refplan_panel_title">Imported plan</string>
+    <string name="refplan_show">Show the plan</string>
+    <string name="refplan_remove">Remove the plan</string>
+    <string name="refplan_reading">Reading the plan…</string>
+    <string name="labels_section_appearance">Appearance</string>
+    <string name="labels_size">Size</string>
+    <string name="labels_offset">Offset from the fixture</string>
+    <string name="labels_section_placement">Placement on the plan</string>
+    <string name="labels_placement_help">Tap a label to pick it up, then drag it; tap it again to let go.</string>
+    <string name="labels_turn_off_fmt">Turn off (%1$d)</string>
+    <string name="labels_separate_blocks">Separate blocks</string>
 </resources>

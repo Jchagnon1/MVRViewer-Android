@@ -3,11 +3,9 @@ package com.minou.mvrviewer.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -20,11 +18,9 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
@@ -35,9 +31,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -210,24 +204,25 @@ fun SceneOptionsMenu(
     onJoinProject: (() -> Unit)? = null,
     showLabelsToggle: Boolean = false,
     /**
-     * « Replacer les étiquettes » : remet à zéro les décalages posés au doigt.
-     * Indispensable comme filet de sécurité — une étiquette traînée très loin de
-     * son projecteur, ou posée pile sur son symbole, resterait sinon pénible à
-     * récupérer. `null` → entrée masquée (vues sans étiquettes déplaçables).
+     * « Réglage des étiquettes… » (SPEC-menus-android §3.8) : ouvre le panneau de
+     * la vue (champs, taille, écart ; dans le plan, placement, blocs séparés,
+     * replacer). Entrée provisoire jusqu'à la tranche C, sous la bascule
+     * « Étiquettes ». null → absente.
      */
-    onResetLabelOffsets: (() -> Unit)? = null,
+    onShowLabelSettings: (() -> Unit)? = null,
     /**
-     * Arme les étiquettes de TOUS les projecteurs sélectionnés (rectangle ou
-     * multi-sélection) : un glissé sur l'une d'elles les déplace toutes. `null`
-     * quand la sélection ne s'y prête pas (vide).
+     * « Position GPS… » (§3.6) : ouvre le panneau de la vue — afficher ma
+     * position, satellite et son opacité, calibrations. Remplace la bascule du
+     * satellite, son curseur et la ligne d'état de la calibration. null → absente.
      */
-    onSelectLabelsOfSelection: (() -> Unit)? = null,
+    onShowGeoPanel: (() -> Unit)? = null,
     /**
-     * Même chose pour tous les projecteurs de MÊME TYPE GDTF sur le MÊME CALQUE
-     * que l'étiquette active (les projecteurs d'un pont, en pratique). `null`
-     * tant qu'aucune étiquette n'est active — le critère n'a alors pas d'origine.
+     * 3D (entrées provisoires jusqu'à C, §10 tranche B) : « Importer un plan
+     * (DXF, image, PDF)… » (Pro au toucher, garde posée par l'appelant) et, s'il
+     * y a un plan, « Régler le plan importé… » (gratuit). null → absentes.
      */
-    onSelectLabelsSameType: (() -> Unit)? = null,
+    onImportRefPlan: (() -> Unit)? = null,
+    onAdjustRefPlan: (() -> Unit)? = null,
     showStructureToggle: Boolean = false,
     showLegendToggle: Boolean = false,
     /**
@@ -239,21 +234,6 @@ fun SceneOptionsMenu(
     showColorModeSelector: Boolean = false,
     colorModeHasSoca: Boolean = false,
     colorModeHasDmx: Boolean = false,
-    // Bascule du fond satellite (dispo seulement une fois la calibration GPS
-    // posée) : la vue 3D n'a pas de contrôle flottant (SurfaceView), donc elle
-    // pilote le satellite depuis ce menu, opacité comprise.
-    showSatelliteToggle: Boolean = false,
-    /**
-     * Ligne d'état « Calibration » (texte, en orange ?) sous les outils — iOS
-     * `GeoCalibrationStatus`. Évaluée à l'ouverture du menu ; null = absente.
-     */
-    calibrationStatus: (@Composable () -> Pair<String, Boolean>)? = null,
-    // Fond IGN = France seulement : hors couverture, l'interrupteur reste VISIBLE
-    // mais désactivé (le message d'état dit pourquoi).
-    satelliteCovered: Boolean = true,
-    // Statut du fond : ligne d'état sous l'interrupteur (téléchargement, pas
-    // d'imagerie, erreur), cf. SatelliteUi.menuRow.
-    satelliteStatus: SatelliteStatus = SatelliteStatus.Idle,
     // Section « Couleur du fond » : activée quand la vue fournit sa couleur
     // courante + un setter. Presets = (nom, ARGB). null → section masquée.
     background: Color? = null,
@@ -277,7 +257,8 @@ fun SceneOptionsMenu(
         // ---- Outils de la vue (N10) : mêmes actions que la barre flottante,
         // accessibles ici. Les bascules gardent le menu ouvert ; les actions le
         // referment. Rendus dans l'ordre fourni par l'écran.
-        if (tools.isNotEmpty() || onCustomizeToolbar != null || onShowLayers != null || onShowClasses != null) {
+        if (tools.isNotEmpty() || onCustomizeToolbar != null || onShowLayers != null || onShowClasses != null ||
+            onImportRefPlan != null || onAdjustRefPlan != null) {
             HorizontalDivider()
             Text(stringResource(R.string.menu_section_tools), style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
@@ -293,12 +274,9 @@ fun SceneOptionsMenu(
                     is MenuTool.Action -> nav(t.label, t.icon) { open = false; t.onClick() }
                 }
             }
-            calibrationStatus?.let { st ->
-                val (text, warning) = st()
-                Text(text, style = MaterialTheme.typography.bodySmall,
-                    color = if (warning) Color(0xFFEF6C00) else Color(0xFF888888),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).widthIn(max = 260.dp))
-            }
+            // Plan importé depuis la 3D (tranche B) : import Pro au toucher, réglage gratuit (lecture).
+            onImportRefPlan?.let { nav(stringResource(R.string.tool_import_ref_plan), Icons.Filled.Map) { open = false; it() } }
+            onAdjustRefPlan?.let { nav(stringResource(R.string.menu_adjust_imported_plan), Icons.Filled.Tune) { open = false; it() } }
             // N11 — accès au panneau de personnalisation des barres (les outils
             // ci-dessus restent TOUJOURS ici, qu'ils soient dans une barre ou non).
             onCustomizeToolbar?.let {
@@ -337,37 +315,11 @@ fun SceneOptionsMenu(
             }
             nav(stringResource(R.string.nav_custom_color), Icons.Filled.Colorize) { open = false; showCustom = true }
         }
-        if (showSatelliteToggle) {
+        // « Position GPS… » : afficher ma position, satellite et opacité (décision 8 :
+        // plus de curseur dans un menu), calibrations — tout vit dans le panneau.
+        onShowGeoPanel?.let {
             HorizontalDivider()
-            // Hors couverture : grisé, jamais coché, et le message le dit TOUJOURS
-            // (même réglage éteint) : c'est lui qui explique le grisé.
-            val satRow = SatelliteUi.menuRow(satelliteCovered, options.showSatellite, satelliteStatus)
-            check(stringResource(R.string.opt_satellite_map), satRow.checked,
-                enabled = satRow.enabled) { options.toggleSatelliteByUser() }
-            satRow.message?.let { (res, args) ->
-                Text(stringResource(res, *args.toTypedArray()), style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF888888),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).widthIn(max = 260.dp))
-            }
-            if (satRow.opacity) {
-                // Opacité : curseur compact dans le menu (le glissé horizontal ne
-                // gêne pas le défilement vertical du menu).
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp)
-                ) {
-                    Icon(Icons.Filled.Public, contentDescription = null,
-                        modifier = Modifier.width(18.dp), tint = Color(0xFF888888))
-                    Slider(
-                        value = options.satelliteOpacity,
-                        onValueChange = { options.satelliteOpacity = it },
-                        valueRange = 0.05f..1f,
-                        modifier = Modifier.width(120.dp).padding(horizontal = 8.dp)
-                    )
-                    Text("${(options.satelliteOpacity * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall, color = Color(0xFF888888))
-                }
-            }
+            nav(stringResource(R.string.menu_gps_position), Icons.Filled.LocationOn) { open = false; it() }
         }
         HorizontalDivider()
         check(stringResource(R.string.opt_layer_colors), options.layerColors) { options.layerColors = !options.layerColors }
@@ -384,73 +336,11 @@ fun SceneOptionsMenu(
         if (showLegendToggle) check(stringResource(R.string.opt_legend), options.showLegend) { options.showLegend = !options.showLegend }
         if (showLabelsToggle) {
             check(stringResource(R.string.opt_labels), options.showLabels) { options.showLabels = !options.showLabels }
-            if (options.showLabels) {
-                // Contenu de l'étiquette : CASES À COCHER (plusieurs champs), et
-                // pour chaque champ retenu, le choix « groupé / détaché ». Un
-                // champ détaché devient une pastille autonome, déplaçable
-                // séparément — c'est ce qui permet le n° au-dessus de l'icône et
-                // le patch en dessous.
-                LabelContent.entries.forEach { c ->
-                    val on = c in options.labelFields
-                    check("  " + stringResource(c.labelRes), on) {
-                        options.labelFields =
-                            if (on) options.labelFields - c else options.labelFields + c
-                        // Un champ retiré ne doit pas laisser derrière lui un
-                        // « détaché » invisible qui ressusciterait au recochage.
-                        if (on) options.labelDetached = options.labelDetached - c
-                    }
-                    if (on) {
-                        val loose = c in options.labelDetached
-                        check("      ↳ " + stringResource(R.string.opt_label_detached), loose) {
-                            options.labelDetached =
-                                if (loose) options.labelDetached - c else options.labelDetached + c
-                        }
-                    }
-                }
-                // Sélection GROUPÉE d'étiquettes : plusieurs actives à la fois,
-                // qu'un seul glissé déplace toutes du même vecteur.
-                onSelectLabelsOfSelection?.let {
-                    nav("  " + stringResource(R.string.opt_labels_of_selection), Icons.Filled.SelectAll) { open = false; it() }
-                }
-                onSelectLabelsSameType?.let {
-                    nav("  " + stringResource(R.string.opt_labels_same_type), Icons.Filled.SelectAll) { open = false; it() }
-                }
-                // Taille (cycle S · M · L).
-                val sizeName = when {
-                    options.labelSize <= 0.75f -> stringResource(R.string.size_small)
-                    options.labelSize >= 1.3f -> stringResource(R.string.size_large)
-                    else -> stringResource(R.string.size_medium)
-                }
-                nav("  " + stringResource(R.string.opt_size_fmt, sizeName), Icons.Filled.Check) {
-                    options.labelSize = when {
-                        options.labelSize <= 0.75f -> 1f
-                        options.labelSize >= 1.3f -> 0.7f
-                        else -> 1.4f
-                    }
-                }
-                // Hauteur / écart (cycle).
-                val offName = when {
-                    options.labelOffset <= 0.6f -> stringResource(R.string.gap_near)
-                    options.labelOffset >= 1.6f -> stringResource(R.string.gap_far)
-                    else -> stringResource(R.string.gap_normal)
-                }
-                nav("  " + stringResource(R.string.opt_gap_fmt, offName), Icons.Filled.Check) {
-                    options.labelOffset = when {
-                        options.labelOffset <= 0.6f -> 1f
-                        options.labelOffset >= 1.6f -> 0.5f
-                        else -> 2f
-                    }
-                }
-                // Filet OPTIONNEL (décoché par défaut) : par défaut les étiquettes
-                // affichées restent visibles à tout zoom ; cochée, celle-ci rebranche
-                // le masquage sous un certain dézoom, utile sur un très gros show.
-                check("  " + stringResource(R.string.opt_hide_when_zoomed_out), options.hideLabelsWhenZoomedOut) {
-                    options.hideLabelsWhenZoomedOut = !options.hideLabelsWhenZoomedOut
-                }
-                onResetLabelOffsets?.let {
-                    nav("  " + stringResource(R.string.opt_reset_label_offsets), Icons.Filled.Refresh) { open = false; it() }
-                }
-            }
+        }
+        // Champs, blocs séparés, taille, écart, dézoom, saisie groupée, replacer :
+        // tout passe dans le panneau « Réglage des étiquettes » (entrée toujours visible).
+        onShowLabelSettings?.let {
+            nav(stringResource(R.string.menu_label_settings), Icons.Filled.Tune) { open = false; it() }
         }
     }
 

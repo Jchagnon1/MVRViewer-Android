@@ -216,8 +216,10 @@ class PlanScreenRulesTest {
         assertTrue(plan.contains("SatelliteAttribution(credit, toolbarLayout, toolsPlan, lift = satLift,"))
         assertTrue(plan.contains("onAnchor = { satMentionAnchorPx = it }, onTop = satMentionOnTop)"))
         assertTrue(plan.contains("lift.dp to SatelliteUi.mentionOnTop(mention, lift, satObstacles)"))
-        assertTrue(plan.contains(".onGloballyPositioned { satSliderAnchorPx = it.anchorBounds() }\n" +
-            "                    .layoutOffset(y = -satLift)"))
+        // Le curseur d'opacité flottant a quitté le plan (SPEC-menus-android, décision 8 :
+        // l'opacité se règle dans le panneau Position GPS SEULEMENT) ; la mention monte seule.
+        assertFalse(plan.contains("satSliderAnchorPx"))
+        assertTrue(plan.contains("mention, null, satObstacles,"))
         assertTrue(plan.contains("cal3PanelAnchorPx = it.anchorBounds()"))
         assertTrue(plan.contains("assignBarAnchorPx = it.anchorBounds()"))
         // La mention mesure son cadre AVANT de monter (sinon elle se poursuivrait).
@@ -248,7 +250,11 @@ class PlanScreenRulesTest {
         assertTrue("demande retenue", loc.contains("LocationPermissionStore.markAsked(context)"))
         assertFalse("plus de refus « de cette visite » seulement", loc.contains("feed.denied = !ok"))
         val plan = src("ui/PlanScreen.kt")
-        assertTrue(plan.contains("GeoCalibrationStatus.of(calibration, locFeed.denied)"))
+        // Ligne d'état du panneau Position GPS (tranche B des menus), dans les deux vues.
+        assertTrue(plan.contains("GeoPanelContent.status(calibration, locFeed.denied)"))
+        assertTrue(src("ui/Scene3DScreen.kt").contains("locFeed3D.denied)"))
+        val st = src("ui/GeoPositionPanel.kt")
+        assertTrue(st.contains("val st = GeoCalibrationStatus.of(calibration, locationDenied)"))
     }
 
     @Test fun texteDuRefusIdentiqueAIos() {

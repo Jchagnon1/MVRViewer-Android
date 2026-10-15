@@ -246,9 +246,9 @@
     <string name="fx_render_type">Type de rendu</string>
     <string name="fx_standard_fmt">Standard : %1$s</string>
     <string name="fx_type_channels_fmt">%1$s  ·  %2$d canaux</string>
-    <string name="gap_far">loin</string>
-    <string name="gap_near">proche</string>
-    <string name="gap_normal">normal</string>
+    <string name="gap_far">Loin</string>
+    <string name="gap_near">Proche</string>
+    <string name="gap_normal">Normal</string>
     <string name="gdtf_connected">Connecté.</string>
     <string name="gdtf_connecting">Connexion…</string>
     <string name="gdtf_download_failed">Téléchargement échoué.</string>
@@ -362,20 +362,15 @@
     <string name="nav_view_3d">Vue 3D</string>
     <string name="nav_view_plan">Vue plan</string>
     <string name="opt_coloring_fmt">Coloration : %1$s</string>
-    <string name="opt_gap_fmt">Écart : %1$s</string>
-    <string name="opt_hide_when_zoomed_out">Masquer si trop dézoomé</string>
+    <string name="opt_hide_when_zoomed_out">Masquer les étiquettes trop dézoomées</string>
     <string name="opt_label_content">Contenu</string>
-    <string name="opt_label_detached">bloc séparé</string>
-    <string name="opt_label_detached_cap">Bloc séparé</string>
     <string name="opt_labels">Étiquettes</string>
     <string name="opt_labels_of_selection">Étiquettes de la sélection</string>
     <string name="opt_labels_same_type">Étiquettes du même type (ce calque)</string>
     <string name="opt_layer_colors">Couleurs par calque</string>
     <string name="opt_legend">Légende</string>
     <string name="opt_reset_label_offsets">Replacer les étiquettes</string>
-    <string name="opt_satellite_map">Fond satellite (carte)</string>
     <string name="opt_show_labels">Afficher les étiquettes</string>
-    <string name="opt_size_fmt">Taille : %1$s</string>
     <string name="opt_structure">Décor / structure</string>
     <string name="patch_count_hint">%1$d / %2$d projecteur(s) · touchez pour éditer</string>
     <string name="patch_duplicate_id_cd">N° en double</string>
@@ -438,9 +433,9 @@
     <string name="sat_unavailable">Pas d\'imagerie IGN pour cette zone.</string>
     <string name="search_fixture_id_hint">N° projecteur</string>
     <string name="sel_fixtures_selected_fmt">%1$d projecteurs sélectionnés</string>
-    <string name="size_large">grande</string>
-    <string name="size_medium">moyenne</string>
-    <string name="size_small">petite</string>
+    <string name="size_large">Grande</string>
+    <string name="size_medium">Moyenne</string>
+    <string name="size_small">Petite</string>
     <string name="status_gdtf_suffix_fmt"> · %1$d proj. GDTF</string>
     <string name="status_loading_3d">chargement 3D…</string>
     <string name="status_objects_3d_fmt">%1$d objets 3D</string>
@@ -514,7 +509,7 @@
     <string name="model_import_formats_title">Formats pris en charge</string>
     <string name="model_import_formats_choose">Choisir un fichier…</string>
     <string name="tool_label_settings">Réglage des étiquettes</string>
-    <string name="tool_label_size">Taille des étiquettes</string>
+    <string name="tool_label_size">Réglage des étiquettes</string>
     <string name="tool_marker_size">Taille du marqueur</string>
     <string name="tool_mask">Masquer des éléments</string>
     <string name="tool_measure">Mesurer une distance</string>
@@ -763,4 +758,30 @@
     <string name="models_gdtf_signed_in">GDTF Share : connecté</string>
     <string name="models_gdtf_sign_in">Se connecter à GDTF Share…</string>
     <string name="layers_title">Calques</string>
+
+    <!-- Rangement des menus, tranche B (SPEC-menus-android §7.1) : panneaux Position GPS, Plan importé, Réglage des étiquettes. -->
+    <string name="menu_display">Affichage</string>
+    <string name="menu_gps_position">Position GPS…</string>
+    <string name="menu_label_settings">Réglage des étiquettes…</string>
+    <string name="menu_adjust_imported_plan">Régler le plan importé…</string>
+    <string name="geo_panel_title">Position GPS</string>
+    <string name="geo_show_my_position">Afficher ma position</string>
+    <string name="geo_calibrate_first">Calibrez d\'abord (ci-dessous) pour afficher votre position et le satellite.</string>
+    <string name="geo_opacity">Opacité</string>
+    <string name="geo_dot_size">Taille du point GPS</string>
+    <string name="geo_section_calibration">Calibration</string>
+    <string name="geo_here_quick">Je suis ici (pose rapide)…</string>
+    <string name="geo_here_caption">Touchez le plan là où vous êtes. Un 2e point corrige l\'orientation et l\'échelle.</string>
+    <string name="geo_reset_calibration">Réinitialiser la calibration</string>
+    <string name="refplan_panel_title">Plan importé</string>
+    <string name="refplan_show">Afficher le plan</string>
+    <string name="refplan_remove">Retirer le plan</string>
+    <string name="refplan_reading">Lecture du plan…</string>
+    <string name="labels_section_appearance">Apparence</string>
+    <string name="labels_size">Taille</string>
+    <string name="labels_offset">Écart au projecteur</string>
+    <string name="labels_section_placement">Placement sur le plan</string>
+    <string name="labels_placement_help">Touchez une étiquette pour la saisir, puis faites-la glisser ; retouchez-la pour la relâcher.</string>
+    <string name="labels_turn_off_fmt">Désactiver (%1$d)</string>
+    <string name="labels_separate_blocks">Blocs séparés</string>
 </resources>

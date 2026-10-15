@@ -287,6 +287,8 @@ private fun DrawScope.drawPdfPage(
                 inkColor = ink,
                 layerColors = v.layerColors,
                 colorMode = v.colorMode,
+                // Jamais d'affectation dans un PDF : pas de pastille pleine (iOS).
+                assigning = false,
                 cablingColor = v.cablingColor,
                 cablingRingColor = v.cablingRingColor,
                 cablingText = v.cablingText,

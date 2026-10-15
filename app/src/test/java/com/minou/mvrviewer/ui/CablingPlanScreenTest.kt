@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.geometry.Rect
 import com.minou.mvrviewer.sync.CablingAssignment
 import com.minou.mvrviewer.sync.CablingSettings
 import com.minou.mvrviewer.sync.Distributor
@@ -123,6 +124,83 @@ class CablingPlanScreenTest {
         assertFalse(CablingAssignColoring.showsSecondRing(PlanColorMode.LAYER, false))
     }
 
+    @Test fun pastillePleineSeulementEnAffectation() {
+        // SPEC §3 / iOS `assignFillFor` (`guard assigningForDraw`) : en affectation,
+        // la pastille pleine porte la couleur de la famille de la voie.
+        assertTrue(CablingAssignColoring.showsAssignFill(PlanColorMode.SOCAPEX, true))
+        assertTrue(CablingAssignColoring.showsAssignFill(PlanColorMode.DMX_LINE, true))
+        // Hors affectation (« Colorer par câblage » du menu, PDF du plan) : jamais.
+        for (mode in PlanColorMode.entries) assertFalse(mode.name, CablingAssignColoring.showsAssignFill(mode, false))
+        assertFalse(CablingAssignColoring.showsAssignFill(PlanColorMode.LAYER, true))
+    }
+
+    // ------------------------------------------------- place de la barre (légende Android EN HAUT)
+
+    /** Cadre de la légende Android telle que PlanScreen la pose (TopStart, constantes partagées). */
+    private fun androidLegend(container: Rect, width: Float, height: Float): Rect {
+        val l = container.left + CablingAssignBarPlacement.LEGEND_START_ANDROID
+        val t = container.top + CablingAssignBarPlacement.LEGEND_TOP_ANDROID
+        return Rect(l, t, l + width, t + height)
+    }
+
+    @Test fun barreEnBasMalgreLaLegendeDuHautEnPortrait() {
+        // Défaut de relecture : téléphone en portrait 411 × 891 dp, légende dépliée
+        // (« Non câblé » seule) en HAUT à gauche → la règle iOS (légende EN BAS)
+        // remontait la barre à 801 dp du bas : il ne restait que 90 dp.
+        val portrait = Rect(0f, 0f, 411f, 891f)
+        val legend = androidLegend(portrait, 110f, 36f)
+        assertEquals(Rect(8f, 100f, 118f, 136f), legend)
+        assertEquals(801f, CablingAssignBarPlacement.assignBarInsets(false, portrait, 300f, legend).bottom, 0f)
+        for (barHeight in listOf(0f, 160f, 30f)) {   // non mesurée, dépliée, réduite
+            val i = CablingAssignBarPlacement.assignBarInsetsTopLegend(false, portrait, 300f, barHeight, legend)
+            assertEquals(BottomBarInsets(84f, 0f), i)
+        }
+        // Légende pleine (12 distributeurs + « … ») : elle s'arrête bien au-dessus de la barre.
+        val tall = androidLegend(portrait, 180f, 280f)
+        val i = CablingAssignBarPlacement.assignBarInsetsTopLegend(false, portrait, 300f, 160f, tall)
+        assertEquals(BottomBarInsets(84f, 0f), i)
+        // La barre garde TOUTE sa hauteur au-dessus de sa marge basse.
+        assertTrue(portrait.height - i.bottom >= 160f)
+        // Petit téléphone 360 × 740 : même chose (avant : 90 dp restants).
+        val small = Rect(0f, 0f, 360f, 740f)
+        assertEquals(BottomBarInsets(84f, 0f),
+            CablingAssignBarPlacement.assignBarInsetsTopLegend(false, small, 300f, 160f, androidLegend(small, 110f, 36f)))
+        // Plan sous une barre d'outils (repère racine décalé) : même résultat.
+        val shifted = Rect(0f, 56f, 411f, 891f)
+        assertEquals(BottomBarInsets(84f, 0f),
+            CablingAssignBarPlacement.assignBarInsetsTopLegend(false, shifted, 300f, 160f, androidLegend(shifted, 110f, 36f)))
+        // Sans légende : la marge ordinaire.
+        assertEquals(BottomBarInsets(84f, 0f),
+            CablingAssignBarPlacement.assignBarInsetsTopLegend(false, portrait, 300f, 160f, null))
+    }
+
+    @Test fun barreEnPaysageAvecLaLegendeDuHaut() {
+        // Hauteur compacte 891 × 380 : barre contre le bas (8), bande 212…372.
+        val land = Rect(0f, 0f, 891f, 380f)
+        // Légende courte : au-dessus de la bande → rien ne bouge.
+        assertEquals(BottomBarInsets(8f, 0f),
+            CablingAssignBarPlacement.assignBarInsetsTopLegend(true, land, 300f, 160f, androidLegend(land, 110f, 90f)))
+        // Légende haute mais étroite : elle descend dans la bande sans toucher la barre centrée.
+        assertEquals(BottomBarInsets(8f, 0f),
+            CablingAssignBarPlacement.assignBarInsetsTopLegend(true, land, 300f, 160f, androidLegend(land, 110f, 250f)))
+        // Légende haute et large (bord droit 308) : la barre glisse à droite comme sur iOS
+        // (308 + 10 − 295,5 = 22,5).
+        val wide = CablingAssignBarPlacement.assignBarInsetsTopLegend(true, land, 300f, 160f, androidLegend(land, 300f, 250f))
+        assertEquals(8f, wide.bottom, 0f)
+        assertEquals(22.5f, wide.leadingShift, 1e-4f)
+        // Pas la place à droite : la barre reste à sa marge, elle ne remonte JAMAIS
+        // au-dessus d'une légende du haut (elle y serait écrasée).
+        val huge = CablingAssignBarPlacement.assignBarInsetsTopLegend(true, land, 300f, 160f, androidLegend(land, 700f, 250f))
+        assertEquals(BottomBarInsets(8f, 0f), huge)
+        // Barre réduite (30 dp) : la légende ne la gêne plus.
+        assertEquals(BottomBarInsets(8f, 0f),
+            CablingAssignBarPlacement.assignBarInsetsTopLegend(true, land, 300f, 30f, androidLegend(land, 300f, 220f)))
+        // En portrait, une légende qui descendrait jusqu'à la barre ne la fait pas remonter non plus.
+        val portrait = Rect(0f, 0f, 411f, 600f)
+        assertEquals(BottomBarInsets(84f, 0f),
+            CablingAssignBarPlacement.assignBarInsetsTopLegend(false, portrait, 300f, 160f, androidLegend(portrait, 200f, 300f)))
+    }
+
     // ------------------------------------------------- cadrage au-dessus de la barre
 
     @Test fun cadrageAuDessusDeLaBarre() {
@@ -144,6 +222,57 @@ class CablingPlanScreenTest {
         // Jamais au-delà de 60 % de la hauteur.
         val (_, dy3) = CablingAssignBarPlacement.fitAbove(400f, 800f, 10f, 20f, 790f)
         assertEquals(-240f, dy3, 1e-3f)
+    }
+
+    // ------------------------------------------------- centrage de la voie au retour du plan
+
+    /**
+     * Modèle de défilement d'une `LazyColumn` : décalage borné à [0, contenu −
+     * zone visible] (une liste ne défile jamais au-delà de ses bouts).
+     * Rend le haut de la ligne [index] dans la zone visible après
+     * `scrollToItem(index)` puis `animateScrollBy(delta(offset))`.
+     */
+    private fun settle(heights: List<Float>, visible: Float, index: Int, delta: (Float, Float) -> Float): Float {
+        val content = heights.sum()
+        val maxScroll = maxOf(0f, content - visible)
+        val top = heights.take(index).sum()
+        var scroll = minOf(top, maxScroll)               // scrollToItem
+        val offset = top - scroll
+        scroll = (scroll + delta(offset, heights[index])).coerceIn(0f, maxScroll)   // animateScrollBy
+        return top - scroll
+    }
+
+    @Test fun voieDeRetourCentreeSansSortirDeLEcran() {
+        val visible = 620f
+        // Dernière Socapex : … C5, C6 (130 dp), la liste finit sur C6.
+        val heights = List(12) { 130f }
+        val newDelta = { off: Float, size: Float -> CablingScrollRestore.centerScrollDelta(off, size, visible) }
+        // Ancienne consigne (défaut de relecture) : la ligne était supposée en haut.
+        val oldDelta = { _: Float, size: Float -> -(visible - size) / 2f }
+        val last = heights.lastIndex
+        // Avant : C6 finissait à 735, sous le bas de la zone visible (620) — cachée.
+        assertEquals(735f, settle(heights, visible, last, oldDelta), 1e-3f)
+        // Après : C6 reste collée en bas, entièrement visible (comme iOS anchor: .center).
+        val after = settle(heights, visible, last, newDelta)
+        assertEquals(490f, after, 1e-3f)
+        assertTrue(after >= 0f && after + 130f <= visible)
+        // Toutes les lignes, partout dans la liste : visibles ; centrées quand la liste le permet.
+        for (i in heights.indices) {
+            val y = settle(heights, visible, i, newDelta)
+            assertTrue("ligne $i visible", y >= 0f && y + heights[i] <= visible)
+            val top = heights.take(i).sum()
+            val centered = (visible - heights[i]) / 2f
+            if (top >= centered && top - centered <= heights.sum() - visible) {
+                assertEquals("ligne $i centrée", centered, y, 1e-3f)
+            }
+        }
+        // Lignes de hauteurs variées (en-têtes, phases, voies) : jamais hors de l'écran.
+        val mixed = listOf(56f, 28f, 130f, 130f, 28f, 130f, 130f, 28f, 130f, 210f, 56f, 28f, 130f, 340f)
+        for (i in mixed.indices) {
+            if (mixed[i] + CablingScrollRestore.CENTER_MARGIN > visible) continue   // trop haute : reste en haut
+            val y = settle(mixed, visible, i, newDelta)
+            assertTrue("ligne $i visible ($y)", y >= -1e-3f && y + mixed[i] <= visible + 1e-3f)
+        }
     }
 
     // ------------------------------------------------- cible, haptique, textes
@@ -220,9 +349,12 @@ class CablingPlanScreenTest {
         // La barre : « Voie supprimée », libellé FIGÉ, ◀ ▶ et cadre éteints.
         val st = CablingVoieStatus.power(target.voie, s.toDTO(), emptyMap())
         assertNull(st)
-        val ui = CablingAssignBarUi.display(target, st, Locale.FRENCH)
+        val ui = CablingAssignBarUi.display(target, st, Locale.FRENCH,
+            CablingAssignBarUi.targetColorArgb(target, s.distributors, emptyList()))
         assertTrue(ui.voieMissing)
         assertEquals("Soca B · C2", ui.title)
+        // Distributeur SUPPRIMÉ : pastille grise « non câblé ».
+        assertEquals(CablingAssignBarUi.UNCABLED_ARGB, ui.colorArgb)
         assertFalse(ui.previousEnabled || ui.nextEnabled || ui.frameEnabled)
         // ◀ ▶ : ni précédente ni suivante.
         assertNull(CablingVoieNavigator.neighbor(target.voie, 1, CablingVoieNavigator.voies(s.toDTO())))
@@ -239,6 +371,38 @@ class CablingPlanScreenTest {
         assertEquals(CablingToggleResult.VOIE_MISSING, d.toggleOnVoie("f1", voie))
         assertEquals(DmxCablingAssignment("f1", "M", 1), d.assignmentOf("f1"))
         assertEquals(0, pushes)
+        // La barre : « Voie supprimée », mais la multipaire EXISTE encore → la
+        // pastille garde SA couleur (iOS `status?.colorArgb ?? assignTargetColorArgb`),
+        // pas le gris « non câblé » (défaut de relecture : 0xFF737373).
+        val target = CablingAssignTarget.forVoie(voie, emptyList(), d.distributors)
+        val st = CablingVoieStatus.dmx(voie, d.toDTO(), emptyMap())
+        assertNull(st)
+        val ui = CablingAssignBarUi.display(target, st, Locale.FRENCH,
+            CablingAssignBarUi.targetColorArgb(target, emptyList(), d.distributors))
+        assertTrue(ui.voieMissing)
+        assertEquals("Multi · D3", ui.title)
+        assertEquals(0xFF8E24AA.toInt(), ui.colorArgb)
+    }
+
+    @Test fun couleurDeLaCibleTantQueSonDistributeurExiste() {
+        val power = listOf(soca("A", "Soca A", color = 0xFFE53935.toInt()))
+        val dmx = listOf(multi("M", "Multi A", 2))
+        // Circuit hors bornes (C7 d'une Socapex de 6) : couleur de la Socapex.
+        val t1 = CablingAssignTarget.forVoie(CablingVoie(SOCA, "A", 7), power, dmx)
+        assertEquals(0xFFE53935.toInt(), CablingAssignBarUi.targetColorArgb(t1, power, dmx))
+        // Départ hors bornes (D3 d'une multipaire de 2) : couleur de la multipaire.
+        val t2 = CablingAssignTarget.forVoie(CablingVoie(DMX, "M", 3), power, dmx)
+        assertEquals(0xFF8E24AA.toInt(), CablingAssignBarUi.targetColorArgb(t2, power, dmx))
+        // Distributeur supprimé (ou d'une autre famille) : gris.
+        val t3 = CablingAssignTarget.forVoie(CablingVoie(SOCA, "B", 1), power, dmx)
+        assertEquals(CablingAssignBarUi.UNCABLED_ARGB, CablingAssignBarUi.targetColorArgb(t3, power, dmx))
+        val t4 = CablingAssignTarget.forVoie(CablingVoie(DMX, "A", 1), power, dmx)
+        assertEquals(CablingAssignBarUi.UNCABLED_ARGB, CablingAssignBarUi.targetColorArgb(t4, power, dmx))
+        // Voie présente : la pastille est celle de l'état (le repli n'est pas lu).
+        val st = CablingVoieStatus.dmx(CablingVoie(DMX, "M", 2), DmxCablingDTO(dmx), emptyMap())!!
+        val ui = CablingAssignBarUi.display(CablingAssignTarget.forVoie(st.voie, power, dmx), st, Locale.FRENCH,
+            CablingAssignBarUi.UNCABLED_ARGB)
+        assertEquals(0xFF8E24AA.toInt(), ui.colorArgb)
     }
 
     @Test fun parcoursMemoireDuRetourDuPlan() {
@@ -272,7 +436,11 @@ class CablingPlanScreenTest {
             "CablingHaptic.of(result)", "CablingHaptic.ofFrame(written)", "CablingHaptic.STEP",
             "CablingAssignColoring.effectiveMode(", "CablingAssignColoring.showsSecondRing(",
             "CablingVoieStatus.power(", "CablingVoieStatus.dmx(", "CablingAssignBarUi.display(",
-            "CablingAssignBarPlacement.assignBarInsets(", "CablingAssignBarPlacement.fitAbove(",
+            "CablingAssignBarPlacement.assignBarInsetsTopLegend(", "CablingAssignBarPlacement.fitAbove(",
+            "CablingAssignBarUi.targetColorArgb(barTarget, cabling.distributors, dmxCabling.distributors)",
+            "assigning = assignMode", "assignBarHeightPx / dens.density",
+            "padding(top = CablingAssignBarPlacement.LEGEND_TOP_ANDROID.dp",
+            "start = CablingAssignBarPlacement.LEGEND_START_ANDROID.dp)",
             "CablingAssignBar(", "resolveDmxFootprints("
         )) assertTrue("PlanScreen n'appelle plus $needle", plan.contains(needle))
         // L'ancien bandeau (libellé sans point médian) a disparu.
@@ -280,6 +448,9 @@ class CablingPlanScreenTest {
         assertFalse(plan.contains("\"\$name C\${at.index}\""))
         // Le cadre n'est plus implicite : il s'arme par le bouton de la barre.
         assertFalse(plan.contains("if (rectMode || assignMode) {"))
+        // La règle iOS (légende EN BAS) n'est plus appliquée telle quelle à la légende du haut.
+        assertFalse(plan.contains("CablingAssignBarPlacement.assignBarInsets("))
+        assertFalse(plan.contains("padding(top = 100.dp, start = 8.dp)"))
     }
 
     @Test fun laSceneRetientLaVoieEtRevientAuCablage() {
@@ -299,6 +470,10 @@ class CablingPlanScreenTest {
         assertTrue(render.contains("drawCircle(col.copy(alpha = 0.85f), radius = r, center = p)"))
         assertTrue(render.contains("drawCircle(s.planBg, radius = r, center = p, style = Stroke(1.5f))"))
         assertTrue(render.indexOf("col.copy(alpha = 0.85f)") < render.indexOf("drawPath(t.path, c, style = Stroke(sw))"))
+        // … et SEULEMENT en affectation : jamais hors affectation ni dans le PDF.
+        assertTrue(render.contains("CablingAssignColoring.showsAssignFill(s.colorMode, s.assigning)"))
+        assertFalse(render.contains("if (s.colorMode != PlanColorMode.LAYER && silhouettesOn && !cablingFill.isNullOrEmpty())"))
+        assertTrue(src("PlanPdfExport.kt").contains("assigning = false,"))
         // SPEC §4 : réduite, la barre garde son en-tête (pastille + voie).
         val bar = src("CablingAssignBar.kt")
         assertTrue(bar.contains("collapsedHeader = {"))
@@ -315,5 +490,9 @@ class CablingPlanScreenTest {
             )) assertTrue("$file n'a plus $needle", s.contains(needle))
         }
         assertTrue(src("CablingScreen.kt").contains("CablingScreenTab.opening(null, memory.tab)"))
+        // Centrage sur le décalage RÉEL de la ligne (pas « supposée en haut »).
+        val mem = src("CablingListMemory.kt")
+        assertTrue(mem.contains("CablingScrollRestore.centerScrollDelta("))
+        assertFalse(mem.contains("animateScrollBy(-(visible - item.size) / 2f)"))
     }
 }

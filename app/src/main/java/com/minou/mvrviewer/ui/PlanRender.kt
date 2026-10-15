@@ -67,6 +67,12 @@ internal class PlanRenderSpec(
      */
     val colorMode: PlanColorMode = PlanColorMode.LAYER,
     /**
+     * Une AFFECTATION est en cours sur le plan (cible armée depuis l'écran
+     * Câblage). Seule elle fait dessiner la PASTILLE pleine sous le symbole
+     * (SPEC-cablage-plan §3, iOS `assignFillFor`). Toujours false pour le PDF.
+     */
+    val assigning: Boolean = false,
+    /**
      * fixtureKey (mvrUUID) → couleur de son distributeur, en mode câblage. Un
      * projecteur ABSENT de la table est NON AFFECTÉ → gris neutre. null = pas de
      * table (mode LAYER). Ne colore QUE la pastille (passe 2) : la silhouette
@@ -405,15 +411,17 @@ internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
         return (fw.radiusBySpec[t] ?: 0f) * det > 7f
     }
     // ---- Passe 0 (câblage) : PASTILLE pleine sous la silhouette ----
-    // SPEC-cablage-plan §3 : en mode câblage (ou d'office en affectation), chaque
-    // projecteur CÂBLÉ porte une pastille pleine de la couleur de son
-    // distributeur (85 %, liseré couleur de fond), SOUS son symbole ; un
-    // projecteur non câblé n'en a pas (symbole gris). Les silhouettes étant
-    // tracées par TYPE (une passe pour tous les clones), c'est cette pastille qui
-    // porte la couleur quand on est assez près pour les voir — sans elle, la
-    // couleur ne tenait qu'à un point de 3 px.
+    // SPEC-cablage-plan §3 : en mode AFFECTATION seulement (iOS `assignFillFor`,
+    // `guard assigningForDraw`), chaque projecteur CÂBLÉ dans la famille de la
+    // voie porte une pastille pleine de la couleur de son distributeur (85 %,
+    // liseré couleur de fond), SOUS son symbole ; un projecteur non câblé n'en a
+    // pas (symbole gris). Les silhouettes étant tracées par TYPE (une passe pour
+    // tous les clones), c'est cette pastille qui porte la couleur quand on est
+    // assez près pour les voir. Hors affectation (« Colorer par câblage » du
+    // menu, PDF du plan), le dessin reste celui d'avant.
     val cablingFill = s.cablingColor
-    if (s.colorMode != PlanColorMode.LAYER && silhouettesOn && !cablingFill.isNullOrEmpty()) {
+    if (CablingAssignColoring.showsAssignFill(s.colorMode, s.assigning) && silhouettesOn &&
+        !cablingFill.isNullOrEmpty()) {
         s.data.fixtures.forEach { f ->
             if (f.key in s.hiddenElements) return@forEach
             val col = cablingFill[f.key] ?: return@forEach

@@ -698,6 +698,8 @@ fun PlanScreen(
     var planBoundsPx by remember { mutableStateOf(Rect.Zero) }
     var legendBoundsPx by remember { mutableStateOf<Rect?>(null) }
     var assignBarTopPx by remember { mutableStateOf(0f) }
+    // Hauteur RÉELLE de la barre (px) : bande qu'une légende du haut peut gêner.
+    var assignBarHeightPx by remember { mutableStateOf(0f) }
 
     // ---- Mesure entre deux points ----
     // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
@@ -1611,6 +1613,8 @@ fun PlanScreen(
                     inkColor = inkColor,
                     layerColors = options.layerColors,
                     colorMode = effectiveColorMode,
+                    // Pastille pleine sous le symbole : seulement en affectation.
+                    assigning = assignMode,
                     cablingColor = cablingColorMap,
                     cablingRingColor = cablingRingColorMap,
                     cablingText = cablingText,
@@ -1836,7 +1840,10 @@ fun PlanScreen(
                 Surface(
                     color = Color.White.copy(alpha = 0.92f), contentColor = Color(0xFF222222),
                     shape = RoundedCornerShape(10.dp), shadowElevation = 3.dp,
-                    modifier = Modifier.align(Alignment.TopStart).padding(top = 100.dp, start = 8.dp)
+                    modifier = Modifier.align(Alignment.TopStart)
+                        // Place partagée avec la barre d'affectation (dégagement).
+                        .padding(top = CablingAssignBarPlacement.LEGEND_TOP_ANDROID.dp,
+                                 start = CablingAssignBarPlacement.LEGEND_START_ANDROID.dp)
                         .onGloballyPositioned { legendBoundsPx = it.boundsInRoot() }
                 ) {
                     androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -2214,19 +2221,25 @@ fun PlanScreen(
         }
         // ---- BARRE D'AFFECTATION (SPEC-cablage-plan §4) ----
         // En BAS, centrée, déplaçable : 84 dp au-dessus du bas en portrait, contre
-        // le bas (8 dp) en hauteur compacte ; elle dégage la légende dépliée (à
-        // droite si la place le permet, sinon au-dessus) — CablingAssignBarPlacement.
+        // le bas (8 dp) en hauteur compacte. La légende Android est EN HAUT : la
+        // barre ne la dégage (à droite, si la place le permet) que si elle
+        // descend jusqu'à elle, et ne remonte jamais au-dessus d'elle (la règle
+        // iOS, faite pour une légende en bas, l'écrasait) —
+        // CablingAssignBarPlacement.assignBarInsetsTopLegend.
         val barTarget = assignTarget
         if (barTarget != null) {
             val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
             val compact = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 480
             val dens = androidx.compose.ui.platform.LocalDensity.current
             fun Rect.toDp() = Rect(left / dens.density, top / dens.density, right / dens.density, bottom / dens.density)
-            val insets = CablingAssignBarPlacement.assignBarInsets(
+            val insets = CablingAssignBarPlacement.assignBarInsetsTopLegend(
                 compact, planBoundsPx.toDp(), CablingAssignBarPlacement.BAR_WIDTH,
+                assignBarHeightPx / dens.density,
                 if (legendShown) legendBoundsPx?.toDp() else null
             )
-            val bar = CablingAssignBarUi.display(barTarget, assignStatus, locale)
+            // Pastille d'une voie disparue : couleur du distributeur s'il existe encore.
+            val bar = CablingAssignBarUi.display(barTarget, assignStatus, locale,
+                CablingAssignBarUi.targetColorArgb(barTarget, cabling.distributors, dmxCabling.distributors))
             CablingAssignBar(
                 display = bar,
                 frameActive = rectMode,
@@ -2240,7 +2253,10 @@ fun PlanScreen(
                     .layoutOffset(x = insets.leadingShift.dp)
                     // Cadre d'ANCRAGE (sans le décalage choisi au doigt) : sert à
                     // réserver sa hauteur au cadrage du plan.
-                    .onGloballyPositioned { assignBarTopPx = it.positionInRoot().y }
+                    .onGloballyPositioned {
+                        assignBarTopPx = it.positionInRoot().y
+                        assignBarHeightPx = it.size.height.toFloat()
+                    }
             )
         }
 

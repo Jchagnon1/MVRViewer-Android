@@ -94,7 +94,8 @@ internal fun Modifier.cardSegment(border: Color, fill: Color, seg: CardSeg, flas
  * 1. à l'APPARITION de la liste, la consigne de [CablingScreenMemoryState.takeRestore] :
  *    la voie travaillée sur le plan est ancrée en haut, puis — sur sa hauteur
  *    RÉELLE et la hauteur RÉELLEMENT visible — centrée si elle tient (hauteur
- *    + 24 dp ≤ zone visible), et surlignée une fois ; une simple reprise remet
+ *    + 24 dp ≤ zone visible ; en fin de liste, elle reste collée en bas,
+ *    visible), et surlignée une fois ; une simple reprise remet
  *    la ligne repère en haut, sans surlignage ;
  * 2. au DÉFILEMENT, la position (tout en haut, ou la ligne en tête — un
  *    en-tête peut être repris lui-même sur Android) est retenue, jamais pendant
@@ -130,7 +131,10 @@ internal fun CablingListMemoryEffects(
                 visible.takeIf { it > 0 }?.let { it / density.density }
             )
             if (anchor == CablingScrollRestore.Anchor.CENTER && item != null) {
-                listState.animateScrollBy(-(visible - item.size) / 2f)
+                // Décalage RÉEL de la ligne : sur le dernier écran elle n'est pas
+                // en haut ; la liste s'arrête à sa fin, la ligne reste visible.
+                listState.animateScrollBy(CablingScrollRestore.centerScrollDelta(
+                    item.offset.toFloat(), item.size.toFloat(), visible.toFloat()))
             }
         } finally {
             restoring[0] = false

@@ -322,10 +322,11 @@ class CablingPlanVectorsTest {
 
             // Textes de la barre (transcription de PlanView.assignPanel), fr ET en.
             val target = CablingAssignTarget.forVoie(vo, p?.distributors ?: emptyList(), d?.distributors ?: emptyList())
+            val targetArgb = CablingAssignBarUi.targetColorArgb(target, p?.distributors ?: emptyList(), d?.distributors ?: emptyList())
             val disp = v.getJSONObject("display")
             for ((lang, r) in listOf("fr" to TestRes.FR, "en" to TestRes.EN)) {
                 val locale = if (lang == "fr") Locale.FRENCH else Locale.ENGLISH
-                val ui = CablingAssignBarUi.display(target, st, locale)
+                val ui = CablingAssignBarUi.display(target, st, locale, targetArgb)
                 val tag = "$id [$lang]"
                 assertEquals("$tag voie disparue", disp.getBoolean("voieMissing"), ui.voieMissing)
                 if (disp.getBoolean("voieMissing")) {
@@ -333,8 +334,16 @@ class CablingPlanVectorsTest {
                     assertFalse(tag, ui.previousEnabled || ui.nextEnabled || ui.frameEnabled)
                     // La barre garde le libellé FIGÉ de la voie.
                     assertEquals(tag, target.label, ui.title)
+                    // Pastille (iOS `status?.colorArgb ?? assignTargetColorArgb`) : couleur
+                    // du distributeur de l'entrée s'il existe encore, gris s'il a disparu.
+                    val dists = v.getJSONObject("input").getJSONArray("distributors")
+                    val distId = v.getJSONObject("voie").getString("distId")
+                    val expectArgb = (0 until dists.length()).map { dists.getJSONObject(it) }
+                        .firstOrNull { it.getString("id") == distId }?.getLong("colorArgb") ?: 0xFF737373L
+                    assertEquals("$tag pastille", expectArgb, unsigned(ui.colorArgb))
                     continue
                 }
+                assertEquals("$tag pastille", unsigned(st!!.colorArgb), unsigned(ui.colorArgb))
                 val lt = disp.opt0("loadText") as JSONObject?
                 assertEquals("$tag charge", lt?.getString(lang)?.let(::norm), res(r, ui.load)?.let(::norm))
                 if (disp.has("loadPending")) assertEquals("$tag sablier", disp.getBoolean("loadPending"), ui.loadPending)

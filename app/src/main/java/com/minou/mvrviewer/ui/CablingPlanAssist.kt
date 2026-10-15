@@ -366,17 +366,33 @@ object CablingAssignBarUi {
     fun formatInt(n: Int, locale: Locale): String = NumberFormat.getIntegerInstance(locale).format(n.toLong())
 
     /**
-     * Contenu de la barre pour [target] dans l'état [status] (`null` = voie
-     * disparue). Les nombres sont mis en forme dans [locale].
+     * Couleur de la CIBLE (iOS `ContentView.planAssignTargetColorArgb`) : celle
+     * de son distributeur tant qu'il EXISTE — même si la voie a disparu (circuit
+     * ou départ hors bornes, par exemple une multipaire réduite à 2 départs
+     * pendant qu'on câble D3) ; le gris « non câblé » seulement s'il a été
+     * supprimé.
      */
-    fun display(target: CablingAssignTarget, status: CablingVoieStatus?, locale: Locale): CablingAssignBarDisplay {
+    fun targetColorArgb(target: CablingAssignTarget, power: List<Distributor>, dmx: List<DmxDistributor>): Int =
+        when (target.kind) {
+            CablingAssignTarget.Kind.SOCA -> power.firstOrNull { it.id == target.distributorId }?.colorArgb
+            CablingAssignTarget.Kind.DMX -> dmx.firstOrNull { it.id == target.distributorId }?.colorArgb
+        } ?: UNCABLED_ARGB
+
+    /**
+     * Contenu de la barre pour [target] dans l'état [status] (`null` = voie
+     * disparue). Les nombres sont mis en forme dans [locale]. [targetColorArgb]
+     * = couleur de la cible (fonction `targetColorArgb` ci-dessus) : pastille
+     * d'une voie disparue (iOS : `status?.colorArgb ?? assignTargetColorArgb`).
+     */
+    fun display(target: CablingAssignTarget, status: CablingVoieStatus?, locale: Locale,
+                targetColorArgb: Int): CablingAssignBarDisplay {
         val title = status?.label ?: target.label.ifEmpty {
             if (target.kind == CablingAssignTarget.Kind.SOCA) CablingVoieLabel.power("", target.index)
             else CablingVoieLabel.dmx("", target.index, 2)
         }
         if (status == null) {
             return CablingAssignBarDisplay(
-                title = title, colorArgb = UNCABLED_ARGB, voieMissing = true,
+                title = title, colorArgb = targetColorArgb, voieMissing = true,
                 load = null, loadPending = false, overloadMark = false, unknownMark = null,
                 phaseText = null, count = null,
                 previousEnabled = false, nextEnabled = false, frameEnabled = false
@@ -453,6 +469,17 @@ data class CablingScrollRestore(val rowId: String, val highlight: Boolean) {
     companion object {
         /** Marge sous laquelle une ligne « tient » à l'écran (dp). */
         const val CENTER_MARGIN = 24f
+
+        /**
+         * Défilement (positif = vers la FIN de la liste) qui CENTRE une ligne
+         * vue à [itemOffset] (haut de la ligne dans la zone visible, après
+         * `scrollToItem`). Le décalage RÉEL compte : une ligne du dernier écran
+         * n'est pas en haut (une liste ne défile jamais au-delà de sa fin) ; la
+         * liste s'arrête d'elle-même à ses bouts, la ligne reste donc visible —
+         * comme `scrollTo(id, anchor: .center)` iOS.
+         */
+        fun centerScrollDelta(itemOffset: Float, itemSize: Float, visibleHeight: Float): Float =
+            itemOffset - (visibleHeight - itemSize) / 2f
     }
 }
 
@@ -723,6 +750,40 @@ object CablingAssignBarPlacement {
         return BottomBarInsets(max(base.bottom, raised), 0f)
     }
 
+    /**
+     * Place de la légende du plan ANDROID (dp) : en HAUT à gauche, sous la
+     * barre d'outils — iOS la pose EN BAS. PlanScreen la place avec ces valeurs.
+     */
+    const val LEGEND_TOP_ANDROID = 100f
+    const val LEGEND_START_ANDROID = 8f
+    /** Hauteur supposée de la barre dépliée tant qu'elle n'est pas mesurée (dp). */
+    const val BAR_HEIGHT_ESTIMATE = 160f
+
+    /**
+     * Variante ANDROID de [assignBarInsets] : la légende y est en HAUT à gauche.
+     * La règle iOS, faite pour une légende posée EN BAS, ferait « remonter » la
+     * barre au-dessus du HAUT de la légende : bornée par cette marge basse, la
+     * barre était écrasée sur 90 dp (◀ ▶, cadre et « Terminé » invisibles).
+     *
+     * Seule une légende qui DESCEND dans la bande de la barre (posée à sa marge
+     * ordinaire, [barHeight] de haut, écart [LEGEND_GAP]) la gêne vraiment. La
+     * barre peut alors glisser à droite comme sur iOS (hauteur compacte, place
+     * suffisante) ; elle ne remonte JAMAIS au-dessus d'une légende du haut.
+     * [barHeight] ≤ 0 (pas encore mesurée) → [BAR_HEIGHT_ESTIMATE].
+     */
+    fun assignBarInsetsTopLegend(compactHeight: Boolean, container: Rect, barWidth: Float,
+                                 barHeight: Float, legend: Rect?): BottomBarInsets {
+        val base = assignBarInsets(compactHeight, container, barWidth, null)
+        if (legend == null || legend.width <= 0f || legend.height <= 0f) return base
+        val h = if (barHeight > 0f) barHeight else BAR_HEIGHT_ESTIMATE
+        val barBottom = container.bottom - base.bottom
+        val barTop = barBottom - h
+        // La légende s'arrête au-dessus de la barre (ou passe dessous) : rien ne bouge.
+        if (legend.bottom + LEGEND_GAP <= barTop || legend.top >= barBottom) return base
+        val ios = assignBarInsets(compactHeight, container, barWidth, legend)
+        return if (ios.leadingShift > 0f) ios else base
+    }
+
     /** Place réservée en bas du plan par la barre (de son bord haut au bas du plan), bornée à 60 %. */
     fun reserve(planTop: Float, planBottom: Float, barTop: Float): Float {
         val h = planBottom - planTop
@@ -826,4 +887,13 @@ object CablingAssignColoring {
     /** L'anneau de 2e dimension n'est dessiné QUE hors affectation (une seule lecture). */
     fun showsSecondRing(mode: PlanColorMode, assigning: Boolean): Boolean =
         !assigning && mode != PlanColorMode.LAYER
+
+    /**
+     * La PASTILLE pleine à 85 % sous le symbole n'existe QUE pendant une
+     * affectation (SPEC §3, iOS `assignFillFor` : `guard assigningForDraw`).
+     * Hors affectation — « Colorer par câblage » choisi au menu, et le PDF du
+     * plan — le dessin reste celui d'avant le câblage sur le plan.
+     */
+    fun showsAssignFill(mode: PlanColorMode, assigning: Boolean): Boolean =
+        assigning && mode != PlanColorMode.LAYER
 }

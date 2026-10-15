@@ -13,6 +13,7 @@ import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.SceneModelLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.stringResource
@@ -73,9 +74,17 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
     private var currentUri: Uri? = null
     private var loadJob: Job? = null
 
+    /**
+     * Retour à l'accueil — aussi « Fermer le projet » PENDANT la lecture (SPEC-menus
+     * §11) : le chargement est annulé, et son résultat, s'il arrive quand même (le
+     * parse en cours n'est pas interruptible), est IGNORÉ ([isActive] testé avant
+     * toute écriture d'état) — ni état d'erreur, ni retrait des récents.
+     */
     fun reset() {
         loadJob?.cancel()
+        loadJob = null
         currentUri = null
+        progress.finish()
         _state.value = UiState.Home
     }
 
@@ -119,6 +128,9 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                     bytes to MvrParser.parse(bytes)
                 }
             }
+            // Fermé pendant la lecture : `runCatching` a aussi attrapé l'annulation
+            // — on n'écrit RIEN (pas d'erreur affichée, récent gardé).
+            if (!isActive) return@launch
             _state.value = result.fold(
                 onSuccess = { (bytes, scene) ->
                     // Projet ouvert avec succès → mémorisé dans les récents.
@@ -154,6 +166,7 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                             getApplication<Application>().getString(R.string.err_unreadable_file))
                 }
             }
+            if (!isActive) return@launch
             _state.value = result.fold(
                 onSuccess = { bytes ->
                     progress.report(LoadStep.READ_MVR, 1f)
@@ -200,6 +213,7 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
                     bytes to MvrParser.parse(bytes)
                 }
             }
+            if (!isActive) return@launch
             _state.value = result.fold(
                 onSuccess = { (b, scene) ->
                     progress.report(LoadStep.READ_MVR, 1f)

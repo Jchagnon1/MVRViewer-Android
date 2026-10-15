@@ -17,6 +17,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -40,6 +42,7 @@ class MainActivity : ComponentActivity() {
     // AIGUILLÉS (show, objet 3D ou bibliothèque MA — SPEC-ma-gdtfshare.md §5.3).
     private val incomingUris = mutableStateOf<List<Uri>>(emptyList())
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Journal de diagnostic (plantages + gels) le plus tôt possible, pour
@@ -58,11 +61,19 @@ class MainActivity : ComponentActivity() {
         if (isDebuggable) intent.getStringExtra("MVR_GDTFSHARE_MOCK_DIR")?.let {
             com.minou.mvrviewer.mvr.GdtfShareClient.enableMock(java.io.File(it))
         }
+        // Crochets d'essai du rangement des menus (MVR_AUTO_PLAN, MVR_AUTO_DEST,
+        // MVR_AUTO_PLAN_START, MVR_AUTO_HOME_DEST) — débogable seulement.
+        com.minou.mvrviewer.ui.DebugHooks.read(intent, isDebuggable)
         enableEdgeToEdge()
         incomingUris.value = urisFrom(intent)
         setContent {
             MvrViewerTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+                // En DEBUG, les étiquettes de test deviennent des identifiants de
+                // ressource : `uiautomator dump` les lit (contrôles à l'écran).
+                val rootModifier = if (isDebuggable) {
+                    Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }
+                } else Modifier.fillMaxSize()
+                Scaffold(modifier = rootModifier) { padding ->
                     App(
                         modifier = Modifier.padding(padding),
                         incomingUris = incomingUris.value,
@@ -94,6 +105,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        com.minou.mvrviewer.ui.DebugHooks.read(
+            intent, (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        )
         incomingUris.value = urisFrom(intent)
     }
 
@@ -122,6 +136,12 @@ private fun App(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // Bibliothèque MA ouverte depuis l'ACCUEIL (bouton, ou profil reçu sans show).
     var homeMaOpen by remember { mutableStateOf(false) }
+    // « Compte & réglages » ouvert depuis l'ACCUEIL (bouton, carte) — écran plein
+    // hébergé ici, avec son propre retour système vers l'accueil (§3.11). Crochet
+    // DEBUG `MVR_AUTO_HOME_DEST=account`.
+    var homeAccountOpen by remember {
+        mutableStateOf(com.minou.mvrviewer.ui.DebugHooks.takeAutoHomeDest()?.trim()?.lowercase() == "account")
+    }
     // Ouverture externe : dès que des URI arrivent, on les AIGUILLE (une seule fois).
     // Un fichier seul : show / objet 3D (comportement existant) ou bibliothèque MA ;
     // plusieurs fichiers partagés : UN lot dans la bibliothèque MA (un .mvr compte ignoré).
@@ -146,14 +166,21 @@ private fun App(
 
     val state by vm.state
     // Un show ouvert reprend la main : au retour à l'accueil, c'est l'accueil qui s'affiche.
-    LaunchedEffect(state) { if (state is SceneViewModel.UiState.Loaded) homeMaOpen = false }
+    LaunchedEffect(state) {
+        if (state is SceneViewModel.UiState.Loaded) { homeMaOpen = false; homeAccountOpen = false }
+    }
     when (val s = state) {
         is SceneViewModel.UiState.Home,
         is SceneViewModel.UiState.Error ->
             if (homeMaOpen) HomeMaLibraryHost(vm, modifier) { homeMaOpen = false }
+            else if (homeAccountOpen) {
+                androidx.activity.compose.BackHandler { homeAccountOpen = false }
+                com.minou.mvrviewer.ui.AccountSettingsScreen(sync = sync, onBack = { homeAccountOpen = false }, modifier = modifier)
+            }
             else HomeScreen(
                 state = s, modifier = modifier, onOpen = { uri: Uri -> vm.open(uri) },
                 onOpenMaLibrary = { homeMaOpen = true },
+                onOpenAccountSettings = { homeAccountOpen = true },
                 sync = sync,
                 onOpenCloudProject = { project ->
                     scope.launch {
@@ -176,7 +203,9 @@ private fun App(
                     }
                 },
                 // Étapes nommées + pourcentage global du chargement (#4).
-                progress = vm.progress
+                progress = vm.progress,
+                // « Fermer le projet » pendant la lecture : chargement annulé, accueil.
+                onCancelLoading = { vm.reset() }
             )
         is SceneViewModel.UiState.Loaded ->
             SceneScreen(

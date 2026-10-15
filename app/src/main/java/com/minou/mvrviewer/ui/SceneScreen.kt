@@ -39,8 +39,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class SceneMode { THREE_D, PLAN, PATCH, GDTF_SHARE, UNIVERSE, CABLING, MA_LIBRARY }
-
 /**
  * Compteur incrémenté à chaque RETOUR du réseau (réseau par défaut disponible) : sert de
  * clé pour retenter les téléchargements de 3D en échec « hors ligne » (salle sans réseau).
@@ -65,9 +63,15 @@ private fun rememberNetworkEpoch(): Int {
 
 /**
  * Hôte d'un .mvr ouvert. Comme iOS, la **vue 3D est l'écran principal** ; la
- * vue plan et la liste de patch s'atteignent depuis le menu d'options (⋯). Les
- * réglages d'affichage (fond, couleurs par calque, étiquettes) sont partagés
- * entre les vues.
+ * vue plan s'atteint depuis le menu d'options (⋯). Les réglages d'affichage
+ * (fond, couleurs par calque, étiquettes) sont partagés entre les vues.
+ *
+ * NAVIGATION (SPEC-menus-android §1.3, §4.1) : une VUE DE BASE (3D ou plan) et
+ * au plus UNE DESTINATION (Patch, Univers, Câblage, Calques, Modèles de
+ * projecteurs, Bibliothèque MA, Compte & réglages, Partager, Historique) posée
+ * PAR-DESSUS, la vue de base restant composée dessous : la fermer rend la 3D ou
+ * le plan intacts (caméra, zoom, sélection, outils). [open] est le seul point
+ * d'entrée ; les décisions passent par [SceneNav.reduce] (pur, testé).
  */
 @Composable
 fun SceneScreen(
@@ -89,12 +93,19 @@ fun SceneScreen(
     maInbox: MaInbox? = null
 ) {
     val ctx = LocalContext.current
-    // Vue SEMÉE depuis l'état persisté : on rouvre l'app sur la vue qu'on
-    // avait sous les yeux en la quittant (parité ViewStateStore iOS).
-    var mode by remember { mutableStateOf(ViewStateStore.mode(ctx)) }
+    // Vue de base SEMÉE depuis l'état persisté : on rouvre l'app sur la vue qu'on
+    // avait sous les yeux en la quittant (parité ViewStateStore iOS). Crochet
+    // DEBUG `MVR_AUTO_PLAN` : ouverture sur le plan.
+    var nav by remember {
+        mutableStateOf(SceneNavState(base = if (DebugHooks.takeAutoPlan()) SceneBase.PLAN else ViewStateStore.base(ctx)))
+    }
     // Fil d'Ariane pour le journal de diagnostic : on saura dans quelle vue
     // l'appli était juste avant un plantage/gel (ex. « vue plan »).
-    LaunchedEffect(mode) { com.minou.mvrviewer.CrashReporter.note("vue affichée : $mode ($fileName)") }
+    LaunchedEffect(nav.base, nav.destination?.id) {
+        com.minou.mvrviewer.CrashReporter.note(
+            "vue affichée : ${nav.base}${nav.destination?.let { " + ${it.id}" } ?: ""} ($fileName)"
+        )
+    }
     // Couleurs de fond semées depuis la préférence globale persistée, puis
     // ré-enregistrées à chaque changement (comme les @State + onChange iOS).
     val options = remember {
@@ -122,8 +133,7 @@ fun SceneScreen(
     // une app tuée doit quand même retrouver son écran). Un seul effet qui lit
     // tous les champs suivis : chaque changement le relance, l'écriture est
     // débouncée pour absorber les rafales (curseur d'opacité satellite).
-    LaunchedEffect(mode) { if (mode == SceneMode.THREE_D || mode == SceneMode.PLAN) {
-        withContext(Dispatchers.IO) { ViewStateStore.setMode(ctx, mode) } } }
+    LaunchedEffect(nav.base) { withContext(Dispatchers.IO) { ViewStateStore.setBase(ctx, nav.base) } }
     LaunchedEffect(options.layerColors, options.showLabels, options.showStructure,
                    options.showLegend, options.hideLabelsWhenZoomedOut,
                    options.labelFields, options.labelDetached,
@@ -156,11 +166,6 @@ fun SceneScreen(
     // ouverture de l'écran, état `maLibrary` reçu en paramètre) + cache 3D des types
     // « profil MA + 3D choisie ».
     val fixture3DStore = remember { Fixture3DStore.of(ctx) }
-    // Profil REÇU (« Ouvrir avec », partage) : la bibliothèque s'ouvre PAR-DESSUS le show,
-    // qui reste ouvert ; l'import démarre aussitôt (SPEC-ma-gdtfshare.md §5.1).
-    if (maInbox != null) LaunchedEffect(maInbox.batches.size) {
-        if (!maInbox.isEmpty) mode = SceneMode.MA_LIBRARY
-    }
     // Dernière sélection de projecteurs (clés d'INSTANCE) en 3D ou en plan — sert à
     // « Enregistrer et affecter à la sélection » depuis la bibliothèque MA.
     var selectionKeys by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -200,7 +205,6 @@ fun SceneScreen(
     // (une classe traverse les calques). Réglage d'AFFICHAGE LOCAL, persisté par
     // projet, volontairement HORS synchro (comme le LOD par calque).
     var hiddenClasses by remember(projectKey) { mutableStateOf<Set<String>>(emptySet()) }
-    var showClasses by remember { mutableStateOf(false) }
     // Liste des classes + effectifs : `classCounts()` parcourt TOUS les objets
     // (11 000+ sur un gros show) — mémoïsé par scène, jamais recalculé au fil des
     // recompositions.
@@ -259,16 +263,48 @@ fun SceneScreen(
         }
         CablingVoieNavigator.neighbor(t.voie, step, order)?.let { setAssignVoie(it) }
     }
-    // « Terminé » (barre, flèche du plan, retour système) : quitte le mode et
-    // rouvre l'écran Câblage SUR LA DERNIÈRE VOIE ACTIVE (bon onglet, voie mise
-    // sous les yeux et surlignée une fois).
-    fun finishAssign() {
-        assignTarget = null
-        mode = SceneMode.CABLING
+    // PAS UNIQUE d'écriture de la navigation : réducteur pur (SceneNav), puis
+    // effets. Une affectation désarmée par le réducteur (plan quitté par un autre
+    // chemin, « Terminé », ←, croix) efface TOUJOURS la cible — sinon une
+    // réouverture normale du plan en hériterait.
+    fun navigate(e: SceneNavEvent) {
+        val r = SceneNav.reduce(nav, e)
+        nav = r.state
+        if (!r.state.assigning) assignTarget = null
+        if (r.closeProject) onClose()
     }
-    // Le plan quitté par un autre chemin (menu, autre vue) : le mode affectation
-    // est TOUJOURS désarmé — sinon une réouverture normale hériterait de la cible.
-    LaunchedEffect(mode) { if (mode != SceneMode.PLAN) assignTarget = null }
+    /** SEUL point d'entrée des destinations : menus, outils ancrés, crochets, profil MA reçu. */
+    fun open(dest: ProjectDestination, from: ProjectSurface = nav.base.surface) =
+        navigate(SceneNavEvent.Open(dest, from))
+    fun closeDestination() = navigate(SceneNavEvent.Close)
+    fun showBase(b: SceneBase) = navigate(SceneNavEvent.ShowBase(b))
+    // « Terminé » de la barre d'affectation : quitte le mode et rouvre l'écran
+    // Câblage SUR LA DERNIÈRE VOIE ACTIVE (bon onglet, voie mise sous les yeux et
+    // surlignée une fois) — par-dessus le plan si le Câblage avait été ouvert
+    // depuis le plan, sur la 3D sinon (CablingAssignRoute, SPEC-menus-android §4.3).
+    fun finishAssign() = navigate(SceneNavEvent.Cabling(CablingAssignEvent.BAR_DONE))
+    // LANCEMENT DU PLAN (PlanStartAction, §4.2) : une demande à usage unique,
+    // prise par le plan à son apparition. Les calibrations sont Pro : garde AVANT
+    // l'ouverture du plan.
+    val planStart = remember { PlanStartRequest() }
+    var planStartTick by remember { mutableIntStateOf(0) }
+    fun openPlanWith(a: PlanStartAction) {
+        val go = { planStart.post(a); planStartTick++; showBase(SceneBase.PLAN) }
+        if (PlanStartAction.needsPro(a)) ProAccess.gate("calibrer la position GPS") { go() } else go()
+    }
+    // Profil REÇU (« Ouvrir avec », partage) : la bibliothèque s'ouvre PAR-DESSUS la
+    // vue courante, le show reste ouvert ; l'import démarre aussitôt (SPEC-ma-gdtfshare.md §5.1).
+    if (maInbox != null) LaunchedEffect(maInbox.batches.size) {
+        if (!maInbox.isEmpty) open(ProjectDestination.MaLibrary)
+    }
+    // Crochets DEBUG (SPEC-menus-android §4.7), pris une fois à l'ouverture du show.
+    LaunchedEffect(Unit) {
+        val start = DebugHooks.takeAutoPlanStart()
+        if (start != PlanStartAction.NONE) openPlanWith(start)
+        val dest = DebugHooks.takeAutoDest() ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(2000)
+        open(dest)
+    }
     var lastHiddenSig by remember(projectKey) { mutableStateOf("") }
     fun hiddenSig(s: Set<String>) = AuditCoding.encodeLayers(s)
     LaunchedEffect(projectKey) {
@@ -1030,38 +1066,40 @@ fun SceneScreen(
         }
     }
 
-    // Dialogues de synchro.
-    var showAccount by remember { mutableStateOf(false) }
-    var showShare by remember { mutableStateOf(false) }
-    var showHistory by remember { mutableStateOf(false) }
+    // « Rejoindre un projet » (ancien ⋯, jusqu'à la tranche C ; l'accueil le garde).
     var showJoin by remember { mutableStateOf(false) }
 
-    // N8 — Gestion du bouton/geste RETOUR système : reculer DANS l'appli au lieu
-    // de la réduire. Les BackHandler sont évalués du DERNIER composé au premier
-    // (le dernier actif gagne), donc on les pose du cas le moins prioritaire au
-    // plus prioritaire :
-    //   1. Vue 3D (racine de la scène) → fermer le projet, retour à l'Accueil.
-    //   2. Sous-vue (plan/patch/GDTF/univers/câblage) → revenir à la vue 3D.
-    //   3. Un dialogue de synchro ouvert → le fermer d'abord (priorité maximale).
-    // L'Accueil (HomeScreen) n'a AUCUN handler : seul lui laisse l'OS réduire l'appli.
-    BackHandler(enabled = mode == SceneMode.THREE_D) { onClose() }
-    // Retour matériel depuis une sous-vue → 3D, et sortie du mode affectation (E2).
-    // Pendant une AFFECTATION sur le plan, le retour vaut « Terminé » : retour à
-    // l'écran Câblage sur la dernière voie (SPEC-cablage-plan §2.3).
-    BackHandler(enabled = mode != SceneMode.THREE_D) {
-        if (mode == SceneMode.PLAN && assignTarget != null) finishAssign()
-        else { assignTarget = null; mode = SceneMode.THREE_D }
-    }
-    BackHandler(enabled = showAccount || showShare || showHistory || showJoin) {
-        showAccount = false; showShare = false; showHistory = false; showJoin = false
+    // Calques du show + nombre d'objets pour la feuille « Calques », figés par
+    // scène (on évite de reconstruire les paires à chaque recomposition).
+    val layerRows = remember(visibleScene) {
+        val idx = LayerColors.index(visibleScene)
+        visibleScene.layers.map { LayerRow(it.name, it.objects.size, LayerColors.colorInt(idx, it.name)) }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-    when (mode) {
-        SceneMode.THREE_D -> Scene3DScreen(
+    // N8 — RETOUR système : reculer DANS l'appli au lieu de la réduire. Au niveau
+    // de la scène, une seule règle (SceneNav, SystemBack) : plan en affectation →
+    // le Câblage rouvre ; plan → 3D ; 3D → fermer le projet (accueil). Les écrans
+    // pleins posent leur propre retour (FullScreenDestination, composé APRÈS la
+    // vue de base, donc prioritaire) ; leurs sous-volets, le leur (encore après) ;
+    // dialogues et feuilles reçoivent le retour eux-mêmes. L'accueil (HomeScreen)
+    // n'a AUCUN handler : seul lui laisse l'OS réduire l'appli.
+    BackHandler { navigate(SceneNavEvent.SystemBack) }
+    BackHandler(enabled = showJoin) { showJoin = false }
+
+    // Un écran plein OPAQUE recouvre la vue de base : 3D en pause de rendu, vue de
+    // base muette pour l'accessibilité.
+    val coveredByScreen = nav.destination?.fullScreen == true
+
+    Box(modifier = modifier.fillMaxSize()) {
+    SceneBaseLayer(covered = coveredByScreen) {
+    when (nav.base) {
+        SceneBase.THREE_D -> Scene3DScreen(
             scene = visibleScene,
             mvrBytes = mvrBytes,
-            onShowClasses = if (classRows.isEmpty()) null else ({ showClasses = true }),
+            onShowClasses = if (classRows.isEmpty()) null else ({ open(ProjectDestination.Layers(LayersTab.CLASSES)) }),
+            onShowLayers = { open(ProjectDestination.Layers(LayersTab.LAYERS)) },
+            // Sous un écran plein (Patch, Câblage…), la boucle de rendu 3D attend.
+            renderPaused = coveredByScreen,
             initialModelUri = initialModelUri,
             onInitialModelConsumed = onInitialModelConsumed,
             options = options,
@@ -1100,14 +1138,19 @@ fun SceneScreen(
             // en 3D (mêmes tables que la vue plan).
             cabling = cabling,
             dmxCabling = dmxCabling,
-            onShowPlan = { mode = SceneMode.PLAN },
-            onShowPatch = { mode = SceneMode.PATCH },
-            onShowGdtfShare = { mode = SceneMode.GDTF_SHARE },
-            onShowUniverse = { mode = SceneMode.UNIVERSE },
-            onShowCabling = { mode = SceneMode.CABLING },
-            onShowAccount = sync?.let { { showAccount = true } },
-            onShareProject = sync?.let { { ProAccess.gate("partager un projet") { showShare = true } } },
-            onShowHistory = sync?.let { { showHistory = true } },
+            onShowPlan = { showBase(SceneBase.PLAN) },
+            onShowPatch = { open(ProjectDestination.PatchList) },
+            // Outil `gdtfShare` et entrée « GDTF Share (modèles 3D) » : l'écran
+            // « Modèles de projecteurs » (libellés inchangés jusqu'aux tranches C / E).
+            onShowGdtfShare = { open(ProjectDestination.FixtureModels) },
+            onShowUniverse = { open(ProjectDestination.Universe) },
+            onShowCabling = { open(ProjectDestination.Cabling(null)) },
+            // « Compte & réglages » : toujours disponible (Pro et GDTF Share y vivent aussi).
+            onShowAccount = { open(ProjectDestination.AccountSettings) },
+            // Ouvrir « Partager » est gratuit : la garde Pro reste à la PUBLICATION
+            // (SyncViewModel.publishCurrentProject) — SPEC-menus-android §1.2.
+            onShareProject = sync?.let { { open(ProjectDestination.ShareProject) } },
+            onShowHistory = sync?.let { { open(ProjectDestination.History) } },
             onJoinProject = sync?.let { { showJoin = true } },
             // Solo partagé avec la vue plan (survit aux bascules 3D ↔ plan).
             soloElements = soloElements,
@@ -1126,14 +1169,17 @@ fun SceneScreen(
             // Bibliothèque MA : objets 3D statiques des types MA + sélection remontée.
             fixture3DStore = fixture3DStore,
             onSelectionChanged = { selectionKeys = it },
-            onShowMaLibrary = { mode = SceneMode.MA_LIBRARY },
-            onClose = onClose,
-            modifier = modifier
+            onShowMaLibrary = { open(ProjectDestination.MaLibrary) },
+            onClose = onClose
         )
-        SceneMode.PLAN -> PlanScreen(
+        SceneBase.PLAN -> PlanScreen(
             scene = visibleScene,
             mvrBytes = mvrBytes,
-            onShowClasses = if (classRows.isEmpty()) null else ({ showClasses = true }),
+            onShowClasses = if (classRows.isEmpty()) null else ({ open(ProjectDestination.Layers(LayersTab.CLASSES)) }),
+            onShowLayers = { open(ProjectDestination.Layers(LayersTab.LAYERS)) },
+            // Lancement du plan (export PDF, 3 points, « je suis ici ») : demande à usage unique.
+            startTick = planStartTick,
+            takeStartAction = { planStart.take() },
             options = options,
             hiddenElements = hiddenElements,
             onSetHiddenElements = { hiddenElements = it },
@@ -1213,121 +1259,149 @@ fun SceneScreen(
             assignTarget = assignTarget,
             onAssignDone = { finishAssign() },
             onStepAssign = { stepAssign(it) },
-            onExitAssign = { assignTarget = null },
+            onExitAssign = { navigate(SceneNavEvent.Cabling(CablingAssignEvent.EXIT_ASSIGN)) },
             power = power,
             customResolver = customResolver,
-            onShow3D = { assignTarget = null; mode = SceneMode.THREE_D },
-            onShowAccount = sync?.let { { showAccount = true } },
-            onShareProject = sync?.let { { ProAccess.gate("partager un projet") { showShare = true } } },
-            onShowHistory = sync?.let { { showHistory = true } },
+            // « Vue 3D » : désarme une affectation et ferme le plan, SANS rouvrir le Câblage.
+            onShow3D = { navigate(SceneNavEvent.Cabling(CablingAssignEvent.VIEW_3D)) },
+            onShowAccount = { open(ProjectDestination.AccountSettings) },
+            onShareProject = sync?.let { { open(ProjectDestination.ShareProject) } },
+            onShowHistory = sync?.let { { open(ProjectDestination.History) } },
             onJoinProject = sync?.let { { showJoin = true } },
             // Flèche haut-gauche : pendant une affectation, elle vaut « Terminé »
-            // (retour à l'écran Câblage) ; sinon retour à la 3D.
-            onBack = { if (assignTarget != null) finishAssign() else mode = SceneMode.THREE_D },
-            onShowPatch = { mode = SceneMode.PATCH },
+            // (le plan se ferme, le Câblage rouvre) ; sinon retour à la 3D.
+            onBack = {
+                navigate(if (assignTarget != null) SceneNavEvent.Cabling(CablingAssignEvent.BACK)
+                         else SceneNavEvent.ShowBase(SceneBase.THREE_D))
+            },
+            onShowPatch = { open(ProjectDestination.PatchList) },
             // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
             onEditFixture = { editFixture = it },
             // N11 — disposition des barres d'outils plan (persistée globalement).
             toolbarLayout = layoutPlan,
             onLayoutChange = { layoutPlan = it },
             // Bibliothèque MA : entrée de menu + sélection remontée (affectation).
-            onShowMaLibrary = { mode = SceneMode.MA_LIBRARY },
-            onSelectionChanged = { selectionKeys = it },
-            modifier = modifier
+            onShowMaLibrary = { open(ProjectDestination.MaLibrary) },
+            onSelectionChanged = { selectionKeys = it }
         )
-        SceneMode.PATCH -> PatchListScreen(
-            // La liste de patch REFLÈTE le masquage par classes, comme iOS.
-            // Univers/Câblage/GDTF Share restent volontairement sur la scène
-            // COMPLÈTE : ils référencent des instances (affectations soca,
-            // lignes DMX) — masquer une classe ne doit pas faire disparaître
-            // des affectations existantes.
-            scene = visibleScene,
-            mvrBytes = mvrBytes,
-            overrides = overrides,
-            power = power,
-            gdtfOverrides = gdtfOverrides,
-            customLibrary = customLibrary,
-            customResolver = customResolver,
-            onBack = { mode = SceneMode.THREE_D },
-            modifier = modifier
-        )
-        SceneMode.MA_LIBRARY -> MaLibraryScreen(
-            state = maLibrary,
-            scene = scene,
-            mvrBytes = mvrBytes,
-            gdtfOverrides = gdtfOverrides,
-            customLibrary = customLibrary,
-            customResolver = customResolver,
-            fixture3DStore = fixture3DStore,
-            sharedProjectOpen = sync?.isCurrentProjectShared == true && curProject?.value != null,
-            selectionCount = run {
-                val keys = selectionKeys.toSet()
-                scene.fixtures.count { overrides.key(it) in keys }
-            },
-            onSaveType = { t, assign -> saveMaType(t, assign) },
-            onCustomLibraryChanged = { scope.launch { syncCustomFixtures() } },
-            onBack = { mode = SceneMode.THREE_D },
-            modifier = modifier,
-            inbox = maInbox
-        )
-        SceneMode.GDTF_SHARE -> GdtfShareScreen(
-            scene = scene,
-            mvrBytes = mvrBytes,
-            overrides = gdtfOverrides,
-            onBack = { mode = SceneMode.THREE_D },
-            modifier = modifier
-        )
-        SceneMode.UNIVERSE -> DmxUniverseScreen(
-            scene = scene,
-            mvrBytes = mvrBytes,
-            overrides = gdtfOverrides,
-            // Overrides de patch : NOM effectif des projecteurs dans la vue Univers.
-            patchOverrides = overrides,
-            // Projecteurs custom V1 : empreinte + noms de canaux du type.
-            customResolver = customResolver,
-            onBack = { mode = SceneMode.THREE_D },
-            modifier = modifier
-        )
-        SceneMode.CABLING -> CablingScreen(
-            scene = scene,
-            mvrBytes = mvrBytes,
-            overrides = overrides,
-            gdtfOverrides = gdtfOverrides,
-            power = power,
-            cabling = cabling,
-            dmxCabling = dmxCabling,
-            // Projecteurs custom V1 : empreinte DMX + puissance résolues via le type.
-            customResolver = customResolver,
-            // Pages « Plans repérés » de l'export PDF : mêmes données que la vue plan
-            // (plan de repère DXF, satellite géo-référencé, calques masqués), hissées
-            // ici pour survivre aux bascules 3D ↔ plan.
-            referencePlan = referencePlan,
-            satellite = satellite,
-            hiddenLayers = hiddenLayers,
-            // AFFECTATION SUR LE PLAN (E2) : un « Sélectionner sur le plan » sur un
-            // circuit / départ bascule en vue plan MODE AFFECTATION vers cette cible.
-            onSelectOnPlan = { t -> setAssignVoie(t.voie); mode = SceneMode.PLAN },
-            memory = cablingMemory,
-            onBack = { mode = SceneMode.THREE_D },
-            modifier = modifier
-        )
-    } // when(mode)
+    } // when(nav.base)
+    } // SceneBaseLayer
 
-        // Panneau des CLASSES — rendu ICI, hors du `when(mode)` : le filtre vaut
-        // pour la 3D ET pour le plan, il doit donc rester ouvert quel que soit le
-        // mode (et survivre à une bascule entre les deux).
-        if (showClasses) {
-            ClassesSheet(
-                classes = classRows,
-                hidden = hiddenClasses,
-                onToggle = { name ->
-                    hiddenClasses =
-                        if (name in hiddenClasses) hiddenClasses - name else hiddenClasses + name
+        // ---- DESTINATIONS (SPEC-menus-android §3.10) : par-dessus la vue de base,
+        // qui reste composée dessous et se retrouve INTACTE à la fermeture. ----
+        val dest = nav.destination
+        // Bibliothèque MA : destination (profil reçu, crochet, ancienne entrée du ⋯)
+        // OU sous-volet de « Modèles de projecteurs » — un seul constructeur.
+        val maLibraryContent: @Composable (onBack: () -> Unit) -> Unit = { back ->
+            MaLibraryScreen(
+                state = maLibrary,
+                scene = scene,
+                mvrBytes = mvrBytes,
+                gdtfOverrides = gdtfOverrides,
+                customLibrary = customLibrary,
+                customResolver = customResolver,
+                fixture3DStore = fixture3DStore,
+                sharedProjectOpen = sync?.isCurrentProjectShared == true && curProject?.value != null,
+                selectionCount = run {
+                    val keys = selectionKeys.toSet()
+                    scene.fixtures.count { overrides.key(it) in keys }
                 },
-                onSetAll = { hideAll ->
+                onSaveType = { t, assign -> saveMaType(t, assign) },
+                onCustomLibraryChanged = { scope.launch { syncCustomFixtures() } },
+                onBack = back,
+                inbox = maInbox
+            )
+        }
+        if (dest != null && dest.fullScreen) FullScreenDestination(dest, onClose = { closeDestination() }) {
+            when (dest) {
+                ProjectDestination.PatchList -> PatchListScreen(
+                    // La liste de patch REFLÈTE le masquage par classes, comme iOS.
+                    // Univers/Câblage/Modèles restent volontairement sur la scène
+                    // COMPLÈTE : ils référencent des instances (affectations soca,
+                    // lignes DMX) — masquer une classe ne doit pas faire disparaître
+                    // des affectations existantes.
+                    scene = visibleScene,
+                    mvrBytes = mvrBytes,
+                    overrides = overrides,
+                    power = power,
+                    gdtfOverrides = gdtfOverrides,
+                    customLibrary = customLibrary,
+                    customResolver = customResolver,
+                    onBack = { closeDestination() }
+                )
+                ProjectDestination.MaLibrary -> maLibraryContent { closeDestination() }
+                ProjectDestination.FixtureModels -> FixtureModelsScreen(
+                    scene = scene,
+                    mvrBytes = mvrBytes,
+                    overrides = gdtfOverrides,
+                    onBack = { closeDestination() },
+                    maLibraryPane = maLibraryContent
+                )
+                ProjectDestination.Universe -> DmxUniverseScreen(
+                    scene = scene,
+                    mvrBytes = mvrBytes,
+                    overrides = gdtfOverrides,
+                    // Overrides de patch : NOM effectif des projecteurs dans la vue Univers.
+                    patchOverrides = overrides,
+                    // Projecteurs custom V1 : empreinte + noms de canaux du type.
+                    customResolver = customResolver,
+                    onBack = { closeDestination() }
+                )
+                is ProjectDestination.Cabling -> CablingScreen(
+                    scene = scene,
+                    mvrBytes = mvrBytes,
+                    overrides = overrides,
+                    gdtfOverrides = gdtfOverrides,
+                    power = power,
+                    cabling = cabling,
+                    dmxCabling = dmxCabling,
+                    // Projecteurs custom V1 : empreinte DMX + puissance résolues via le type.
+                    customResolver = customResolver,
+                    // Pages « Plans repérés » de l'export PDF : mêmes données que la vue plan
+                    // (plan de repère DXF, satellite géo-référencé, calques masqués), hissées
+                    // ici pour survivre aux bascules 3D ↔ plan.
+                    referencePlan = referencePlan,
+                    satellite = satellite,
+                    hiddenLayers = hiddenLayers,
+                    // AFFECTATION SUR LE PLAN (E2) : « Sélectionner sur le plan » sur un
+                    // circuit / départ ferme le Câblage et arme l'affectation sur le plan
+                    // (ouvert s'il ne l'était pas, sinon le plan déjà là — §4.3).
+                    onSelectOnPlan = { t -> setAssignVoie(t.voie); navigate(SceneNavEvent.Cabling(CablingAssignEvent.SELECT_ON_PLAN)) },
+                    memory = cablingMemory,
+                    initialTab = dest.tab,
+                    onBack = { closeDestination() }
+                )
+                ProjectDestination.AccountSettings -> AccountSettingsScreen(
+                    sync = sync,
+                    onBack = { closeDestination() }
+                )
+                else -> {}
+            }
+        }
+
+        // Feuille « Calques » (fusion Calques + Classes) : par-dessus la vue de base,
+        // qui reste visible autour. Depuis le plan : sans le réglage LOD (D10).
+        if (dest is ProjectDestination.Layers) {
+            LayersSheet(
+                initialTab = dest.tab,
+                layers = layerRows,
+                lod = if (!LayersSheetTabs.showsLod(nav.base.surface)) null else LayerLodControls(
+                    modes = layerLod,
+                    onSetMode = { layer, m ->
+                        // « Auto » = absence de clé → un projet neuf reste neutre.
+                        layerLod = if (m == LayerLodMode.AUTO) layerLod - layer else layerLod + (layer to m)
+                    },
+                    onResetAll = { layerLod = emptyMap() }
+                ),
+                classes = classRows,
+                hiddenClasses = hiddenClasses,
+                onToggleClass = { name ->
+                    hiddenClasses = if (name in hiddenClasses) hiddenClasses - name else hiddenClasses + name
+                },
+                onSetAllClasses = { hideAll ->
                     hiddenClasses = if (hideAll) classRows.map { it.first }.toSet() else emptySet()
                 },
-                onDismiss = { showClasses = false }
+                onDismiss = { closeDestination() }
             )
         }
 
@@ -1344,15 +1418,16 @@ fun SceneScreen(
                 }
             }
             // Pastille de statut seule (les actions compte/partage/historique/
-            // rejoindre vivent dans le menu ⋯, pas dans un bouton flottant).
-            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
+            // rejoindre vivent dans le menu ⋯, pas dans un bouton flottant). Les écrans
+            // pleins, opaques, la cachent : elle se relit en les fermant (§3.5).
+            if (!coveredByScreen) Box(modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
                 SyncStatusBadge(sync)
             }
 
-            if (showAccount) AccountDialog(sync) { showAccount = false }
-            if (showShare) ShareProjectDialog(sync, fileName, onDismiss = { showShare = false },
+            if (dest == ProjectDestination.ShareProject) ShareProjectDialog(sync, fileName,
+                onDismiss = { closeDestination() },
                 onPublished = { scope.launch { pushAllLocalState() } })
-            if (showHistory) HistoryDialog(sync, onUndo = { e -> undoAudit(e) }) { showHistory = false }
+            if (dest == ProjectDestination.History) HistoryDialog(sync, onUndo = { e -> undoAudit(e) }) { closeDestination() }
             if (showJoin) JoinProjectDialog(sync, onDismiss = { showJoin = false }) { project ->
                 scope.launch {
                     runCatching { sync.downloadMvr(project) }.getOrNull()?.let {

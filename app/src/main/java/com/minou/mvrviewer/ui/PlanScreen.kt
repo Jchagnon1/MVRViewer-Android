@@ -137,6 +137,16 @@ fun PlanScreen(
     hiddenLayers: Set<String> = emptySet(),
     /** Ouvre le panneau « Classes… ». null = ce fichier n'a aucune classe. */
     onShowClasses: (() -> Unit)? = null,
+    /** Ouvre la feuille « Calques » (sans réglage LOD depuis le plan, D10). */
+    onShowLayers: (() -> Unit)? = null,
+    /**
+     * Action à lancer à l'APPARITION du plan (export PDF, calibration 3 points,
+     * « je suis ici ») — SPEC-menus-android §4.2. [takeStartAction] la rend UNE
+     * fois (puis NONE, cf. [PlanStartRequest]) ; [startTick] change à chaque
+     * demande, pour une demande faite alors que le plan est déjà affiché.
+     */
+    startTick: Int = 0,
+    takeStartAction: () -> PlanStartAction = { PlanStartAction.NONE },
     onToggleLayer: (String) -> Unit = {},
     /**
      * Éléments MVR masqués, par IDENTITÉ D'INSTANCE (cf. mvrInstanceKey) —
@@ -1176,6 +1186,23 @@ fun PlanScreen(
             onInvoke = { showBackgroundDialog = true }, inMenu = false))
     }
 
+    // LANCEMENT DU PLAN (PlanStartAction) : pris UNE fois à l'apparition (ou à une
+    // nouvelle demande) — une recomposition ne le relance jamais. La
+    // garde Pro des calibrations est faite AVANT l'ouverture du plan. Posé après
+    // la relecture de « Ma position » (effet plus haut) : « je suis ici » allume
+    // la position par-dessus la valeur relue.
+    LaunchedEffect(startTick) {
+        when (takeStartAction()) {
+            PlanStartAction.EXPORT_PDF -> exportMode = true
+            PlanStartAction.THREE_POINT -> if (cal3Session == null && !cal3Starting) startThreePoint()
+            PlanStartAction.HERE_ANCHOR -> {
+                showLocation = true
+                if (!calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
+            }
+            PlanStartAction.NONE -> {}
+        }
+    }
+
     // CADRAGE en mode affectation : au premier affichage de la barre (une fois
     // qu'elle est mesurée), le plan est recadré AU-DESSUS d'elle — la hauteur
     // qu'elle occupe en bas est retirée de la zone de cadrage, bornée à 60 %.
@@ -2082,6 +2109,7 @@ fun PlanScreen(
                 onShowAccount = onShowAccount, onShareProject = onShareProject,
                 onShowHistory = onShowHistory, onJoinProject = onJoinProject,
                 onShowClasses = onShowClasses,
+                onShowLayers = onShowLayers,
                 // Outils de la vue plan exposés DANS le menu (N10) : dérivés de la
                 // MÊME description unifiée que les barres (toolsPlan) → plus de
                 // duplication. Mêmes actions, mêmes bascules, mêmes conditions.

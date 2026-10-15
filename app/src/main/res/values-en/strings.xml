@@ -147,7 +147,6 @@
     <string name="color_white">White</string>
     <string name="common_apply">Apply</string>
     <string name="common_back">Back</string>
-    <string name="common_back_3d">Back to 3D</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_choose">Choose…</string>
     <string name="common_clear">Clear</string>
@@ -251,7 +250,6 @@
     <string name="gap_near">near</string>
     <string name="gap_normal">normal</string>
     <string name="gdtf_connected">Connected.</string>
-    <string name="gdtf_connected_to_share">Connected to GDTF Share.</string>
     <string name="gdtf_connecting">Connecting…</string>
     <string name="gdtf_download_failed">Download failed.</string>
     <string name="gdtf_err_connect">Could not connect to gdtf-share.com. Check your Internet connection.</string>
@@ -283,7 +281,6 @@
     <string name="gdtf_type_status_fmt">%1$d fixture(s) · %2$s</string>
     <string name="gdtf_username">Username / e-mail</string>
     <string name="home_members_version">%1$d member(s) · v%2$d</string>
-    <string name="home_my_account">My account</string>
     <string name="home_open_mvr">Open an .mvr file</string>
     <string name="home_recent_projects">Recent projects</string>
     <string name="home_send_diag">Send the diagnostic report</string>
@@ -301,13 +298,14 @@
     <string name="layers_all_auto">All to Auto</string>
     <string name="layers_lod_help">Level of detail shown while navigating. Affects navigation only (during camera gestures): everything reappears once you stop.</string>
     <string name="layers_none">This show declares no layers.</string>
-    <string name="layers_title_3d">Layers · 3D view</string>
     <string name="layers_hide_all">Hide all</string>
     <string name="layers_show_all">Show all</string>
     <string name="classes_title">Classes</string>
     <string name="classes_help">Vectorworks classes in this file. A class spans layers: both filters combine.</string>
-    <string name="classes_none">This file declares no Vectorworks class.</string>
-    <string name="classes_objects_fmt">%1$d objects</string>
+    <plurals name="classes_objects">
+        <item quantity="one">%1$d object</item>
+        <item quantity="other">%1$d objects</item>
+    </plurals>
     <string name="tool_classes">Classes…</string>
     <string name="legend_more_fmt">+%1$d more</string>
     <string name="legend_more_layers_fmt">+%1$d more layer(s)</string>
@@ -351,7 +349,6 @@
     <string name="model_reset_placement">Reset the placement</string>
     <string name="model_too_many_fmt">Too many imported models (%1$d maximum).</string>
     <string name="mvr_err_no_scene_xml">GeneralSceneDescription.xml not found in the .mvr file.</string>
-    <string name="nav_account">Account</string>
     <string name="nav_custom_color">Custom…</string>
     <string name="nav_customize_toolbar">Customize the toolbar…</string>
     <string name="nav_dmx_universe">DMX universes</string>
@@ -499,7 +496,6 @@
     <string name="sync_share_message_fmt">Join my MVRViewer project with the code: %1$s  (mvrviewer://join/%2$s)</string>
     <string name="sync_share_project_title">Share the project</string>
     <string name="sync_shared">Shared</string>
-    <string name="sync_sign_in_title">Sign in</string>
     <string name="sync_sign_in_to_join">Sign in first to join a project.</string>
     <string name="sync_sign_in_to_share">Sign in first to share this project.</string>
     <string name="sync_sign_out">Sign out</string>
@@ -739,4 +735,25 @@
         <item quantity="one">%1$d channel</item>
         <item quantity="other">%1$d channels</item>
     </plurals>
+
+    <!-- Rangement des menus, tranche A (SPEC-menus-android §7.1) : Compte &amp; réglages, Modèles de projecteurs, Calques, sorties. -->
+    <string name="menu_close_project">Close the project</string>
+    <string name="menu_account_settings">Account &amp; settings…</string>
+    <string name="account_settings_title">Account &amp; settings</string>
+    <string name="account_section_account">Account</string>
+    <string name="account_section_services">Services</string>
+    <string name="account_signed_in">Signed in</string>
+    <string name="account_not_signed_in">Not signed in</string>
+    <string name="pro_section_title">MVR Viewer Pro</string>
+    <string name="pro_active">Pro version active — editing unlocked</string>
+    <string name="pro_pitch">Reading is free; editing (patch, cabling, imports…) requires Pro.</string>
+    <string name="pro_unlock">Unlock Pro</string>
+    <string name="pro_restore">Restore a purchase</string>
+    <string name="home_account_prompt_title">Create your account (free)</string>
+    <string name="home_account_prompt_body">It\'s how you receive projects shared by your crew chief, with their changes live. Reading is free; only editing requires Pro.</string>
+    <string name="home_account_prompt_action">Create an account or sign in…</string>
+    <string name="models_title">Fixture models</string>
+    <string name="models_gdtf_signed_in">GDTF Share: signed in</string>
+    <string name="models_gdtf_sign_in">Sign in to GDTF Share…</string>
+    <string name="layers_title">Layers</string>
 </resources>

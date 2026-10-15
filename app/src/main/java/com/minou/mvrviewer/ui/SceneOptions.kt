@@ -311,7 +311,8 @@ fun SceneOptionsMenu(
             Text(stringResource(R.string.menu_section_sync), style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF888888),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
-            onShowAccount?.let { nav(stringResource(R.string.nav_account), Icons.Filled.AccountCircle) { open = false; it() } }
+            // « Compte & réglages… » (compte, Pro, GDTF Share) — écran plein (SPEC-menus-android §3.11).
+            onShowAccount?.let { nav(stringResource(R.string.menu_account_settings), Icons.Filled.AccountCircle) { open = false; it() } }
             onShareProject?.let { nav(stringResource(R.string.nav_share_project), Icons.Filled.Share) { open = false; it() } }
             onShowHistory?.let { nav(stringResource(R.string.nav_history), Icons.Filled.History) { open = false; it() } }
             onJoinProject?.let { nav(stringResource(R.string.join_project), Icons.Filled.GroupAdd) { open = false; it() } }

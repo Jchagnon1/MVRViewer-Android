@@ -59,128 +59,8 @@ import com.minou.mvrviewer.R
  * piloté par le [SyncViewModel] partagé. Tout est no-op visuel si déconnecté.
  */
 
-// MARK: - Version Pro (état, déblocage, restauration) — même vocabulaire que
-// le paywall, au même endroit que le compte : c'est là qu'on cherche « ai-je
-// payé ? ».
-
-@Composable
-private fun ProAccountSection() {
-    // Bloc à l'écran : un refus de rattachement s'affiche ICI (pas d'alerte en
-    // double par-dessus, cf. ProAccess.setAccountLinkRefusal).
-    DisposableEffect(Unit) {
-        ProAccess.accountSectionShown(true)
-        onDispose { ProAccess.accountSectionShown(false) }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (ProAccess.isPro) {
-            Text("MVR Viewer Pro — édition débloquée", style = MaterialTheme.typography.titleSmall)
-        } else {
-            Text("MVR Viewer Pro", style = MaterialTheme.typography.titleSmall)
-            Text("La lecture est gratuite ; l'édition (patch, câblage, imports…) passe en Pro.",
-                style = MaterialTheme.typography.bodySmall)
-            androidx.compose.material3.TextButton(onClick = {
-                ProAccess.gate("débloquer l'édition") {}
-            }) { Text("Débloquer la version Pro") }
-        }
-        // Refus DÉFINITIF du rattachement de l'achat au compte, après un achat ou
-        // « Restaurer un achat » seulement (SPEC-purchase §6.4) ; rien sinon.
-        ProAccess.accountLinkMessage?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error)
-        }
-        androidx.compose.material3.TextButton(onClick = { ProAccess.restore() }) {
-            Text("Restaurer un achat")
-        }
-    }
-    androidx.compose.material3.HorizontalDivider()
-}
-
-// MARK: - Compte (connexion / inscription / déconnexion)
-
-@Composable
-fun AccountDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
-    val auth by sync.auth.collectAsState()
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var email by remember { mutableStateOf(auth.accountOrNull?.email ?: "") }
-    var password by remember { mutableStateOf("") }
-    var displayName by remember { mutableStateOf("") }
-    var isSignUp by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var showDelete by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(if (auth.isSignedIn) R.string.nav_account else if (isSignUp) R.string.sync_create_account else R.string.sync_sign_in_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                ProAccountSection()
-                val account = auth.accountOrNull
-                if (account != null) {
-                    Text(account.displayName, style = MaterialTheme.typography.titleMedium)
-                    Text(account.email, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(stringResource(R.string.sync_backend_fmt, sync.backendLabel), style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    // Suppression de compte (politique Google Play) : toujours
-                    // visible ici, JAMAIS derrière une garde Pro — c'est un droit.
-                    TextButton(
-                        onClick = { showDelete = true },
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                    ) { Text(stringResource(R.string.sync_delete_account)) }
-                } else {
-                    OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.sync_email)) },
-                        singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.sync_password)) },
-                        singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth())
-                    if (isSignUp) {
-                        OutlinedTextField(displayName, { displayName = it },
-                            label = { Text(stringResource(R.string.sync_display_name)) }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth())
-                    }
-                    Text(stringResource(R.string.sync_backend_fmt, sync.backendLabel), style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall) }
-            }
-        },
-        confirmButton = {
-            val account = auth.accountOrNull
-            if (account != null) {
-                TextButton(onClick = { sync.signOut(); onDismiss() }) { Text(stringResource(R.string.sync_sign_out)) }
-            } else {
-                TextButton(enabled = !busy && email.isNotBlank() && password.isNotBlank(), onClick = {
-                    busy = true; error = null
-                    scope.launch {
-                        try {
-                            if (isSignUp) sync.signUp(email.trim(), password, displayName.trim())
-                            else sync.signIn(email.trim(), password)
-                            onDismiss()
-                        } catch (e: Exception) { error = e.syncMessage(ctx) } finally { busy = false }
-                    }
-                }) { Text(stringResource(if (isSignUp) R.string.common_create else R.string.home_sign_in)) }
-            }
-        },
-        dismissButton = {
-            if (auth.accountOrNull == null) {
-                TextButton(onClick = { isSignUp = !isSignUp; error = null }) {
-                    Text(stringResource(if (isSignUp) R.string.sync_have_account else R.string.sync_create_account))
-                }
-            } else {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
-            }
-        }
-    )
-
-    if (showDelete) DeleteAccountDialog(
-        sync = sync,
-        onDismiss = { showDelete = false },
-        onDeleted = { showDelete = false; onDismiss() }
-    )
-}
+// MARK: - Compte : l'écran « Compte & réglages » (AccountSettingsScreen.kt)
+// remplace l'ancien dialogue AccountDialog (SPEC-menus-android §3.11).
 
 /**
  * Confirmation de suppression de compte : le mot de passe est re-saisi (le
@@ -188,7 +68,7 @@ fun AccountDialog(sync: SyncViewModel, onDismiss: () -> Unit) {
  * seul à la réussite. Verrouillé pendant l'opération (pas de double envoi).
  */
 @Composable
-private fun DeleteAccountDialog(sync: SyncViewModel, onDismiss: () -> Unit, onDeleted: () -> Unit) {
+internal fun DeleteAccountDialog(sync: SyncViewModel, onDismiss: () -> Unit, onDeleted: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }

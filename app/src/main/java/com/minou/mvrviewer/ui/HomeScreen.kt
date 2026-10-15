@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,10 +61,13 @@ fun HomeScreen(
     // Avancement NOMMÉ du chargement (#4). null → ancien indicateur indéterminé.
     progress: LoadProgress? = null,
     // Bibliothèque MA depuis l'accueil (comme iOS), sans show ouvert.
-    onOpenMaLibrary: () -> Unit = {}
+    onOpenMaLibrary: () -> Unit = {},
+    // « Compte & réglages » (écran plein hébergé par App) — SPEC-menus-android §3.11.
+    onOpenAccountSettings: () -> Unit = {},
+    // « Fermer le projet » pendant la lecture du .mvr (abandon sûr du chargement).
+    onCancelLoading: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
-    var showAccount by remember { mutableStateOf(false) }
     var showJoin by remember { mutableStateOf(false) }
     // Le MVR n'a pas de type MIME standard : on ouvre en "*/*".
     val picker = rememberLauncherForActivityResult(
@@ -110,6 +115,12 @@ fun HomeScreen(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                // Sortie pendant la lecture (iOS §11) : le chargement est annulé, son
+                // résultat ignoré (SceneViewModel.reset), retour à l'accueil.
+                OutlinedButton(
+                    onClick = onCancelLoading,
+                    modifier = Modifier.padding(top = 16.dp).testTag("loading.closeProject")
+                ) { Text(stringResource(R.string.menu_close_project)) }
             }
             else -> {
                 // ACTION PRINCIPALE = surface d'identité : jaune franc,
@@ -133,21 +144,27 @@ fun HomeScreen(
                 TextButton(onClick = onOpenMaLibrary, modifier = Modifier.padding(top = 4.dp)) {
                     Text(stringResource(R.string.ma_library))
                 }
-                // Synchro cloud : compte + rejoindre un projet partagé.
+                // INVITATION À CRÉER UN COMPTE — pour tout le monde, gratuit
+                // compris : c'est par le compte que l'équipe REÇOIT les projets
+                // partagés par le chef de chantier (Pro), avec ses modifications
+                // en direct. Lire est gratuit.
                 if (sync != null) {
                     val auth by sync.auth.collectAsState()
-                    // INVITATION À CRÉER UN COMPTE — pour tout le monde, gratuit
-                    // compris : c'est par le compte que l'équipe REÇOIT les
-                    // projets partagés par le chef de chantier (Pro), avec ses
-                    // modifications en direct. Lire est gratuit.
-                    if (!auth.isSignedIn) AccountPromptCard(onClick = { showAccount = true })
-                    Row(modifier = Modifier.padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { showAccount = true }) {
-                            Text(stringResource(if (auth.isSignedIn) R.string.home_my_account else R.string.home_sign_in))
-                        }
+                    if (!auth.isSignedIn) AccountPromptCard(onClick = onOpenAccountSettings)
+                }
+                // « Compte & réglages » (compte, Pro, GDTF Share) — toujours présent ;
+                // « Rejoindre un projet » reste sur l'accueil (synchro branchée).
+                Row(modifier = Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = onOpenAccountSettings, modifier = Modifier.testTag("home.accountSettings")) {
+                        Text(stringResource(R.string.account_settings_title))
+                    }
+                    if (sync != null) {
                         TextButton(onClick = { showJoin = true }) { Text(stringResource(R.string.join_project)) }
                     }
+                }
+                // Synchro cloud : projets partagés.
+                if (sync != null) {
                     // Projets partagés (cloud) : ouverts en un tap (comme iOS RootView).
                     val projects by sync.cloudProjects.collectAsState()
                     if (projects.isNotEmpty()) {
@@ -232,9 +249,8 @@ fun HomeScreen(
             }
         }
 
-        // Dialogues de synchro cloud (accueil).
+        // Dialogue de synchro cloud (accueil).
         if (sync != null) {
-            if (showAccount) AccountDialog(sync) { showAccount = false }
             if (showJoin) JoinProjectDialog(sync, onDismiss = { showJoin = false }) { project ->
                 onOpenCloudProject(project)
             }
@@ -268,14 +284,14 @@ private fun AccountPromptCard(onClick: () -> Unit) {
         modifier = Modifier.padding(top = 14.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Text("Créez votre compte (gratuit)", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.home_account_prompt_title), style = MaterialTheme.typography.titleSmall)
             Text(
-                "C'est par lui que vous recevez les projets partagés par votre chef de chantier, avec ses modifications en direct. Lire est gratuit ; seule l'édition passe en Pro.",
+                stringResource(R.string.home_account_prompt_body),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp)
             )
             TextButton(onClick = onClick, modifier = Modifier.padding(top = 4.dp)) {
-                Text("Créer un compte ou se connecter…")
+                Text(stringResource(R.string.home_account_prompt_action))
             }
         }
     }

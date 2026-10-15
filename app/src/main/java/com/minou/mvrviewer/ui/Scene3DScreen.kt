@@ -318,6 +318,17 @@ fun Scene3DScreen(
     onInitialModelConsumed: () -> Unit = {},
     /** Ouvre le panneau « Classes… ». null = ce fichier n'a aucune classe. */
     onShowClasses: (() -> Unit)? = null,
+    /**
+     * Ouvre la feuille « Calques » (SPEC-menus-android §3.10) : posée par
+     * SceneScreen, partagée avec le plan (sans le réglage LOD depuis le plan).
+     */
+    onShowLayers: () -> Unit = {},
+    /**
+     * Un écran plein opaque recouvre la 3D (destination en surimpression) : la
+     * boucle de rendu SceneView est mise en attente (cycle de vie plafonné à
+     * STARTED), puis reprend telle quelle à la fermeture.
+     */
+    renderPaused: Boolean = false,
     options: SceneOptions,
     gdtfOverrides: GdtfOverrides,
     // Overrides de patch — NOM d'AFFICHAGE effectif (renommage) dans les étiquettes
@@ -406,6 +417,8 @@ fun Scene3DScreen(
     modifier: Modifier = Modifier
 ) {
     val engine = rememberEngine()
+    // Cycle de vie du RENDU : celui de l'activité, plafonné sous un écran plein.
+    val renderLifecycle = rememberRenderLifecycle(renderPaused)
     val modelLoader = rememberModelLoader(engine)
     val materialLoader = rememberMaterialLoader(engine)
     // Couleur de fond 3D = SKYBOX de la scène Filament (SceneView pose
@@ -1749,14 +1762,6 @@ fun Scene3DScreen(
 
     // N11 — panneau « Personnaliser la barre d'outils… » (mode édition).
     var showCustomize by remember { mutableStateOf(false) }
-    // Panneau « Calques » de la vue 3D (#1) : réglage du LOD par calque.
-    var showLayers by remember { mutableStateOf(false) }
-    // Calques du show + nombre d'objets, figés par scène (scene.layers est déjà
-    // une liste, mais on évite de reconstruire les paires à chaque recomposition).
-    val layerRows = remember(scene) {
-        val idx = LayerColors.index(scene)
-        scene.layers.map { LayerRow(it.name, it.objects.size, LayerColors.colorInt(idx, it.name)) }
-    }
     // N11 — couleur du fond ouvrable depuis un bouton DOCKÉ (outil BACKGROUND) : le
     // menu a déjà ses presets + « Personnalisée… », mais un bouton dans une barre
     // doit pouvoir ouvrir le sélecteur directement.
@@ -1887,7 +1892,7 @@ fun Scene3DScreen(
         // ne pas la doubler.
         add(ToolSpec(ToolId.LAYERS, "Calques", Icons.Filled.Layers,
             available = true, checked = null,
-            onInvoke = { showLayers = true }, inMenu = false))
+            onInvoke = onShowLayers, inMenu = false))
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
         add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,
             available = true, checked = options.showLabels,
@@ -1939,8 +1944,10 @@ fun Scene3DScreen(
             available = true, checked = null, onInvoke = onShowGdtfShare, inMenu = false))
         // Synchro cloud : présentes seulement si le service est branché (callbacks
         // non nuls) — mêmes conditions que les entrées de menu.
+        // « Compte & réglages » : toujours disponible, même sans synchro (le bloc
+        // Pro et GDTF Share y vivent aussi — SPEC-menus-android §3.11).
         onShowAccount?.let { cb ->
-            add(ToolSpec(ToolId.ACCOUNT, "Compte", Icons.Filled.AccountCircle,
+            add(ToolSpec(ToolId.ACCOUNT, stringResource(R.string.account_settings_title), Icons.Filled.AccountCircle,
                 available = true, checked = null, onInvoke = cb, inMenu = false))
         }
         onShareProject?.let { cb ->
@@ -2019,7 +2026,7 @@ fun Scene3DScreen(
                     tools = tools3D.toMenuTools(),
                     onCustomizeToolbar = { showCustomize = true },
                     // Panneau des calques (LOD d'interaction par calque).
-                    onShowLayers = { showLayers = true },
+                    onShowLayers = onShowLayers,
                     onShowClasses = onShowClasses,
                     // Étiquettes de projecteurs aussi en 3D : même bascule + mêmes
                     // champs/taille que le plan (SceneOptions partagé).
@@ -2059,6 +2066,8 @@ fun Scene3DScreen(
                 // décor. La caméra reste pilotée par notre rig (camHome + orbite).
                 autoCenterContent = false,
                 autoFitContent = false,
+                // Sous un écran plein (Patch, Câblage…), la boucle de rendu attend.
+                lifecycle = renderLifecycle,
                 // Perf : pas d'ombres (des milliers d'objets = coût énorme) et
                 // qualité « Performance » (MSAA/post-process réduits).
                 renderQuality = RenderQuality.Performance,
@@ -2430,23 +2439,6 @@ fun Scene3DScreen(
         // N11 — panneau « Personnaliser la barre d'outils » (vue 3D). Agit sur la
         // disposition de CETTE vue uniquement ; onLayoutChange remonte à SceneScreen
         // qui persiste globalement (par appareil).
-        // Panneau « Calques » (#1) : LOD d'interaction par calque. Le réglage
-        // remonte à SceneScreen, qui le persiste avec le projet (local seul).
-        if (showLayers) {
-            LayersSheet(
-                layers = layerRows,
-                modes = layerLod,
-                onSetMode = { layer, m ->
-                    // « Auto » = absence de clé → un projet neuf reste neutre.
-                    onSetLayerLod(
-                        if (m == LayerLodMode.AUTO) layerLod - layer else layerLod + (layer to m)
-                    )
-                },
-                onResetAll = { onSetLayerLod(emptyMap()) },
-                onDismiss = { showLayers = false }
-            )
-        }
-
         if (showCustomize) {
             ToolbarCustomizeSheet(
                 title = stringResource(R.string.toolbar_title_3d),

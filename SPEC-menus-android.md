@@ -6,7 +6,8 @@ fait foi pour la structure, les libellés et les règles gratuit/Pro) et
 Android, ce qui existe aujourd'hui (inventaire), ce qui change, ce qui manque,
 et dans quel ordre l'implémenter.
 
-État : **préparation**. Aucun code d'application n'est touché par ce document.
+État : **tranche A réalisée** (2026-10-15, voir *Réalisé* sous la tranche A, §10) ;
+tranches B à E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
 Base : branche `feature/v1.7-tilt-formats`, commit `e110bbc`
 (539 tests unitaires verts + 4 tests réseau ignorés). Relu et corrigé après
 critique (re-parcours du code, décisions, disparitions, sûreté des
@@ -30,12 +31,12 @@ Leur traduction :
 | 1 | Pastille « Vue » = points de vue de la vue courante + bascule ; « Vue plan » quitte le ⋯ | Même pastille (composable `ViewPill`), dans les deux vues. En 3D : Perspective, Dessus, Face, Arrière, Gauche, Droite, puis « Vue plan 2D ». Dans le plan : « Dessus » seul (le plan Android n'a pas d'autre projection, §8 D6) puis « Vue 3D ». Le menu « Points de vue » (icône caméra) de la barre 3D disparaît. |
 | 2 | « Terminé » à gauche dans le plan | La flèche ← en haut à gauche du plan reste (TalkBack « Terminé », aujourd'hui « Vue 3D ») ; pendant une affectation elle ramène au Câblage (déjà en place, `SceneScreen.kt:1226`). Place et rôle conformes ; la forme (icône ← et non le mot « Terminé ») est une divergence visible, §8 D19. |
 | 3 | Compte, Pro, GDTF Share dans « Compte & réglages », hors des familles de la scène | Écran plein « Compte & réglages » (remplace `AccountDialog`), ouvert par l'avant-dernière ligne du ⋯, par l'accueil et par l'outil `account`. |
-| 4 | Fiche : portée unique, croix de fermeture | Croix « Fermer » : oui. Portée : **sans objet tant qu'Android n'a ni Pan 180°, ni Tilt 180°, ni côté d'étiquette** (rien à quoi l'appliquer) → absente, question ouverte Q3. |
+| 4 | Fiche : portée unique, croix de fermeture | Croix « Fermer » : oui. Portée : **sans objet tant qu'Android n'a ni Pan 180°, ni Tilt 180°, ni côté d'étiquette** (rien à quoi l'appliquer) → absente ; Q3 tranchée : hors chantier (§9.0). |
 | 5 | Même fiche dans le plan | Une seule `SelectionCard` dans les deux vues (aujourd'hui : une pastille de texte en 3D, une fiche texte dans le plan). |
 | 6 | Plan importé lisible en gratuit, modifier = Pro | Le panneau s'ouvre pour tous ; chaque modification est gardée au toucher (aujourd'hui Pro à l'entrée, `PlanScreen.kt:1150`). |
 | 7 | « Je suis ici » ET 3 points | Les deux dans le panneau Position GPS, dans les deux vues. |
 | 8 | Opacité du satellite dans le panneau GPS seulement | Le curseur flottant du plan (`PlanScreen.kt:2259`) et les curseurs du ⋯ (`SceneOptions.kt:351`) disparaissent. |
-| 9 | iPad : barre préremplie | **Tablette Android** (plus petite largeur ≥ 600 dp) : barre gauche préremplie Patch, Univers, Câblage, Calques, dans les deux vues. Téléphone : aucune barre ancrée. La barre flottante historique (les deux appareils) : Q1. |
+| 9 | iPad : barre préremplie | **Tablette Android** (plus petite largeur ≥ 600 dp) : barre gauche préremplie Patch, Univers, Câblage, Calques, dans les deux vues. Téléphone : aucune barre ancrée. La barre flottante historique est **retirée** (Q1 tranchée, §9.0). |
 | 10 | Fiche compacte en paysage | Même règle sur téléphone en paysage (hauteur < 480 dp, le seuil déjà utilisé par `PlanScreen.kt:2452`). |
 | 11 | Pastille FR à moitié visible acceptée | Sans objet sur Android (la pastille n'a pas de section « Mes vues ») ; si un menu demande un court défilement en paysage, il est accepté de même. |
 
@@ -358,7 +359,8 @@ hauteur — DESIGN_UI §6 : l'habillage se fait oublier) :
   48 dp, rendu `ToolbarButton` (jaune plein, glyphe noir quand actif). Un
   bouton permanent est **masqué quand son outil est ancré** dans une barre.
   TalkBack : « Sélection par cadre », « Multi-sélection », « Plus d'options ».
-  Le bouton Multi-sélection dépend de Q2 (§9).
+  Le bouton Multi-sélection existe (Q2 tranchée, §9.0 : toucher remplace,
+  Multi-sélection ajoute).
 - **sous la rangée** :
   - 3D : bloc d'état à gauche (§3.5), pastille « Vue » à droite (§3.3) ;
   - plan : pastille « Vue » **centrée** ; la légende commence sous elle
@@ -864,8 +866,8 @@ Sections, dans l'ordre :
   disposition par défaut **propre à la tablette**, dans les deux vues : barre
   **gauche** = `patchList`, `universe`, `cabling`, `layers`.
 - **Téléphone** : aucune barre ancrée par défaut.
-- **Barre flottante historique** (bas-gauche, les deux appareils) : Q1
-  (recommandation : retirée sur téléphone **et** tablette). Si elle était
+- **Barre flottante historique** (bas-gauche, les deux appareils) :
+  **retirée** sur téléphone **et** tablette (Q1 tranchée, §9.0). Si elle était
   gardée, elle ne s'afficherait pas sur tablette quand la disposition
   préremplie s'applique (deux barres à gauche se gêneraient).
 - `ToolbarLayoutStore.load(view, idiom)` : une disposition **enregistrée** est
@@ -891,7 +893,7 @@ Sections, dans l'ordre :
 
 ### 3.14 Bandeaux de mode (plan)
 
-Nouveau (indispensable si la barre flottante disparaît, Q1 : c'était le seul
+Nouveau (indispensable : la barre flottante disparaît, Q1 : c'était le seul
 signe qu'un mode était armé) : bandeau en haut, sous la pastille, dont l'icône
 de tête quitte le mode :
 
@@ -1022,7 +1024,7 @@ en a besoin** :
 | ToolId | rawId | Titre | Tranche | Pourquoi là |
 |---|---|---|---|---|
 | `GEO_PANEL` | `geoPanel` | Position GPS | B | ouvre le panneau créé en B (tests B) |
-| `MULTI_SELECT` | `multiSelect` | Multi-sélection | C (si Q2 = oui) | le bouton permanent se masque quand l'outil est ancré : l'outil doit exister avec le bouton |
+| `MULTI_SELECT` | `multiSelect` | Multi-sélection | C (Q2 = oui, §9.0) | le bouton permanent se masque quand l'outil est ancré : l'outil doit exister avec le bouton |
 | `REF_PLAN_PANEL` | `refPlanPanel` | Régler le plan importé | E | jusque-là, l'outil `importDXF` garde ses deux états (importer / ouvrir le panneau, désormais sans garde) |
 | `MODELS_PANEL` | `modelsPanel` | Modèles importés | E | idem pour `importModel` |
 | `GDTF_MAPPING` | `gdtfMapping` | Modèles de projecteurs | E | catalogue 3D, ouvre Modèles de projecteurs (iOS `gdtfMapping`) |
@@ -1193,7 +1195,7 @@ Récapitulatif : A = 15 lignes, B = 23, C = 45, D = 10, E = 8 (101).
 
 | # | Option Android | Où aujourd'hui | Après | Tr. |
 |---|---|---|---|---|
-| A1 | Barre flottante historique (3D 6 outils, plan 12) | `AnchoredToolbars.kt:112`, `ToolbarLayout.kt:183-193` | Q1 : retirée sur téléphone et tablette (recommandé), chaque outil ayant une autre place (`ToolId.home`) ; seule exception transitoire : « Vider la sélection », dont le ✕ arrive en D (entre C et D : toucher le vide désélectionne, comme aujourd'hui) | C |
+| A1 | Barre flottante historique (3D 6 outils, plan 12) | `AnchoredToolbars.kt:112`, `ToolbarLayout.kt:183-193` | Q1 tranchée (§9.0) : retirée sur téléphone et tablette, chaque outil ayant une autre place (`ToolId.home`) ; seule exception transitoire : « Vider la sélection », dont le ✕ arrive en D (entre C et D : toucher le vide désélectionne, comme aujourd'hui) | C |
 | A2 | ← en 3D (ferme le projet) | `Scene3DScreen.kt:1979` | gardée dans la rangée commune (§8 D2) | C |
 | A3 | Menu « Points de vue » (icône caméra) | `Scene3DScreen.kt:1987` | pastille Vue + Recadrer | C |
 | A4 | Section *Outils* du ⋯ (doublon des barres, `toMenuTools`) | `SceneOptions.kt:280-307` | supprimée | C |
@@ -1429,7 +1431,39 @@ de présence fr / en.
 
 ---
 
-## 9. Questions ouvertes (à poser à l'utilisateur)
+## 9. Décisions / questions
+
+### 9.0 Réponses de l'utilisateur (2026-10-15) — FIGÉES
+
+Les trois questions ci-dessous ont été tranchées par l'utilisateur le
+2026-10-15 (plan validé, « porte le rangement des menus sur Android et le
+web »). Elles s'ajoutent aux décisions iOS du §0 et ne se re-litigent pas.
+
+- **Q1 — Barre flottante historique : RETIRÉE.** Sur téléphone, plus de barre
+  flottante par défaut (chaque outil garde une autre place, `ToolId.home`, et
+  reste ancrable ; bandeaux de mode §3.14). La **tablette** (plus petite
+  largeur ≥ 600 dp) reçoit la barre **gauche préremplie** Patch · Univers ·
+  Câblage · Calques, dans les deux vues, avec la **migration** de la
+  disposition vide déjà enregistrée (§3.13 : une disposition vide d'avant la
+  migration compte comme « non personnalisée »). Une disposition réellement
+  personnalisée par l'utilisateur est gardée. Tranches C (retrait) et E
+  (tablette, migration).
+- **Q2 — Toucher en 3D : REMPLACE la sélection**, comme le plan et iOS. Le
+  bouton **Multi-sélection** permanent (rangée du haut, deux vues) sert à
+  ajouter / retirer. Le **cadre de sélection s'aligne aussi** : même règle dans
+  les deux vues, celle d'iOS (armer le cadre force le multi, le cadre ajoute à
+  la sélection ; couper le multi vide la sélection et coupe le cadre).
+  Tranche C (`ToolId.MULTI_SELECT` créé avec le bouton).
+- **Q3 — Fonctions iOS absentes d'Android : HORS CHANTIER.** Pan / Tilt 180°
+  avec la portée, côté d'étiquette par projecteur, patch multiple (adressage
+  séquentiel), Mes vues, Placer sur une carte, export MVR, rendu 3D / qualité,
+  masquage des calques MVR : chantier séparé « parité des fonctions », plus
+  tard. Dans ce chantier-ci, **aucune entrée ne pointe dans le vide** : ces
+  entrées restent absentes (§8 D5), seules les trois petites additions déjà
+  prévues sont faites (Arrière / Gauche en 3D, Réinitialiser la calibration,
+  « Éditer » dans l'univers).
+
+Rappel du texte des questions, tel qu'il a été posé :
 
 **Q1 — Barre flottante historique (téléphone et tablette).** Aujourd'hui, la
 3D montre en bas à gauche 6 boutons d'outils et le plan 12, par défaut, sur
@@ -1521,25 +1555,90 @@ Tests unitaires (`ProjectNavigationTest`) :
 - Textes : chaque nouvelle clé de la tranche existe en fr et en (`TestRes`).
 
 Contrôle à l'écran (émulateur Medium_Phone, `mini.mvr`, portrait et paysage) :
-- [ ] depuis le plan (`MVR_AUTO_PLAN=1`, `MVR_AUTO_DEST=…`) : Patch, Univers,
+- [x] depuis le plan (`MVR_AUTO_PLAN=1`, `MVR_AUTO_DEST=…`) : Patch, Univers,
       Câblage (onglet DMX demandé), Calques (avec Classes, sans LOD), Modèles
       de projecteurs, Compte & réglages, Historique s'ouvrent par-dessus ;
-      ← ramène au plan **avec son zoom et sa sélection** ;
-- [ ] la surimpression cache entièrement la 3D et capte les touchers ; rendu
+      ← ramène au plan **avec son zoom et sa sélection** — *vérifié depuis le
+      plan pour Patch, Câblage (DMX), Calques / Classes, Modèles de
+      projecteurs et Compte & réglages ; Univers et Historique vérifiés
+      depuis la 3D (même chemin `open`)* ;
+- [x] la surimpression cache entièrement la 3D et capte les touchers ; rendu
       3D dessous mesuré (pas de saccade au retour, pas de chauffe anormale) ;
-- [ ] Câblage ouvert par-dessus le plan → « Sur le plan » → toucher →
+- [x] Câblage ouvert par-dessus le plan → « Sur le plan » → toucher →
       « Terminé » de la barre → Câblage par-dessus le plan, sur la voie
       travaillée ; parcours depuis la 3D inchangé ;
-- [ ] Compte & réglages depuis l'accueil (bouton et carte) ; GDTF Share s'y
-      connecte et s'y déconnecte (bouton, pas la ligne) ; la résolution des
-      modèles repart après connexion ;
-- [ ] Modèles de projecteurs déconnecté : liste visible, un type touché →
+- [x] Compte & réglages depuis l'accueil (bouton et carte) ; GDTF Share s'y
+      connecte et s'y déconnecte (bouton, pas la ligne ; essai avec
+      `MVR_GDTFSHARE_MOCK_DIR`) ; la résolution des modèles repart après
+      connexion — *non rejoué à l'écran : assuré par l'effet existant de
+      `SceneScreen` clé sur `GdtfShareClient.loggedInFlow`* ;
+- [x] Modèles de projecteurs déconnecté : liste visible, un type touché →
       connexion → recherche ; Bibliothèque MA → ← revient à Modèles ;
-- [ ] ← des cinq écrans pleins : TalkBack « Retour » (`uiautomator dump`) ;
-- [ ] lecture de `test-gc-v1.mvr` : « Fermer le projet » → accueil, aucun
+- [x] ← des cinq écrans pleins : TalkBack « Retour » (`uiautomator dump`) ;
+- [x] lecture de `test-gc-v1.mvr` : « Fermer le projet » → accueil, aucun
       plantage, aucun journal d'erreur après coup ;
-- [ ] en anglais (`adb shell cmd locale set-app-locales com.minou.mvrviewer
-      --locales en`) : titres et boutons nouveaux traduits.
+- [x] en anglais (langue système de l'émulateur) et en français
+      (`adb shell cmd locale set-app-locales com.minou.mvrviewer --locales
+      fr-FR`) : titres et boutons nouveaux traduits.
+
+*Réalisé (tranche A, 2026-10-15)* — 559 tests unitaires verts + 4 ignorés
+(539 au départ ; 20 nouveaux dans `ProjectNavigationTest`), APK construit.
+
+- Code : `ProjectNavigation.kt` (pur : `SceneBase`, `ProjectSurface`,
+  `ProjectDestination` + `fromHook`, `CablingOrigin`, `CablingAssignRoute`,
+  `SceneNavState` / `SceneNav.reduce`, `PlanStartAction` /
+  `PlanStartRequest`, `AccountSettingsSections`, `FixtureModelsPane` /
+  `FixtureModelsNav`, `LayersSheetTabs`, `RenderLifecycleRule`) ;
+  `ProjectDestinationHost.kt` (`FullScreenDestination`, `SceneBaseLayer`,
+  `rememberRenderLifecycle`) ; `AccountSettingsScreen.kt` ; `DebugHooks.kt` ;
+  `LayersSheet.kt` fusionné (`ClassesSheet.kt` supprimé) ; `GdtfShareScreen.kt`
+  → `FixtureModelsScreen` ; `SceneScreen` sans `SceneMode` (valeurs persistées
+  « THREE_D » / « PLAN » inchangées, `ViewStateStore.base`).
+- `SceneScreen.open(dest, from)` est le seul point d'entrée ; un seul
+  `BackHandler` de scène (`SystemBack`), les écrans pleins posent le leur
+  (composé après la vue de base, donc prioritaire), leurs sous-volets aussi
+  (recherche et connexion GDTF Share, Bibliothèque MA, connexion de Compte &
+  réglages).
+- **Rendu 3D sous un écran plein : mis en PAUSE.** Mesure émulateur
+  (SwiftShader) : ~600 % CPU 3D visible → ~15–25 % sous la Liste de patch.
+  SceneView ne dessine qu'à l'état RESUMED (sa boucle attend sinon, vérifié
+  dans le bytecode 4.22) : la `Scene` reçoit un cycle de vie plafonné à
+  STARTED tant qu'un écran plein la recouvre (`rememberRenderLifecycle`). Au
+  retour, caméra et sélection sont intactes, aucune reconstruction.
+- La vue de base recouverte est muette pour TalkBack et **rognée à ses bornes**
+  (constat paysage : étiquettes du plan et ombre de la fiche débordaient dans
+  la marge de la barre de navigation, sous l'écran plein).
+- **Défaut corrigé** en passant : « Fermer le projet » pendant la lecture —
+  `runCatching` attrapait l'annulation, le chargement abandonné affichait
+  alors une erreur et retirait le fichier des récents ; garde `isActive` avant
+  toute écriture d'état (`SceneViewModel`), progression close au `reset()`.
+- Entrées provisoires de l'ancien ⋯ (jusqu'à C) : « Compte & réglages… »
+  (remplace « Compte », toujours présent), « Calques… » ajouté au ⋯ du plan
+  (la feuille, sans LOD, n'y avait pas d'autre entrée), « Classes… » ouvre la
+  feuille sur l'onglet Classes. « Partager ce projet » s'ouvre sans garde Pro
+  (la garde reste à la publication) dès cette tranche, puisque `open` est le
+  seul chemin. Titre de l'outil `account` passé à « Compte & réglages »
+  (texte en dur retiré ; le reste des titres d'outils reste pour E).
+- Modèles de projecteurs : la phrase « …ou choisis toi-même le modèle… » ne
+  s'affiche qu'à l'état connecté (elle prolonge « Améliorer tous »).
+  Nombre d'objets d'une classe passé en pluriel (`classes_objects`).
+- Crochets : lus dans `onCreate` ET `onNewIntent` (l'émulateur relivre
+  l'intention à l'instance en cours) ; `testTagsAsResourceId` en DEBUG ;
+  étiquettes `destination.<id>`, `layersSheet`, `accountSettings`,
+  `services.gdtfShare`, `models.gdtfStatus`, `models.gdtfSignIn`,
+  `home.accountSettings`, `loading.closeProject`.
+- Données d'essai : `app/src/test/resources/menus/` (`mini.mvr`, `mini.dxf`,
+  `bad.mvr`, copiés d'iOS) ; `MvrParser` dépend d'`android.util.Xml`, le test
+  lit donc l'archive avec `javax.xml` ; `mini.dxf` passe par le vrai
+  `DxfParser`.
+- Constats d'essai : avec `MVR_GDTFSHARE_MOCK_DIR`, une connexion faite dans
+  le formulaire ENREGISTRE les identifiants saisis
+  (`shared_prefs/mvrviewer.gdtfshare.xml`) : sans le crochet, l'app tente
+  ensuite une vraie connexion avec eux — effacer ce fichier après l'essai.
+  Le champ de recherche permanent garde le focus et rouvre le clavier
+  (existant, il disparaît en C). « 3 projecteur(s) » des types et « Plan ·
+  6 projecteur(s) » : « (s) » existants, hors tranche (§11, C).
+- Captures : `~/.mvrviewer-tools/scratch/android-menus/A/`.
 
 ### Tranche B — Panneaux : Position GPS, Plan importé lisible, Réglage des étiquettes
 
@@ -1624,7 +1723,7 @@ Périmètre :
 3. `ViewPill` + `ViewPillModel` (§3.3), presets Arrière / Gauche, suppression
    du menu « Points de vue ».
 4. `SceneTopRow` (§3.1) : suppression de la `TopAppBar` 3D et des boutons
-   flottants du plan ; Multi-sélection (selon Q2) avec **`ToolId.MULTI_SELECT`
+   flottants du plan ; Multi-sélection (Q2 tranchée : oui) avec **`ToolId.MULTI_SELECT`
    créé ici** ; boutons masqués quand l'outil est ancré ; bannière « nouvelle
    version » sous la rangée.
 5. Pile bas-droite Rechercher + Recadrer (§3.4) ; panneaux en bas-gauche
@@ -1636,7 +1735,7 @@ Périmètre :
    plan : à droite sous la rangée, D21), pastille « Plan · N » retirée,
    `LEGEND_TOP_ANDROID` ajusté.
 7. Masquer & isoler (§3.2.3) + bandeaux de mode (§3.14).
-8. Barre flottante historique (selon Q1). Seul manque transitoire jusqu'à D :
+8. Barre flottante historique retirée (Q1 tranchée, §9.0). Seul manque transitoire jusqu'à D :
    « Vider la sélection » n'a plus de bouton à l'écran (sauf s'il est ancré)
    — toucher le vide désélectionne, comme aujourd'hui (cadre armé dans le
    plan : le couper d'abord par son bouton permanent).
@@ -1661,7 +1760,7 @@ Tests unitaires (`MainMenuModelTest`, `ViewPillModelTest`, `SelectionRulesTest`,
   de valeurs vont au 3e niveau) ;
 - pastille : 3D (6 points de vue + « Vue plan 2D »), plan (Dessus + « Vue 3D ») ;
 - sélection : toucher remplace / ajoute selon Multi ; le cadre force le multi ;
-  couper le multi vide la sélection et coupe le cadre (si Q2 = oui) ;
+  couper le multi vide la sélection et coupe le cadre (Q2 = oui) ;
 - pile bas-droite : montée au-dessus d'une fiche, d'une barre d'affectation,
   de la mention IGN (cadres mesurés à l'émulateur) ;
 - `planFitMargins` : contenu entre le bas de la pastille + 24 dp et le haut
@@ -1767,7 +1866,7 @@ Contrôle à l'écran :
       3D et dans le plan, qui ne gêne ni la légende, ni les panneaux, ni la
       fiche, en portrait et en paysage ; vidée par « Tout remettre hors
       barres » → reste vide au relancement ;
-- [ ] téléphone : aucune barre par défaut (si Q1 = oui), dispositions
+- [ ] téléphone : aucune barre par défaut (Q1 = oui), dispositions
       personnalisées d'avant gardées ;
 - [ ] TalkBack (ou `uiautomator dump`) : chaque bouton nommé, état coché ;
 - [ ] pluriels « 1 vue », « 2 vues », « 1 projecteur sélectionné » (fr et en) ;
@@ -1795,7 +1894,7 @@ Contrôle à l'écran :
 - Web : même portage, document séparé dans le dépôt `MVRViewerWeb`.
 - Cadre de sélection : il **ajoute** à la sélection en 3D
   (`Scene3DScreen.kt:2146`) mais la **remplace** dans le plan
-  (`PlanScreen.kt:1312`). À aligner avec la réponse à Q2 (règle iOS : le
+  (`PlanScreen.kt:1312`). Aligné en tranche C (Q2 tranchée, §9.0 ; règle iOS : le
   cadre force le multi, donc ajoute).
 - Les sections partagées `labelSides` et `fixtureOrientations` sont reçues
   mais pas appliquées (`SceneScreen.kt:545`) : un Pan / Tilt 180° fait sur

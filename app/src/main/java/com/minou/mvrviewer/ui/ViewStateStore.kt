@@ -40,21 +40,19 @@ object ViewStateStore {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /**
-     * Vue au dernier abandon. Seules 3D et PLAN sont MÉMORISABLES : rouvrir
-     * l'app dans la liste de patch ou le câblage n'aurait pas de sens (ce sont
-     * des outils ponctuels), et une valeur inconnue d'une future version
-     * retombe sur la 3D au lieu de faire échouer le décodage.
+     * Vue de base au dernier abandon. Seules 3D et PLAN sont MÉMORISABLES : les
+     * destinations (patch, câblage…) sont des outils ponctuels posés par-dessus,
+     * jamais rouverts au lancement ; une valeur inconnue d'une future version
+     * retombe sur la 3D au lieu de faire échouer le décodage. Valeurs persistées
+     * inchangées (« THREE_D » / « PLAN », noms de l'ancien `SceneMode`).
      */
-    fun mode(ctx: Context): SceneMode =
-        when (prefs(ctx).getString(KEY_MODE, null)) {
-            SceneMode.PLAN.name -> SceneMode.PLAN
-            else -> SceneMode.THREE_D
-        }
+    fun base(ctx: Context): SceneBase = baseFrom(prefs(ctx).getString(KEY_MODE, null))
 
-    fun setMode(ctx: Context, mode: SceneMode) {
-        if (mode == SceneMode.THREE_D || mode == SceneMode.PLAN) {
-            prefs(ctx).edit().putString(KEY_MODE, mode.name).apply()
-        }
+    fun baseFrom(stored: String?): SceneBase =
+        if (stored == SceneBase.PLAN.name) SceneBase.PLAN else SceneBase.THREE_D
+
+    fun setBase(ctx: Context, base: SceneBase) {
+        prefs(ctx).edit().putString(KEY_MODE, base.name).apply()
     }
 
     /** Sème les réglages d'affichage persistés dans des [SceneOptions] neuves. */

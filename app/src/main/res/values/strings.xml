@@ -147,7 +147,6 @@
     <string name="color_white">Blanc</string>
     <string name="common_apply">Appliquer</string>
     <string name="common_back">Retour</string>
-    <string name="common_back_3d">Retour 3D</string>
     <string name="common_cancel">Annuler</string>
     <string name="common_choose">Choisir…</string>
     <string name="common_clear">Vider</string>
@@ -251,7 +250,6 @@
     <string name="gap_near">proche</string>
     <string name="gap_normal">normal</string>
     <string name="gdtf_connected">Connecté.</string>
-    <string name="gdtf_connected_to_share">Connecté à GDTF Share.</string>
     <string name="gdtf_connecting">Connexion…</string>
     <string name="gdtf_download_failed">Téléchargement échoué.</string>
     <string name="gdtf_err_connect">Connexion à gdtf-share.com impossible. Vérifie ta connexion Internet.</string>
@@ -283,7 +281,6 @@
     <string name="gdtf_type_status_fmt">%1$d projecteur(s) · %2$s</string>
     <string name="gdtf_username">Identifiant / email</string>
     <string name="home_members_version">%1$d membre(s) · v%2$d</string>
-    <string name="home_my_account">Mon compte</string>
     <string name="home_open_mvr">Ouvrir un fichier .mvr</string>
     <string name="home_recent_projects">Projets récents</string>
     <string name="home_send_diag">Envoyer le rapport de diagnostic</string>
@@ -301,13 +298,14 @@
     <string name="layers_all_auto">Tout en Auto</string>
     <string name="layers_lod_help">Détail affiché pendant la navigation. N\'affecte que la navigation (pendant les gestes caméra) : à l\'arrêt, tout redevient visible.</string>
     <string name="layers_none">Ce show ne déclare aucun calque.</string>
-    <string name="layers_title_3d">Calques · Vue 3D</string>
     <string name="layers_hide_all">Tout masquer</string>
     <string name="layers_show_all">Tout afficher</string>
     <string name="classes_title">Classes</string>
     <string name="classes_help">Classes Vectorworks du fichier. Une classe traverse les calques : les deux filtres se cumulent.</string>
-    <string name="classes_none">Ce fichier ne déclare aucune classe Vectorworks.</string>
-    <string name="classes_objects_fmt">%1$d objets</string>
+    <plurals name="classes_objects">
+        <item quantity="one">%1$d objet</item>
+        <item quantity="other">%1$d objets</item>
+    </plurals>
     <string name="tool_classes">Classes…</string>
     <string name="legend_more_fmt">+%1$d autre(s)</string>
     <string name="legend_more_layers_fmt">+%1$d autre(s) calque(s)</string>
@@ -351,7 +349,6 @@
     <string name="model_reset_placement">Réinitialiser le placement</string>
     <string name="model_too_many_fmt">Trop de modèles importés (%1$d au maximum).</string>
     <string name="mvr_err_no_scene_xml">GeneralSceneDescription.xml introuvable dans le .mvr.</string>
-    <string name="nav_account">Compte</string>
     <string name="nav_custom_color">Personnalisée…</string>
     <string name="nav_customize_toolbar">Personnaliser la barre d\'outils…</string>
     <string name="nav_dmx_universe">Univers DMX</string>
@@ -499,10 +496,9 @@
     <string name="sync_share_message_fmt">Rejoins mon projet MVRViewer avec le code : %1$s  (mvrviewer://join/%2$s)</string>
     <string name="sync_share_project_title">Partager le projet</string>
     <string name="sync_shared">Partagé</string>
-    <string name="sync_sign_in_title">Connexion</string>
     <string name="sync_sign_in_to_join">Connectez-vous d\'abord pour rejoindre un projet.</string>
     <string name="sync_sign_in_to_share">Connectez-vous d\'abord pour partager ce projet.</string>
-    <string name="sync_sign_out">Déconnexion</string>
+    <string name="sync_sign_out">Se déconnecter</string>
     <string name="sync_syncing">Synchro…</string>
     <string name="sync_undo_change">Annuler cette modification</string>
     <string name="sync_uploading_fmt">Envoi %1$d %%</string>
@@ -746,4 +742,25 @@
         <item quantity="one">%1$d canal</item>
         <item quantity="other">%1$d canaux</item>
     </plurals>
+
+    <!-- Rangement des menus, tranche A (SPEC-menus-android §7.1) : Compte &amp; réglages, Modèles de projecteurs, Calques, sorties. -->
+    <string name="menu_close_project">Fermer le projet</string>
+    <string name="menu_account_settings">Compte &amp; réglages…</string>
+    <string name="account_settings_title">Compte &amp; réglages</string>
+    <string name="account_section_account">Compte</string>
+    <string name="account_section_services">Services</string>
+    <string name="account_signed_in">Connecté</string>
+    <string name="account_not_signed_in">Non connecté</string>
+    <string name="pro_section_title">MVR Viewer Pro</string>
+    <string name="pro_active">Version Pro active — édition débloquée</string>
+    <string name="pro_pitch">La lecture est gratuite ; l\'édition (patch, câblage, imports…) passe en Pro.</string>
+    <string name="pro_unlock">Débloquer la version Pro</string>
+    <string name="pro_restore">Restaurer un achat</string>
+    <string name="home_account_prompt_title">Créez votre compte (gratuit)</string>
+    <string name="home_account_prompt_body">C\'est par lui que vous recevez les projets partagés par votre chef de chantier, avec ses modifications en direct. Lire est gratuit ; seule l\'édition passe en Pro.</string>
+    <string name="home_account_prompt_action">Créer un compte ou se connecter…</string>
+    <string name="models_title">Modèles de projecteurs</string>
+    <string name="models_gdtf_signed_in">GDTF Share : connecté</string>
+    <string name="models_gdtf_sign_in">Se connecter à GDTF Share…</string>
+    <string name="layers_title">Calques</string>
 </resources>

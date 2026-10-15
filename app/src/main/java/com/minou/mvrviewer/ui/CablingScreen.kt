@@ -135,6 +135,11 @@ fun CablingScreen(
      * onglet, voie travaillée à remettre sous les yeux au retour).
      */
     memory: CablingScreenMemoryState = remember { CablingScreenMemoryState() },
+    /**
+     * Onglet imposé par l'entrée (⋯ › Patch & câblage › Socapex / DMX / Puissances,
+     * SPEC-menus-android §3.2.4) ; null = dernier onglet retenu ([memory]).
+     */
+    initialTab: CablingScreenTab? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -168,7 +173,12 @@ fun CablingScreen(
     // votes remontent `power.version`, qui re-clé `fixtures`). L'onglet de
     // départ est le DERNIER ouvert (mémoire hissée) — il était perdu à chaque
     // bascule câblage ↔ plan : on revenait sur « Électrique » en câblant du DMX.
-    var tab by remember { mutableIntStateOf(CablingScreenTab.opening(null, memory.tab).index) }
+    var tab by remember {
+        val opening = CablingScreenTab.opening(initialTab, memory.tab)
+        // L'onglet imposé devient le « dernier onglet » (c'est lui qu'on a sous les yeux).
+        if (initialTab != null) memory.tab = opening
+        mutableIntStateOf(opening.index)
+    }
     fun selectTab(i: Int) { tab = i; memory.tab = CablingScreenTab.fromIndex(i) }
 
     // ---- EXPORT PDF (phase 5) : dossier complet + 3 exports séparés ----------
@@ -274,7 +284,7 @@ fun CablingScreen(
             title = { Text(stringResource(R.string.cabling_pdf_title), style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_3d))
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                 }
             },
             actions = {

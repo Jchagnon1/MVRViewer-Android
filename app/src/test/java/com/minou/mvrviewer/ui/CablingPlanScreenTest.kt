@@ -457,10 +457,18 @@ class CablingPlanScreenTest {
         val scene = src("SceneScreen.kt")
         for (needle in listOf(
             "cablingMemory.rememberWorkedVoie(voie)", "CablingVoieNavigator.neighbor(t.voie, step, order)",
-            "CablingAssignTarget.forVoie(", "onSelectOnPlan = { t -> setAssignVoie(t.voie); mode = SceneMode.PLAN }",
+            "CablingAssignTarget.forVoie(",
+            "onSelectOnPlan = { t -> setAssignVoie(t.voie); navigate(SceneNavEvent.Cabling(CablingAssignEvent.SELECT_ON_PLAN)) }",
             "memory = cablingMemory", "onStepAssign = { stepAssign(it) }", "onAssignDone = { finishAssign() }",
-            "if (mode == SceneMode.PLAN && assignTarget != null) finishAssign()",
-            "onBack = { if (assignTarget != null) finishAssign() else mode = SceneMode.THREE_D }"
+            // Rangement des menus (tranche A) : le parcours passe par le réducteur pur
+            // (SceneNav / CablingAssignRoute, ProjectNavigationTest) — « Terminé »,
+            // ←, retour système et croix.
+            "fun finishAssign() = navigate(SceneNavEvent.Cabling(CablingAssignEvent.BAR_DONE))",
+            "BackHandler { navigate(SceneNavEvent.SystemBack) }",
+            "navigate(if (assignTarget != null) SceneNavEvent.Cabling(CablingAssignEvent.BACK)",
+            "onExitAssign = { navigate(SceneNavEvent.Cabling(CablingAssignEvent.EXIT_ASSIGN)) }",
+            "if (!r.state.assigning) assignTarget = null",
+            "initialTab = dest.tab"
         )) assertTrue("SceneScreen n'a plus $needle", scene.contains(needle))
     }
 
@@ -489,7 +497,7 @@ class CablingPlanScreenTest {
                 "itemsIndexed(rows, key = { _, r -> r.id })", "CablingRowActions(", "flash.alphaOf(id)"
             )) assertTrue("$file n'a plus $needle", s.contains(needle))
         }
-        assertTrue(src("CablingScreen.kt").contains("CablingScreenTab.opening(null, memory.tab)"))
+        assertTrue(src("CablingScreen.kt").contains("CablingScreenTab.opening(initialTab, memory.tab)"))
         // Centrage sur le décalage RÉEL de la ligne (pas « supposée en haut »).
         val mem = src("CablingListMemory.kt")
         assertTrue(mem.contains("CablingScrollRestore.centerScrollDelta("))

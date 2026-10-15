@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.outlined.ViewInAr
@@ -30,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -42,6 +47,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.GdtfShareClient
@@ -96,12 +102,20 @@ class GdtfOverrides {
 }
 
 /**
- * Écran GDTF Share : connexion, puis DEUX façons de remplacer les modèles 3D
- * des projecteurs (comme iOS) :
- *  - « Améliorer tout » : résolution AUTOMATIQUE (par FixtureTypeID puis
- *    fabricant+nom) — rapide mais peut ne pas tout trouver ;
- *  - liste des TYPES de projecteurs → on ouvre une RECHERCHE GDTF Share et on
- *    choisit soi-même le bon modèle (port de GDTFMappingListView + GDTFModelSearchView).
+ * « MODÈLES DE PROJECTEURS » (SPEC-menus-android §3.10, iOS §9.4) — ex-écran
+ * « GDTF Share (modèles 3D) ». La liste des TYPES de projecteurs (état Générique
+ * / Auto / Manuel) s'affiche TOUJOURS, connecté ou non. En tête :
+ *  - une ligne d'état « GDTF Share : connecté » avec, au bout, un bouton « Se
+ *    déconnecter » (jamais une déconnexion au simple toucher de la ligne), ou le
+ *    bouton « Se connecter à GDTF Share… » (sous-volet de connexion) ;
+ *  - la ligne « Bibliothèque MA » (sous-volet [maLibraryPane]).
+ * « Améliorer tous » (résolution AUTOMATIQUE par FixtureTypeID puis fabricant +
+ * nom) est réservé à l'état connecté. Toucher un type ouvre la RECHERCHE GDTF
+ * Share de ce type (port de GDTFModelSearchView) ; déconnecté, la connexion
+ * d'abord, PUIS la recherche (même enchaînement que la bibliothèque MA).
+ *
+ * Les sous-volets ([FixtureModelsPane]) sont internes : leur ← et le retour
+ * système ramènent à la liste, jamais à la vue de base.
  */
 // Plafond du cache de .gdtf préchargés dans la recherche (chaque entrée pèse
 // plusieurs Mo) : au-delà, on ne garde plus les octets (re-téléchargement au choix).
@@ -109,37 +123,35 @@ private const val PREFETCH_CAP = 40
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GdtfShareScreen(
+fun FixtureModelsScreen(
     scene: MvrScene,
     mvrBytes: ByteArray,
     overrides: GdtfOverrides,
     onBack: () -> Unit,
+    /** Bibliothèque MA en sous-volet ; reçoit le retour vers la liste des types. */
+    maLibraryPane: @Composable (onBack: () -> Unit) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    var user by remember { mutableStateOf("") }
-    var pass by remember { mutableStateOf("") }
-    var loggedIn by remember { mutableStateOf(GdtfShareClient.loggedIn) }
+    val loggedIn by GdtfShareClient.loggedInFlow.collectAsState()
+    var pane by remember { mutableStateOf<FixtureModelsPane>(FixtureModelsPane.List) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
-    var searchSpec by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     // Messages de statut résolus ICI : les coroutines ci-dessous ne peuvent pas
     // appeler stringResource.
     val sGdtfReconnecting = stringResource(R.string.gdtf_reconnecting)
     val sGdtfConnected = stringResource(R.string.gdtf_connected)
-    val sGdtfConnecting = stringResource(R.string.gdtf_connecting)
-    val sGdtfLoginFailed = stringResource(R.string.gdtf_login_failed)
     val sGdtfResolvingFmt = stringResource(R.string.gdtf_resolving_fmt)
     val sGdtfResolvedFmt = stringResource(R.string.gdtf_resolved_fmt)
 
     // Reconnexion automatique depuis les identifiants enregistrés (le compte
     // reste connecté d'un lancement à l'autre — plus besoin de se reconnecter).
     LaunchedEffect(Unit) {
-        if (!loggedIn && com.minou.mvrviewer.mvr.GdtfCredentialStore.username(ctx) != null) {
+        if (!GdtfShareClient.loggedIn && com.minou.mvrviewer.mvr.GdtfCredentialStore.username(ctx) != null) {
             busy = true; status = sGdtfReconnecting
-            loggedIn = GdtfShareClient.ensureLoggedIn(ctx)
-            status = if (loggedIn) sGdtfConnected else ""
+            val ok = GdtfShareClient.ensureLoggedIn(ctx)
+            status = if (ok) sGdtfConnected else ""
             busy = false
         }
     }
@@ -150,64 +162,96 @@ fun GdtfShareScreen(
             .groupingBy { it }.eachCount().toList().sortedBy { it.first.lowercase() }
     }
 
-    // Volet RECHERCHE d'un type précis (plein écran, comme la sheet iOS).
-    val sp = searchSpec
-    if (loggedIn && sp != null) {
-        GdtfSearchPane(
-            spec = sp,
-            onBack = { searchSpec = null },
-            onChosen = { data, rid -> overrides.setManual(sp, data, rid); searchSpec = null }
-        )
-        return
+    // ---- Sous-volets internes (plein écran, comme les sheets iOS) ----
+    when (val p = pane) {
+        is FixtureModelsPane.Search -> {
+            BackHandler { pane = FixtureModelsNav.back(p) }
+            GdtfSearchPane(
+                spec = p.spec,
+                onBack = { pane = FixtureModelsNav.back(p) },
+                onChosen = { data, rid -> overrides.setManual(p.spec, data, rid); pane = FixtureModelsPane.List }
+            )
+            return
+        }
+        is FixtureModelsPane.Login -> {
+            BackHandler { pane = FixtureModelsNav.back(p) }
+            GdtfShareLoginPane(
+                title = stringResource(R.string.gdtf_share_title),
+                onBack = { pane = FixtureModelsNav.back(p) },
+                onLoggedIn = { pane = FixtureModelsNav.afterLogin(p) }
+            )
+            return
+        }
+        FixtureModelsPane.MaLibrary -> {
+            // Retour depuis la LISTE de la bibliothèque : vers les types (ses pages
+            // internes ont leur propre retour, composé après, donc prioritaire).
+            BackHandler { pane = FixtureModelsPane.List }
+            maLibraryPane { pane = FixtureModelsPane.List }
+            return
+        }
+        FixtureModelsPane.List -> {}
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text(stringResource(R.string.gdtf_share_title), style = MaterialTheme.typography.titleMedium) },
+            title = { Text(stringResource(R.string.models_title), style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_3d))
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                 }
             }
         )
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
-            if (!loggedIn) {
-                Text(
-                    stringResource(R.string.gdtf_intro),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                OutlinedTextField(
-                    value = user, onValueChange = { user = it }, label = { Text(stringResource(R.string.gdtf_username)) },
-                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                )
-                OutlinedTextField(
-                    value = pass, onValueChange = { pass = it }, label = { Text(stringResource(R.string.sync_password)) },
-                    singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                )
-                Button(
-                    onClick = {
-                        scope.launch {
-                            busy = true; status = sGdtfConnecting
-                            runCatching { GdtfShareClient.login(user.trim(), pass) }.fold(
-                                onSuccess = {
-                                    // Identifiants mémorisés (chiffrés) pour rester connecté.
-                                    com.minou.mvrviewer.mvr.GdtfCredentialStore.save(ctx, user.trim(), pass)
-                                    loggedIn = true; status = sGdtfConnected
-                                },
-                                onFailure = { status = it.gdtfShareMessage(ctx) ?: sGdtfLoginFailed }
-                            )
-                            busy = false
-                        }
-                    },
-                    enabled = !busy && user.isNotBlank() && pass.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text(stringResource(R.string.home_sign_in)) }
-                GdtfSignupLink()
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)) {
+            // 1) Ligne d'état GDTF Share.
+            if (loggedIn) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("models.gdtfStatus")
+                ) {
+                    Icon(Icons.Filled.CloudDone, contentDescription = null, tint = Color(0xFF2E7D32))
+                    Text(
+                        stringResource(R.string.models_gdtf_signed_in),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f).padding(start = 10.dp)
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            GdtfShareClient.logout()
+                            com.minou.mvrviewer.mvr.GdtfCredentialStore.clear(ctx)
+                            status = ""
+                        },
+                        enabled = !busy
+                    ) { Text(stringResource(R.string.sync_sign_out)) }
+                }
             } else {
-                Text(stringResource(R.string.gdtf_connected_to_share), style = MaterialTheme.typography.titleSmall)
-                // 1) Résolution automatique de tout.
+                OutlinedButton(
+                    onClick = { pane = FixtureModelsPane.Login(null) },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("models.gdtfSignIn")
+                ) {
+                    Icon(Icons.Filled.Cloud, contentDescription = null)
+                    Text("  " + stringResource(R.string.models_gdtf_sign_in))
+                }
+            }
+            // 2) Bibliothèque MA (sous-volet).
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+                    .clickable(enabled = !busy) { pane = FixtureModelsPane.MaLibrary }
+                    .padding(vertical = 14.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.ma_library), style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f).padding(start = 10.dp))
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HorizontalDivider()
+
+            // 3) Résolution automatique de tout : connecté seulement.
+            if (loggedIn) {
                 Button(
                     onClick = {
                         scope.launch {
@@ -232,39 +276,37 @@ fun GdtfShareScreen(
                     },
                     enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                 ) { Text(stringResource(R.string.gdtf_improve_all)) }
+            }
 
-                Text(
-                    stringResource(R.string.gdtf_manual_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-                )
-                // 2) Liste des types → recherche manuelle.
-                specSummaries.forEach { (spec, count) ->
-                    HorizontalDivider()
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                            .clickable(enabled = !busy) { searchSpec = spec }
-                            .padding(vertical = 12.dp)
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(spec, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-                            Text(
-                                stringResource(R.string.gdtf_type_status_fmt, count, stringResource(statusLabelRes(spec, overrides))),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            // « …ou choisis toi-même… » prolonge « Améliorer tous » : sans lui
+            // (déconnecté), la liste suit directement.
+            if (loggedIn) Text(
+                stringResource(R.string.gdtf_manual_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+            )
+            // 4) Liste des types → recherche manuelle (connexion d'abord si besoin).
+            specSummaries.forEachIndexed { i, (spec, count) ->
+                // Déconnecté, la ligne « Bibliothèque MA » a déjà son trait en dessous.
+                if (i > 0 || loggedIn) HorizontalDivider()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable(enabled = !busy) { pane = FixtureModelsNav.tapType(spec, loggedIn) }
+                        .padding(vertical = 12.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(spec, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                        Text(
+                            stringResource(R.string.gdtf_type_status_fmt, count, stringResource(statusLabelRes(spec, overrides))),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-
-                OutlinedButton(
-                    onClick = { GdtfShareClient.logout(); com.minou.mvrviewer.mvr.GdtfCredentialStore.clear(ctx); loggedIn = false; status = "" },
-                    enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-                ) { Text(stringResource(R.string.sync_sign_out)) }
             }
 
             if (busy) {

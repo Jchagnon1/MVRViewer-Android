@@ -599,8 +599,9 @@ class ThreePointSessionTest {
         val onTap = plan.indexOf("onTap = { tap ->")
         assertTrue(onTap > 0)
         assertTrue(plan.indexOf("cal3.tap(", onTap) in onTap until plan.indexOf("if (assignMode)", onTap))
-        // Armer un autre mode ferme l'assistant (cadre, masquage, solo, mesure, « je suis ici »).
-        assertTrue(Regex("closeThreePoint\\(\\)").findAll(plan).count() >= 7)
+        // Armer un autre mode ferme l'assistant (cadre, masquage, solo, mesure,
+        // « je suis ici ») : règle pure et branchement OUTIL PAR OUTIL dans
+        // PlanScreenRulesTest (le simple compte des appels ne prouvait rien).
         // « Je suis ici » après un relevé : on repart de zéro.
         assertTrue(plan.contains("if (calibration.survey != null) calibration.reset()"))
         // Appliquer : persisté (relevé compris), poussé et journalisé comme les autres.
@@ -622,6 +623,8 @@ class ThreePointSessionTest {
         val w = GeoThreePoint.rotate(e, theta) * 1000.0
         assertEquals(10_000.0, w.x, 1e-6)
         assertEquals(0.0, w.y, 1e-6)
-        assertEquals(cos(theta), cos(theta), 0.0); assertEquals(sin(theta), sin(theta), 0.0)
+        // L'ENU brut est bien TOURNÉ de −θ (le générateur n'est pas l'identité).
+        assertEquals(10.0 * cos(theta), e.x, 1e-9)
+        assertEquals(-10.0 * sin(theta), e.y, 1e-9)
     }
 }

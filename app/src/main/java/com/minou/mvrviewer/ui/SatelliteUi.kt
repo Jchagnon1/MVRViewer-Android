@@ -2,6 +2,7 @@ package com.minou.mvrviewer.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +15,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -24,6 +28,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.zIndex
 import com.minou.mvrviewer.R
 import com.minou.mvrviewer.mvr.GeoCalibration
 import com.minou.mvrviewer.mvr.IgnImagery
@@ -171,6 +177,36 @@ object SatelliteUi {
         android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
     }
 
+    /**
+     * Montée COMMUNE de la mention et du curseur d'opacité du plan (posé juste
+     * au-dessus d'elle) pour qu'aucun panneau du bas ne les recouvre — iOS
+     * `satelliteAttributionLift` (l'assistant 3 points et la barre d'affectation
+     * y sont des obstacles). Les deux montent ensemble : leur bloc (union des
+     * cadres SANS montée, vides ignorés) passe juste au-dessus de l'obstacle le
+     * plus proche, jamais plus haut que [topLimit] (sinon 0 : ils restent en
+     * place). Unités libres mais communes (la vue plan travaille en dp, comme
+     * les points iOS).
+     */
+    fun overlayLift(mention: Rect, slider: Rect?, obstacles: List<Rect>, topLimit: Float,
+                    gap: Float = PanelPlacementMath.CORNER_STACK_GAP): Float {
+        val parts = listOfNotNull(mention, slider).filter { it.width > 0f && it.height > 0f }
+        if (parts.isEmpty()) return 0f
+        val block = parts.reduce { a, b ->
+            Rect(minOf(a.left, b.left), minOf(a.top, b.top), maxOf(a.right, b.right), maxOf(a.bottom, b.bottom))
+        }
+        return PanelPlacementMath.clearanceLift(block, obstacles, topLimit, gap)
+    }
+
+    /**
+     * Aucune place au-dessus ([lift] nul alors qu'un obstacle la touche) : la
+     * mention reste en place mais passe DEVANT le panneau, pour rester lisible et
+     * entière (iOS : « dessinée par-dessus le panneau »). Le curseur, lui, reste
+     * dessous (les boutons du panneau gardent la main).
+     */
+    fun mentionOnTop(mention: Rect, lift: Float, obstacles: List<Rect>): Boolean =
+        lift == 0f && mention.width > 0f && mention.height > 0f &&
+            obstacles.any { it.width > 0f && it.height > 0f && it.overlaps(mention) }
+
     /** Ouvre la page du jeu de données IGN (lien de la mention). */
     fun openDataset(ctx: android.content.Context) {
         val intent = android.content.Intent(
@@ -186,9 +222,16 @@ object SatelliteUi {
  * visibles et cliquables). Texte toujours ENTIER (retour à la ligne, jamais de
  * « … »), lien vers la page du jeu de données. Posée AU-DESSUS des barres d'outils
  * du bas (flottante à 12 dp ; relevée à 72 dp quand une barre est ancrée en bas).
+ * [lift] la monte encore au-dessus des panneaux du bas (plan : assistant 3 points,
+ * barre d'affectation — cf. [SatelliteUi.overlayLift]) ; [onAnchor] reçoit son
+ * cadre SANS cette montée (px racine), mesuré avant le décalage. [onTop] la passe
+ * devant les autres éléments (aucune place au-dessus, cf. [SatelliteUi.mentionOnTop]).
  */
 @Composable
-fun BoxScope.SatelliteAttribution(credit: Pair<Int, List<Any>>, layout: ToolbarLayout, specs: List<ToolSpec>) {
+fun BoxScope.SatelliteAttribution(
+    credit: Pair<Int, List<Any>>, layout: ToolbarLayout, specs: List<ToolSpec>,
+    lift: Dp = 0.dp, onAnchor: ((Rect) -> Unit)? = null, onTop: Boolean = false
+) {
     val ctx = LocalContext.current
     val (res, args) = credit
     val label = stringResource(res, *args.toTypedArray())
@@ -196,8 +239,11 @@ fun BoxScope.SatelliteAttribution(credit: Pair<Int, List<Any>>, layout: ToolbarL
         color = Color.Black.copy(alpha = 0.55f), contentColor = Color.White,
         shape = RoundedCornerShape(6.dp),
         modifier = Modifier.align(Alignment.BottomEnd)
+            .zIndex(if (onTop) 1f else 0f)
             .padding(end = 8.dp, bottom = satelliteAttributionBottom(layout, specs))
             .widthIn(max = 260.dp)
+            .then(if (onAnchor != null) Modifier.onGloballyPositioned { onAnchor(it.anchorBounds()) } else Modifier)
+            .offset(y = -lift)
             .clickable(role = Role.Button, onClickLabel = label) { SatelliteUi.openDataset(ctx) }
     ) {
         Text(
@@ -207,6 +253,9 @@ fun BoxScope.SatelliteAttribution(credit: Pair<Int, List<Any>>, layout: ToolbarL
         )
     }
 }
+
+/** Cadre (px racine, non rogné) de l'élément à cet endroit de la chaîne de modificateurs. */
+internal fun LayoutCoordinates.anchorBounds(): Rect = Rect(positionInRoot(), size.toSize())
 
 /**
  * Marge basse de la mention : juste au-dessus de la barre flottante du bas (12 dp +

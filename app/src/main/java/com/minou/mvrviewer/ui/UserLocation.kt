@@ -18,8 +18,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 /**
  * Flux GPS de la vue plan : position courante (observable), refus de la
@@ -29,7 +33,11 @@ import androidx.compose.ui.platform.LocalContext
  */
 class UserLocationFeed {
     val location = mutableStateOf<Location?>(null)
-    /** Permission demandée puis refusée. */
+    /**
+     * Localisation REFUSÉE par le système (iOS `deniedByUser`) : pas seulement
+     * pendant cette visite — un refus d'une session précédente, ou une
+     * autorisation retirée dans les Réglages, compte aussi ([LocationPermissionRule]).
+     */
     var denied by mutableStateOf(false)
         internal set
     /** Dernier fix brut connu (filet « appareil immobile » de l'assistant). Non observable. */
@@ -67,12 +75,33 @@ fun Location.toRawFix(): RawFix = RawFix(
 @Composable
 fun rememberUserLocationFeed(active: Boolean): UserLocationFeed {
     val context = LocalContext.current
-    val feed = remember { UserLocationFeed() }
     var granted by remember { mutableStateOf(hasLocationPermission(context)) }
+    // État SYSTÈME dès la création : la ligne d'état du menu le dit sans attendre
+    // que « Ma position » soit allumée.
+    val feed = remember { UserLocationFeed().also { it.denied = locationDeniedBySystem(context, granted) } }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { ok -> granted = ok; feed.denied = !ok }
+    ) { ok ->
+        LocationPermissionStore.markAsked(context)
+        granted = ok
+        feed.denied = locationDeniedBySystem(context, ok)
+    }
+
+    // Retour au premier plan (Réglages, autre appli) : l'autorisation a pu
+    // changer pendant l'absence — accordée, retirée ou remise à zéro.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val g = hasLocationPermission(context)
+                granted = g
+                feed.denied = locationDeniedBySystem(context, g)
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(active, granted) {
         if (active && !granted) launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -115,3 +144,44 @@ fun rememberUserLocation(active: Boolean): State<Location?> = rememberUserLocati
 fun hasLocationPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
+
+/**
+ * Refus de la localisation déduit de l'ÉTAT SYSTÈME (règle pure, testée en JVM).
+ * Android ne dit pas « refusé » comme iOS (`.denied`/`.restricted`) : une
+ * permission non accordée peut aussi n'avoir jamais été demandée. On la tient
+ * pour refusée si elle a déjà été demandée (drapeau persistant), ou si le
+ * système propose une explication — ce qu'il ne fait qu'après un refus.
+ */
+object LocationPermissionRule {
+    fun denied(granted: Boolean, askedBefore: Boolean, rationale: Boolean): Boolean =
+        !granted && (askedBefore || rationale)
+}
+
+/** « La permission de localisation a déjà été demandée » — persistant, par appareil. */
+object LocationPermissionStore {
+    private const val PREFS = "location_permission"
+    private const val KEY_ASKED = "asked"
+    fun asked(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ASKED, false)
+    fun markAsked(ctx: Context) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ASKED, true).apply()
+    }
+}
+
+/** [LocationPermissionRule] appliquée à l'appareil. */
+fun locationDeniedBySystem(context: Context, granted: Boolean): Boolean {
+    if (granted) return false
+    val rationale = context.findActivity()?.let {
+        ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.ACCESS_FINE_LOCATION)
+    } ?: false
+    return LocationPermissionRule.denied(granted, LocationPermissionStore.asked(context), rationale)
+}
+
+private fun Context.findActivity(): android.app.Activity? {
+    var c: Context? = this
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
+}

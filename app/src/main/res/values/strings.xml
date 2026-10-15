@@ -111,7 +111,7 @@
     <string name="calib_tap_second">Touchez un 2e point (oriente + met à l\'échelle)</string>
     <string name="calib_waiting_gps">En attente du GPS…</string>
     <string name="calib_status_anchors">Calibré (%1$d points : position + orientation + échelle)</string>
-    <string name="calib_status_denied">Localisation refusée — Paramètres &gt; Confidentialité</string>
+    <string name="calib_status_denied">Localisation refusée — Réglages &gt; Confidentialité</string>
     <string name="calib_status_none">Non calibré</string>
     <string name="calib_status_one">1 point posé. Avec un seul, le nord = le haut du plan. Posez un 2e point à un autre endroit pour corriger l\'orientation du plan et l\'échelle.</string>
     <string name="cam_front">Face</string>

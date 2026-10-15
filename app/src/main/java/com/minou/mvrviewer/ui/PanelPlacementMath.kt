@@ -1,5 +1,7 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.geometry.Rect
+
 /**
  * GÉOMÉTRIE DES PANNEAUX DÉPLAÇABLES — calcul PUR, testable JUnit, portage
  * exact de `PanelPlacementMath.swift`. Un panneau se déplace « comme une
@@ -45,5 +47,45 @@ object PanelPlacementMath {
         cy = if (minY <= maxY) cy.coerceIn(minY, maxY) else 0f
 
         return cx to cy
+    }
+
+    /** Écart entre deux éléments empilés du bas (iOS `cornerStackGap`, 8 pt = 8 dp). */
+    const val CORNER_STACK_GAP = 8f
+
+    /**
+     * De combien un élément ([anchor], cadre SANS montée) doit MONTER pour
+     * qu'aucun [obstacles] de sa colonne ne le recouvre — portage exact de
+     * `PanelPlacementMath.clearanceLift` iOS (mention du fond satellite) : la
+     * place libre LA PLUS PROCHE au-dessus, juste au-dessus d'un obstacle sans en
+     * toucher aucun, jamais plus haut que [topLimit]. 0 si rien ne gêne, ou si
+     * aucune place n'existe (l'élément reste alors à sa place). Cadres vides
+     * ignorés. Unités libres mais communes ([gap] et la tolérance d'un demi-point
+     * sont en points iOS = dp).
+     */
+    fun clearanceLift(anchor: Rect, obstacles: List<Rect>, topLimit: Float, gap: Float = CORNER_STACK_GAP): Float {
+        if (anchor.width <= 0f || anchor.height <= 0f ||
+            !anchor.top.isFinite() || !anchor.bottom.isFinite() ||
+            !anchor.left.isFinite() || !anchor.right.isFinite()
+        ) return 0f
+        // Obstacles de la COLONNE (chevauchement horizontal strict).
+        val column = obstacles.filter {
+            it.width > 0f && it.height > 0f &&
+                it.left.isFinite() && it.top.isFinite() && it.right.isFinite() && it.bottom.isFinite() &&
+                it.right > anchor.left && it.left < anchor.right
+        }
+        // Demi-point de tolérance : posé « pile à gap » d'un obstacle n'est pas un contact.
+        val tolerance = 0.5f
+        fun blocked(top: Float): Boolean {
+            val bottom = top + anchor.height
+            return column.any { it.top < bottom + gap - tolerance && it.bottom + gap - tolerance > top }
+        }
+        if (!blocked(anchor.top)) return 0f
+        // Places candidates : juste au-dessus de chaque obstacle, la plus proche d'abord.
+        val candidates = column
+            .map { it.top - gap - anchor.height }
+            .filter { it < anchor.top && it >= topLimit }
+            .sortedDescending()
+        for (top in candidates) if (!blocked(top)) return anchor.top - top
+        return 0f
     }
 }

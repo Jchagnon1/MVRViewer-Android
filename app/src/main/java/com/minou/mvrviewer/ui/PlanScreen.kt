@@ -704,6 +704,11 @@ fun PlanScreen(
     var assignBarTopPx by remember { mutableStateOf(0f) }
     // Hauteur RÉELLE de la barre (px) : bande qu'une légende du haut peut gêner.
     var assignBarHeightPx by remember { mutableStateOf(0f) }
+    // Cadre d'ancrage entier de la barre : obstacle de la mention du satellite.
+    var assignBarAnchorPx by remember { mutableStateOf(Rect.Zero) }
+    // Mention du fond satellite et curseur d'opacité : cadres SANS montée (px).
+    var satMentionAnchorPx by remember { mutableStateOf(Rect.Zero) }
+    var satSliderAnchorPx by remember { mutableStateOf(Rect.Zero) }
 
     // ---- Mesure entre deux points ----
     // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
@@ -985,10 +990,15 @@ fun PlanScreen(
     // Cadre d'ANCRAGE du panneau (px racine) : sa hauteur est réservée au cadrage.
     var cal3PanelTopPx by remember { mutableStateOf(0f) }
     var cal3PanelHeightPx by remember { mutableStateOf(0f) }
+    // Même cadre d'ancrage, entier : obstacle de la mention du fond satellite.
+    var cal3PanelAnchorPx by remember { mutableStateOf(Rect.Zero) }
     // Plus grande réserve déjà cadrée, et vue (échelle, décalage) posée par ce
     // cadrage : si l'utilisateur a bougé le plan depuis, on ne recadre plus.
     var cal3FitReserve by remember { mutableStateOf(0f) }
     var cal3FitView by remember { mutableStateOf<Pair<Float, Offset>?>(null) }
+    // Taille du plan (canevas) lors du dernier cadrage : une autre taille =
+    // rotation → recadrer même si la réserve a baissé (SPEC §2).
+    var cal3FitCanvas by remember { mutableStateOf<Offset?>(null) }
     // Emprise et éléments repères en cours de calcul (hors thread principal).
     var cal3Starting by remember { mutableStateOf(false) }
     val cal3Token = remember { IntArray(1) }
@@ -998,14 +1008,29 @@ fun PlanScreen(
         cal3Starting = false
         cal3Session?.cancel()
         cal3Session = null
-        cal3PanelTopPx = 0f; cal3PanelHeightPx = 0f; cal3FitReserve = 0f; cal3FitView = null
+        cal3PanelTopPx = 0f; cal3PanelHeightPx = 0f; cal3PanelAnchorPx = Rect.Zero
+        cal3FitReserve = 0f; cal3FitView = null; cal3FitCanvas = null
     }
+    // MODES DE TOUCHER : état réduit lu/posé ici, décisions dans PlanModeRules
+    // (pure, testée). Armer un mode y ferme l'assistant 3 points.
+    fun currentTouchModes() = PlanTouchModes(
+        rect = rectMode, mask = maskMode, solo = soloMode, measure = measureMode,
+        anchorTap = calibrating, threePoint = cal3Session != null || cal3Starting
+    )
+    fun applyTouchModes(n: PlanTouchModes) {
+        rectMode = n.rect; maskMode = n.mask; soloMode = n.solo
+        measureMode = n.measure; calibrating = n.anchorTap
+        if (!n.threePoint && (cal3Session != null || cal3Starting)) closeThreePoint()
+    }
+    /** Bascule d'un outil de toucher (barres et menu) ; rend le nouvel état. */
+    fun toggleTouchTool(tool: PlanTouchTool): PlanTouchModes =
+        PlanModeRules.toggle(currentTouchModes(), tool).also { applyTouchModes(it) }
     // Ouvre l'assistant : GPS démarré, autres modes de toucher désarmés
     // (mesure, masquage, solo, cadre, « je suis ici », affectation câblage).
     fun startThreePoint() {
         if (assignTarget != null) onExitAssign()
-        rectMode = false; maskMode = false; soloMode = false; calibrating = false
-        if (measureMode) { measureMode = false; measureA = null; measureB = null }
+        if (measureMode) { measureA = null; measureB = null }
+        applyTouchModes(PlanModeRules.startThreePoint())
         showLocation = true
         closeThreePoint()
         val token = cal3Token[0]
@@ -1051,27 +1076,22 @@ fun PlanScreen(
     val toolsPlan: List<ToolSpec> = buildList {
         add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
-                rectMode = !rectMode; if (rectMode) { measureMode = false; closeThreePoint() }
+                toggleTouchTool(PlanTouchTool.RECT)
             }))
         add(ToolSpec(ToolId.MASK, stringResource(R.string.tool_mask), Icons.Filled.VisibilityOff,
             available = true, checked = maskMode, onInvoke = {
-                maskMode = !maskMode
-                if (maskMode) { selected.clear(); measureMode = false; soloMode = false; closeThreePoint() }
+                if (toggleTouchTool(PlanTouchTool.MASK).mask) selected.clear()
             }))
         add(ToolSpec(ToolId.SOLO, stringResource(R.string.tool_solo), Icons.Filled.CenterFocusStrong,
             available = true, checked = soloMode, onInvoke = {
-                soloMode = !soloMode
-                if (soloMode) { selected.clear(); measureMode = false; maskMode = false; closeThreePoint() }
+                if (toggleTouchTool(PlanTouchTool.SOLO).solo) selected.clear()
                 else onSetSoloElements(emptySet())
             }))
         add(ToolSpec(ToolId.MEASURE, stringResource(R.string.tool_measure), Icons.Filled.Straighten,
             available = true, checked = measureMode, onInvoke = {
-                measureMode = !measureMode
-                if (measureMode) {
-                    rectMode = false; maskMode = false; soloMode = false; calibrating = false
-                    closeThreePoint()
-                    measureA = null; measureB = null
-                } else { measureA = null; measureB = null }
+                // Armé ou désarmé : la mesure repart de zéro.
+                toggleTouchTool(PlanTouchTool.MEASURE)
+                measureA = null; measureB = null
             }))
         add(ToolSpec(ToolId.SHOW_ALL, stringResource(R.string.tool_show_all), Icons.Filled.Visibility,
             available = hiddenElements.isNotEmpty(), checked = null,
@@ -1089,9 +1109,10 @@ fun PlanScreen(
             available = showLocation, checked = calibrating, onInvoke = {
                 // Calibration GPS = donnée de show PARTAGÉE (poussée, journalisée,
                 // destructive pour l'équipe) : Pro. Désarmer reste libre.
-                if (calibrating) calibrating = false
+                if (calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
                 else ProAccess.gate("calibrer la position GPS") {
-                    calibrating = true; measureMode = false; closeThreePoint()
+                    // Rappel éventuellement différé (achat) : armer, jamais rebasculer.
+                    if (!calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
                 }
             }))
         // Calibration GUIDÉE EN 3 POINTS (SPEC-calibration-3-points) : même place que
@@ -1175,22 +1196,26 @@ fun PlanScreen(
 
     // CADRAGE pendant l'assistant 3 points : tant que le plan n'a pas été touché,
     // il est recadré AU-DESSUS du panneau quand celui-ci dépasse la plus grande
-    // hauteur déjà cadrée (+ 4 dp) — jamais à chaque étape (pas de sautillement).
+    // hauteur déjà cadrée (+ 4 dp) — jamais à chaque étape (pas de sautillement) —
+    // et après une rotation, même si le panneau y prend moins de place
+    // (décisions : ThreePointPlanFit, pure et testée).
     LaunchedEffect(cal3Session != null, cal3PanelTopPx, planBoundsPx, canvas) {
         if (cal3Session == null) return@LaunchedEffect
         val pb = planBoundsPx
-        if (pb.height <= 0f || canvas.x <= 0f || canvas.y <= 0f) return@LaunchedEffect
-        if (cal3PanelTopPx <= pb.top || cal3PanelTopPx >= pb.bottom) return@LaunchedEffect
-        val reserve = CablingAssignBarPlacement.reserve(pb.top, pb.bottom, cal3PanelTopPx)
-        if (reserve <= cal3FitReserve + 4f * labelDensity.density) return@LaunchedEffect
         val untouched = if (cal3FitView == null) scale == 1f && offset == Offset.Zero
             else cal3FitView == (scale to offset)
-        if (!untouched) return@LaunchedEffect
-        cal3FitReserve = reserve
-        val (s, dy) = CablingAssignBarPlacement.fitAbove(canvas.x, canvas.y, data.spanX, data.spanY, reserve)
-        scale = s
-        offset = Offset(0f, dy)
-        cal3FitView = s to offset
+        val fitted = cal3FitCanvas
+        val fit = ThreePointPlanFit.refit(
+            canvas.x, canvas.y, data.spanX, data.spanY, pb.top, pb.bottom, cal3PanelTopPx,
+            fittedReserve = cal3FitReserve, untouched = untouched,
+            sizeChanged = fitted != null && fitted != canvas,
+            slack = 4f * labelDensity.density
+        ) ?: return@LaunchedEffect
+        cal3FitReserve = fit.reserve
+        scale = fit.scale
+        offset = Offset(0f, fit.dy)
+        cal3FitView = fit.scale to offset
+        cal3FitCanvas = canvas
     }
 
     Box(modifier = modifier.fillMaxSize().background(planBg)
@@ -2186,13 +2211,33 @@ fun PlanScreen(
         // Opacité du fond satellite : curseur flottant (impossible dans un menu).
         // Avec lui, la mention OBLIGATOIRE de l'imagerie IGN (bas-droite) ; le
         // curseur est posé juste au-dessus d'elle pour ne jamais la recouvrir.
+        // Les deux MONTENT ensemble au-dessus du panneau 3 points ou de la barre
+        // d'affectation (iOS satelliteAttributionLift) : jamais cachés dessous.
         val satShown = satellite
+        val (satLift, satMentionOnTop) = run {
+            val dpd = labelDensity.density
+            fun Rect.inDp() = Rect(left / dpd, top / dpd, right / dpd, bottom / dpd)
+            val satObstacles = buildList {
+                if (cal3Session != null) add(cal3PanelAnchorPx.inDp())
+                if (assignTarget != null) add(assignBarAnchorPx.inDp())
+            }
+            val mention = satMentionAnchorPx.inDp()
+            val lift = SatelliteUi.overlayLift(
+                mention, satSliderAnchorPx.inDp(), satObstacles,
+                topLimit = planBoundsPx.top / dpd + 60f
+            )
+            lift.dp to SatelliteUi.mentionOnTop(mention, lift, satObstacles)
+        }
         SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)?.let { credit ->
-            SatelliteAttribution(credit, toolbarLayout, toolsPlan)
+            SatelliteAttribution(credit, toolbarLayout, toolsPlan, lift = satLift,
+                onAnchor = { satMentionAnchorPx = it }, onTop = satMentionOnTop)
             Surface(
                 color = Color.Black.copy(alpha = 0.4f), shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(bottom = satelliteAttributionBottom(toolbarLayout, toolsPlan) + 24.dp).width(230.dp)
+                    // Cadre SANS montée (mesuré avant le décalage), puis la montée.
+                    .onGloballyPositioned { satSliderAnchorPx = it.anchorBounds() }
+                    .layoutOffset(y = -satLift)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
@@ -2406,6 +2451,7 @@ fun PlanScreen(
                     .onGloballyPositioned {
                         assignBarTopPx = it.positionInRoot().y
                         assignBarHeightPx = it.size.height.toFloat()
+                        assignBarAnchorPx = it.anchorBounds()
                     }
             )
         }
@@ -2434,6 +2480,7 @@ fun PlanScreen(
                     .onGloballyPositioned {
                         cal3PanelTopPx = it.positionInRoot().y
                         cal3PanelHeightPx = it.size.height.toFloat()
+                        cal3PanelAnchorPx = it.anchorBounds()
                     }
             )
         }
@@ -2639,8 +2686,13 @@ fun PlanScreen(
             }
         }
 
-        // Fiche du bas : 1 projecteur = détail ; plusieurs = compteur.
-        if (selected.size == 1) {
+        // Fiche du bas : 1 projecteur = détail ; plusieurs = compteur. Masquée
+        // pendant l'assistant 3 points et l'affectation : le bas leur appartient
+        // (iOS selectionBarShown) — sinon elle recouvrait leurs boutons.
+        val selectionBar = PlanBottomRules.selectionBar(
+            selected.size, threePointOpen = cal3Session != null || cal3Starting, assignOpen = assignTarget != null
+        )
+        if (selectionBar == PlanSelectionBar.CARD) {
             val f = data.fixtures[selected.first()]
             Surface(
                 color = Color.White, contentColor = Color(0xFF111111),
@@ -2659,7 +2711,7 @@ fun PlanScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-        } else if (selected.size > 1) {
+        } else if (selectionBar == PlanSelectionBar.BANNER) {
             Surface(
                 color = Color(0xFFFFC400), contentColor = Color(0xFF111111),
                 shape = RoundedCornerShape(12.dp), shadowElevation = 6.dp,

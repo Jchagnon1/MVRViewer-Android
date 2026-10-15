@@ -43,7 +43,21 @@ enum class ToolId {
      * Multi-sélection (tranche C) : le bouton permanent de la rangée du haut se
      * masque quand l'outil est ancré — l'outil naît donc avec le bouton.
      */
-    MULTI_SELECT;
+    MULTI_SELECT,
+    /**
+     * Ouvre / referme le panneau « Plan importé » (tranche E) : l'outil [DXF]
+     * (« importDXF ») ne fait plus qu'importer, à libellé fixe.
+     */
+    REF_PLAN_PANEL,
+    /** Ouvre / referme le panneau « Modèles importés » (tranche E) ; [IMPORT_MODEL] n'importe plus que. */
+    MODELS_PANEL,
+    /**
+     * « Modèles de projecteurs » (tranche E, iOS `gdtfMapping`). [GDTF_SHARE]
+     * prend le sens iOS (la CONNEXION GDTF Share, dans Compte & réglages) ; la
+     * migration v2 des dispositions remplace l'ancien `gdtfShare` Android (qui
+     * ouvrait les modèles) par celui-ci (SPEC-menus-android §3.13, §8 D24).
+     */
+    GDTF_MAPPING;
 
     /**
      * Identifiant STABLE persisté (JSON) — MÊME chaîne camelCase que la `rawValue`
@@ -97,6 +111,10 @@ enum class ToolId {
             GEO_PANEL -> "geoPanel"
             // Valeur iOS (`ToolId.multiSelect`).
             MULTI_SELECT -> "multiSelect"
+            // Valeurs iOS (`ToolId.refPlanPanel`, `.modelsPanel`, `.gdtfMapping`).
+            REF_PLAN_PANEL -> "refPlanPanel"
+            MODELS_PANEL -> "modelsPanel"
+            GDTF_MAPPING -> "gdtfMapping"
         }
 
     companion object {
@@ -129,6 +147,21 @@ data class ToolbarLayout(
     fun edgeOf(id: ToolId): ToolbarEdge? = ToolbarEdge.entries.firstOrNull { id in forEdge(it) }
 
     fun allAssigned(): Set<ToolId> = (top + bottom + left + right).toSet()
+
+    /** Aucune barre : « Tout remettre hors barres », ou le défaut du téléphone. */
+    val isEmpty: Boolean get() = top.isEmpty() && bottom.isEmpty() && left.isEmpty() && right.isEmpty()
+
+    /**
+     * Remplace [old] par [new] À SA PLACE (même barre, même rang) ; si [new] est
+     * déjà placé ailleurs, [old] est seulement retiré (jamais de doublon). Sert à
+     * la migration v2 (`gdtfShare` → `gdtfMapping`).
+     */
+    fun replacing(old: ToolId, new: ToolId): ToolbarLayout {
+        if (edgeOf(old) == null) return this
+        val keepNew = edgeOf(new) == null
+        fun r(l: List<ToolId>) = l.mapNotNull { if (it == old) new.takeIf { keepNew } else it }
+        return ToolbarLayout(r(top), r(bottom), r(left), r(right))
+    }
 
     private fun withEdge(e: ToolbarEdge, list: List<ToolId>): ToolbarLayout = when (e) {
         ToolbarEdge.TOP -> copy(top = list)
@@ -175,17 +208,28 @@ data class ToolbarLayout(
     }
 
     companion object {
-        /**
-         * DÉFAUT = VIDE (modèle iOS) : au premier lancement AUCUNE barre ancrée.
-         * La barre flottante historique est RETIRÉE (SPEC-menus-android §9.0, Q1) :
-         * chaque outil a une autre place (bouton permanent, menu ⋯, panneau,
-         * pastille), et reste ancrable. Un outil n'apparaît dans une barre que
-         * lorsque l'utilisateur l'y place.
-         */
-        val default3D = ToolbarLayout()
+        /** Aucune barre (« Tout remettre hors barres », défaut du téléphone). */
+        val EMPTY = ToolbarLayout()
 
-        /** Défaut plan = VIDE (idem). */
-        val defaultPlan = ToolbarLayout()
+        /**
+         * Barre TABLETTE préremplie (SPEC-menus-android §3.13, décision 9, Q1) :
+         * à GAUCHE, dans cet ordre, la même dans les deux vues (iOS `padDefault`).
+         */
+        val tabletDefault = ToolbarLayout(
+            left = listOf(ToolId.PATCH, ToolId.UNIVERSE, ToolId.CABLING, ToolId.LAYERS)
+        )
+
+        /**
+         * Disposition par défaut quand RIEN n'est enregistré pour cette vue :
+         * tablette → barre gauche préremplie ; téléphone → VIDE. La barre
+         * flottante historique est RETIRÉE (§9.0, Q1) : chaque outil a une autre
+         * place ([ToolId.home]) et reste ancrable.
+         */
+        @Suppress("UNUSED_PARAMETER")
+        fun defaultLayout(view: ToolbarView, idiom: ToolbarIdiom): ToolbarLayout = when (idiom) {
+            ToolbarIdiom.TABLET -> tabletDefault
+            ToolbarIdiom.PHONE -> EMPTY
+        }
 
         /**
          * Décode une disposition JSON, en TOLÉRANT les ids inconnus (ignorés) et

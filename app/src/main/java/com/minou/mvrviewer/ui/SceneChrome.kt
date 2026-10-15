@@ -1,5 +1,7 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -139,7 +141,8 @@ fun ViewPill(
             shape = RoundedCornerShape(50), shadowElevation = 3.dp,
             color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.testTag("viewPill")
-                .clickable { open = true }
+                // TalkBack : bouton « Vue », état = le libellé affiché (« 3D · Face »).
+                .clickable(role = Role.Button) { open = true }
                 .semantics { contentDescription = cd; stateDescription = label }
         ) {
             Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
@@ -174,6 +177,8 @@ fun ViewPill(
                         },
                         modifier = Modifier.testTag("viewPill.${e.action.name.lowercase()}" +
                             (e.viewpoint?.let { ".${it.name.lowercase()}" } ?: ""))
+                            // Le point de vue courant est annoncé « sélectionné ».
+                            .semantics { selected = e.checked }
                     )
                 }
             }

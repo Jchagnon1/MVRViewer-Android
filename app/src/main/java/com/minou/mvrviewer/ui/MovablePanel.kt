@@ -70,6 +70,11 @@ fun MovablePanel(
      * sa taille normale », SPEC-cablage-plan §4). null = barre nue (historique).
      */
     collapsedHeader: (@Composable RowScope.() -> Unit)? = null,
+    /**
+     * Cadre RACINE AFFICHÉ (décalage au doigt et repli compris) : la barre ancrée
+     * gauche l'évite (SPEC-menus-android §3.13). null = personne ne l'écoute.
+     */
+    onDisplayedBounds: ((androidx.compose.ui.geometry.Rect) -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -109,6 +114,10 @@ fun MovablePanel(
                 val (dx, dy) = clamped(placement.dx + live.x, placement.dy + live.y)
                 IntOffset(dx.roundToInt(), dy.roundToInt())
             }
+            // APRÈS l'offset : la place réellement affichée.
+            .then(if (onDisplayedBounds != null) Modifier.onGloballyPositioned {
+                onDisplayedBounds(it.anchorBounds())
+            } else Modifier)
     ) {
         // ---- Barre de préhension ----
         Surface(

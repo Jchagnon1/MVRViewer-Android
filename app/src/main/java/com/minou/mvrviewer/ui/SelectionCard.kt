@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -144,8 +145,9 @@ fun SelectionCard(
         ) {
             Column(Modifier.padding(start = 14.dp, end = 4.dp, top = 2.dp, bottom = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // TalkBack : le titre est l'en-tête de la fiche (navigation par titres).
                     Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })
                     CloseButton(onClose, R.string.common_close, "selectionCard.close")
                 }
                 Column(Modifier.padding(end = 10.dp).testTag("selectionCard.details")) {
@@ -178,7 +180,7 @@ fun SelectionCard(
                         Text(SelectionCardLayout.shortTitle(title), style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             // TalkBack lit le titre complet (« Projecteur — Wash 101 »).
-                            modifier = Modifier.weight(1f).semantics { contentDescription = title })
+                            modifier = Modifier.weight(1f).semantics { contentDescription = title; heading() })
                         Spacer(Modifier.width(10.dp))
                         PatchChip(onPatch, compact = true)
                         TextButton(

@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -229,7 +230,7 @@ private fun SummaryBar(count: Int, used: Int, conflicts: Int) {
         if (conflicts == 0) {
             Text(stringResource(R.string.universe_no_conflict), style = MaterialTheme.typography.labelLarge, color = Color(0xFF2E7D32))
         } else {
-            Text("⚠ " + stringResource(R.string.universe_conflicts_fmt, conflicts),
+            Text("⚠ " + pluralStringResource(R.plurals.universe_conflicts, conflicts, conflicts),
                 style = MaterialTheme.typography.labelLarge, color = Color(0xFFC62828))
         }
     }
@@ -390,7 +391,7 @@ private fun FixtureLegend(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(p.rangeLabel, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
-                    Text(stringResource(R.string.universe_channels_count_fmt, p.count), style = MaterialTheme.typography.labelSmall,
+                    Text(pluralStringResource(R.plurals.universe_channels_count, p.count, p.count), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

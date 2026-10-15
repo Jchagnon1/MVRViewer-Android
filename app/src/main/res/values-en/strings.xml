@@ -18,12 +18,10 @@
     <string name="cabling_already_here">already on this circuit</string>
     <string name="cabling_assign_fixtures_cd">Assign fixtures</string>
     <string name="cabling_assign_fmt">Assign (%1$d)</string>
-    <string name="cabling_assigned_fmt">%1$d / %2$d fixture(s) cabled</string>
     <string name="cabling_circuit_fmt">Circuit %1$d</string>
     <string name="cabling_circuit_limit">Limit per circuit (W)</string>
     <string name="cabling_clear_circuit_cd">Clear the circuit</string>
     <string name="cabling_clear_circuit_msg2">The other circuits are untouched.</string>
-    <string name="cabling_clear_circuit_msg_fmt">Remove the %1$d fixture(s) from circuit %2$d of « %3$s »? </string>
     <string name="cabling_clear_circuit_q">Clear the circuit?</string>
     <string name="cabling_dist_circuit_fmt">%1$s · circuit %2$d</string>
     <string name="cabling_edit_dist_fmt">Edit « %1$s »</string>
@@ -176,10 +174,8 @@
     <string name="diag_subject">MVR Viewer — diagnostic report</string>
     <string name="dmx_already_here">already on this line</string>
     <string name="dmx_analysing">Analysing DMX footprints…</string>
-    <string name="dmx_assigned_fmt">%1$d / %2$d fixture(s) cabled in DMX</string>
     <string name="dmx_clear_core_cd">Clear the core</string>
     <string name="dmx_clear_core_msg2">The other lines are untouched.</string>
-    <string name="dmx_clear_core_msg_fmt">Remove the %1$d fixture(s) from %2$s of « %3$s »? </string>
     <string name="dmx_clear_core_q">Clear the line?</string>
     <string name="dmx_core_count">Number of cores</string>
     <string name="dmx_core_fmt">Core %1$d</string>
@@ -208,7 +204,7 @@
     <string name="dmx_unknown_footprint_cd">Unknown footprint</string>
     <string name="edge_bottom">Bottom</string>
     <string name="edge_left">Left</string>
-    <string name="edge_none">None</string>
+    <string name="edge_none">Off the bars</string>
     <string name="edge_right">Right</string>
     <string name="edge_top">Top</string>
     <string name="err_unknown">Unknown error.</string>
@@ -223,10 +219,8 @@
     <string name="fx_channel_default_fmt"> · default %1$d</string>
     <string name="fx_channel_offset_fmt">offset %1$s</string>
     <string name="fx_channel_virtual">virtual</string>
-    <string name="fx_channels_count">%1$d channels</string>
     <string name="fx_channels_title_fmt">Channels (%1$d)</string>
     <string name="fx_custom_channels_title_fmt">Custom channels (%1$d)</string>
-    <string name="fx_custom_type_fmt">%1$s  ·  %2$d channels (custom)</string>
     <string name="fx_duplicate_type_fmt">Duplicate « %1$s »</string>
     <string name="fx_edit_type_fmt">Edit « %1$s »</string>
     <string name="fx_modes_unavailable">Modes unavailable</string>
@@ -240,7 +234,6 @@
     <string name="fx_power_vote_hint">Vote another value if needed; the consensus is recalculated.</string>
     <string name="fx_render_type">Render type</string>
     <string name="fx_standard_fmt">Standard: %1$s</string>
-    <string name="fx_type_channels_fmt">%1$s  ·  %2$d channels</string>
     <string name="gap_far">Far</string>
     <string name="gap_near">Near</string>
     <string name="gap_normal">Normal</string>
@@ -264,7 +257,6 @@
     <string name="gdtf_model_missing">No 3D model (generic shapes)</string>
     <string name="gdtf_rating_fmt">Rating: %1$s/5</string>
     <string name="gdtf_reconnecting">Reconnecting…</string>
-    <string name="gdtf_resolved_fmt">%1$d / %2$d type(s) found automatically.</string>
     <string name="gdtf_resolving_fmt">Resolving %1$d/%2$d…</string>
     <string name="gdtf_search_failed">Search failed.</string>
     <string name="gdtf_search_hint">Manufacturer or model</string>
@@ -273,9 +265,7 @@
     <string name="gdtf_status_auto">real model (auto)</string>
     <string name="gdtf_status_generic">generic shapes</string>
     <string name="gdtf_status_manual">picked manually</string>
-    <string name="gdtf_type_status_fmt">%1$d fixture(s) · %2$s</string>
     <string name="gdtf_username">Username / e-mail</string>
-    <string name="home_members_version">%1$d member(s) · v%2$d</string>
     <string name="home_open_mvr">Open an .mvr file</string>
     <string name="home_recent_projects">Recent projects</string>
     <string name="home_send_diag">Send the diagnostic report</string>
@@ -301,8 +291,6 @@
         <item quantity="one">%1$d object</item>
         <item quantity="other">%1$d objects</item>
     </plurals>
-    <string name="legend_more_fmt">+%1$d more</string>
-    <string name="legend_more_layers_fmt">+%1$d more layer(s)</string>
     <string name="load_build">Building the scene…</string>
     <string name="load_gdtf">Loading GDTF files…</string>
     <string name="load_geometry">Loading 3D geometry…</string>
@@ -344,10 +332,9 @@
     <string name="nav_dmx_universe">DMX universes</string>
     <string name="nav_history">Change history</string>
     <string name="nav_patch_list">Patch list</string>
-    <string name="nav_power_cabling">Power cabling</string>
     <string name="nav_share_project">Share this project</string>
     <string name="nav_view_3d">3D view</string>
-    <string name="nav_view_plan">Plan view</string>
+    <string name="nav_view_plan">2D plan view</string>
     <string name="opt_hide_when_zoomed_out">Hide labels when zoomed too far out</string>
     <string name="opt_label_content">Content</string>
     <string name="opt_labels">Labels</string>
@@ -358,7 +345,6 @@
     <string name="opt_reset_label_offsets">Reset label positions</string>
     <string name="opt_show_labels">Show labels</string>
     <string name="opt_structure">Set / structure</string>
-    <string name="patch_count_hint">%1$d / %2$d fixture(s) · tap to edit</string>
     <string name="patch_duplicate_id_cd">Duplicate ID</string>
     <string name="patch_duplicate_ids">Duplicate IDs: </string>
     <string name="patch_filter_hint">Filter (ID, GDTF, layer, DMX…)</string>
@@ -379,14 +365,10 @@
     <string name="pdf_total_distributor">Distributor total</string>
     <string name="pdf_total_line">Line total</string>
     <string name="pdf_unknown_channels">\? channels</string>
-    <string name="pdf_unknown_footprint_fmt">%1$d fixture(s) with unknown footprint (counted as 0 channels)</string>
-    <string name="pdf_unknown_watts_fmt">%1$d fixture(s) with unknown power (counted as 0 W)</string>
     <string name="plan_export_add_view">Add this view</string>
-    <string name="plan_export_ready_fmt">PDF ready · %1$d page(s)</string>
     <string name="plan_export_rename_view">Rename the view</string>
     <string name="plan_export_view_fmt">View %1$d</string>
     <string name="plan_export_view_name">View name</string>
-    <string name="plan_export_views_fmt">%1$d view(s)</string>
     <string name="plan_image_default_name">Image plan</string>
     <string name="plan_pdf_default_name">PDF plan</string>
     <string name="plan_pdf_doc_title">Plan</string>
@@ -477,30 +459,28 @@
     <string name="sync_syncing">Syncing…</string>
     <string name="sync_undo_change">Undo this change</string>
     <string name="sync_uploading_fmt">Uploading %1$d %%</string>
-    <string name="tool_calibrate">Calibrate (I am here)</string>
+    <string name="tool_calibrate">I am here (quick)</string>
     <string name="tool_calibrate_3">Calibrate with 3 points (guided)…</string>
     <string name="tool_clear_selection">Clear selection</string>
     <string name="tool_clear_solo">Clear the solo</string>
-    <string name="tool_export_pdf">PDF export mode</string>
-    <string name="tool_gps">My GPS position</string>
-    <string name="tool_gps_3d">My position (3D)</string>
-    <string name="tool_import_model">Import a 3D model…</string>
-    <string name="tool_import_ref_plan">Import a plan (DXF, image, PDF)…</string>
+    <string name="tool_export_pdf">Plan PDF</string>
+    <string name="tool_gps">Show my position</string>
+    <string name="tool_import_model">Import a 3D model</string>
+    <string name="tool_import_ref_plan">Import a plan (DXF, image, PDF)</string>
     <string name="model_import_formats_title">Supported formats</string>
     <string name="model_import_formats_choose">Choose a file…</string>
     <string name="tool_label_settings">Label settings</string>
     <string name="tool_label_size">Label settings</string>
-    <string name="tool_marker_size">Marker size</string>
+    <string name="tool_marker_size">GPS dot size</string>
     <string name="tool_mask">Hide items</string>
     <string name="tool_measure">Measure a distance</string>
-    <string name="tool_models_fmt">3D models (%1$d)</string>
-    <string name="tool_recenter_camera">Recentre the camera</string>
+    <string name="tool_models_fmt">Imported models (%1$d)</string>
+    <string name="tool_recenter_camera">Reframe</string>
     <string name="tool_rect_select">Rectangle selection</string>
-    <string name="tool_ref_plan">Reference plan</string>
     <string name="tool_satellite">Satellite background</string>
     <string name="tool_show_all">Show everything again</string>
     <string name="tool_solo">Isolate (solo)</string>
-    <string name="toolbar_customize_help">Dock each tool to a screen edge, or leave it out of the bars. Every tool stays available in the ⋯ menu.</string>
+    <string name="toolbar_customize_help">Put a tool on an edge of the screen for quick access, or leave it “Off the bars”: it stays available from its button, the ⋯ menu or a panel. The arrows reorder the tools within a bar.</string>
     <string name="toolbar_title_3d">Toolbar · 3D view</string>
     <string name="toolbar_title_plan">Toolbar · Plan view</string>
     <string name="unit_metre">metre</string>
@@ -508,8 +488,6 @@
     <string name="universe_analysing">Analysing the patch…</string>
     <string name="universe_channel_fmt">Channel %1$d</string>
     <string name="universe_channel_free">Free channel.</string>
-    <string name="universe_channels_count_fmt">%1$d channel(s)</string>
-    <string name="universe_conflicts_fmt">%1$d channel(s) in conflict</string>
     <string name="universe_empty">No patched fixture\n(no DMX address to show).</string>
     <string name="universe_fixtures_fmt">%1$d fx</string>
     <string name="universe_fixtures_title_fmt">Fixtures — universe %1$d</string>
@@ -826,5 +804,88 @@
     <plurals name="sel_fixtures_selected">
         <item quantity="one">%1$d fixture selected</item>
         <item quantity="other">%1$d fixtures selected</item>
+    </plurals>
+    <!-- Rangement des menus, tranche E (SPEC-menus-android §7) : titres d'outils, barres, pluriels (« (s) » retirés). -->
+    <string name="menu_import_plan">Import a plan (DXF, image, PDF)…</string>
+    <string name="menu_import_model">Import a 3D model…</string>
+    <string name="tool_ref_plan_panel">Adjust the imported plan</string>
+    <string name="tool_models_panel">Imported models</string>
+    <string name="toolbar_all_off">Put everything back off the bars</string>
+    <string name="fx_fixture_number">Fixture number</string>
+    <plurals name="plan_export_views">
+        <item quantity="one">%1$d view</item>
+        <item quantity="other">%1$d views</item>
+    </plurals>
+    <plurals name="plan_export_ready">
+        <item quantity="one">PDF ready · %1$d page</item>
+        <item quantity="other">PDF ready · %1$d pages</item>
+    </plurals>
+    <plurals name="fx_type_channels">
+        <item quantity="one">%1$s  ·  %2$d channel</item>
+        <item quantity="other">%1$s  ·  %2$d channels</item>
+    </plurals>
+    <plurals name="fx_custom_type">
+        <item quantity="one">%1$s  ·  %2$d channel (custom)</item>
+        <item quantity="other">%1$s  ·  %2$d channels (custom)</item>
+    </plurals>
+    <plurals name="fx_channels">
+        <item quantity="one">%1$d channel</item>
+        <item quantity="other">%1$d channels</item>
+    </plurals>
+    <plurals name="cabling_assigned">
+        <item quantity="one">%1$d / %2$d fixture cabled</item>
+        <item quantity="other">%1$d / %2$d fixtures cabled</item>
+    </plurals>
+    <plurals name="cabling_clear_circuit_msg">
+        <item quantity="one">Remove %1$d fixture from circuit %2$d of « %3$s »? </item>
+        <item quantity="other">Remove the %1$d fixtures from circuit %2$d of « %3$s »? </item>
+    </plurals>
+    <plurals name="dmx_assigned">
+        <item quantity="one">%1$d / %2$d fixture cabled in DMX</item>
+        <item quantity="other">%1$d / %2$d fixtures cabled in DMX</item>
+    </plurals>
+    <plurals name="dmx_clear_core_msg">
+        <item quantity="one">Remove %1$d fixture from %2$s of « %3$s »? </item>
+        <item quantity="other">Remove the %1$d fixtures from %2$s of « %3$s »? </item>
+    </plurals>
+    <plurals name="gdtf_resolved">
+        <item quantity="one">%1$d / %2$d type found automatically.</item>
+        <item quantity="other">%1$d / %2$d types found automatically.</item>
+    </plurals>
+    <plurals name="gdtf_type_status">
+        <item quantity="one">%1$d fixture · %2$s</item>
+        <item quantity="other">%1$d fixtures · %2$s</item>
+    </plurals>
+    <plurals name="home_members_version">
+        <item quantity="one">%1$d member · v%2$d</item>
+        <item quantity="other">%1$d members · v%2$d</item>
+    </plurals>
+    <plurals name="legend_more">
+        <item quantity="one">+%1$d more</item>
+        <item quantity="other">+%1$d more</item>
+    </plurals>
+    <plurals name="legend_more_layers">
+        <item quantity="one">+%1$d more layer</item>
+        <item quantity="other">+%1$d more layers</item>
+    </plurals>
+    <plurals name="patch_count">
+        <item quantity="one">%1$d / %2$d fixture · tap to edit</item>
+        <item quantity="other">%1$d / %2$d fixtures · tap to edit</item>
+    </plurals>
+    <plurals name="pdf_unknown_footprint">
+        <item quantity="one">%1$d fixture with unknown footprint (counted as 0 channels)</item>
+        <item quantity="other">%1$d fixtures with unknown footprint (counted as 0 channels)</item>
+    </plurals>
+    <plurals name="pdf_unknown_watts">
+        <item quantity="one">%1$d fixture with unknown power (counted as 0 W)</item>
+        <item quantity="other">%1$d fixtures with unknown power (counted as 0 W)</item>
+    </plurals>
+    <plurals name="universe_channels_count">
+        <item quantity="one">%1$d channel</item>
+        <item quantity="other">%1$d channels</item>
+    </plurals>
+    <plurals name="universe_conflicts">
+        <item quantity="one">%1$d channel in conflict</item>
+        <item quantity="other">%1$d channels in conflict</item>
     </plurals>
 </resources>

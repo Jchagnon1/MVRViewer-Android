@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.res.pluralStringResource
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -182,7 +183,7 @@ fun HomeScreen(
                                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                                         Text(p.name, style = MaterialTheme.typography.bodyMedium,
                                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(stringResource(R.string.home_members_version, p.memberUids.size, p.mvrVersion),
+                                        Text(pluralStringResource(R.plurals.home_members_version, p.memberUids.size, p.memberUids.size, p.mvrVersion),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }

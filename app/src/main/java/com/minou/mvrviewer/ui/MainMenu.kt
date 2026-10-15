@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.semantics.role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -340,7 +341,9 @@ private fun MenuLine(
             }
         },
         modifier = Modifier.testTag("menu.${item.id.name.lowercase()}")
+            // TalkBack : une bascule est une case cochée / non cochée (le menu reste ouvert).
             .then(if (item.kind == MainMenuKind.TOGGLE) Modifier.semantics {
+                role = Role.Checkbox
                 toggleableState = ToggleableState(state.isOn(item.id))
             } else Modifier)
     )

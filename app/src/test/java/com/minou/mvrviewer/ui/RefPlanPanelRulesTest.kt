@@ -127,7 +127,9 @@ class RefPlanPanelRulesTest {
             "refplan_show" to ("Afficher le plan" to "Show the plan"),
             "refplan_remove" to ("Retirer le plan" to "Remove the plan"),
             "menu_adjust_imported_plan" to ("Régler le plan importé…" to "Adjust the imported plan…"),
-            "tool_import_ref_plan" to ("Importer un plan (DXF, image, PDF)…" to "Import a plan (DXF, image, PDF)…"),
+            // Menu (avec « … ») ; l'outil ancrable a son titre sans points de suspension (tranche E).
+            "menu_import_plan" to ("Importer un plan (DXF, image, PDF)…" to "Import a plan (DXF, image, PDF)…"),
+            "tool_import_ref_plan" to ("Importer un plan (DXF, image, PDF)" to "Import a plan (DXF, image, PDF)"),
             "refplan_reading" to ("Lecture du plan…" to "Reading the plan…")
         )
         for ((k, v) in expected) {

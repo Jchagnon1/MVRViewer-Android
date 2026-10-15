@@ -250,12 +250,12 @@ object MainMenuModel {
 
     private fun planScenery(ctx: MainMenuContext): List<MainMenuSection> = buildList {
         add(MainMenuSection(titleRes = R.string.menu_section_imported_plan, items = buildList {
-            add(action(MainMenuItemId.IMPORT_PLAN, R.string.tool_import_ref_plan))
+            add(action(MainMenuItemId.IMPORT_PLAN, R.string.menu_import_plan))
             if (ctx.hasRefPlan) add(action(MainMenuItemId.ADJUST_PLAN, R.string.menu_adjust_imported_plan))
         }))
         if (ctx.surface == ProjectSurface.SCENE_3D) {
             add(MainMenuSection(titleRes = R.string.menu_section_scenery_3d, items = buildList {
-                add(action(MainMenuItemId.IMPORT_MODEL, R.string.tool_import_model))
+                add(action(MainMenuItemId.IMPORT_MODEL, R.string.menu_import_model))
                 if (ctx.importedModelCount > 0) {
                     add(action(MainMenuItemId.IMPORTED_MODELS, R.string.menu_imported_models_fmt,
                         arg = ctx.importedModelCount))

@@ -79,7 +79,7 @@ fun BackgroundColorDialog(
                     onValueChange = { value = it; onColorChange(Color.hsv(hue.coerceIn(0f, 360f), sat.coerceIn(0f, 1f), it.coerceIn(0f, 1f))) })
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) } },
         dismissButton = {
             TextButton(onClick = {
                 val h = default.toHsv()

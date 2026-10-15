@@ -565,7 +565,7 @@ private fun MaReportDialog(r: MaImportReport, onDismiss: () -> Unit) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) } }
     )
 }
 

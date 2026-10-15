@@ -285,7 +285,7 @@ private fun buildElecRows(
             for (cl in circuitLoads.filter { it.phase == phase }) {
                 rows.add(circuitHeaderRow(m, left, right, cl, settings.circuitLimitW))
                 if (cl.unknownCount > 0)
-                    rows.add(noteRow(m, left, right, "⚠ " + ctx.getString(R.string.pdf_unknown_watts_fmt, cl.unknownCount)))
+                    rows.add(noteRow(m, left, right, "⚠ " + ctx.resources.getQuantityString(R.plurals.pdf_unknown_watts, cl.unknownCount, cl.unknownCount)))
                 if (cl.fixtures.isEmpty())
                     rows.add(fixtureLineRow(m, left, right, "— " + ctx.getString(R.string.cabling_no_fixture), C_MUTE))
                 else for (u in cl.fixtures) {
@@ -339,7 +339,7 @@ private fun buildDmxRows(
             val coreLabel = if (dist.kind == DmxDistributorKind.MULTI) ctx.getString(R.string.pdf_core_fmt, cl.core) else ctx.getString(R.string.dmx_line)
             rows.add(coreHeaderRow(m, left, right, coreLabel, cl))
             if (cl.unknownCount > 0)
-                rows.add(noteRow(m, left, right, "⚠ " + ctx.getString(R.string.pdf_unknown_footprint_fmt, cl.unknownCount)))
+                rows.add(noteRow(m, left, right, "⚠ " + ctx.resources.getQuantityString(R.plurals.pdf_unknown_footprint, cl.unknownCount, cl.unknownCount)))
             if (cl.mixedUniverse)
                 rows.add(noteRow(m, left, right, "⚠ " + ctx.getString(R.string.dmx_mixed_universes_fmt, cl.universes.joinToString(", "))))
             if (cl.fixtures.isEmpty())
@@ -355,13 +355,13 @@ private fun buildDmxRows(
                     fixtureId = labelOf(u) ?: u,
                     gdtfType = specOf(u) ?: "—",
                     detail = "$addr · $mode",
-                    value = if (ch == null) ctx.getString(R.string.pdf_unknown_channels) else ctx.getString(R.string.fx_channels_count, ch),
+                    value = if (ch == null) ctx.getString(R.string.pdf_unknown_channels) else ctx.resources.getQuantityString(R.plurals.fx_channels, ch, ch),
                     unknown = ch == null
                 ))
             }
         }
         val total = DmxCablingCalc.distributorTotalChannels(dist, dto.assignments, channelsOf)
-        rows.add(totalRow(m, left, right, ctx.getString(R.string.pdf_total_line), ctx.getString(R.string.fx_channels_count, total)))
+        rows.add(totalRow(m, left, right, ctx.getString(R.string.pdf_total_line), ctx.resources.getQuantityString(R.plurals.fx_channels, total, total)))
     }
     return rows
 }

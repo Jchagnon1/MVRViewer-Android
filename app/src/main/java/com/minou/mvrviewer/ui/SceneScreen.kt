@@ -143,14 +143,32 @@ fun SceneScreen(
         kotlinx.coroutines.delay(400)
         withContext(Dispatchers.IO) { ViewStateStore.save(ctx, options) }
     }
-    // N11 — dispositions des barres d'outils ancrables (vue 3D / vue plan). Semées
-    // depuis le store GLOBAL persisté (par appareil, hors projet/cloud), ré-écrites
-    // à chaque changement. Pas de debounce : les changements de disposition sont
-    // rares (contrairement aux couleurs, émises à chaque frame de glissé).
-    var layout3D by remember { mutableStateOf(ToolbarLayoutStore.load3D(ctx)) }
-    var layoutPlan by remember { mutableStateOf(ToolbarLayoutStore.loadPlan(ctx)) }
-    LaunchedEffect(layout3D) { withContext(Dispatchers.IO) { ToolbarLayoutStore.save3D(ctx, layout3D) } }
-    LaunchedEffect(layoutPlan) { withContext(Dispatchers.IO) { ToolbarLayoutStore.savePlan(ctx, layoutPlan) } }
+    // N11 — dispositions des barres d'outils ancrables (vue 3D / vue plan), lues dans
+    // le store GLOBAL (par appareil, hors projet/cloud). Rien d'enregistré → défaut
+    // de l'APPAREIL : tablette (plus petite largeur ≥ 600 dp, ou crochet
+    // MVR_FORCE_TABLET_LAYOUT) = barre gauche préremplie ; téléphone = vide
+    // (SPEC-menus-android §3.13). On n'ENREGISTRE qu'au changement fait par
+    // l'utilisateur (avant la tranche E, la disposition vide était écrite dès
+    // l'ouverture : la migration v2 du store l'efface une fois).
+    val toolbarIdiom = ToolbarIdiom.of(
+        androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp,
+        DebugHooks.forceTabletLayout
+    )
+    var layout3D by remember(toolbarIdiom) { mutableStateOf(ToolbarLayoutStore.load(ctx, ToolbarView.SCENE_3D, toolbarIdiom)) }
+    var layoutPlan by remember(toolbarIdiom) { mutableStateOf(ToolbarLayoutStore.load(ctx, ToolbarView.PLAN, toolbarIdiom)) }
+    fun setToolbarLayout(view: ToolbarView, l: ToolbarLayout) {
+        if (view == ToolbarView.SCENE_3D) layout3D = l else layoutPlan = l
+        ToolbarLayoutStore.save(ctx, view, l)
+    }
+    /** « Réinitialiser » : plus rien d'enregistré → défaut de l'appareil. */
+    fun resetToolbarLayout(view: ToolbarView) {
+        ToolbarLayoutStore.clear(ctx, view)
+        val d = ToolbarLayout.defaultLayout(view, toolbarIdiom)
+        if (view == ToolbarView.SCENE_3D) layout3D = d else layoutPlan = d
+    }
+    // Outil `gdtfShare` (connexion GDTF Share) : Compte & réglages s'ouvre défilé
+    // jusqu'à sa section « Services ». Pris une fois par l'écran.
+    var accountFocusServices by remember { mutableStateOf(false) }
     val overrides = remember { PatchOverrides() }
     // N12 — fiche d'édition patch ouverte par APPUI LONG sur un projecteur (en 3D
     // OU en plan). Hissée ici : la MÊME FixtureDetailSheet que la liste de patch,
@@ -1339,9 +1357,11 @@ fun SceneScreen(
             dmxCabling = dmxCabling,
             onShowPlan = { showBase(SceneBase.PLAN) },
             onShowPatch = { open(ProjectDestination.PatchList) },
-            // Outil `gdtfShare` et entrée « GDTF Share (modèles 3D) » : l'écran
-            // « Modèles de projecteurs » (libellés inchangés jusqu'aux tranches C / E).
-            onShowGdtfShare = { open(ProjectDestination.FixtureModels) },
+            // Outil `gdtfMapping` : « Modèles de projecteurs ». Outil `gdtfShare` (sens
+            // iOS, tranche E) : la CONNEXION GDTF Share, section Services de Compte &
+            // réglages (§4.6, §8 D24).
+            onShowFixtureModels = { open(ProjectDestination.FixtureModels) },
+            onShowGdtfShareAccount = { accountFocusServices = true; open(ProjectDestination.AccountSettings) },
             onShowUniverse = { open(ProjectDestination.Universe) },
             onShowCabling = { open(ProjectDestination.Cabling(null)) },
             // « Compte & réglages » : toujours disponible (Pro et GDTF Share y vivent aussi).
@@ -1355,9 +1375,11 @@ fun SceneScreen(
             onSetSoloElements = { soloElements = it },
             // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
             onEditFixture = { editFixture = it },
-            // N11 — disposition des barres d'outils 3D (persistée globalement).
+            // N11 — disposition des barres d'outils 3D (persistée globalement, au
+            // seul changement de l'utilisateur ; « Réinitialiser » = défaut de l'appareil).
             toolbarLayout = layout3D,
-            onLayoutChange = { layout3D = it },
+            onLayoutChange = { setToolbarLayout(ToolbarView.SCENE_3D, it) },
+            onLayoutReset = { resetToolbarLayout(ToolbarView.SCENE_3D) },
             // LOD d'interaction par calque (persisté localement avec le projet).
             layerLod = layerLod,
             onSetLayerLod = { layerLod = it },
@@ -1434,9 +1456,11 @@ fun SceneScreen(
             },
             // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
             onEditFixture = { editFixture = it },
-            // N11 — disposition des barres d'outils plan (persistée globalement).
+            // N11 — disposition des barres d'outils plan (persistée globalement, au
+            // seul changement de l'utilisateur ; « Réinitialiser » = défaut de l'appareil).
             toolbarLayout = layoutPlan,
-            onLayoutChange = { layoutPlan = it },
+            onLayoutChange = { setToolbarLayout(ToolbarView.PLAN, it) },
+            onLayoutReset = { resetToolbarLayout(ToolbarView.PLAN) },
             // Sélection remontée (« affecter à la sélection » de la bibliothèque MA).
             onSelectionChanged = { selectionKeys = it },
             // Fiche de sélection / bannière multi communes (tranche D) + crochet DEBUG.
@@ -1535,7 +1559,9 @@ fun SceneScreen(
                 )
                 ProjectDestination.AccountSettings -> AccountSettingsScreen(
                     sync = sync,
-                    onBack = { closeDestination() }
+                    onBack = { closeDestination() },
+                    focusServices = accountFocusServices,
+                    onFocusConsumed = { accountFocusServices = false }
                 )
                 else -> {}
             }

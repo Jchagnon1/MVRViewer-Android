@@ -136,4 +136,56 @@ object PanelPlacementMath {
         for (top in candidates) if (!blocked(top)) return anchor.top - top
         return 0f
     }
+    /** Déplacement de la barre ancrée GAUCHE : [dy] vertical (négatif = monte), [dx] vers la droite. */
+    data class LeadingBarOffset(val dy: Float, val dx: Float) {
+        companion object { val NONE = LeadingBarOffset(0f, 0f) }
+    }
+
+    /**
+     * Où poser la barre ancrée GAUCHE (préremplie sur tablette, §3.13) pour
+     * qu'elle ne couvre ni la légende du plan, ni un panneau flottant ouvert, ni
+     * la fiche ou la bannière, ni le bloc d'état — portage de
+     * `PanelPlacementMath.leadingBarOffset` iOS, étendu à la légende Android qui
+     * est EN HAUT (§8 D11) : la barre gagne la place libre LA PLUS PROCHE de sa
+     * place centrée, au-dessus OU au-dessous des obstacles de sa colonne (bornée
+     * par [topLimit] et [bottomLimit]) ; sans place, elle garde sa hauteur et
+     * passe À DROITE de tout ce qu'elle chevauche, si l'écran ([maxX], moins
+     * [edgeMargin]) le permet — sinon elle reste où elle est.
+     *
+     * [anchor] = cadre de la barre SANS décalage (mesuré avant lui : pas de
+     * boucle) ; obstacles vides ou non finis ignorés. Unités libres mais communes.
+     */
+    fun leadingBarOffset(
+        anchor: Rect, occupants: List<Rect>, topLimit: Float, bottomLimit: Float,
+        maxX: Float = Float.POSITIVE_INFINITY, gap: Float = CORNER_STACK_GAP, edgeMargin: Float = 16f
+    ): LeadingBarOffset {
+        if (anchor.width <= 0f || anchor.height <= 0f || !anchor.top.isFinite() || !anchor.bottom.isFinite() ||
+            !anchor.left.isFinite() || !anchor.right.isFinite()
+        ) return LeadingBarOffset.NONE
+        val valid = occupants.filter {
+            it.width > 0f && it.height > 0f &&
+                it.left.isFinite() && it.top.isFinite() && it.right.isFinite() && it.bottom.isFinite()
+        }
+        // Obstacles de la COLONNE (chevauchement horizontal strict).
+        val column = valid.filter { it.right > anchor.left && it.left < anchor.right }
+        // Demi-unité de tolérance : posé « pile à gap » d'un obstacle n'est pas un contact.
+        val tolerance = 0.5f
+        val h = anchor.height
+        fun blocked(top: Float): Boolean =
+            column.any { it.top < top + h + gap - tolerance && it.bottom + gap - tolerance > top }
+        if (!blocked(anchor.top)) return LeadingBarOffset.NONE
+        // Places candidates : juste au-dessus ou juste au-dessous de chaque obstacle.
+        val lo = if (topLimit.isFinite()) topLimit else Float.NEGATIVE_INFINITY
+        val hi = if (bottomLimit.isFinite()) bottomLimit else Float.POSITIVE_INFINITY
+        val candidates = column.flatMap { listOf(it.top - gap - h, it.bottom + gap) }
+            .filter { it >= lo && it + h <= hi && !blocked(it) }
+        // La plus proche ; à égalité, monter (comme iOS).
+        val best = candidates.minWithOrNull(compareBy<Float>({ kotlin.math.abs(it - anchor.top) }, { it }))
+        if (best != null) return LeadingBarOffset(best - anchor.top, 0f)
+        // Pas de place : à droite de TOUT ce que la barre chevauche à sa place.
+        val overlapping = column.filter { it.top < anchor.bottom + gap && it.bottom + gap > anchor.top }
+        val shift = maxOf(0f, (overlapping.maxOfOrNull { it.right } ?: anchor.left) + gap - anchor.left)
+        if (shift <= 0f || anchor.right + shift > maxX - edgeMargin) return LeadingBarOffset.NONE
+        return LeadingBarOffset(0f, shift)
+    }
 }

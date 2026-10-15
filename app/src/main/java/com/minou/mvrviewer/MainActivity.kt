@@ -64,6 +64,8 @@ class MainActivity : ComponentActivity() {
         // Crochets d'essai du rangement des menus (MVR_AUTO_PLAN, MVR_AUTO_DEST,
         // MVR_AUTO_PLAN_START, MVR_AUTO_HOME_DEST) — débogable seulement.
         com.minou.mvrviewer.ui.DebugHooks.read(intent, isDebuggable)
+        // MVR_RESET_TOOLBARS : avant toute vue (les dispositions sont lues à l'ouverture d'un projet).
+        if (com.minou.mvrviewer.ui.DebugHooks.takeResetToolbars()) com.minou.mvrviewer.ui.ToolbarLayoutStore.reset(this)
         enableEdgeToEdge()
         incomingUris.value = urisFrom(intent)
         setContent {
@@ -108,6 +110,7 @@ class MainActivity : ComponentActivity() {
         com.minou.mvrviewer.ui.DebugHooks.read(
             intent, (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         )
+        if (com.minou.mvrviewer.ui.DebugHooks.takeResetToolbars()) com.minou.mvrviewer.ui.ToolbarLayoutStore.reset(this)
         incomingUris.value = urisFrom(intent)
     }
 

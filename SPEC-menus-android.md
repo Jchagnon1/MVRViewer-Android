@@ -6,8 +6,9 @@ fait foi pour la structure, les libellés et les règles gratuit/Pro) et
 Android, ce qui existe aujourd'hui (inventaire), ce qui change, ce qui manque,
 et dans quel ordre l'implémenter.
 
-État : **tranches A, B, C et D réalisées** (2026-10-15 / 16, voir *Réalisé* sous
-chaque tranche, §10) ; tranche E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
+État : **tranches A, B, C, D et E réalisées** (2026-10-15 / 16, voir *Réalisé* sous
+chaque tranche, §10) : le chantier Android est terminé. Décisions de l'utilisateur
+sur Q1–Q3 : §9.0.
 Base : branche `feature/v1.7-tilt-formats`, commit `e110bbc`
 (539 tests unitaires verts + 4 tests réseau ignorés). Relu et corrigé après
 critique (re-parcours du code, décisions, disparitions, sûreté des
@@ -1339,6 +1340,18 @@ Noms de ressources proposés ; « (pl.) » = `<plurals>` one / other.
 | `cabling_pdf_generating` | Génération du PDF… | Generating the PDF… |
 | `tool_ref_plan_panel` | Régler le plan importé | Adjust the imported plan |
 | `tool_models_panel` | Modèles importés | Imported models |
+| `menu_import_plan` (E) | Importer un plan (DXF, image, PDF)… | Import a plan (DXF, image, PDF)… |
+| `menu_import_model` (E) | Importer un modèle 3D… | Import a 3D model… |
+| `fx_fixture_number` (E) | N° de projecteur | Fixture number |
+| `plan_export_views` (pl., E) | 1 vue / %1$d vues | %1$d view / %1$d views |
+| `plan_export_ready` (pl., E) | PDF prêt · 1 page / PDF prêt · %1$d pages | PDF ready · %1$d page / … pages |
+| `fx_type_channels`, `fx_custom_type`, `fx_channels` (pl., E) | « %1$s  ·  %2$d canal / canaux » (+ « (custom) »), « %1$d canal / canaux » | channel / channels |
+| `universe_channels_count`, `universe_conflicts` (pl., E) | %1$d canal / canaux (en conflit) | %1$d channel / channels (in conflict) |
+| pluriels des « restes » (§11, faits en E) | `cabling_assigned`, `cabling_clear_circuit_msg`, `dmx_assigned`, `dmx_clear_core_msg`, `gdtf_resolved`, `gdtf_type_status`, `home_members_version`, `legend_more`, `legend_more_layers`, `patch_count`, `pdf_unknown_footprint`, `pdf_unknown_watts` | idem, one / other |
+
+`menu_import_plan` / `menu_import_model` (E) : le menu garde les points de
+suspension (il ouvre un sélecteur), les outils ancrables ont leur titre iOS sans
+(`tool_import_ref_plan`, `tool_import_model`, valeurs changées en E).
 
 Titres d'outils repris de clés de ce tableau : `geoPanel` = `geo_panel_title`, `multiSelect` = `perm_multi_select`, `gdtfMapping` = `models_title`, `account` = `account_settings_title`, `layers` = `menu_layers`, `cabling` = `menu_cabling` (valeurs iOS de `ToolId.title`).
 
@@ -1399,7 +1412,10 @@ Textes réutilisés tels quels : `opt_labels`, `patch_title`, `cam_top`,
 §2.6, disparaissent en A), `tool_ref_plan`, `tool_gps_3d`,
 `sync_sign_in_title` (si plus d'usage), `sel_fixtures_selected_fmt` (devenu le
 pluriel `sel_fixtures_selected`, D), `fixture_id_name_fmt` (pastille « N° · nom »
-de la 3D, D). `tool_models_fmt` n'est **pas**
+de la 3D, D) ; en E : `nav_power_cabling`, `plan_export_views_fmt`,
+`plan_export_ready_fmt`, `fx_type_channels_fmt`, `fx_custom_type_fmt`,
+`fx_channels_count`, `universe_channels_count_fmt`, `universe_conflicts_fmt` et
+les douze `…_fmt` / « (s) » du §11 (devenus des pluriels). `tool_models_fmt` n'est **pas**
 supprimée : elle reste le titre du panneau Modèles importés
 (`ModelPlacementPanel.kt:84`), valeur changée en E. Contrôle à chaque
 tranche : `grep` de la clé dans `app/src/main` (aucun usage restant) et test
@@ -1438,6 +1454,8 @@ de présence fr / en.
 | D23 | **VISIBLE** — En 3D, « Isoler (solo) » est grisé sans sélection ni solo (iOS : une entrée sans donnée est plutôt absente). | Laisser la famille « Masquer & isoler » vide en 3D serait pire ; le grisé dit pourquoi rien ne se passe. Jamais selon Pro. |
 | D24 | **VISIBLE** — L'outil `gdtfShare` (« GDTF Share ») ouvre « Compte & réglages » (Services), pas une fenêtre GDTF Share à part ; les dispositions Android qui l'avaient sont migrées vers `gdtfMapping`. | Android n'a pas de fenêtre de réglages GDTF Share séparée ; la connexion vit dans Compte & réglages (décision 3). L'ancien outil Android ouvrait les modèles : la migration garde ce que l'utilisateur avait voulu. |
 | D25 | **VISIBLE** — Pastille 3D : Face, Arrière, Gauche et Droite reculent davantage quand la vue est plus haute que large (téléphone en portrait : ×hauteur/largeur, marge ×1,35, borné ×3,5). Dessus, Perspective et le paysage gardent le recul d'avant. | Le champ horizontal d'un téléphone en portrait est étroit : avec le recul d'avant, « Gauche » / « Droite » montraient un écran noir sur `mini.mvr` (rangées hors du cadre). Constat émulateur, tranche C. |
+| D26 | **VISIBLE** — La barre ancrée gauche (préremplie sur tablette) gagne la place libre la plus proche AU-DESSUS ou AU-DESSOUS de ce qui occupe sa colonne (iOS : seulement au-dessus) ; sans place, elle passe à droite, comme iOS. | La légende du plan Android est EN HAUT à gauche (D11) : monter ne la dégagerait jamais. |
+| D27 | **VISIBLE** — « Barre d'outils de cette vue… » garde « Réinitialiser » (iOS : seulement « Tout remettre hors barres ») ; il efface le choix enregistré et rend le défaut de l'appareil (tablette : la barre préremplie). | Bouton existant d'Android ; seul moyen de retrouver la barre préremplie après l'avoir vidée. |
 
 ---
 
@@ -2115,33 +2133,111 @@ Tests unitaires (`ToolbarDefaultsTest`, `ToolHomeTest`, `LocalizationTest`) :
 - textes : clés §7 présentes en fr et en ; pluriels one / other ; plus de
   « (s) » ni de « Fixture » dans les clés touchées ; clés supprimées absentes.
 
-Contrôle à l'écran :
-- [ ] tablette simulée (`adb shell wm size 1600x2560` + `wm density 320`,
+Contrôle à l'écran (émulateur Medium_Phone, `mini.mvr`, fr et en) :
+- [x] tablette simulée (`adb shell wm size 1600x2560` + `wm density 320`,
       puis `wm size reset` / `wm density reset`) : barre gauche préremplie en
       3D et dans le plan, qui ne gêne ni la légende, ni les panneaux, ni la
       fiche, en portrait et en paysage ; vidée par « Tout remettre hors
-      barres » → reste vide au relancement ;
-- [ ] téléphone : aucune barre par défaut (Q1 = oui), dispositions
-      personnalisées d'avant gardées ;
-- [ ] TalkBack (ou `uiautomator dump`) : chaque bouton nommé, état coché ;
-- [ ] pluriels « 1 vue », « 2 vues », « 1 projecteur sélectionné » (fr et en) ;
-- [ ] rapport d'import MA et couleur personnalisée : « Terminé » ;
-- [ ] outil `gdtfShare` ancré → Compte & réglages ; une disposition d'avant
+      barres » → reste vide au relancement — *portrait : la barre monte
+      au-dessus du panneau Position GPS, sous la légende (plan) et le bloc
+      d'état (3D) ; paysage : le panneau occupe toute la colonne, la barre passe
+      à sa droite ; fiche pleine largeur (520 dp) hors de sa colonne. Vidée en
+      3D : la 3D reste vide au relancement, le plan garde sa barre. Patch et
+      Calques ouverts depuis la barre du plan, retour au plan* ;
+- [x] téléphone : aucune barre par défaut (Q1 = oui), dispositions
+      personnalisées d'avant gardées — *dispositions vides écrites par les
+      versions d'avant (présentes sur l'émulateur) effacées par la migration,
+      drapeau `toolbar.layout.v2.done` posé ; une disposition d'avant
+      [gdtfShare, measure] gardée (migrée)* ;
+- [x] TalkBack (ou `uiautomator dump`) : chaque bouton nommé, état coché —
+      *boutons ancrés : `content-desc` = titre de l'outil (« Liste de patch »,
+      « Patch list » en anglais…), `checkable` / `checked` pour Mesurer ;
+      cases Mesurer / Étiquettes du ⋯ et bascules de ⋯ › Affichage
+      cochables ; pastille : bouton « Vue », état = libellé* ;
+- [x] pluriels « 1 vue », « 2 vues », « 1 projecteur sélectionné » (fr et en) —
+      *« 0 vue », « 1 vue », « 2 vues », « PDF prêt · 2 pages » ; en : « 0 views »,
+      « 1 view », « 2 views », « PDF ready · 2 pages ». « 1 projecteur
+      sélectionné » ne s'affiche jamais (un seul projecteur = la fiche) :
+      prouvé en JVM (`LocalizationTest`)* ;
+- [x] rapport d'import MA et couleur personnalisée : « Terminé » — *profil
+      `ma2_dimmer.xml` envoyé à l'app (« 1 profil ajouté » · Terminé) ;
+      ⋯ › Affichage › Couleur du fond › Personnalisée… · Terminé* ;
+- [x] outil `gdtfShare` ancré → Compte & réglages ; une disposition d'avant
       qui contenait `gdtfShare` montre « Modèles de projecteurs » et l'ouvre ;
       outils `importDXF` / `refPlanPanel` et `importModel` / `modelsPanel` à
-      libellé fixe.
+      libellé fixe — *ancré à droite par le panneau de personnalisation :
+      Compte & réglages défile jusqu'à « Services » (visible en paysage) ;
+      catalogue 3D lu : « Importer un plan (DXF, image, PDF) », « Régler le
+      plan importé », « Importer un modèle 3D », « Modèles importés », « GDTF
+      Share », « Modèles de projecteurs », « Recadrer », « Vue plan 2D »,
+      « Taille du point GPS », « Afficher ma position »*.
+
+*Réalisé (tranche E, 2026-10-16)* — 690 tests unitaires verts + 4 ignorés
+(652 après D ; 38 nouveaux : `ToolbarDefaultsTest` 25, `ToolHomeTest` 5,
+`LocalizationTest` 8 ; `ToolbarLayoutTest` et `RefPlanPanelRulesTest` suivent
+les nouveaux défauts et le libellé de menu), APK construit, contrôle à
+l'émulateur Medium_Phone (mémoire 2 Go, démarré en 30 s, API 37), puis arrêté
+(`adb emu kill`), démon Gradle arrêté.
+
+- Code : `ToolbarDefaults.kt` (pur : `ToolbarView`, `ToolbarIdiom.of`,
+  `ToolCatalog.SCENE_3D` / `PLAN` + `ordered`, `ToolHome`, `ToolId.home`),
+  `ToolbarLayout.kt` (`REF_PLAN_PANEL` « refPlanPanel », `MODELS_PANEL`
+  « modelsPanel », `GDTF_MAPPING` « gdtfMapping » ; `EMPTY`, `tabletDefault`,
+  `defaultLayout(view, idiom)`, `isEmpty`, `replacing` ; `default3D` /
+  `defaultPlan` supprimés), `ToolbarLayoutStore.kt` (`ToolbarPrefs` pour les
+  tests JVM ; `load(view, idiom)`, `save`, `clear`, `reset`, `migrate` v2),
+  `PanelPlacementMath.leadingBarOffset` (§8 D26), `AnchoredToolbars`
+  (`LeadingBarClearance`, barre gauche mesurée avant son décalage, animée
+  0,2 s ; cadres lus dans la composition de la barre seule), `MovablePanel` /
+  `BottomLeadingPanel` (`onDisplayedBounds` : cadre affiché, glissé compris),
+  `PanelFrames` (cadres des panneaux ouverts de chaque vue).
+- `SceneScreen` : appareil lu par `LocalConfiguration.smallestScreenWidthDp`
+  (+ `MVR_FORCE_TABLET_LAYOUT`) ; dispositions lues par vue et par appareil,
+  ENREGISTRÉES seulement au changement de l'utilisateur (plus d'effet qui
+  écrivait la disposition à l'ouverture) ; « Réinitialiser » efface le choix.
+  Les deux écrans rangent leurs `ToolSpec` par `ToolCatalog.ordered` (test :
+  les `ToolSpec` de chaque écran = son catalogue). Plan : + Patch, Univers,
+  Câblage, Calques (par le ⋯, par-dessus le plan), `refPlanPanel` ; 3D :
+  `refPlanPanel`, `modelsPanel`, `gdtfMapping`, `importDXF` (importe, garde
+  dans `SceneScreen`). `gdtfShare` ouvre Compte & réglages défilé jusqu'à
+  « Services » (`focusServices`, pris une fois).
+- Crochets : `MVR_RESET_TOOLBARS` (lu par `MainActivity` avant tout affichage
+  et à `onNewIntent`) et `MVR_FORCE_TABLET_LAYOUT` (pour la vie du processus,
+  `=0` le retire).
+- Barres : boutons d'action ancrés NEUTRES et ronds de 48 dp, comme les
+  boutons permanents (constat émulateur : jaune foncé par défaut de Material,
+  alors que le jaune est réservé à une bascule active) ; TalkBack porté par le
+  bouton lui-même (aussi pendant l'indicateur d'attente) ; étiquettes de test
+  `dockedTool.<rawId>`, `dockedBar.left`, `toolbarCustomize.*`.
+- Personnalisation : texte d'aide iOS, « Hors barres » en tête des puces
+  (qui passent à la ligne sur téléphone), « Tout remettre hors barres » rouge
+  en fin de liste (grisé si déjà vide), « Réinitialiser », « Terminé ».
+- TalkBack : bascules du ⋯ annoncées en cases à cocher (`Role.Checkbox`) ;
+  pastille : bouton, point de vue courant « sélectionné » ; titre de la fiche
+  en en-tête.
+- Textes : §7.2 appliqué (titres d'outils iOS, « PDF du plan », « Modèles
+  importés (%d) », « Câblage ») ; « OK » → « Terminé » (rapport MA, couleur
+  personnalisée) ; fiche patch : « Fixture ID » → « N° de projecteur »,
+  « 1 canal » / « n canaux » ; plus AUCUN « (s) » ni « (aux) » dans les textes
+  fr / en (les douze du §11 + `universe_*` faits ici) ; plus de « Fixture »
+  en français (testé sur tout le fichier).
+- Défaut corrigé en passant : les boutons « Générer · Envoyer · Imprimer » du
+  panneau « PDF du plan » coupaient leur mot en deux sur 268 dp (« Géné / rer »)
+  — marge intérieure réduite, une ligne.
+- Captures : `~/.mvrviewer-tools/scratch/android-menus/E/`.
 
 ---
 
 ## 11. Hors périmètre (relevé en passant)
 
-- « (s) » restant hors des surfaces du chantier : `cabling_assigned_fmt`,
-  `cabling_clear_circuit_msg_fmt`, `dmx_assigned_fmt`,
-  `dmx_clear_core_msg_fmt`, `gdtf_resolved_fmt`, `gdtf_type_status_fmt`,
-  `home_members_version`, `legend_more_fmt`, `legend_more_layers_fmt`,
-  `patch_count_hint`, `pdf_unknown_footprint_fmt`, `pdf_unknown_watts_fmt`
-  (iOS les a traités dans ses « restes ») — à faire avec la tranche E si le
-  temps le permet, sinon chantier vocabulaire.
+- « (s) » restant hors des surfaces du chantier (`cabling_assigned_fmt`… —
+  douze clés) : **fait en tranche E** (pluriels one / other).
+- Restent hors chantier : le journal d'audit (`AuditCoding.kt`, « n ancre(s) »
+  fabriqué et champ « Fixture ID ») — texte de journal partagé, pas une
+  surface de menu ; la chevron de repli des panneaux déplaçables
+  (`MovablePanel`) n'a pas de nom TalkBack ; en paysage, le panneau Position
+  GPS du plan recouvre la légende (il n'est borné que par la rangée du haut,
+  la pastille et le bandeau de mode).
 - Dialogue « Renommer le distributeur » du Câblage (`CablingScreen.kt:736`,
   `DmxCablingScreen.kt:486`) : « OK » + « Fermer » au lieu de « Annuler » /
   « Enregistrer » (DESIGN_UI §8).

@@ -38,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -73,7 +75,13 @@ import kotlinx.coroutines.launch
 fun AccountSettingsScreen(
     sync: SyncViewModel?,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /**
+     * Ouvert par l'outil ancré `gdtfShare` (SPEC-menus-android §4.6, §8 D24) :
+     * l'écran défile jusqu'à la section « Services » (connexion GDTF Share).
+     */
+    focusServices: Boolean = false,
+    onFocusConsumed: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     var gdtfLogin by remember { mutableStateOf(false) }
@@ -101,15 +109,26 @@ fun AccountSettingsScreen(
                 }
             }
         )
+        val scroll = rememberScrollState()
+        // Haut de la section « Services » dans la colonne défilante (px), mesuré.
+        var servicesTop by remember { mutableStateOf<Int?>(null) }
+        LaunchedEffect(focusServices, servicesTop) {
+            val y = servicesTop ?: return@LaunchedEffect
+            if (!focusServices) return@LaunchedEffect
+            scroll.animateScrollTo(y)
+            onFocusConsumed()
+        }
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             AccountSettingsSections.of(sync != null).forEach { section ->
                 when (section) {
                     AccountSettingsSection.ACCOUNT -> sync?.let { AccountSection(it) }
                     AccountSettingsSection.PRO -> ProSection()
-                    AccountSettingsSection.SERVICES -> ServicesSection(onSignIn = { gdtfLogin = true })
+                    AccountSettingsSection.SERVICES -> Column(
+                        Modifier.onGloballyPositioned { servicesTop = it.positionInParent().y.toInt() }
+                    ) { ServicesSection(onSignIn = { gdtfLogin = true }) }
                 }
             }
         }

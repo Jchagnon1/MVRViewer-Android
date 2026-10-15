@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -138,7 +139,7 @@ fun DmxCablingPanel(
         }
         val assignedCount = dmx.assignments.size
         Text(
-            stringResource(R.string.dmx_assigned_fmt, assignedCount, fixtures.size),
+            pluralStringResource(R.plurals.dmx_assigned, fixtures.size, assignedCount, fixtures.size),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
@@ -386,7 +387,7 @@ private fun DmxCoreRow(
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.common_cancel)) } },
             title = { Text(stringResource(R.string.dmx_clear_core_q)) },
             text = {
-                Text(stringResource(R.string.dmx_clear_core_msg_fmt, fx.size, departLabel, dist.name) + (
+                Text(pluralStringResource(R.plurals.dmx_clear_core_msg, fx.size, fx.size, departLabel, dist.name) + (
                     stringResource(R.string.dmx_clear_core_msg2)))
             }
         )
@@ -450,7 +451,7 @@ private fun DmxFixturePickerDialog(
                                     color = if (elsewhere) MaterialTheme.colorScheme.onSurfaceVariant
                                     else MaterialTheme.colorScheme.onSurface
                                 )
-                                val empreinte = f.channels?.let { stringResource(R.string.fx_channels_count, it) } ?: stringResource(R.string.dmx_unknown_footprint)
+                                val empreinte = f.channels?.let { pluralStringResource(R.plurals.fx_channels, it, it) } ?: stringResource(R.string.dmx_unknown_footprint)
                                 val patch = f.address?.let { stringResource(R.string.dmx_patch_fmt, it) } ?: ""
                                 val whereTxt = when {
                                     here -> " · " + stringResource(R.string.dmx_already_here)

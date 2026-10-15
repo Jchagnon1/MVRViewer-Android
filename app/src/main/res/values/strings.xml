@@ -18,12 +18,10 @@
     <string name="cabling_already_here">déjà sur ce circuit</string>
     <string name="cabling_assign_fixtures_cd">Affecter des projecteurs</string>
     <string name="cabling_assign_fmt">Affecter (%1$d)</string>
-    <string name="cabling_assigned_fmt">%1$d / %2$d projecteur(s) câblé(s)</string>
     <string name="cabling_circuit_fmt">Circuit %1$d</string>
     <string name="cabling_circuit_limit">Limite par circuit (W)</string>
     <string name="cabling_clear_circuit_cd">Vider le circuit</string>
     <string name="cabling_clear_circuit_msg2">Les autres circuits ne sont pas touchés.</string>
-    <string name="cabling_clear_circuit_msg_fmt">Retirer les %1$d projecteur(s) du circuit %2$d de « %3$s » ? </string>
     <string name="cabling_clear_circuit_q">Vider le circuit ?</string>
     <string name="cabling_dist_circuit_fmt">%1$s · circuit %2$d</string>
     <string name="cabling_edit_dist_fmt">Modifier « %1$s »</string>
@@ -176,10 +174,8 @@
     <string name="diag_subject">MVR Viewer — rapport de diagnostic</string>
     <string name="dmx_already_here">déjà sur ce départ</string>
     <string name="dmx_analysing">Analyse des empreintes DMX…</string>
-    <string name="dmx_assigned_fmt">%1$d / %2$d projecteur(s) câblé(s) en DMX</string>
     <string name="dmx_clear_core_cd">Vider le départ</string>
     <string name="dmx_clear_core_msg2">Les autres départs ne sont pas touchés.</string>
-    <string name="dmx_clear_core_msg_fmt">Retirer les %1$d projecteur(s) de %2$s de « %3$s » ? </string>
     <string name="dmx_clear_core_q">Vider le départ ?</string>
     <string name="dmx_core_count">Nombre de paires</string>
     <string name="dmx_core_fmt">Paire %1$d</string>
@@ -208,7 +204,7 @@
     <string name="dmx_unknown_footprint_cd">Empreinte inconnue</string>
     <string name="edge_bottom">Bas</string>
     <string name="edge_left">Gauche</string>
-    <string name="edge_none">Aucun</string>
+    <string name="edge_none">Hors barres</string>
     <string name="edge_right">Droite</string>
     <string name="edge_top">Haut</string>
     <string name="err_unknown">Erreur inconnue.</string>
@@ -223,10 +219,8 @@
     <string name="fx_channel_default_fmt"> · défaut %1$d</string>
     <string name="fx_channel_offset_fmt">offset %1$s</string>
     <string name="fx_channel_virtual">virtuel</string>
-    <string name="fx_channels_count">%1$d canaux</string>
     <string name="fx_channels_title_fmt">Canaux (%1$d)</string>
     <string name="fx_custom_channels_title_fmt">Canaux custom (%1$d)</string>
-    <string name="fx_custom_type_fmt">%1$s  ·  %2$d canaux (custom)</string>
     <string name="fx_duplicate_type_fmt">Dupliquer « %1$s »</string>
     <string name="fx_edit_type_fmt">Éditer « %1$s »</string>
     <string name="fx_modes_unavailable">Modes indisponibles</string>
@@ -240,7 +234,6 @@
     <string name="fx_power_vote_hint">Votez une autre valeur si besoin ; le consensus se recalcule.</string>
     <string name="fx_render_type">Type de rendu</string>
     <string name="fx_standard_fmt">Standard : %1$s</string>
-    <string name="fx_type_channels_fmt">%1$s  ·  %2$d canaux</string>
     <string name="gap_far">Loin</string>
     <string name="gap_near">Proche</string>
     <string name="gap_normal">Normal</string>
@@ -264,7 +257,6 @@
     <string name="gdtf_model_missing">Pas de modèle 3D (formes génériques)</string>
     <string name="gdtf_rating_fmt">Note : %1$s/5</string>
     <string name="gdtf_reconnecting">Reconnexion…</string>
-    <string name="gdtf_resolved_fmt">%1$d / %2$d type(s) trouvé(s) automatiquement.</string>
     <string name="gdtf_resolving_fmt">Résolution %1$d/%2$d…</string>
     <string name="gdtf_search_failed">Recherche impossible.</string>
     <string name="gdtf_search_hint">Fabricant ou modèle</string>
@@ -273,9 +265,7 @@
     <string name="gdtf_status_auto">modèle réel (auto)</string>
     <string name="gdtf_status_generic">formes génériques</string>
     <string name="gdtf_status_manual">choisi à la main</string>
-    <string name="gdtf_type_status_fmt">%1$d projecteur(s) · %2$s</string>
     <string name="gdtf_username">Identifiant / email</string>
-    <string name="home_members_version">%1$d membre(s) · v%2$d</string>
     <string name="home_open_mvr">Ouvrir un fichier .mvr</string>
     <string name="home_recent_projects">Projets récents</string>
     <string name="home_send_diag">Envoyer le rapport de diagnostic</string>
@@ -301,8 +291,6 @@
         <item quantity="one">%1$d objet</item>
         <item quantity="other">%1$d objets</item>
     </plurals>
-    <string name="legend_more_fmt">+%1$d autre(s)</string>
-    <string name="legend_more_layers_fmt">+%1$d autre(s) calque(s)</string>
     <string name="load_build">Construction de la scène…</string>
     <string name="load_gdtf">Chargement des GDTF…</string>
     <string name="load_geometry">Chargement de la 3D…</string>
@@ -344,10 +332,9 @@
     <string name="nav_dmx_universe">Univers DMX</string>
     <string name="nav_history">Historique des modifications</string>
     <string name="nav_patch_list">Liste de patch</string>
-    <string name="nav_power_cabling">Câblage électrique</string>
     <string name="nav_share_project">Partager ce projet</string>
     <string name="nav_view_3d">Vue 3D</string>
-    <string name="nav_view_plan">Vue plan</string>
+    <string name="nav_view_plan">Vue plan 2D</string>
     <string name="opt_hide_when_zoomed_out">Masquer les étiquettes trop dézoomées</string>
     <string name="opt_label_content">Contenu</string>
     <string name="opt_labels">Étiquettes</string>
@@ -358,7 +345,6 @@
     <string name="opt_reset_label_offsets">Replacer les étiquettes</string>
     <string name="opt_show_labels">Afficher les étiquettes</string>
     <string name="opt_structure">Décor / structure</string>
-    <string name="patch_count_hint">%1$d / %2$d projecteur(s) · touchez pour éditer</string>
     <string name="patch_duplicate_id_cd">N° en double</string>
     <string name="patch_duplicate_ids">N° en double : </string>
     <string name="patch_filter_hint">Filtrer (ID, GDTF, calque, DMX…)</string>
@@ -379,14 +365,10 @@
     <string name="pdf_total_distributor">Total distributeur</string>
     <string name="pdf_total_line">Total ligne</string>
     <string name="pdf_unknown_channels">\? canaux</string>
-    <string name="pdf_unknown_footprint_fmt">%1$d projecteur(s) à empreinte inconnue (comptés 0 canal)</string>
-    <string name="pdf_unknown_watts_fmt">%1$d projecteur(s) à conso inconnue (comptés 0 W)</string>
     <string name="plan_export_add_view">Ajouter cette vue</string>
-    <string name="plan_export_ready_fmt">PDF prêt · %1$d page(s)</string>
     <string name="plan_export_rename_view">Renommer la vue</string>
     <string name="plan_export_view_fmt">Vue %1$d</string>
     <string name="plan_export_view_name">Nom de la vue</string>
-    <string name="plan_export_views_fmt">%1$d vue(s)</string>
     <string name="plan_image_default_name">Plan image</string>
     <string name="plan_pdf_default_name">Plan PDF</string>
     <string name="plan_pdf_doc_title">Plan</string>
@@ -477,30 +459,28 @@
     <string name="sync_syncing">Synchro…</string>
     <string name="sync_undo_change">Annuler cette modification</string>
     <string name="sync_uploading_fmt">Envoi %1$d %%</string>
-    <string name="tool_calibrate">Calibrer : je suis ici</string>
+    <string name="tool_calibrate">Je suis ici (pose rapide)</string>
     <string name="tool_calibrate_3">Calibrer en 3 points (guidé)…</string>
-    <string name="tool_clear_selection">Effacer la sélection</string>
+    <string name="tool_clear_selection">Vider la sélection</string>
     <string name="tool_clear_solo">Vider l\'isolement</string>
-    <string name="tool_export_pdf">Export PDF</string>
-    <string name="tool_gps">Ma position GPS</string>
-    <string name="tool_gps_3d">Ma position (3D)</string>
-    <string name="tool_import_model">Importer un modèle 3D…</string>
-    <string name="tool_import_ref_plan">Importer un plan (DXF, image, PDF)…</string>
+    <string name="tool_export_pdf">PDF du plan</string>
+    <string name="tool_gps">Afficher ma position</string>
+    <string name="tool_import_model">Importer un modèle 3D</string>
+    <string name="tool_import_ref_plan">Importer un plan (DXF, image, PDF)</string>
     <string name="model_import_formats_title">Formats pris en charge</string>
     <string name="model_import_formats_choose">Choisir un fichier…</string>
     <string name="tool_label_settings">Réglage des étiquettes</string>
     <string name="tool_label_size">Réglage des étiquettes</string>
-    <string name="tool_marker_size">Taille du marqueur</string>
+    <string name="tool_marker_size">Taille du point GPS</string>
     <string name="tool_mask">Masquer des éléments</string>
     <string name="tool_measure">Mesurer une distance</string>
-    <string name="tool_models_fmt">Modèles 3D (%1$d)</string>
-    <string name="tool_recenter_camera">Recentrer la caméra</string>
+    <string name="tool_models_fmt">Modèles importés (%1$d)</string>
+    <string name="tool_recenter_camera">Recadrer</string>
     <string name="tool_rect_select">Sélection par cadre</string>
-    <string name="tool_ref_plan">Plan de repère</string>
     <string name="tool_satellite">Fond satellite</string>
     <string name="tool_show_all">Tout réafficher</string>
     <string name="tool_solo">Isoler (solo)</string>
-    <string name="toolbar_customize_help">Placez chaque outil sur un bord de l\'écran ou hors des barres. Tous les outils restent accessibles dans le menu ⋯.</string>
+    <string name="toolbar_customize_help">Placez un outil sur un bord de l\'écran pour un accès rapide, ou laissez-le « Hors barres » : il reste accessible par son bouton, le menu ⋯ ou un panneau. Les flèches réordonnent les outils d\'une même barre.</string>
     <string name="toolbar_title_3d">Barre d\'outils · Vue 3D</string>
     <string name="toolbar_title_plan">Barre d\'outils · Vue plan</string>
     <string name="unit_metre">mètre</string>
@@ -508,8 +488,6 @@
     <string name="universe_analysing">Analyse du patch…</string>
     <string name="universe_channel_fmt">Canal %1$d</string>
     <string name="universe_channel_free">Canal libre.</string>
-    <string name="universe_channels_count_fmt">%1$d canal(aux)</string>
-    <string name="universe_conflicts_fmt">%1$d canal(aux) en conflit</string>
     <string name="universe_empty">Aucun projecteur patché\n(aucune adresse DMX à afficher).</string>
     <string name="universe_fixtures_fmt">%1$d proj.</string>
     <string name="universe_fixtures_title_fmt">Projecteurs — univers %1$d</string>
@@ -833,5 +811,88 @@
     <plurals name="sel_fixtures_selected">
         <item quantity="one">%1$d projecteur sélectionné</item>
         <item quantity="other">%1$d projecteurs sélectionnés</item>
+    </plurals>
+    <!-- Rangement des menus, tranche E (SPEC-menus-android §7) : titres d'outils, barres, pluriels (« (s) » retirés). -->
+    <string name="menu_import_plan">Importer un plan (DXF, image, PDF)…</string>
+    <string name="menu_import_model">Importer un modèle 3D…</string>
+    <string name="tool_ref_plan_panel">Régler le plan importé</string>
+    <string name="tool_models_panel">Modèles importés</string>
+    <string name="toolbar_all_off">Tout remettre hors barres</string>
+    <string name="fx_fixture_number">N° de projecteur</string>
+    <plurals name="plan_export_views">
+        <item quantity="one">%1$d vue</item>
+        <item quantity="other">%1$d vues</item>
+    </plurals>
+    <plurals name="plan_export_ready">
+        <item quantity="one">PDF prêt · %1$d page</item>
+        <item quantity="other">PDF prêt · %1$d pages</item>
+    </plurals>
+    <plurals name="fx_type_channels">
+        <item quantity="one">%1$s  ·  %2$d canal</item>
+        <item quantity="other">%1$s  ·  %2$d canaux</item>
+    </plurals>
+    <plurals name="fx_custom_type">
+        <item quantity="one">%1$s  ·  %2$d canal (custom)</item>
+        <item quantity="other">%1$s  ·  %2$d canaux (custom)</item>
+    </plurals>
+    <plurals name="fx_channels">
+        <item quantity="one">%1$d canal</item>
+        <item quantity="other">%1$d canaux</item>
+    </plurals>
+    <plurals name="cabling_assigned">
+        <item quantity="one">%1$d / %2$d projecteur câblé</item>
+        <item quantity="other">%1$d / %2$d projecteurs câblés</item>
+    </plurals>
+    <plurals name="cabling_clear_circuit_msg">
+        <item quantity="one">Retirer %1$d projecteur du circuit %2$d de « %3$s » ? </item>
+        <item quantity="other">Retirer les %1$d projecteurs du circuit %2$d de « %3$s » ? </item>
+    </plurals>
+    <plurals name="dmx_assigned">
+        <item quantity="one">%1$d / %2$d projecteur câblé en DMX</item>
+        <item quantity="other">%1$d / %2$d projecteurs câblés en DMX</item>
+    </plurals>
+    <plurals name="dmx_clear_core_msg">
+        <item quantity="one">Retirer %1$d projecteur de %2$s de « %3$s » ? </item>
+        <item quantity="other">Retirer les %1$d projecteurs de %2$s de « %3$s » ? </item>
+    </plurals>
+    <plurals name="gdtf_resolved">
+        <item quantity="one">%1$d / %2$d type trouvé automatiquement.</item>
+        <item quantity="other">%1$d / %2$d types trouvés automatiquement.</item>
+    </plurals>
+    <plurals name="gdtf_type_status">
+        <item quantity="one">%1$d projecteur · %2$s</item>
+        <item quantity="other">%1$d projecteurs · %2$s</item>
+    </plurals>
+    <plurals name="home_members_version">
+        <item quantity="one">%1$d membre · v%2$d</item>
+        <item quantity="other">%1$d membres · v%2$d</item>
+    </plurals>
+    <plurals name="legend_more">
+        <item quantity="one">+%1$d autre</item>
+        <item quantity="other">+%1$d autres</item>
+    </plurals>
+    <plurals name="legend_more_layers">
+        <item quantity="one">+%1$d autre calque</item>
+        <item quantity="other">+%1$d autres calques</item>
+    </plurals>
+    <plurals name="patch_count">
+        <item quantity="one">%1$d / %2$d projecteur · touchez pour éditer</item>
+        <item quantity="other">%1$d / %2$d projecteurs · touchez pour éditer</item>
+    </plurals>
+    <plurals name="pdf_unknown_footprint">
+        <item quantity="one">%1$d projecteur à empreinte inconnue (compté 0 canal)</item>
+        <item quantity="other">%1$d projecteurs à empreinte inconnue (comptés 0 canal)</item>
+    </plurals>
+    <plurals name="pdf_unknown_watts">
+        <item quantity="one">%1$d projecteur à conso inconnue (compté 0 W)</item>
+        <item quantity="other">%1$d projecteurs à conso inconnue (comptés 0 W)</item>
+    </plurals>
+    <plurals name="universe_channels_count">
+        <item quantity="one">%1$d canal</item>
+        <item quantity="other">%1$d canaux</item>
+    </plurals>
+    <plurals name="universe_conflicts">
+        <item quantity="one">%1$d canal en conflit</item>
+        <item quantity="other">%1$d canaux en conflit</item>
     </plurals>
 </resources>

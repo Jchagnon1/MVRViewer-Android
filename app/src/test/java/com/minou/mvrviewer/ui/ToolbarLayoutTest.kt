@@ -15,17 +15,21 @@ import org.junit.Test
 class ToolbarLayoutTest {
 
     @Test
-    fun `defaut 3D est vide`() {
-        val d = ToolbarLayout.default3D
-        assertTrue(d.top.isEmpty() && d.bottom.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
-        assertTrue(d.allAssigned().isEmpty())
+    fun `defaut telephone vide dans les deux vues (barre flottante retiree, Q1)`() {
+        for (view in ToolbarView.entries) {
+            val d = ToolbarLayout.defaultLayout(view, ToolbarIdiom.PHONE)
+            assertTrue(d.isEmpty)
+            assertTrue(d.allAssigned().isEmpty())
+        }
     }
 
     @Test
-    fun `defaut plan est vide`() {
-        val d = ToolbarLayout.defaultPlan
-        assertTrue(d.top.isEmpty() && d.bottom.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
-        assertTrue(d.allAssigned().isEmpty())
+    fun `defaut tablette - barre gauche preremplie dans les deux vues`() {
+        for (view in ToolbarView.entries) {
+            val d = ToolbarLayout.defaultLayout(view, ToolbarIdiom.TABLET)
+            assertEquals(listOf(ToolId.PATCH, ToolId.UNIVERSE, ToolId.CABLING, ToolId.LAYERS), d.left)
+            assertTrue(d.top.isEmpty() && d.bottom.isEmpty() && d.right.isEmpty())
+        }
     }
 
     @Test
@@ -107,14 +111,14 @@ class ToolbarLayoutTest {
             left = listOf(ToolId.GPS),
             right = listOf(ToolId.LABELS, ToolId.LAYER_COLORS)
         )
-        val back = ToolbarLayout.fromJson(l.toJson(), ToolbarLayout.default3D)
+        val back = ToolbarLayout.fromJson(l.toJson(), ToolbarLayout.EMPTY)
         assertEquals(l, back)
     }
 
     @Test
     fun `fromJson tolere les ids inconnus (ignores)`() {
         val raw = """{"top":[],"bottom":["rectSelect","pasUnOutil","measure"],"left":[],"right":[]}"""
-        val l = ToolbarLayout.fromJson(raw, ToolbarLayout.default3D)
+        val l = ToolbarLayout.fromJson(raw, ToolbarLayout.EMPTY)
         assertEquals(listOf(ToolId.RECT, ToolId.MEASURE), l.bottom)
     }
 
@@ -122,7 +126,7 @@ class ToolbarLayoutTest {
     fun `fromJson decode les rawValues iOS (interop cross-plateforme)`() {
         // Une disposition telle qu'iOS l'écrirait (rawValues Swift) se relit ici.
         val raw = """{"top":["labels"],"bottom":["rectSelect","exportPDF"],"left":[],"right":["patchList"]}"""
-        val l = ToolbarLayout.fromJson(raw, ToolbarLayout.defaultPlan)
+        val l = ToolbarLayout.fromJson(raw, ToolbarLayout.EMPTY)
         assertEquals(listOf(ToolId.LABELS), l.top)
         assertEquals(listOf(ToolId.RECT, ToolId.EXPORT_PDF), l.bottom)
         assertEquals(listOf(ToolId.PATCH), l.right)
@@ -130,15 +134,15 @@ class ToolbarLayoutTest {
 
     @Test
     fun `fromJson vide ou illisible retombe sur le defaut`() {
-        assertEquals(ToolbarLayout.defaultPlan, ToolbarLayout.fromJson(null, ToolbarLayout.defaultPlan))
-        assertEquals(ToolbarLayout.defaultPlan, ToolbarLayout.fromJson("", ToolbarLayout.defaultPlan))
-        assertEquals(ToolbarLayout.defaultPlan, ToolbarLayout.fromJson("{pas du json", ToolbarLayout.defaultPlan))
+        assertEquals(ToolbarLayout.EMPTY, ToolbarLayout.fromJson(null, ToolbarLayout.EMPTY))
+        assertEquals(ToolbarLayout.EMPTY, ToolbarLayout.fromJson("", ToolbarLayout.EMPTY))
+        assertEquals(ToolbarLayout.EMPTY, ToolbarLayout.fromJson("{pas du json", ToolbarLayout.EMPTY))
     }
 
     @Test
     fun `fromJson dedoublonne un id present dans deux barres`() {
         val raw = """{"top":["rectSelect"],"bottom":["rectSelect","measure"],"left":[],"right":[]}"""
-        val l = ToolbarLayout.fromJson(raw, ToolbarLayout.default3D)
+        val l = ToolbarLayout.fromJson(raw, ToolbarLayout.EMPTY)
         // Première occurrence gardée (haut → bas → gauche → droite).
         assertEquals(listOf(ToolId.RECT), l.top)
         assertEquals(listOf(ToolId.MEASURE), l.bottom)

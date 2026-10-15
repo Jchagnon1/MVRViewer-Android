@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.res.pluralStringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -143,7 +144,8 @@ fun FixtureModelsScreen(
     val sGdtfReconnecting = stringResource(R.string.gdtf_reconnecting)
     val sGdtfConnected = stringResource(R.string.gdtf_connected)
     val sGdtfResolvingFmt = stringResource(R.string.gdtf_resolving_fmt)
-    val sGdtfResolvedFmt = stringResource(R.string.gdtf_resolved_fmt)
+    // « n / m types trouvés » : pluriel choisi au moment du résultat (hors composition).
+    val resGdtf = androidx.compose.ui.platform.LocalContext.current.resources
 
     // Reconnexion automatique depuis les identifiants enregistrés (le compte
     // reste connecté d'un lancement à l'autre — plus besoin de se reconnecter).
@@ -270,7 +272,7 @@ fun FixtureModelsScreen(
                                 if (bytes != null) { overrides.set(spec, bytes); applied++ }
                                 done++
                             }
-                            status = sGdtfResolvedFmt.format(applied, specs.size)
+                            status = resGdtf.getQuantityString(R.plurals.gdtf_resolved, specs.size, applied, specs.size)
                             busy = false
                         }
                     },
@@ -299,7 +301,7 @@ fun FixtureModelsScreen(
                     Column(Modifier.weight(1f)) {
                         Text(spec, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                         Text(
-                            stringResource(R.string.gdtf_type_status_fmt, count, stringResource(statusLabelRes(spec, overrides))),
+                            pluralStringResource(R.plurals.gdtf_type_status, count, count, stringResource(statusLabelRes(spec, overrides))),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

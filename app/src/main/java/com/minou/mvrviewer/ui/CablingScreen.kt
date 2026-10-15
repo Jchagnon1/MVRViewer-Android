@@ -299,7 +299,7 @@ fun CablingScreen(
         // Compteur d'affectation (aide : ce qui reste à câbler).
         val assignedCount = cabling.assignments.size
         Text(
-            stringResource(R.string.cabling_assigned_fmt, assignedCount, fixtures.size),
+            pluralStringResource(R.plurals.cabling_assigned, fixtures.size, assignedCount, fixtures.size),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
@@ -579,7 +579,7 @@ private fun CircuitRow(
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.common_cancel)) } },
             title = { Text(stringResource(R.string.cabling_clear_circuit_q)) },
             text = {
-                Text(stringResource(R.string.cabling_clear_circuit_msg_fmt, fx.size, circuit, dist.name) + (
+                Text(pluralStringResource(R.plurals.cabling_clear_circuit_msg, fx.size, fx.size, circuit, dist.name) + (
                     stringResource(R.string.cabling_clear_circuit_msg2)))
             }
         )

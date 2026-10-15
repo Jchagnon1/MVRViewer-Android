@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,6 +25,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Architecture
 import androidx.compose.material.icons.filled.CenterFocusStrong
@@ -224,8 +230,10 @@ fun PlanScreen(
     // N11 — disposition des barres d'outils ancrables (vue plan). Nommé
     // `toolbarLayout` (cohérence avec Scene3DScreen). Défaut = barre bas-gauche
     // actuelle → aucun changement pour qui ne personnalise pas.
-    toolbarLayout: ToolbarLayout = ToolbarLayout.defaultPlan,
+    toolbarLayout: ToolbarLayout = ToolbarLayout.EMPTY,
     onLayoutChange: (ToolbarLayout) -> Unit = {},
+    /** « Réinitialiser » du panneau de personnalisation : défaut de l'appareil. */
+    onLayoutReset: () -> Unit = {},
     onBack: () -> Unit,
     /** Sélection courante (clés d'INSTANCE) remontée à la scène — « affecter à la sélection ». */
     onSelectionChanged: (List<String>) -> Unit = {},
@@ -681,6 +689,8 @@ fun PlanScreen(
     var syncBadgeWidthPx by remember { mutableStateOf(0f) }
     var selectionBarPx by remember { mutableStateOf(Rect.Zero) }
     var bottomAidPx by remember { mutableStateOf(Rect.Zero) }
+    // Cadres AFFICHÉS des panneaux flottants (barre ancrée gauche, §3.13).
+    val panelFramesPlan = remember { PanelFrames() }
 
     // ---- Mesure entre deux points ----
     // Les deux extrémités sont en coordonnées PLAN (mm), pas en pixels : la
@@ -1037,7 +1047,7 @@ fun PlanScreen(
     // du haut (cadre, multi), le catalogue « Barre d'outils de cette vue… » et les
     // entrées du menu ⋯ qui font la même chose (mêmes actions, mêmes exclusions).
     // La barre flottante historique est retirée (§9.0, Q1).
-    val toolsPlan: List<ToolSpec> = buildList {
+    val toolsPlan: List<ToolSpec> = ToolCatalog.ordered(ToolbarView.PLAN, buildList {
         add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
                 // Armer le cadre force le multi (SelectionRules.toggleRect).
@@ -1112,28 +1122,31 @@ fun PlanScreen(
             }))
         add(ToolSpec(ToolId.EXPORT_PDF, stringResource(R.string.tool_export_pdf), Icons.Filled.PictureAsPdf,
             available = true, checked = exportMode, onInvoke = { exportMode = !exportMode }))
-        // POINT D'ENTRÉE UNIQUE du plan de repère (Android n'a pas d'import en 3D) :
-        // le libellé dit ce que fait l'action — importer tant qu'aucun plan n'est
-        // chargé, ouvrir/fermer le panneau de placement ensuite. Le ToolSpec est
-        // reconstruit à chaque recomposition, donc le libellé suit l'état.
-        add(ToolSpec(ToolId.DXF,
-            stringResource(if (referencePlan == null) R.string.tool_import_ref_plan else R.string.tool_ref_plan),
-            Icons.Filled.Layers,
-            available = true, checked = referencePlan != null && panels.refPlan, busy = importingRefPlan,
-            onInvoke = {
-                // Deux états jusqu'à la tranche E : importer (Pro, garde dans
-                // SceneScreen) ; sinon ouvrir / fermer le panneau, SANS garde
-                // désormais (lecture pour tous, décision 6).
-                if (referencePlan == null) onImportRefPlan()
-                else onPanels(panels.toggle(ScenePanel.REF_PLAN))
-            }))
+        // Plan importé (tranche E) : deux outils à libellé FIXE — `importDXF` importe
+        // (Pro, garde dans SceneScreen), `refPlanPanel` ouvre / referme le panneau
+        // (lecture pour tous, décision 6), seulement s'il y a un plan.
+        add(ToolSpec(ToolId.DXF, stringResource(R.string.tool_import_ref_plan), Icons.Filled.UploadFile,
+            available = true, checked = null, busy = importingRefPlan, onInvoke = onImportRefPlan))
+        add(ToolSpec(ToolId.REF_PLAN_PANEL, stringResource(R.string.tool_ref_plan_panel), Icons.Filled.Tune,
+            available = referencePlan != null, checked = panels.refPlan,
+            onInvoke = { onPanels(panels.toggle(ScenePanel.REF_PLAN)) }))
+        // Fenêtres du projet (tranche E, barre préremplie de la tablette) : par-dessus
+        // le plan, qui se retrouve intact au retour (mêmes entrées que le ⋯).
+        add(ToolSpec(ToolId.LAYERS, stringResource(R.string.menu_layers), Icons.Filled.Layers,
+            available = true, checked = null, onInvoke = { onMainMenu(MainMenuItemId.LAYERS) }))
+        add(ToolSpec(ToolId.PATCH, stringResource(R.string.nav_patch_list), Icons.AutoMirrored.Filled.List,
+            available = true, checked = null, onInvoke = { onMainMenu(MainMenuItemId.PATCH) }))
+        add(ToolSpec(ToolId.UNIVERSE, stringResource(R.string.nav_dmx_universe), Icons.Filled.GridView,
+            available = true, checked = null, onInvoke = { onMainMenu(MainMenuItemId.UNIVERSE) }))
+        add(ToolSpec(ToolId.CABLING, stringResource(R.string.menu_cabling), Icons.Filled.Bolt,
+            available = true, checked = null, onInvoke = { onMainMenu(MainMenuItemId.CABLING) }))
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
         add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,
             available = true, checked = options.showLabels,
             onInvoke = { options.showLabels = !options.showLabels }))
         // Réglage des étiquettes (parité iOS catalogPlan) : ACTION ponctuelle qui
         // ouvre le panneau « Réglage des étiquettes » (⋯ › Affichage aussi).
-        add(ToolSpec(ToolId.LABEL_SETTINGS, stringResource(R.string.tool_label_settings), Icons.Filled.Tune,
+        add(ToolSpec(ToolId.LABEL_SETTINGS, stringResource(R.string.tool_label_settings), Icons.Filled.FormatSize,
             available = true, checked = null,
             onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }))
         add(ToolSpec(ToolId.LAYER_COLORS, stringResource(R.string.opt_layer_colors), Icons.Filled.Palette,
@@ -1150,7 +1163,7 @@ fun PlanScreen(
         add(ToolSpec(ToolId.BACKGROUND, stringResource(R.string.menu_section_background), Icons.Filled.FormatColorFill,
             available = true, checked = null,
             onInvoke = { showBackgroundDialog = true }))
-    }
+    })
 
     // LANCEMENT DU PLAN (PlanStartAction) : pris UNE fois à l'apparition (ou à une
     // nouvelle demande) — une recomposition ne le relance jamais. La
@@ -2099,7 +2112,7 @@ fun PlanScreen(
                                 }
                             }
                             if (cablingLegend.size > 12) {
-                                Text("  " + stringResource(R.string.legend_more_fmt, cablingLegend.size - 12), style = MaterialTheme.typography.labelSmall)
+                                Text("  " + (cablingLegend.size - 12).let { n -> pluralStringResource(R.plurals.legend_more, n, n) }, style = MaterialTheme.typography.labelSmall)
                             }
                         } else {
                             legend.take(10).forEach { (layer, n) ->
@@ -2115,7 +2128,7 @@ fun PlanScreen(
                                 }
                             }
                             if (legend.size > 10) {
-                                Text("  " + stringResource(R.string.legend_more_layers_fmt, legend.size - 10), style = MaterialTheme.typography.labelSmall)
+                                Text("  " + (legend.size - 10).let { n -> pluralStringResource(R.plurals.legend_more_layers, n, n) }, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
@@ -2217,7 +2230,25 @@ fun PlanScreen(
         // N11 — barres d'outils ANCRABLES (défaut = vide). AnchoredToolbars rend les
         // 4 bords d'après `layout` en filtrant toolsPlan au disponible : rien tant
         // que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas rendue.
-        AnchoredToolbars(layout = toolbarLayout, specs = toolsPlan)
+        // Barre GAUCHE (préremplie sur tablette, §3.13) : elle évite la légende (en
+        // haut à gauche sur Android, §8 D11), le bandeau de mode, la fiche / bannière,
+        // les aides, la barre d'affectation, le panneau 3 points et les panneaux
+        // flottants ouverts (à leur place affichée) — montée / descente, sinon à droite.
+        AnchoredToolbars(layout = toolbarLayout, specs = toolsPlan, leading = LeadingBarClearance(
+            occupants = {
+                buildList {
+                    if (legendShown) legendBoundsPx?.let { add(it) }
+                    if (modeBanner != null) add(modeBannerPx)
+                    if (selectionBar != PlanSelectionBar.NONE) add(selectionBarPx)
+                    if (calibrating || measureMode) add(bottomAidPx)
+                    if (assignTarget != null) add(assignBarAnchorPx)
+                    if (cal3Session != null) add(cal3PanelAnchorPx)
+                    addAll(panelFramesPlan.open(panels, otherOpen = exportMode))
+                }
+            },
+            topLimitPx = { maxOf(planBoundsPx.top, topRowBottomPx) },
+            bottomLimitPx = { if (planBoundsPx.height > 0f) planBoundsPx.bottom else Float.POSITIVE_INFINITY }
+        ))
 
         // ---- HABILLAGE (SPEC-menus-android §3.1, §3.3, §3.14) : rangée du haut
         // (← « Terminé », cadre, multi, ⋯), pastille « Vue » centrée, pastille de
@@ -2481,7 +2512,8 @@ fun PlanScreen(
                 // Bas-GAUCHE (le coin bas-droit revient à la pile Rechercher / Recadrer),
                 // nouvelle clé de position (§3.4, §8 D13).
                 id = PanelLayoutStore.PanelID.EXPORT_PLAN_LEADING,
-                modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp).width(268.dp)
+                modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp).width(268.dp),
+                onDisplayedBounds = { panelFramesPlan.other = it }
             ) {
             Surface(
                 color = Color.White, contentColor = Color(0xFF111111),
@@ -2493,7 +2525,7 @@ fun PlanScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(stringResource(R.string.tool_export_pdf), style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f))
-                        Text(stringResource(R.string.plan_export_views_fmt, exportViews.size), style = MaterialTheme.typography.labelSmall,
+                        Text(pluralStringResource(R.plurals.plan_export_views, exportViews.size, exportViews.size), style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF666666))
                     }
                     OutlinedTextField(
@@ -2576,26 +2608,31 @@ fun PlanScreen(
                                     exportBusy = false
                                 }
                             },
+                            // Marge réduite, une ligne : sur 268 dp, la marge par défaut coupait
+                            // « Générer » / « Envoyer » / « Imprimer » en deux (constat tranche E).
+                            contentPadding = EXPORT_BUTTON_PADDING,
                             modifier = Modifier.weight(1f)
                         ) {
                             if (exportBusy) androidx.compose.material3.CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            else Text(stringResource(R.string.common_generate), style = MaterialTheme.typography.labelMedium)
+                            else Text(stringResource(R.string.common_generate), style = MaterialTheme.typography.labelMedium, maxLines = 1)
                         }
                         val ready = exportFile
                         androidx.compose.material3.OutlinedButton(
                             enabled = ready != null, colors = panelButtonColors(),
                             onClick = { ready?.let { sharePlanPdf(ctxPlan, it) } },
+                            contentPadding = EXPORT_BUTTON_PADDING,
                             modifier = Modifier.weight(1f)
-                        ) { Text(stringResource(R.string.common_send), style = MaterialTheme.typography.labelMedium) }
+                        ) { Text(stringResource(R.string.common_send), style = MaterialTheme.typography.labelMedium, maxLines = 1) }
                         androidx.compose.material3.OutlinedButton(
                             enabled = ready != null, colors = panelButtonColors(),
                             onClick = { ready?.let { printPlanPdf(ctxPlan, it) } },
+                            contentPadding = EXPORT_BUTTON_PADDING,
                             modifier = Modifier.weight(1f)
-                        ) { Text(stringResource(R.string.common_print), style = MaterialTheme.typography.labelMedium) }
+                        ) { Text(stringResource(R.string.common_print), style = MaterialTheme.typography.labelMedium, maxLines = 1) }
                     }
                     if (exportFile != null) {
-                        Text(stringResource(R.string.plan_export_ready_fmt, exportViews.size),
+                        Text(pluralStringResource(R.plurals.plan_export_ready, exportViews.size, exportViews.size),
                             style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
                     }
                 }
@@ -2700,8 +2737,8 @@ fun PlanScreen(
                 title = stringResource(R.string.toolbar_title_plan),
                 layout = toolbarLayout,
                 catalog = toolsPlan.toCatalog(),
-                default = ToolbarLayout.defaultPlan,
                 onLayout = onLayoutChange,
+                onReset = onLayoutReset,
                 onDismiss = { showCustomize = false }
             )
         }
@@ -2734,7 +2771,8 @@ fun PlanScreen(
         }
         if (panels.labels) BottomLeadingPanel(
             PanelLayoutStore.PanelID.LABELS_PLAN, panelTopLimit, panelTop, panelBottom,
-            Modifier.zIndex(panels.zIndex(ScenePanel.LABELS))
+            Modifier.zIndex(panels.zIndex(ScenePanel.LABELS)),
+            onDisplayedBounds = { panelFramesPlan.labels = it }
         ) { maxH ->
             LabelSettingsPanel(options = options, surface = ProjectSurface.PLAN, placement = labelPlacement,
                 onClose = { onPanels(panels.close(ScenePanel.LABELS)) }, maxContentHeight = maxH)
@@ -2742,7 +2780,8 @@ fun PlanScreen(
         val rpPanel = referencePlan
         if (panels.refPlan && rpPanel != null) BottomLeadingPanel(
             PanelLayoutStore.PanelID.REF_PLAN_PLAN_LEADING, panelTopLimit, panelTop, panelBottom,
-            Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN))
+            Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN)),
+            onDisplayedBounds = { panelFramesPlan.refPlan = it }
         ) { maxH ->
             RefPlanPanel(
                 plan = rpPanel, surface = ProjectSurface.PLAN, hiddenLayers = hiddenLayers, bgDark = bgDark,
@@ -2752,7 +2791,8 @@ fun PlanScreen(
         }
         if (panels.geo) BottomLeadingPanel(
             PanelLayoutStore.PanelID.GEO_POSITION_PLAN, panelTopLimit, panelTop, panelBottom,
-            Modifier.zIndex(panels.zIndex(ScenePanel.GEO))
+            Modifier.zIndex(panels.zIndex(ScenePanel.GEO)),
+            onDisplayedBounds = { panelFramesPlan.geo = it }
         ) { maxH ->
             GeoPositionPanel(
                 // `calibVersion` lu : la calibration (non observable) vient d'être posée ici.
@@ -3528,3 +3568,5 @@ private fun panelButtonColors() = ButtonDefaults.outlinedButtonColors(
     contentColor = Color(0xFF111111)
 )
 
+/** Boutons du panneau « PDF du plan » : trois sur 268 dp, sans couper les mots. */
+private val EXPORT_BUTTON_PADDING = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 8.dp)

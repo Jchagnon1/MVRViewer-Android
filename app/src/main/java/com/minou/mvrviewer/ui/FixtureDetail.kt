@@ -306,7 +306,7 @@ fun FixtureDetailSheet(
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
-                    value = id, onValueChange = { id = it }, label = { Text("Fixture ID") },
+                    value = id, onValueChange = { id = it }, label = { Text(stringResource(R.string.fx_fixture_number)) },
                     singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.weight(1f)
                 )
@@ -332,7 +332,7 @@ fun FixtureDetailSheet(
             Text(stringResource(R.string.fx_render_type), style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             OutlinedButton(onClick = { typeMenu = true }) {
-                Text(customType?.let { stringResource(R.string.fx_custom_type_fmt, it.name, maxOf(1, it.footprint)) }
+                Text(customType?.let { maxOf(1, it.footprint).let { n -> pluralStringResource(R.plurals.fx_custom_type, n, it.name, n) } }
                     ?: stringResource(R.string.fx_standard_fmt, fixture.gdtfSpec ?: "—"))
             }
             // Bibliothèque MA : provenance + 3D du type, et statut « 3D indisponible » (§4.5).
@@ -354,7 +354,7 @@ fun FixtureDetailSheet(
                         text = {
                             // Type MA / à 3D choisie : sous-titre §5.9 (+ « · 3D indisponible »).
                             val sub = maTypeSubtitle(t)
-                            if (sub == null) Text(stringResource(R.string.fx_type_channels_fmt, t.name, maxOf(1, t.footprint)))
+                            if (sub == null) Text(maxOf(1, t.footprint).let { n -> pluralStringResource(R.plurals.fx_type_channels, n, t.name, n) })
                             else Column {
                                 Text(t.name)
                                 val store3D = Fixture3DStore.of(androidx.compose.ui.platform.LocalContext.current)
@@ -404,7 +404,7 @@ fun FixtureDetailSheet(
                 Text(
                     when {
                         modes.isEmpty() -> stringResource(R.string.fx_modes_unavailable)
-                        selectedMode != null -> stringResource(R.string.fx_type_channels_fmt, selectedMode.name, selectedMode.footprint)
+                        selectedMode != null -> pluralStringResource(R.plurals.fx_type_channels, selectedMode.footprint, selectedMode.name, selectedMode.footprint)
                         else -> stringResource(R.string.common_choose)
                     }
                 )
@@ -412,7 +412,7 @@ fun FixtureDetailSheet(
             DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
                 modes.forEach { m ->
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.fx_type_channels_fmt, m.name, m.footprint)) },
+                        text = { Text(pluralStringResource(R.plurals.fx_type_channels, m.footprint, m.name, m.footprint)) },
                         onClick = { modeName = m.name; modeMenu = false }
                     )
                 }

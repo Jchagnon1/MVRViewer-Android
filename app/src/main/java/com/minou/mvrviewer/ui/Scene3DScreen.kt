@@ -36,6 +36,9 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.ZoomOutMap
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -396,7 +399,10 @@ fun Scene3DScreen(
     // Outils ancrables de navigation (le menu ⋯ passe par [onMainMenu]).
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
-    onShowGdtfShare: () -> Unit,
+    /** Outil `gdtfMapping` : « Modèles de projecteurs ». */
+    onShowFixtureModels: () -> Unit,
+    /** Outil `gdtfShare` (sens iOS) : connexion GDTF Share, section Services de Compte & réglages. */
+    onShowGdtfShareAccount: () -> Unit = {},
     onShowUniverse: () -> Unit = {},
     onShowCabling: () -> Unit = {},
     onShowAccount: (() -> Unit)? = null,
@@ -414,8 +420,10 @@ fun Scene3DScreen(
     // N11 — disposition des barres d'outils ancrables (vue 3D). Nommé `toolbarLayout`
     // pour ne pas masquer le `val layout` (FixtureLayout) local plus bas. Défaut =
     // barre bas-gauche actuelle → aucun changement pour qui ne personnalise pas.
-    toolbarLayout: ToolbarLayout = ToolbarLayout.default3D,
+    toolbarLayout: ToolbarLayout = ToolbarLayout.EMPTY,
     onLayoutChange: (ToolbarLayout) -> Unit = {},
+    /** « Réinitialiser » du panneau de personnalisation : défaut de l'appareil. */
+    onLayoutReset: () -> Unit = {},
     // LOD d'interaction PAR CALQUE (#1) : « Auto » (absent de la map) = comportement
     // historique. N'affecte QUE la navigation, jamais la visibilité au repos.
     layerLod: Map<String, LayerLodMode> = emptyMap(),
@@ -1650,6 +1658,8 @@ fun Scene3DScreen(
     var topRow3DBottomPx by remember { mutableStateOf(0f) }
     var selectionCard3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var measureBand3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    // Cadres AFFICHÉS des panneaux flottants (barre ancrée gauche, §3.13).
+    val panelFrames3D = remember { PanelFrames() }
     var satMention3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
 
     // Recherche d'un projecteur par N° / nom → le sélectionne (la surbrillance le
@@ -1933,7 +1943,7 @@ fun Scene3DScreen(
         camEye = Float3(pv.x + x, pv.y + y, pv.z + z)
         viewpoint = v
     }
-    val tools3D: List<ToolSpec> = buildList {
+    val tools3D: List<ToolSpec> = ToolCatalog.ordered(ToolbarView.SCENE_3D, buildList {
         // Boutons permanents de la rangée du haut (masqués quand ancrés, §3.1).
         add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = { toggleRectTool() }))
@@ -1946,7 +1956,9 @@ fun Scene3DScreen(
             checked = soloElements.isNotEmpty(), onInvoke = { toggleSolo3D() }))
         add(ToolSpec(ToolId.CLEAR_SEL, stringResource(R.string.tool_clear_selection), Icons.Filled.Close,
             available = selected.isNotEmpty(), checked = null, onInvoke = { selected.clear() }))
-        add(ToolSpec(ToolId.GPS, stringResource(R.string.tool_gps_3d), Icons.Filled.MyLocation,
+        // « Afficher ma position » : même titre que la ligne du panneau Position GPS ;
+        // en 3D, le point n'existe que par la calibration (§8 D20).
+        add(ToolSpec(ToolId.GPS, stringResource(R.string.tool_gps), Icons.Filled.MyLocation,
             available = calibration?.isCalibrated == true, checked = showLocation,
             onInvoke = { showLocation = !showLocation }))
         // Panneau « Position GPS » (tranche B) : ouvre / referme (actif = jaune).
@@ -1961,22 +1973,25 @@ fun Scene3DScreen(
                     else -> 1.6f
                 }
             }))
-        // Importer un modèle 3D de décor (chantier #3). Le ToolSpec étant reconstruit
-        // à chaque recomposition, le libellé suit l'état (deux états jusqu'à la
-        // tranche E) ; `busy` donne l'indicateur pendant le décodage.
-        add(ToolSpec(ToolId.IMPORT_MODEL,
-            if (importedModels.isEmpty()) stringResource(R.string.tool_import_model) else stringResource(R.string.tool_models_fmt, importedModels.size),
-            Icons.Filled.ViewInAr,
-            available = true, checked = importedModels.isNotEmpty() && showModelsPanel,
-            busy = importingModel || modelBusy,
+        // Plan importé (tranche E) : deux outils à libellé FIXE — `importDXF` importe
+        // (Pro, garde dans SceneScreen), `refPlanPanel` ouvre / referme le panneau
+        // (lecture pour tous, décision 6), seulement s'il y a un plan.
+        add(ToolSpec(ToolId.DXF, stringResource(R.string.tool_import_ref_plan), Icons.Filled.UploadFile,
+            available = true, checked = null, busy = importingRefPlan, onInvoke = onImportRefPlan))
+        add(ToolSpec(ToolId.REF_PLAN_PANEL, stringResource(R.string.tool_ref_plan_panel), Icons.Filled.Tune,
+            available = referencePlan != null, checked = panels.refPlan,
+            onInvoke = { onPanels(panels.toggle(ScenePanel.REF_PLAN)) }))
+        // Modèles 3D de décor (tranche E) : `importModel` importe (dialogue des
+        // formats, Pro), `modelsPanel` ouvre / referme le panneau (Pro à l'entrée,
+        // inchangé), seulement s'il y a un modèle ; `busy` pendant le décodage.
+        add(ToolSpec(ToolId.IMPORT_MODEL, stringResource(R.string.tool_import_model), Icons.Filled.ViewInAr,
+            available = true, checked = null, busy = importingModel || modelBusy,
+            onInvoke = { ProAccess.gate("importer un objet 3D") { showModelImportFormats = true } }))
+        add(ToolSpec(ToolId.MODELS_PANEL, stringResource(R.string.tool_models_panel), Icons.Filled.Widgets,
+            available = importedModels.isNotEmpty(), checked = showModelsPanel,
             onInvoke = {
-                if (importedModels.isEmpty()) {
-                    ProAccess.gate("importer un objet 3D") { showModelImportFormats = true }
-                } else if (showModelsPanel) {
-                    showModelsPanel = false
-                } else {
-                    ProAccess.gate("régler les objets 3D importés") { showModelsPanel = true }
-                }
+                if (showModelsPanel) showModelsPanel = false
+                else ProAccess.gate("régler les objets 3D importés") { showModelsPanel = true }
             }))
         // Feuille « Calques » (la même que ⋯ › Calques).
         add(ToolSpec(ToolId.LAYERS, stringResource(R.string.menu_layers), Icons.Filled.Layers,
@@ -1996,7 +2011,7 @@ fun Scene3DScreen(
                     ?.let { SatelliteUi.toast(ctx3dSat, it) }
             }))
         // « Réglage des étiquettes » (outil `labelSize`, comme iOS) : ouvre / referme le panneau.
-        add(ToolSpec(ToolId.LABEL_SIZE, stringResource(R.string.tool_label_size), Icons.Filled.Tune,
+        add(ToolSpec(ToolId.LABEL_SIZE, stringResource(R.string.tool_label_size), Icons.Filled.FormatSize,
             available = true, checked = panels.labels,
             onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }))
         // Couleur du fond : ouvre le sélecteur fin (⋯ › Affichage garde les préréglages).
@@ -2014,10 +2029,15 @@ fun Scene3DScreen(
             available = true, checked = null, onInvoke = onShowPatch))
         add(ToolSpec(ToolId.UNIVERSE, stringResource(R.string.nav_dmx_universe), Icons.Filled.GridView,
             available = true, checked = null, onInvoke = onShowUniverse))
-        add(ToolSpec(ToolId.CABLING, stringResource(R.string.nav_power_cabling), Icons.Filled.Bolt,
+        add(ToolSpec(ToolId.CABLING, stringResource(R.string.menu_cabling), Icons.Filled.Bolt,
             available = true, checked = null, onInvoke = onShowCabling))
-        add(ToolSpec(ToolId.GDTF_SHARE, "GDTF Share", Icons.Filled.CloudDownload,
-            available = true, checked = null, onInvoke = onShowGdtfShare))
+        // `gdtfShare` = la CONNEXION GDTF Share (sens iOS, §8 D24) ; `gdtfMapping` =
+        // l'écran « Modèles de projecteurs » (que l'ancien `gdtfShare` ouvrait : la
+        // migration v2 des dispositions l'a remplacé par celui-ci).
+        add(ToolSpec(ToolId.GDTF_SHARE, stringResource(R.string.gdtf_share_title), Icons.Filled.CloudDownload,
+            available = true, checked = null, onInvoke = onShowGdtfShareAccount))
+        add(ToolSpec(ToolId.GDTF_MAPPING, stringResource(R.string.models_title), Icons.Filled.Lightbulb,
+            available = true, checked = null, onInvoke = onShowFixtureModels))
         // « Compte & réglages » : toujours disponible (Pro et GDTF Share y vivent aussi).
         onShowAccount?.let { cb ->
             add(ToolSpec(ToolId.ACCOUNT, stringResource(R.string.account_settings_title), Icons.Filled.AccountCircle,
@@ -2031,7 +2051,7 @@ fun Scene3DScreen(
             add(ToolSpec(ToolId.HISTORY, stringResource(R.string.nav_history), Icons.Filled.History,
                 available = true, checked = null, onInvoke = cb))
         }
-    }
+    })
 
     // Menu ⋯ (SPEC-menus-android §3.2) : contexte (apparitions) et répartiteur. La
     // 3D traite ses entrées (bascules, panneaux, décor importé, barre d'outils) et
@@ -2352,7 +2372,21 @@ fun Scene3DScreen(
             // les 4 bords d'après `layout` en filtrant tools3D au disponible : rien
             // tant que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas
             // rendue.
-            AnchoredToolbars(layout = toolbarLayout, specs = tools3D)
+            // Barre GAUCHE (préremplie sur tablette, §3.13) : elle évite le bloc d'état,
+            // la fiche / bannière, le bandeau de mesure et les panneaux flottants
+            // ouverts (à leur place affichée), entre la rangée du haut et le bas.
+            AnchoredToolbars(layout = toolbarLayout, specs = tools3D, leading = LeadingBarClearance(
+                occupants = {
+                    buildList {
+                        add(statusBlock3DPx)
+                        if (selPresentation3D != PlanSelectionBar.NONE) add(selectionCard3DPx)
+                        if (measureMode) add(measureBand3DPx)
+                        addAll(panelFrames3D.open(panels, otherOpen = showModelsPanel && importedModels.isNotEmpty()))
+                    }
+                },
+                topLimitPx = { maxOf(sceneBoxPx.top, topRow3DBottomPx) },
+                bottomLimitPx = { if (sceneBoxPx.height > 0f) sceneBoxPx.bottom else Float.POSITIVE_INFINITY }
+            ))
 
             // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte), tant que le
             // quad satellite est affiché : bas-droite, au-dessus des barres du bas. Elle
@@ -2443,7 +2477,8 @@ fun Scene3DScreen(
             }
             if (panels.labels) BottomLeadingPanel(
                 PanelLayoutStore.PanelID.LABELS_3D, panelTopLimit3D, panelTop3D, panelBottom3D,
-                Modifier.zIndex(panels.zIndex(ScenePanel.LABELS))
+                Modifier.zIndex(panels.zIndex(ScenePanel.LABELS)),
+                onDisplayedBounds = { panelFrames3D.labels = it }
             ) { maxH ->
                 LabelSettingsPanel(options = options, surface = ProjectSurface.SCENE_3D, placement = null,
                     onClose = { onPanels(panels.close(ScenePanel.LABELS)) }, maxContentHeight = maxH)
@@ -2451,7 +2486,8 @@ fun Scene3DScreen(
             val rpPanel3D = referencePlan
             if (panels.refPlan && rpPanel3D != null) BottomLeadingPanel(
                 PanelLayoutStore.PanelID.REF_PLAN_3D, panelTopLimit3D, panelTop3D, panelBottom3D,
-                Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN))
+                Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN)),
+                onDisplayedBounds = { panelFrames3D.refPlan = it }
             ) { maxH ->
                 RefPlanPanel(
                     plan = rpPanel3D, surface = ProjectSurface.SCENE_3D, hiddenLayers = hiddenLayers,
@@ -2462,7 +2498,8 @@ fun Scene3DScreen(
             }
             if (panels.geo) BottomLeadingPanel(
                 PanelLayoutStore.PanelID.GEO_POSITION_3D, panelTopLimit3D, panelTop3D, panelBottom3D,
-                Modifier.zIndex(panels.zIndex(ScenePanel.GEO))
+                Modifier.zIndex(panels.zIndex(ScenePanel.GEO)),
+                onDisplayedBounds = { panelFrames3D.geo = it }
             ) { maxH ->
                 val calibrated3D = calibration?.isCalibrated == true
                 GeoPositionPanel(
@@ -2497,7 +2534,8 @@ fun Scene3DScreen(
                 // nouvelle clé de position (§3.4, §8 D13).
                 MovablePanel(
                     id = PanelLayoutStore.PanelID.IMPORTED_MODELS_3D_LEADING,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp).width(240.dp)
+                    modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp).width(240.dp),
+                    onDisplayedBounds = { panelFrames3D.other = it }
                 ) {
                 ModelPlacementPanel(
                     models = importedModels,
@@ -2654,8 +2692,8 @@ fun Scene3DScreen(
                 title = stringResource(R.string.toolbar_title_3d),
                 layout = toolbarLayout,
                 catalog = tools3D.toCatalog(),
-                default = ToolbarLayout.default3D,
                 onLayout = onLayoutChange,
+                onReset = onLayoutReset,
                 onDismiss = { showCustomize = false }
             )
         }

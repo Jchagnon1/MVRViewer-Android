@@ -23,6 +23,12 @@ import android.content.Intent
  * - `MVR_AUTO_SELECT=<N°>` (tranche D) : sélectionne ce projecteur (N° effectif) dès
  *   la scène prête, dans la vue d'ouverture — fiche (ou bannière s'il y en a
  *   plusieurs) visible sans toucher l'écran.
+ * - `MVR_RESET_TOOLBARS=1` (tranche E) : efface les dispositions de barres
+ *   enregistrées (les deux vues repartent du défaut de l'appareil), avant tout
+ *   affichage ;
+ * - `MVR_FORCE_TABLET_LAYOUT=1` (tranche E) : applique le défaut TABLETTE (barre
+ *   gauche préremplie) sur un téléphone, pour toute la vie du processus
+ *   (`=0` le retire).
  */
 object DebugHooks {
     @Volatile private var autoPlan = false
@@ -31,6 +37,10 @@ object DebugHooks {
     @Volatile private var autoHomeDest: String? = null
     @Volatile private var autoPanels: ScenePanels? = null
     @Volatile private var autoSelect: String? = null
+    @Volatile private var resetToolbars = false
+    /** Défaut tablette forcé (lu par la scène à chaque composition, jamais consommé). */
+    @Volatile var forceTabletLayout = false
+        private set
 
     fun read(intent: Intent?, debuggable: Boolean) {
         if (!debuggable || intent == null) return
@@ -47,6 +57,8 @@ object DebugHooks {
         val labels = flag(intent, "MVR_AUTO_LABELS_PANEL")
         if (geo || ref || labels) autoPanels = ScenePanels.fromHooks(geo, ref, labels)
         intent.getStringExtra("MVR_AUTO_SELECT")?.trim()?.takeIf { it.isNotEmpty() }?.let { autoSelect = it }
+        if (flag(intent, "MVR_RESET_TOOLBARS")) resetToolbars = true
+        if (intent.hasExtra("MVR_FORCE_TABLET_LAYOUT")) forceTabletLayout = flag(intent, "MVR_FORCE_TABLET_LAYOUT")
     }
 
     /** Booléen d'intent : `--ez X true` comme `--es X 1` / `true`. */
@@ -60,4 +72,5 @@ object DebugHooks {
     fun takeAutoHomeDest(): String? = autoHomeDest.also { autoHomeDest = null }
     fun takeAutoPanels(): ScenePanels? = autoPanels.also { autoPanels = null }
     fun takeAutoSelect(): String? = autoSelect.also { autoSelect = null }
+    fun takeResetToolbars(): Boolean = resetToolbars.also { resetToolbars = false }
 }

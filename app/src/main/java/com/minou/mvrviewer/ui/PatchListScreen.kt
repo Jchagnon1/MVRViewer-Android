@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -134,7 +135,7 @@ fun PatchListScreen(
             }
         }
         Text(
-            stringResource(R.string.patch_count_hint, filtered.size, fixtures.size),
+            pluralStringResource(R.plurals.patch_count, fixtures.size, filtered.size, fixtures.size),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -238,7 +239,7 @@ private fun FixtureRow(
         // GDTF/mode (parité iOS). Non-custom : inchangé.
         val custom = customTypeOf(f, overrides, customResolver)
         val spec = custom?.name ?: f.gdtfSpec ?: "—"
-        val mode = custom?.let { stringResource(R.string.fx_channels_count, maxOf(1, it.footprint)) } ?: overrides.effectiveMode(f) ?: "—"
+        val mode = custom?.let { maxOf(1, it.footprint).let { n -> pluralStringResource(R.plurals.fx_channels, n, n) } } ?: overrides.effectiveMode(f) ?: "—"
         val addr = overrides.effectiveAddress(f)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "—"
         // Puissance effective à côté du patch (outil de câblage). « ? » = à saisir ;
         // « * » = valeur saisie (bibliothèque) plutôt que GDTF.

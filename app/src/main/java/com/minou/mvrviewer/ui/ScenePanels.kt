@@ -98,6 +98,27 @@ data class ScenePanels(
     }
 }
 
+/**
+ * Cadres AFFICHÉS des panneaux flottants d'une vue (px racine), lus par la barre
+ * ancrée gauche ([LeadingBarClearance]). Un état par panneau : seule la barre,
+ * qui les lit, se recompose quand un panneau glisse.
+ */
+class PanelFrames {
+    var geo by mutableStateOf(Rect.Zero)
+    var refPlan by mutableStateOf(Rect.Zero)
+    var labels by mutableStateOf(Rect.Zero)
+    /** Modèles importés (3D) ou Export PDF (plan) : le 4e panneau du bas-gauche. */
+    var other by mutableStateOf(Rect.Zero)
+
+    /** Cadres des panneaux OUVERTS (un panneau fermé garde son dernier cadre, ignoré). */
+    fun open(panels: ScenePanels, otherOpen: Boolean): List<Rect> = buildList {
+        if (panels.geo) add(geo)
+        if (panels.refPlan) add(refPlan)
+        if (panels.labels) add(labels)
+        if (otherOpen) add(other)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Place d'un panneau du bas-gauche (iOS `.mvrBottomLeadingPanelSlot`)
 // ---------------------------------------------------------------------------
@@ -130,6 +151,8 @@ fun BoxScope.BottomLeadingPanel(
     bottomObstacles: List<Rect>,
     modifier: Modifier = Modifier,
     bottomPadding: Dp = 76.dp,
+    /** Cadre racine AFFICHÉ (montée et glissé compris), pour la barre ancrée gauche. */
+    onDisplayedBounds: ((Rect) -> Unit)? = null,
     content: @Composable (maxContentHeight: Dp?) -> Unit
 ) {
     val density = LocalDensity.current
@@ -153,7 +176,8 @@ fun BoxScope.BottomLeadingPanel(
             .width(FLOATING_PANEL_WIDTH)
             // Place NATURELLE (sans montée) : mesurée avant le décalage.
             .onGloballyPositioned { natural = it.anchorBounds() }
-            .offset { IntOffset(0, -lift.roundToInt()) }
+            .offset { IntOffset(0, -lift.roundToInt()) },
+        onDisplayedBounds = onDisplayedBounds
     ) { content(maxContent) }
 }
 

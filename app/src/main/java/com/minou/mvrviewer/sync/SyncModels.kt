@@ -188,7 +188,38 @@ data class GeoAnchorDTO(
     val longitude: Double
 )
 
-data class GeoCalibrationDTO(val anchors: List<GeoAnchorDTO> = emptyList())
+/** Point du relevé « 3 points » — miroir de `GeoSurveyPointDTO` (tous les champs requis). */
+data class GeoSurveyPointDTO(
+    val worldX: Float,
+    val worldY: Float,
+    val latitude: Double,
+    val longitude: Double,
+    val accuracy: Double,
+    val residual: Double
+)
+
+/**
+ * Relevé de la calibration guidée (SPEC-calibration-3-points §5) — miroir de
+ * `GeoSurveyDTO`. `edgePrecision` est OMIS quand il est nul (jamais `null`).
+ */
+data class GeoSurveyDTO(
+    val method: String,
+    val points: List<GeoSurveyPointDTO>,
+    val precision: Double,
+    val freeScale: Double,
+    val epoch: Double,
+    val edgePrecision: Double? = null
+)
+
+/**
+ * Section `calibration`. `survey` est OMIS quand il est nul : une calibration
+ * ordinaire garde exactement sa forme historique. Il n'est lu ET réécrit
+ * qu'avec EXACTEMENT 2 ancres (les deux ancres synthétiques qu'il a produites).
+ */
+data class GeoCalibrationDTO(
+    val anchors: List<GeoAnchorDTO> = emptyList(),
+    val survey: GeoSurveyDTO? = null
+)
 
 /** Overrides de couleur de calque `[layerName: "#RRGGBB"]` — miroir de `LayerColorsDTO`. */
 data class LayerColorsDTO(val overrides: Map<String, String> = emptyMap())

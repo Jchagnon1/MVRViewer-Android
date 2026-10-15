@@ -101,7 +101,7 @@ object SectionCodec {
         put("entries", arr)
     }
 
-    private fun encodeCalibration(d: GeoCalibrationDTO) = JSONObject().apply {
+    internal fun encodeCalibration(d: GeoCalibrationDTO) = JSONObject().apply {
         val arr = JSONArray()
         for (a in d.anchors) {
             arr.put(JSONObject()
@@ -109,6 +109,26 @@ object SectionCodec {
                 .put("latitude", a.latitude).put("longitude", a.longitude))
         }
         put("anchors", arr)
+        // Relevé 3 points : seulement avec ses DEUX ancres synthétiques (iOS
+        // n'en écrit jamais d'autre) ; omis sinon, jamais écrit à `null`.
+        val s = d.survey
+        if (s != null && d.anchors.size == 2) put("survey", encodeSurvey(s))
+    }
+
+    /** Relevé : tous les champs, `edgePrecision` omis s'il est nul (jamais `null`). */
+    internal fun encodeSurvey(s: GeoSurveyDTO): JSONObject {
+        val pts = JSONArray()
+        for (p in s.points) {
+            pts.put(JSONObject()
+                .put("worldX", p.worldX.toDouble()).put("worldY", p.worldY.toDouble())
+                .put("latitude", p.latitude).put("longitude", p.longitude)
+                .put("accuracy", p.accuracy).put("residual", p.residual))
+        }
+        val so = JSONObject()
+            .put("method", s.method).put("points", pts)
+            .put("precision", s.precision).put("freeScale", s.freeScale).put("epoch", s.epoch)
+        s.edgePrecision?.let { so.put("edgePrecision", it) }
+        return so
     }
 
     private fun encodeLayerColors(d: LayerColorsDTO) =
@@ -163,7 +183,7 @@ object SectionCodec {
         return PatchDTO(entries)
     }
 
-    private fun decodeCalibration(o: JSONObject): GeoCalibrationDTO {
+    internal fun decodeCalibration(o: JSONObject): GeoCalibrationDTO {
         val arr = o.optJSONArray("anchors") ?: JSONArray()
         val anchors = (0 until arr.length()).map { i ->
             val a = arr.getJSONObject(i)
@@ -174,7 +194,36 @@ object SectionCodec {
                 longitude = a.optDouble("longitude", 0.0)
             )
         }
-        return GeoCalibrationDTO(anchors)
+        // Relevé : gardé seulement avec 2 ancres (iOS `init(dto:)`). Incomplet →
+        // ignoré, ANCRES GARDÉES (iOS rejette toute la section : écart permis, plus
+        // tolérant, cf. PORTAGE-cablage-calibration §3.5). Clés inconnues perdues.
+        val survey = if (anchors.size == 2) o.optJSONObject("survey")?.let(::decodeSurvey) else null
+        return GeoCalibrationDTO(anchors, survey)
+    }
+
+    /** Relevé complet, ou null s'il manque un champ requis (ou un point incomplet). */
+    internal fun decodeSurvey(s: JSONObject): GeoSurveyDTO? {
+        val method = s.reqString("method") ?: return null
+        val arr = s.optJSONArray("points") ?: return null
+        val points = ArrayList<GeoSurveyPointDTO>(arr.length())
+        for (i in 0 until arr.length()) {
+            val p = arr.optJSONObject(i) ?: return null
+            points.add(GeoSurveyPointDTO(
+                worldX = (p.reqNumber("worldX") ?: return null).toFloat(),
+                worldY = (p.reqNumber("worldY") ?: return null).toFloat(),
+                latitude = p.reqNumber("latitude") ?: return null,
+                longitude = p.reqNumber("longitude") ?: return null,
+                accuracy = p.reqNumber("accuracy") ?: return null,
+                residual = p.reqNumber("residual") ?: return null
+            ))
+        }
+        return GeoSurveyDTO(
+            method = method, points = points,
+            precision = s.reqNumber("precision") ?: return null,
+            freeScale = s.reqNumber("freeScale") ?: return null,
+            epoch = s.reqNumber("epoch") ?: return null,
+            edgePrecision = s.reqNumber("edgePrecision")
+        )
     }
 
     private fun decodeLayerColors(o: JSONObject) =
@@ -321,6 +370,18 @@ private fun JSONObject.optStringOrNull(key: String): String? =
 
 private fun JSONObject.optBooleanOrNull(key: String): Boolean? =
     if (!has(key) || isNull(key)) null else optBoolean(key)
+
+/** Nombre REQUIS (JSONDecoder iOS) : absent, nul ou non numérique → null. */
+private fun JSONObject.reqNumber(key: String): Double? {
+    if (!has(key) || isNull(key)) return null
+    return (opt(key) as? Number)?.toDouble()
+}
+
+/** Chaîne REQUISE : absente, nulle ou d'un autre type → null. */
+private fun JSONObject.reqString(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    return opt(key) as? String
+}
 
 private fun JSONArray?.toStringList(): List<String> {
     this ?: return emptyList()

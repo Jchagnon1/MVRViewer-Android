@@ -274,12 +274,13 @@ fun SceneScreen(
     LaunchedEffect(projectKey) {
         val rp = withContext(Dispatchers.IO) { ProjectStore.loadReferencePlan(ctx, projectKey) }
         val ov = withContext(Dispatchers.IO) { ProjectStore.loadOverrides(ctx, projectKey) }
-        val anchors = withContext(Dispatchers.IO) { ProjectStore.loadCalibration(ctx, projectKey) }
+        // Ancres + relevé 3 points (absent des anciens manifestes : relus tels quels).
+        val (anchors, survey) = withContext(Dispatchers.IO) { ProjectStore.loadCalibrationWithSurvey(ctx, projectKey) }
         if (rp != null && referencePlan == null) referencePlan = rp
         ov?.let { (map, manual) ->
             map.forEach { (s, b) -> if (s in manual) gdtfOverrides.setManual(s, b) else gdtfOverrides.set(s, b) }
         }
-        if (calibration.anchors.isEmpty()) anchors.forEach { calibration.addAnchor(it) }
+        if (calibration.anchors.isEmpty()) calibration.replace(anchors, survey)
         // Fond satellite : drapeau restauré seulement si calibré (sinon rien à géo-référencer).
         if (calibration.isCalibrated) options.showSatellite = ProjectStore.loadShowSatellite(ctx, projectKey)
         val hidden = withContext(Dispatchers.IO) { ProjectStore.loadRefPlanHiddenLayers(ctx, projectKey) }
@@ -444,8 +445,10 @@ fun SceneScreen(
             is SectionPayload.Calibration -> {
                 val anchors = LocalMapper.toAnchors(p.dto)
                 lastCalibSig = AuditCoding.encodeAnchors(anchors)
-                calibration.reset(); anchors.forEach { calibration.addAnchor(it) }
-                withContext(Dispatchers.IO) { ProjectStore.saveCalibration(ctx, projectKey, calibration.anchors) }
+                // Ancres ET relevé 3 points reçus (relevé gardé seulement avec 2 ancres).
+                calibration.replace(anchors, LocalMapper.toSurvey(p.dto))
+                val survey = calibration.survey
+                withContext(Dispatchers.IO) { ProjectStore.saveCalibration(ctx, projectKey, anchors, survey) }
                 calibTick++
             }
             is SectionPayload.Manifest -> {
@@ -663,7 +666,9 @@ fun SceneScreen(
         lastHiddenSig = hiddenSig(hiddenLayers)
         if (calibration.isCalibrated) {
             lastCalibSig = calibSig()
-            s.pushCalibration(calibration.anchors)
+            // Le relevé 3 points repart TEL QUEL (sinon iOS retomberait sur
+            // « Calibré (2 points…) »).
+            s.pushCalibration(calibration.anchors, calibration.survey)
         }
         if (overrides.edits.isNotEmpty()) s.pushPatch(scene, overrides.toPersistedList())
         if (cabling.distributors.isNotEmpty() || cabling.assignments.isNotEmpty()) s.pushPowerCabling(cabling.toDTO())
@@ -907,7 +912,7 @@ fun SceneScreen(
             AuditCoding.describeAnchors(before), AuditCoding.describeAnchors(sig),
             "", AuditFieldKey.GEO_ANCHORS, before, sig
         )?.let { s.recordAudit(listOf(it)) }
-        if (s.isCurrentProjectShared) s.pushCalibration(calibration.anchors)
+        if (s.isCurrentProjectShared) s.pushCalibration(calibration.anchors, calibration.survey)
     }
 
     // Push du manifeste quand le satellite change (utilisateur), sauf écho distant.
@@ -999,6 +1004,8 @@ fun SceneScreen(
                 overrides.assignSpec(f, raw.ifBlank { null })
             }
             AuditFieldKey.GEO_ANCHORS -> {
+                // Le journal porte les ancres seules : une annulation rétablit des
+                // ancres SANS relevé (comme iOS) — reset() efface le relevé.
                 val anchors = AuditCoding.decodeAnchors(raw)
                 calibration.reset(); anchors.forEach { calibration.addAnchor(it) }
                 scope.launch(Dispatchers.IO) {

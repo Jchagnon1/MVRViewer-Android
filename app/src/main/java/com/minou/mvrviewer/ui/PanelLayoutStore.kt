@@ -22,6 +22,8 @@ object PanelLayoutStore {
         EXPORT_PLAN("exportPlan"),
         /** Barre d'affectation du câblage sur le plan (clé iOS `cablingAssignPlan`). */
         CABLING_ASSIGN_PLAN("cablingAssignPlan"),
+        /** Assistant de calibration GPS en 3 points (clé iOS `geoCalibration3Plan`). */
+        GEO_CALIBRATION_3_PLAN("geoCalibration3Plan"),
     }
 
     data class Placement(val dx: Float = 0f, val dy: Float = 0f, val collapsed: Boolean = false) {

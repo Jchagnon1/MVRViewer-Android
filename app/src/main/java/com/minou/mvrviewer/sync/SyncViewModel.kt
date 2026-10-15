@@ -459,8 +459,9 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     ) = push(SectionPayload.Manifest(
         LocalMapper.manifestDTO(mvrName, dxfName, transform, hiddenLayers, showSatellite, refPlanBlobSHA)))
 
-    fun pushCalibration(anchors: List<GeoAnchor>) =
-        push(SectionPayload.Calibration(LocalMapper.calibrationDTO(anchors)))
+    /** Ancres + relevé 3 points (gardé seulement avec 2 ancres, renvoyé tel quel). */
+    fun pushCalibration(anchors: List<GeoAnchor>, survey: com.minou.mvrviewer.mvr.GeoSurvey? = null) =
+        push(SectionPayload.Calibration(LocalMapper.calibrationDTO(anchors, survey)))
 
     /** Câblage électrique (distributeurs + affectations + réglages). */
     fun pushPowerCabling(dto: PowerCablingDTO) =

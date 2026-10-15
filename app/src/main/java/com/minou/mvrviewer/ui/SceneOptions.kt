@@ -243,6 +243,11 @@ fun SceneOptionsMenu(
     // posée) : la vue 3D n'a pas de contrôle flottant (SurfaceView), donc elle
     // pilote le satellite depuis ce menu, opacité comprise.
     showSatelliteToggle: Boolean = false,
+    /**
+     * Ligne d'état « Calibration » (texte, en orange ?) sous les outils — iOS
+     * `GeoCalibrationStatus`. Évaluée à l'ouverture du menu ; null = absente.
+     */
+    calibrationStatus: (@Composable () -> Pair<String, Boolean>)? = null,
     // Fond IGN = France seulement : hors couverture, l'interrupteur reste VISIBLE
     // mais désactivé (le message d'état dit pourquoi).
     satelliteCovered: Boolean = true,
@@ -287,6 +292,12 @@ fun SceneOptionsMenu(
                     is MenuTool.Toggle -> toolToggle(t.label, t.icon, t.checked) { t.onToggle() }
                     is MenuTool.Action -> nav(t.label, t.icon) { open = false; t.onClick() }
                 }
+            }
+            calibrationStatus?.let { st ->
+                val (text, warning) = st()
+                Text(text, style = MaterialTheme.typography.bodySmall,
+                    color = if (warning) Color(0xFFEF6C00) else Color(0xFF888888),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).widthIn(max = 260.dp))
             }
             // N11 — accès au panneau de personnalisation des barres (les outils
             // ci-dessus restent TOUJOURS ici, qu'ils soient dans une barre ou non).

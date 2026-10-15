@@ -1,6 +1,8 @@
 package com.minou.mvrviewer.sync
 
 import com.minou.mvrviewer.mvr.GeoAnchor
+import com.minou.mvrviewer.mvr.GeoSurvey
+import com.minou.mvrviewer.mvr.GeoSurveyPoint
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.ReferencePlanTransform
 
@@ -61,12 +63,40 @@ object LocalMapper {
 
     // ---- Calibration --------------------------------------------------------
 
-    fun calibrationDTO(anchors: List<GeoAnchor>) = GeoCalibrationDTO(
-        anchors.map { GeoAnchorDTO(it.worldX, it.worldY, it.latitude, it.longitude) }
+    /**
+     * Section `calibration` : ancres + relevé 3 points s'il existe. Le relevé ne
+     * part qu'avec EXACTEMENT 2 ancres (il décrit les deux ancres synthétiques) ;
+     * republier sans avoir touché aux ancres le renvoie donc TEL QUEL.
+     */
+    fun calibrationDTO(anchors: List<GeoAnchor>, survey: GeoSurvey? = null) = GeoCalibrationDTO(
+        anchors.map { GeoAnchorDTO(it.worldX, it.worldY, it.latitude, it.longitude) },
+        if (anchors.size == 2) survey?.let(::surveyDTO) else null
+    )
+
+    fun surveyDTO(s: GeoSurvey) = GeoSurveyDTO(
+        method = s.method,
+        points = s.points.map {
+            GeoSurveyPointDTO(it.worldX, it.worldY, it.latitude, it.longitude, it.accuracy, it.residual)
+        },
+        precision = s.precision, freeScale = s.freeScale, epoch = s.epoch, edgePrecision = s.edgePrecision
     )
 
     fun toAnchors(d: GeoCalibrationDTO): List<GeoAnchor> =
         d.anchors.map { GeoAnchor(it.worldX, it.worldY, it.latitude, it.longitude) }
+
+    /** Relevé de la section, seulement avec 2 ancres (iOS `GeoCalibration(dto:)`). */
+    fun toSurvey(d: GeoCalibrationDTO): GeoSurvey? {
+        if (d.anchors.size != 2) return null
+        return d.survey?.let(::surveyFromDTO)
+    }
+
+    fun surveyFromDTO(s: GeoSurveyDTO) = GeoSurvey(
+        method = s.method,
+        points = s.points.map {
+            GeoSurveyPoint(it.worldX, it.worldY, it.latitude, it.longitude, it.accuracy, it.residual)
+        },
+        precision = s.precision, freeScale = s.freeScale, epoch = s.epoch, edgePrecision = s.edgePrecision
+    )
 
     // ---- Patch --------------------------------------------------------------
 

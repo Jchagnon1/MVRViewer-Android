@@ -35,7 +35,7 @@ enum class ToolId {
     // Navigation / actions dockables (vue 3D) — présentes aussi au menu
     PATCH, UNIVERSE, CABLING, GDTF_SHARE, PLAN_VIEW, ACCOUNT, SHARE_PROJECT, HISTORY,
     // Spécifiques plan
-    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE, LABEL_SETTINGS;
+    MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, CALIBRATE_3, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE, LABEL_SETTINGS;
 
     /**
      * Identifiant STABLE persisté (JSON) — MÊME chaîne camelCase que la `rawValue`
@@ -70,6 +70,8 @@ enum class ToolId {
             GPS -> "myLocation"
             SATELLITE -> "satellite"
             CALIBRATE -> "calibrate"
+            // Calibration guidée en 3 points : valeur de `PlanStartAction` iOS.
+            CALIBRATE_3 -> "threePointCalibration"
             SHOW_ALL -> "showAll"
             CLEAR_SOLO -> "clearSolo"
             CLEAR_SEL -> "clearSelection"

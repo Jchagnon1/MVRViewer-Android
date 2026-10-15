@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +60,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -91,6 +93,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
+import com.minou.mvrviewer.mvr.GeoCalibrationStatus
+import com.minou.mvrviewer.mvr.Vec2
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
 import kotlin.math.max
@@ -743,7 +747,21 @@ fun PlanScreen(
     var showLocation by remember { mutableStateOf(false) }
     var calibrating by remember { mutableStateOf(false) }
     var calibVersion by remember { mutableIntStateOf(0) } // force le redraw à l'ajout d'ancre
-    val gps by rememberUserLocation(showLocation)
+    // ASSISTANT « CALIBRATION GPS EN 3 POINTS » (SPEC-calibration-3-points) : non
+    // nul = ouvert. Seuls son panneau et son calque de dessin OBSERVENT la session
+    // (sinon chaque tic de mesure recomposerait tout le plan). Il démarre le GPS
+    // lui-même ; quitter la vue plan le ferme (mesure interrompue = à refaire).
+    var cal3Session by remember { mutableStateOf<ThreePointCalibrationSession?>(null) }
+    val locFeed = rememberUserLocationFeed(showLocation || cal3Session != null)
+    val gps by locFeed.location
+    DisposableEffect(cal3Session) {
+        val s = cal3Session
+        locFeed.rawFixHandler = s?.let { ss -> { loc -> ss.onRawFix(loc.toRawFix()) } }
+        onDispose {
+            locFeed.rawFixHandler = null
+            s?.cancel()
+        }
+    }
     // Historique court des relevés → moyenne pondérée par 1/précision au calibrage
     // (l'utilisateur est immobile ; ça enlève la gigue GPS de la ligne de base).
     val recentFixes = remember { ArrayList<android.location.Location>() }
@@ -771,7 +789,7 @@ fun PlanScreen(
     // au mode normal, où l'utilisateur ne s'attend plus à rien de sélectionné).
     LaunchedEffect(
         options.showLabels, options.labelFields, options.labelDetached,
-        rectMode, maskMode, soloMode, calibrating, measureMode, assignMode
+        rectMode, maskMode, soloMode, calibrating, measureMode, assignMode, cal3Session != null
     ) {
         activeLabelKeys = emptySet()
     }
@@ -812,8 +830,12 @@ fun PlanScreen(
             }
         }
         LaunchedEffect(calibVersion) {
-            if (calibVersion > 0) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.minou.mvrviewer.mvr.ProjectStore.saveCalibration(ctxPlan, projectKey, calibration.anchors.toList())
+            if (calibVersion > 0) {
+                // Copie sur le thread principal (la calibration est mutée ici même).
+                val anchors = calibration.anchors.toList(); val survey = calibration.survey
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.minou.mvrviewer.mvr.ProjectStore.saveCalibration(ctxPlan, projectKey, anchors, survey)
+                }
             }
         }
         // Affichage de la position GPS : persisté par projet (survit à la bascule
@@ -958,6 +980,67 @@ fun PlanScreen(
     // N11 — réglages/champs d'étiquette ouverts par l'outil DOCKÉ labelSettings
     // (parité iOS catalogPlan) : même contenu que la section « Étiquettes » du menu.
     var showLabelSettingsDialog by remember { mutableStateOf(false) }
+
+    // ---- ASSISTANT 3 POINTS : ouverture, fermeture, application ----------------
+    // Cadre d'ANCRAGE du panneau (px racine) : sa hauteur est réservée au cadrage.
+    var cal3PanelTopPx by remember { mutableStateOf(0f) }
+    var cal3PanelHeightPx by remember { mutableStateOf(0f) }
+    // Plus grande réserve déjà cadrée, et vue (échelle, décalage) posée par ce
+    // cadrage : si l'utilisateur a bougé le plan depuis, on ne recadre plus.
+    var cal3FitReserve by remember { mutableStateOf(0f) }
+    var cal3FitView by remember { mutableStateOf<Pair<Float, Offset>?>(null) }
+    // Emprise et éléments repères en cours de calcul (hors thread principal).
+    var cal3Starting by remember { mutableStateOf(false) }
+    val cal3Token = remember { IntArray(1) }
+    val cal3Scope = rememberCoroutineScope()
+    fun closeThreePoint() {
+        cal3Token[0]++
+        cal3Starting = false
+        cal3Session?.cancel()
+        cal3Session = null
+        cal3PanelTopPx = 0f; cal3PanelHeightPx = 0f; cal3FitReserve = 0f; cal3FitView = null
+    }
+    // Ouvre l'assistant : GPS démarré, autres modes de toucher désarmés
+    // (mesure, masquage, solo, cadre, « je suis ici », affectation câblage).
+    fun startThreePoint() {
+        if (assignTarget != null) onExitAssign()
+        rectMode = false; maskMode = false; soloMode = false; calibrating = false
+        if (measureMode) { measureMode = false; measureA = null; measureB = null }
+        showLocation = true
+        closeThreePoint()
+        val token = cal3Token[0]
+        val fixturesWorld = data.fixtures.map { it.key to Vec2(it.px.toDouble(), -it.py.toDouble()) }
+        val structurePoints = data.structure.mapIndexed { i, p ->
+            (data.structureKeys.getOrNull(i) ?: "") to Vec2(p.first.toDouble(), -p.second.toDouble())
+        }
+        val wf = wire; val hidden = effectiveHidden.toSet(); val rp = referencePlan; val refHidden = hiddenLayers
+        val stored = CalibrationStepLengthStore.load(ctxPlan)
+        cal3Starting = true
+        cal3Scope.launch {
+            val inputs = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                ThreePointPlanInputs.compute(fixturesWorld, structurePoints, wf, hidden, rp, refHidden)
+            }
+            if (token != cal3Token[0]) return@launch // fermé ou relancé entre-temps
+            cal3Starting = false
+            cal3Session = ThreePointCalibrationSession(
+                inputs.bounds, inputs.landmarks, stored,
+                clock = ::locationClockSeconds,
+                lastRawFix = { locFeed.lastRawFix?.toRawFix() },
+                onStepLengthChanged = { CalibrationStepLengthStore.save(ctxPlan, it) }
+            )
+        }
+    }
+    // « Appliquer » : la calibration vaut PARTOUT (plan, 3D, fond satellite) via
+    // l'objet hissé dans SceneScreen, qui la persiste, la pousse et la journalise
+    // (onCalibrationChanged) comme les autres méthodes ; la position s'affiche.
+    fun applyThreePoint(anchors: List<com.minou.mvrviewer.mvr.GeoAnchor>, survey: com.minou.mvrviewer.mvr.GeoSurvey) {
+        calibration.replace(anchors, survey)
+        calibVersion++
+        onCalibrationChanged()
+        showLocation = true
+        closeThreePoint()
+    }
+
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue plan : UNE liste consommée à la
     // fois par les 4 barres ancrables (AnchoredToolbars) ET la section « Outils » du
     // menu (toMenuTools) — supprime la duplication barre/menu. Les 12 premiers
@@ -968,17 +1051,17 @@ fun PlanScreen(
     val toolsPlan: List<ToolSpec> = buildList {
         add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
-                rectMode = !rectMode; if (rectMode) measureMode = false
+                rectMode = !rectMode; if (rectMode) { measureMode = false; closeThreePoint() }
             }))
         add(ToolSpec(ToolId.MASK, stringResource(R.string.tool_mask), Icons.Filled.VisibilityOff,
             available = true, checked = maskMode, onInvoke = {
                 maskMode = !maskMode
-                if (maskMode) { selected.clear(); measureMode = false; soloMode = false }
+                if (maskMode) { selected.clear(); measureMode = false; soloMode = false; closeThreePoint() }
             }))
         add(ToolSpec(ToolId.SOLO, stringResource(R.string.tool_solo), Icons.Filled.CenterFocusStrong,
             available = true, checked = soloMode, onInvoke = {
                 soloMode = !soloMode
-                if (soloMode) { selected.clear(); measureMode = false; maskMode = false }
+                if (soloMode) { selected.clear(); measureMode = false; maskMode = false; closeThreePoint() }
                 else onSetSoloElements(emptySet())
             }))
         add(ToolSpec(ToolId.MEASURE, stringResource(R.string.tool_measure), Icons.Filled.Straighten,
@@ -986,6 +1069,7 @@ fun PlanScreen(
                 measureMode = !measureMode
                 if (measureMode) {
                     rectMode = false; maskMode = false; soloMode = false; calibrating = false
+                    closeThreePoint()
                     measureA = null; measureB = null
                 } else { measureA = null; measureB = null }
             }))
@@ -1006,7 +1090,17 @@ fun PlanScreen(
                 // Calibration GPS = donnée de show PARTAGÉE (poussée, journalisée,
                 // destructive pour l'équipe) : Pro. Désarmer reste libre.
                 if (calibrating) calibrating = false
-                else ProAccess.gate("calibrer la position GPS") { calibrating = true; measureMode = false }
+                else ProAccess.gate("calibrer la position GPS") {
+                    calibrating = true; measureMode = false; closeThreePoint()
+                }
+            }))
+        // Calibration GUIDÉE EN 3 POINTS (SPEC-calibration-3-points) : même place que
+        // « je suis ici ». Disponible sans « Ma position » : l'assistant démarre
+        // lui-même le GPS. Fonction Pro (calibration = donnée partagée).
+        add(ToolSpec(ToolId.CALIBRATE_3, stringResource(R.string.tool_calibrate_3), Icons.Filled.TrackChanges,
+            available = true, checked = cal3Session != null || cal3Starting, onInvoke = {
+                if (cal3Session != null || cal3Starting) closeThreePoint()
+                else ProAccess.gate("calibrer la position GPS") { startThreePoint() }
             }))
         // Fond IGN = France seulement : hors couverture, Toast et PAS de bascule (le
         // réglage mémorisé est gardé pour un retour en France).
@@ -1077,6 +1171,26 @@ fun PlanScreen(
         val (s, dy) = CablingAssignBarPlacement.fitAbove(canvas.x, canvas.y, data.spanX, data.spanY, reserve)
         scale = s
         offset = Offset(0f, dy)
+    }
+
+    // CADRAGE pendant l'assistant 3 points : tant que le plan n'a pas été touché,
+    // il est recadré AU-DESSUS du panneau quand celui-ci dépasse la plus grande
+    // hauteur déjà cadrée (+ 4 dp) — jamais à chaque étape (pas de sautillement).
+    LaunchedEffect(cal3Session != null, cal3PanelTopPx, planBoundsPx, canvas) {
+        if (cal3Session == null) return@LaunchedEffect
+        val pb = planBoundsPx
+        if (pb.height <= 0f || canvas.x <= 0f || canvas.y <= 0f) return@LaunchedEffect
+        if (cal3PanelTopPx <= pb.top || cal3PanelTopPx >= pb.bottom) return@LaunchedEffect
+        val reserve = CablingAssignBarPlacement.reserve(pb.top, pb.bottom, cal3PanelTopPx)
+        if (reserve <= cal3FitReserve + 4f * labelDensity.density) return@LaunchedEffect
+        val untouched = if (cal3FitView == null) scale == 1f && offset == Offset.Zero
+            else cal3FitView == (scale to offset)
+        if (!untouched) return@LaunchedEffect
+        cal3FitReserve = reserve
+        val (s, dy) = CablingAssignBarPlacement.fitAbove(canvas.x, canvas.y, data.spanX, data.spanY, reserve)
+        scale = s
+        offset = Offset(0f, dy)
+        cal3FitView = s to offset
     }
 
     Box(modifier = modifier.fillMaxSize().background(planBg)
@@ -1235,7 +1349,8 @@ fun PlanScreen(
                     // modes qui s'approprient déjà le geste (rectangle/affectation/
                     // masquage/solo/mesure/calibrage) l'ignorent, comme le TAP.
                     onLongPress = onLongPress@{ pos ->
-                        if (rectMode || assignMode || maskMode || soloMode || measureMode || calibrating) return@onLongPress
+                        if (rectMode || assignMode || maskMode || soloMode || measureMode || calibrating ||
+                            cal3Session != null) return@onLongPress
                         val lw = canvas.x; val lh = canvas.y
                         var lbest = -1; var lbestD = 44f * 44f
                         data.fixtures.forEachIndexed { i, f ->
@@ -1253,6 +1368,14 @@ fun PlanScreen(
                     },
                     onTap = { tap ->
                         val w = canvas.x; val h = canvas.y
+                        // ASSISTANT 3 POINTS : PRIORITAIRE — le toucher dit SEULEMENT
+                        // « je suis ici » (l'endroit où l'on se tient) ; pan/zoom libres.
+                        val cal3 = cal3Session
+                        if (cal3 != null) {
+                            val (cpx, cpy) = toPlan(tap.x, tap.y, w, h)
+                            cal3.tap(Vec2(cpx.toDouble(), -cpy.toDouble()))
+                            return@detectTapGestures
+                        }
                         // MODE AFFECTATION (E2) : PRIORITAIRE. Le toucher affecte/retire
                         // le projecteur visé (toggle) à la cible courante — il ne
                         // sélectionne pas. Hit-test 34px comme le masquage, filtré
@@ -1395,6 +1518,10 @@ fun PlanScreen(
                         if (calibrating && g != null) {
                             val (px, py) = toPlan(tap.x, tap.y, w, h)
                             val avg = averagedLatLon() ?: (g.latitude to g.longitude)
+                            // Après une calibration 3 points, « je suis ici » REPART de
+                            // zéro : ses deux ancres sont synthétiques, en remplacer une
+                            // seule donnerait un mélange sans précision connue.
+                            if (calibration.survey != null) calibration.reset()
                             calibration.addAnchor(
                                 com.minou.mvrviewer.mvr.GeoAnchor(px, -py, avg.first, avg.second)
                             )
@@ -1471,13 +1598,14 @@ fun PlanScreen(
                 // reçoit l'événement le premier en passe principale, donc
                 // consommer ici annule proprement le pan/zoom
                 // (detectTransformGestures s'arrête sur un change consommé).
-                .pointerInput(scene, rectMode, assignMode, maskMode, soloMode, calibrating, measureMode, projectKey, activeLabelKeys) {
+                .pointerInput(scene, rectMode, assignMode, maskMode, soloMode, calibrating, measureMode, projectKey, activeLabelKeys, cal3Session) {
                     val keys = activeLabelKeys
                     if (keys.isEmpty()) return@pointerInput
                     // soloMode / affectation s'approprient le geste (comme maskMode) :
                     // pas de saisie d'étiquette pendant qu'on constitue le solo ou qu'on
                     // affecte sur le plan.
-                    if (rectMode || assignMode || maskMode || soloMode || calibrating || measureMode) return@pointerInput
+                    if (rectMode || assignMode || maskMode || soloMode || calibrating || measureMode ||
+                        cal3Session != null) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // Un SEUL test, contre les boîtes des étiquettes ARMÉES :
@@ -1656,7 +1784,10 @@ fun PlanScreen(
             // Position GPS de l'utilisateur (bleu), après calibrage.
             calibVersion.let { /* redraw à l'ajout d'ancre */ }
             val g = gps
-            if (showLocation && g != null && calibration.isCalibrated) {
+            // Pendant l'assistant 3 points, l'ANCIENNE calibration n'a plus cours :
+            // son point bleu induirait en erreur (l'assistant dessine sa position
+            // provisoire).
+            if (showLocation && g != null && calibration.isCalibrated && cal3Session == null) {
                 val wp = calibration.worldPosition(g.latitude, g.longitude)
                 if (wp != null) {
                     val s = toScreen(wp.first, -wp.second, w, h)
@@ -1793,6 +1924,18 @@ fun PlanScreen(
 
         }
 
+        // ---- ASSISTANT 3 POINTS : minuterie + calque de dessin (repères, flèche,
+        // points, position provisoire). Ils OBSERVENT la session et le GPS à la
+        // place de la vue plan, qui n'est donc pas recomposée à chaque fix.
+        cal3Session?.let { s ->
+            ThreePointCalibrationTimer(s)
+            ThreePointCalibrationOverlay(
+                session = s, liveState = locFeed.location,
+                toScreen = { v, sz -> toScreen(v.x.toFloat(), (-v.y).toFloat(), sz.width, sz.height) },
+                pxPerMm = { sz -> baseScale(sz.width, sz.height) * scale }
+            )
+        }
+
         // Barre du haut : retour + stats. Le voile s'inverse sur fond sombre.
         Surface(
             color = if (bgDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.05f),
@@ -1893,6 +2036,13 @@ fun PlanScreen(
                 // MÊME description unifiée que les barres (toolsPlan) → plus de
                 // duplication. Mêmes actions, mêmes bascules, mêmes conditions.
                 tools = toolsPlan.toMenuTools(),
+                // Ligne d'état « Calibration » (iOS GeoCalibrationStatus), relue à
+                // chaque ouverture du menu (la calibration n'est pas observable).
+                calibrationStatus = {
+                    calibVersion.let { }
+                    val st = GeoCalibrationStatus.of(calibration, locFeed.denied)
+                    ThreePointDisplay.statusText(st).text() to st.isWarning
+                },
                 onCustomizeToolbar = { showCustomize = true },
                 showLabelsToggle = true, showStructureToggle = true,
                 showLegendToggle = true,
@@ -2260,6 +2410,34 @@ fun PlanScreen(
             )
         }
 
+        // ---- ASSISTANT 3 POINTS : panneau en bas (SPEC-calibration-3-points §2) ----
+        // Même place et même dégagement de la légende que la barre d'affectation ;
+        // en hauteur compacte, textes secondaires et réglage du pas masqués.
+        val cal3Open = cal3Session
+        if (cal3Open != null) {
+            val compact = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 480
+            val dens = androidx.compose.ui.platform.LocalDensity.current
+            fun Rect.toDp() = Rect(left / dens.density, top / dens.density, right / dens.density, bottom / dens.density)
+            val insets = CablingAssignBarPlacement.assignBarInsetsTopLegend(
+                compact, planBoundsPx.toDp(), CablingAssignBarPlacement.BAR_WIDTH,
+                cal3PanelHeightPx / dens.density,
+                if (legendShown) legendBoundsPx?.toDp() else null
+            )
+            ThreePointCalibrationPanel(
+                session = cal3Open, liveState = locFeed.location, denied = locFeed.denied, compact = compact,
+                onApply = { a, sv -> applyThreePoint(a, sv) },
+                onClose = { closeThreePoint() },
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = insets.bottom.dp)
+                    .layoutOffset(x = insets.leadingShift.dp)
+                    // Cadre d'ANCRAGE : sa hauteur est réservée au cadrage du plan.
+                    .onGloballyPositioned {
+                        cal3PanelTopPx = it.positionInRoot().y
+                        cal3PanelHeightPx = it.size.height.toFloat()
+                    }
+            )
+        }
+
         // ---- Panneau d'export PDF « en construction » ----
         // Volontairement à part des modes de toucher : composer le document ne
         // s'approprie aucun geste, on continue de cadrer le plan librement entre
@@ -2430,7 +2608,7 @@ fun PlanScreen(
             ) {
                 Text(
                     if (gps == null) stringResource(R.string.calib_waiting_gps)
-                    else if (calibration.anchors.isEmpty()) stringResource(R.string.calib_tap_first)
+                    else if (calibration.anchors.isEmpty() || calibration.survey != null) stringResource(R.string.calib_tap_first)
                     else stringResource(R.string.calib_tap_second),
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodyMedium

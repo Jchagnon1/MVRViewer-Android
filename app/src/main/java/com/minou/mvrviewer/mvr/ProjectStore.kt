@@ -205,24 +205,42 @@ object ProjectStore {
 
     // ---- Calibration GPS ----
 
-    fun saveCalibration(ctx: Context, key: String, anchors: List<GeoAnchor>) = synchronized(manifestLock) {
-        val m = readManifest(ctx, key)
-        if (anchors.isEmpty()) { m.remove("anchors"); writeManifest(ctx, key, m) }
-        else {
-            val arr = JSONArray()
-            for (a in anchors) arr.put(JSONObject()
-                .put("wx", a.worldX.toDouble()).put("wy", a.worldY.toDouble())
-                .put("lat", a.latitude).put("lon", a.longitude))
-            m.put("anchors", arr); writeManifest(ctx, key, m)
+    fun saveCalibration(ctx: Context, key: String, anchors: List<GeoAnchor>, survey: GeoSurvey? = null) =
+        synchronized(manifestLock) {
+            val m = readManifest(ctx, key)
+            if (anchors.isEmpty()) { m.remove("anchors"); m.remove("survey"); writeManifest(ctx, key, m) }
+            else {
+                val arr = JSONArray()
+                for (a in anchors) arr.put(JSONObject()
+                    .put("wx", a.worldX.toDouble()).put("wy", a.worldY.toDouble())
+                    .put("lat", a.latitude).put("lon", a.longitude))
+                m.put("anchors", arr)
+                // Relevé 3 points (SPEC-calibration-3-points §5) : même forme que la
+                // section synchronisée ; seulement avec ses DEUX ancres synthétiques.
+                val dto = if (survey != null && anchors.size == 2)
+                    com.minou.mvrviewer.sync.LocalMapper.surveyDTO(survey) else null
+                if (dto != null) m.put("survey", com.minou.mvrviewer.sync.SectionCodec.encodeSurvey(dto)) else m.remove("survey")
+                writeManifest(ctx, key, m)
+            }
         }
-    }
 
-    fun loadCalibration(ctx: Context, key: String): List<GeoAnchor> {
-        val arr = readManifest(ctx, key).optJSONArray("anchors") ?: return emptyList()
-        return (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            GeoAnchor(o.getDouble("wx").toFloat(), o.getDouble("wy").toFloat(), o.getDouble("lat"), o.getDouble("lon"))
-        }
+    fun loadCalibration(ctx: Context, key: String): List<GeoAnchor> = loadCalibrationWithSurvey(ctx, key).first
+
+    /** Ancres + relevé (anciens manifestes sans relevé : relus sans changement). */
+    fun loadCalibrationWithSurvey(ctx: Context, key: String): Pair<List<GeoAnchor>, GeoSurvey?> {
+        val m = readManifest(ctx, key)
+        val arr = m.optJSONArray("anchors") ?: return emptyList<GeoAnchor>() to null
+        val anchors = runCatching {
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                GeoAnchor(o.getDouble("wx").toFloat(), o.getDouble("wy").toFloat(), o.getDouble("lat"), o.getDouble("lon"))
+            }
+        }.getOrDefault(emptyList())
+        val survey = if (anchors.size == 2) m.optJSONObject("survey")
+            ?.let { com.minou.mvrviewer.sync.SectionCodec.decodeSurvey(it) }
+            ?.let { com.minou.mvrviewer.sync.LocalMapper.surveyFromDTO(it) }
+        else null
+        return anchors to survey
     }
 
     // ---- Fond satellite (juste le drapeau on/off, comme iOS) ----

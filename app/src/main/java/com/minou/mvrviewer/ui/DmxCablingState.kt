@@ -76,11 +76,13 @@ class DmxCablingState {
 
     /**
      * Ajoute une ligne DMX auto-nommée (« DMX N » / « Multi N ») et la renvoie.
+     * N = nombre TOTAL de lignes + 1, tous types confondus (iOS
+     * `DMXCablingView.addDistributor`, web) : « DMX 1 » puis « Multi 2 ».
      * `cores` n'est utilisé que pour une multipaire (nombre de paires réglable à
      * la création) ; une ligne simple est toujours à 1 départ.
      */
     fun addDistributor(kind: DmxDistributorKind, cores: Int = defaultDmxCores(kind)): DmxDistributor {
-        val n = distributors.count { it.kind == kind } + 1
+        val n = distributors.size + 1
         val name = if (kind == DmxDistributorKind.MULTI) "Multi $n" else "DMX $n"
         val color = CablingPalette.colorAt(distributors.size)
         val c = if (kind == DmxDistributorKind.SIMPLE) 1 else maxOf(1, cores)

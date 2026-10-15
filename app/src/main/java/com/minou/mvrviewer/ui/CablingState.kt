@@ -79,16 +79,25 @@ class PowerCablingState {
 
     // ---- Distributeurs ------------------------------------------------------
 
-    /** Ajoute un distributeur auto-nommé (« Soca N » / « Ligne N ») et le renvoie. */
+    /**
+     * Ajoute un distributeur auto-nommé et le renvoie. Règle iOS
+     * (`PowerCablingView.addDistributor`) : « Soca N » (N = Socapex existantes + 1),
+     * « Ligne A », « Ligne B »… pour les lignes solo, puis « Ligne 27 » au-delà de
+     * l'alphabet. Les types sont comptés RÉSOLUS (un type inconnu compte en solo).
+     */
     fun addDistributor(kind: DistributorKind): Distributor {
-        val n = distributors.count { it.kind == kind } + 1
-        val name = if (kind == DistributorKind.SOCA) "Soca $n" else "Ligne $n"
+        val sameKind = distributors.count { it.kind == kind }
+        val name = if (kind == DistributorKind.SOCA) "Soca ${sameKind + 1}" else "Ligne ${soloLetter(sameKind)}"
         val color = CablingPalette.colorAt(distributors.size)
         val d = Distributor(UUID.randomUUID().toString(), name, kind, color, defaultCircuitPhases(kind))
         distributors.add(d)
         commit()
         return d
     }
+
+    /** « A », « B »… « Z », puis « 27 », « 28 »… (iOS `soloLetter`, web `letterName`). */
+    internal fun soloLetter(index: Int): String =
+        if (index < 26) ('A' + index).toString() else (index + 1).toString()
 
     private fun replace(id: String, transform: (Distributor) -> Distributor) {
         val i = distributors.indexOfFirst { it.id == id }

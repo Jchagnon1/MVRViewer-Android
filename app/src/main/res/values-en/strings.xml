@@ -36,6 +36,8 @@
     <string name="cabling_export_pdf_cd">Export the cabling as PDF</string>
     <string name="cabling_export_plans">Marked-up plans</string>
     <string name="cabling_filter_hint">Filter (ID, name, type…)</string>
+    <string name="cabling_legend_dmx">DMX lines</string>
+    <string name="cabling_legend_soca">Socapex / lines</string>
     <string name="cabling_line_pc16">Single 16 A line</string>
     <string name="cabling_no_fixture">no fixture</string>
     <string name="cabling_pdf_failed">PDF export failed</string>
@@ -52,7 +54,7 @@
     <string name="cabling_settings_summary_fmt">%1$d V · circuit %2$d W · </string>
     <string name="cabling_settings_title">Cabling settings</string>
     <string name="cabling_tab_elec">Electrical</string>
-    <string name="cabling_tab_power">Power draw</string>
+    <string name="cabling_tab_power">Power</string>
     <string name="cabling_total_fmt"> · total %1$d W</string>
     <string name="cabling_unassigned">Not cabled</string>
     <string name="cabling_unknown_power">unknown power</string>
@@ -173,7 +175,7 @@
     <string name="common_scale">Scale</string>
     <string name="common_send">Send</string>
     <string name="common_uniform_scale">Uniform scale</string>
-    <string name="common_unnamed">(unnamed)</string>
+    <string name="common_unnamed">(untitled)</string>
     <string name="common_visible">Visible</string>
     <string name="diag_share">Send the report</string>
     <string name="diag_subject">MVR Viewer — diagnostic report</string>

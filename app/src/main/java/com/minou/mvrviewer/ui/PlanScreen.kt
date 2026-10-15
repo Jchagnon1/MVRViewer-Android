@@ -306,27 +306,27 @@ fun PlanScreen(
     // si au moins un projecteur PRÉSENT dans la scène est non affecté dans ce mode
     // (absent de la table de couleur du mode = dessiné en gris non-câblé), on AJOUTE
     // en fin une entrée « Non câblé » de teinte CABLING_UNASSIGNED_GRAY (0xFF737373).
+    // SECTION ABSENTE si aucun distributeur de la famille n'est utilisé (iOS) :
+    // jamais une légende réduite à « Non câblé » — la légende des calques reste.
     val sUnassigned = stringResource(R.string.cabling_unassigned)
-    val cablingLegend: List<Pair<String, Color>> =
+    val sUnnamed = stringResource(R.string.common_unnamed)
+    val cablingLegendSection: CablingLegendSection? =
         remember(cabling.version, dmxCabling.version, effectiveColorMode,
                  data, socaColorByFixture, dmxColorByFixture) {
-            when (effectiveColorMode) {
-                PlanColorMode.SOCAPEX -> {
-                    val used = cabling.assignments.values.mapTo(HashSet()) { it.distributor }
-                    val base = cabling.distributors.filter { it.id in used }
-                        .map { it.name to Color(it.colorArgb) }
-                    val anyUnassigned = data.fixtures.any { it.key !in socaColorByFixture }
-                    if (anyUnassigned) base + (sUnassigned to CABLING_UNASSIGNED_GRAY) else base
-                }
-                PlanColorMode.DMX_LINE -> {
-                    val used = dmxCabling.assignments.values.mapTo(HashSet()) { it.distributor }
-                    val base = dmxCabling.distributors.filter { it.id in used }
-                        .map { it.name to Color(it.colorArgb) }
-                    val anyUnassigned = data.fixtures.any { it.key !in dmxColorByFixture }
-                    if (anyUnassigned) base + (sUnassigned to CABLING_UNASSIGNED_GRAY) else base
-                }
-                PlanColorMode.LAYER -> emptyList()
+            val modeMap = when (effectiveColorMode) {
+                PlanColorMode.SOCAPEX -> socaColorByFixture
+                PlanColorMode.DMX_LINE -> dmxColorByFixture
+                PlanColorMode.LAYER -> null
             }
+            val anyUnassigned = modeMap != null && data.fixtures.any { it.key !in modeMap }
+            CablingLegendUi.section(effectiveColorMode, cabling.toDTO(), dmxCabling.toDTO(), anyUnassigned)
+        }
+    // Lignes « nom → couleur » (écran ET PDF) : nom vide → « (sans nom) ».
+    val cablingLegend: List<Pair<String, Color>> =
+        remember(cablingLegendSection, sUnassigned, sUnnamed) {
+            val s = cablingLegendSection ?: return@remember emptyList()
+            val rows = s.entries.map { CablingLegendUi.displayName(it.name, sUnnamed) to Color(it.argb) }
+            if (s.showUnassigned) rows + (sUnassigned to CABLING_UNASSIGNED_GRAY) else rows
         }
 
     val measurer = rememberTextMeasurer()
@@ -1808,6 +1808,21 @@ fun PlanScreen(
 
             // Position GPS de l'utilisateur (bleu), après calibrage.
             calibVersion.let { /* redraw à l'ajout d'ancre */ }
+            // Repères de calibration : petites cibles ROUGES aux points réellement
+            // mesurés (3 points) ou aux ancres posées — sous le point bleu, masqués
+            // pendant l'assistant (iOS drawUserLocation, SPEC-calibration §2.6).
+            val markers = CalibrationMarkers.points(calibration, showLocation, calibrating, cal3Session != null)
+            if (markers.isNotEmpty()) {
+                val mr = CalibrationMarkers.RADIUS_DP.dp.toPx()
+                val mc = CalibrationMarkers.CROSS_HALF_DP.dp.toPx()
+                val mStroke = androidx.compose.ui.graphics.drawscope.Stroke(CalibrationMarkers.STROKE_DP.dp.toPx())
+                for ((mx, my) in markers) {
+                    val sp = toScreen(mx, -my, w, h)
+                    drawCircle(Color.Red, radius = mr, center = sp, style = mStroke)
+                    drawLine(Color.Red, Offset(sp.x - mc, sp.y), Offset(sp.x + mc, sp.y), strokeWidth = mStroke.width)
+                    drawLine(Color.Red, Offset(sp.x, sp.y - mc), Offset(sp.x, sp.y + mc), strokeWidth = mStroke.width)
+                }
+            }
             val g = gps
             // Pendant l'assistant 3 points, l'ANCIENNE calibration n'a plus cours :
             // son point bleu induirait en erreur (l'assistant dessine sa position
@@ -1998,7 +2013,9 @@ fun PlanScreen(
         }
         // En mode CÂBLAGE (ou d'office en affectation), la légende passe de
         // « couleur → calque » à « couleur → distributeur » (ceux réellement utilisés).
-        val legendCablingMode = effectiveColorMode != PlanColorMode.LAYER
+        // Aucun distributeur utilisé (affectation qui commence) : pas de section
+        // câblage, la légende des calques reste (iOS garde Types et Calques).
+        val legendCablingMode = cablingLegendSection != null
         val legendShown = options.showLegend &&
             (if (legendCablingMode) cablingLegend.isNotEmpty() else legend.isNotEmpty())
         if (options.showLegend) {
@@ -2016,6 +2033,14 @@ fun PlanScreen(
                 ) {
                     androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                         if (cablingMode) {
+                            // Titre de la famille (iOS « Socapex / lignes » / « Lignes DMX »).
+                            cablingLegendSection?.let { sec ->
+                                Text(stringResource(sec.titleRes),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                    color = Color(0xFF666666),
+                                    modifier = Modifier.padding(bottom = 2.dp))
+                            }
                             cablingLegend.take(12).forEach { (name, col) ->
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
                                     androidx.compose.foundation.layout.Box(

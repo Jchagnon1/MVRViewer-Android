@@ -36,6 +36,8 @@
     <string name="cabling_export_pdf_cd">Exporter le câblage en PDF</string>
     <string name="cabling_export_plans">Plans repérés</string>
     <string name="cabling_filter_hint">Filtrer (N°, nom, type…)</string>
+    <string name="cabling_legend_dmx">Lignes DMX</string>
+    <string name="cabling_legend_soca">Socapex / lignes</string>
     <string name="cabling_line_pc16">Ligne PC16</string>
     <string name="cabling_no_fixture">aucun projecteur</string>
     <string name="cabling_pdf_failed">Échec de l\'export PDF</string>

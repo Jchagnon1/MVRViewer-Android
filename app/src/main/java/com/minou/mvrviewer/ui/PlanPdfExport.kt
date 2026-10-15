@@ -326,10 +326,10 @@ private fun DrawScope.drawPdfPage(
         )
         // Légende par-dessus le plan, comme à l'écran. En mode câblage, elle liste
         // les distributeurs (couleur → nom) au lieu des calques.
+        // Aucun distributeur utilisé : légende des calques, comme à l'écran.
         if (v.showLegend) {
-            if (v.colorMode != PlanColorMode.LAYER) {
-                if (v.cablingLegend.isNotEmpty())
-                    drawCablingLegend(v, measurer, Offset(left + 10f, top + 10f))
+            if (v.colorMode != PlanColorMode.LAYER && v.cablingLegend.isNotEmpty()) {
+                drawCablingLegend(v, measurer, Offset(left + 10f, top + 10f))
             } else if (src.legend.isNotEmpty()) {
                 drawLegend(src, v, measurer, Offset(left + 10f, top + 10f))
             }

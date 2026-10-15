@@ -79,6 +79,16 @@ class GeoCalibration {
         survey = if (newAnchors.size == 2) newSurvey else null
     }
 
+    /**
+     * Repères rouges du plan (SPEC-calibration §2.6, iOS `drawUserLocation`, web
+     * `markerPoints`) : avec un relevé, les points RÉELLEMENT mesurés (les deux
+     * ancres synthétiques ne sont aucun lieu réel) ; sinon les ancres posées.
+     * (x, y) en mm monde.
+     */
+    val markerPoints: List<Pair<Float, Float>>
+        get() = survey?.points?.map { it.worldX to it.worldY }
+            ?: anchors.map { it.worldX to it.worldY }
+
     /** Précision affichable (m, arrondie, ≥ 1) d'une calibration 3 points, près des points. */
     val surveyPrecisionMeters: Int?
         get() {

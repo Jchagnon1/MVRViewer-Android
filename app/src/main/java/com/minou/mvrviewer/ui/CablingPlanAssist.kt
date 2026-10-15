@@ -866,6 +866,34 @@ object CablingColorResolver {
 }
 
 /**
+ * Section « câblage » de la légende du plan (iOS PlanView, légende) : titre de
+ * la famille, distributeurs UTILISÉS dans l'ordre du modèle, puis « Non câblé »
+ * si au moins un projecteur présent n'est pas affecté dans ce mode.
+ */
+data class CablingLegendSection(val titleRes: Int, val entries: List<CablingLegendEntry>, val showUnassigned: Boolean)
+
+object CablingLegendUi {
+    /**
+     * Section du mode EFFECTIF, ou `null` si elle est absente : mode Calque, ou
+     * AUCUN distributeur de la famille utilisé (iOS n'affiche alors pas la
+     * section — jamais une légende réduite à « Non câblé »).
+     */
+    fun section(mode: PlanColorMode, power: PowerCablingDTO, dmx: DmxCablingDTO,
+                anyUnassignedPresent: Boolean): CablingLegendSection? {
+        val (title, entries) = when (mode) {
+            PlanColorMode.SOCAPEX -> R.string.cabling_legend_soca to CablingColorResolver.legend(power)
+            PlanColorMode.DMX_LINE -> R.string.cabling_legend_dmx to CablingColorResolver.legend(dmx)
+            PlanColorMode.LAYER -> return null
+        }
+        if (entries.isEmpty()) return null
+        return CablingLegendSection(title, entries, anyUnassignedPresent)
+    }
+
+    /** Nom affiché : « (sans nom) » pour un nom VIDE (iOS `isEmpty`). */
+    fun displayName(name: String, unnamed: String): String = name.ifEmpty { unnamed }
+}
+
+/**
  * Mode de coloration EFFECTIF du plan (SPEC §3) : pendant une affectation, il
  * est FORCÉ par la famille de la voie (Socapex pour un circuit, Ligne DMX pour un
  * départ), quel que soit le choix du menu — et sans anneau de 2e dimension.

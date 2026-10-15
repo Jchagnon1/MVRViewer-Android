@@ -13,7 +13,7 @@ import com.minou.mvrviewer.mvr.GeoThreePoint
 import com.minou.mvrviewer.mvr.Vec2
 import java.math.BigDecimal
 import java.math.RoundingMode
-import java.text.DecimalFormatSymbols
+import java.text.NumberFormat
 import java.util.Locale
 
 // ASSISTANT « CALIBRATION GPS EN TROIS POINTS » (vue plan) — partie PURE, testée
@@ -544,9 +544,16 @@ object ThreePointDisplay {
         if (!x.isFinite()) return x.toString()
         // Chiffres les plus courts du double, puis arrondi au pair — comme ICU.
         val bd = BigDecimal(java.lang.Double.toString(x)).setScale(digits, RoundingMode.HALF_EVEN)
-        val plain = bd.abs().toPlainString()
-        val sep = DecimalFormatSymbols.getInstance(locale).decimalSeparator
-        val body = plain.replace('.', sep)
+        // Mise en forme de la langue AVEC séparateur de milliers, comme iOS
+        // (`formatted`) et le web (Intl) : « 1 234,5 » / « 1,234.5 ». La valeur est
+        // déjà arrondie : le format ne fait que l'écrire.
+        val nf = NumberFormat.getNumberInstance(locale).apply {
+            isGroupingUsed = true
+            minimumFractionDigits = digits
+            maximumFractionDigits = digits
+            roundingMode = RoundingMode.HALF_EVEN
+        }
+        val body = nf.format(bd.abs())
         return if (bd.signum() < 0) "-$body" else body
     }
 
@@ -650,6 +657,32 @@ object ThreePointDisplay {
         session.stage != ThreePointStage.Result && i == session.currentIndex -> Dot.CURRENT
         else -> Dot.EMPTY
     }
+}
+
+// ---- Repères rouges des points de calibration (iOS drawUserLocation) ----------
+
+/**
+ * Cibles rouges posées sur le plan à chaque point de calibration (SPEC §2.6 et
+ * §8) : les points RÉELLEMENT mesurés d'une calibration 3 points, sinon les
+ * ancres ([GeoCalibration.markerPoints]). Dessin iOS : cercle de 10 pt + croix
+ * de 18 pt, trait rouge de 1,5 pt.
+ */
+object CalibrationMarkers {
+    const val RADIUS_DP = 5f
+    const val CROSS_HALF_DP = 9f
+    const val STROKE_DP = 1.5f
+
+    /**
+     * Visibles quand la position est affichée OU que la pose d'ancre est armée ;
+     * jamais pendant l'assistant 3 points (l'ancienne calibration n'a plus cours).
+     */
+    fun visible(showLocation: Boolean, anchorTapArmed: Boolean, assistantActive: Boolean): Boolean =
+        !assistantActive && (showLocation || anchorTapArmed)
+
+    /** Points (mm monde) à marquer, ou aucun si les repères sont masqués. */
+    fun points(calibration: GeoCalibration, showLocation: Boolean, anchorTapArmed: Boolean,
+               assistantActive: Boolean): List<Pair<Float, Float>> =
+        if (visible(showLocation, anchorTapArmed, assistantActive)) calibration.markerPoints else emptyList()
 }
 
 // ---- Emprise et éléments reconnaissables (iOS threePointBounds / Landmarks) ----

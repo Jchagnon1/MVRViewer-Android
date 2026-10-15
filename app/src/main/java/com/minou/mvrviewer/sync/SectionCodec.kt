@@ -58,7 +58,10 @@ object SectionCodec {
         val inner = root.optJSONObject(key)?.optJSONObject("_0") ?: return null
         return when (kind) {
             ProjectSectionKind.MANIFEST -> SectionPayload.Manifest(decodeManifest(inner))
-            ProjectSectionKind.CALIBRATION -> SectionPayload.Calibration(decodeCalibration(inner))
+            // Ancre hors des bornes (Float ou nombre non fini) : section REJETÉE,
+            // comme iOS (JSONDecoder) — la garder ferait lever sa réécriture.
+            ProjectSectionKind.CALIBRATION ->
+                decodeCalibration(inner).takeIf(::anchorsFinite)?.let { SectionPayload.Calibration(it) }
             ProjectSectionKind.PATCH -> SectionPayload.Patch(decodePatch(inner))
             ProjectSectionKind.LAYER_COLORS -> SectionPayload.LayerColors(decodeLayerColors(inner))
             ProjectSectionKind.LABEL_SIDES -> SectionPayload.LabelSides(decodeLabelSides(inner))
@@ -201,7 +204,18 @@ object SectionCodec {
         return GeoCalibrationDTO(anchors, survey)
     }
 
-    /** Relevé complet, ou null s'il manque un champ requis (ou un point incomplet). */
+    /** Toutes les ancres sont-elles écrivables (coordonnées finies) ? */
+    internal fun anchorsFinite(d: GeoCalibrationDTO): Boolean = d.anchors.all {
+        it.worldX.isFinite() && it.worldY.isFinite() && it.latitude.isFinite() && it.longitude.isFinite()
+    }
+
+    /**
+     * Relevé complet, ou null s'il manque un champ requis (ou un point incomplet).
+     * Chaque nombre doit être FINI, et `worldX`/`worldY` doivent tenir dans un
+     * Float (iOS : débordement → section rejetée ; web `normalizeSurvey` : relevé
+     * écarté). Sinon le relevé est ignoré (ancres gardées) : garder un Infinity
+     * ferait lever la réécriture (org.json refuse les nombres non finis).
+     */
     internal fun decodeSurvey(s: JSONObject): GeoSurveyDTO? {
         val method = s.reqString("method") ?: return null
         val arr = s.optJSONArray("points") ?: return null
@@ -209,20 +223,24 @@ object SectionCodec {
         for (i in 0 until arr.length()) {
             val p = arr.optJSONObject(i) ?: return null
             points.add(GeoSurveyPointDTO(
-                worldX = (p.reqNumber("worldX") ?: return null).toFloat(),
-                worldY = (p.reqNumber("worldY") ?: return null).toFloat(),
-                latitude = p.reqNumber("latitude") ?: return null,
-                longitude = p.reqNumber("longitude") ?: return null,
-                accuracy = p.reqNumber("accuracy") ?: return null,
-                residual = p.reqNumber("residual") ?: return null
+                worldX = p.reqFloat("worldX") ?: return null,
+                worldY = p.reqFloat("worldY") ?: return null,
+                latitude = p.reqFinite("latitude") ?: return null,
+                longitude = p.reqFinite("longitude") ?: return null,
+                accuracy = p.reqFinite("accuracy") ?: return null,
+                residual = p.reqFinite("residual") ?: return null
             ))
         }
+        // `edgePrecision` facultatif : absent ou nul → null ; présent mais pas un
+        // nombre fini → relevé écarté (comme le web).
+        val edge = if (!s.has("edgePrecision") || s.isNull("edgePrecision")) null
+            else s.reqFinite("edgePrecision") ?: return null
         return GeoSurveyDTO(
             method = method, points = points,
-            precision = s.reqNumber("precision") ?: return null,
-            freeScale = s.reqNumber("freeScale") ?: return null,
-            epoch = s.reqNumber("epoch") ?: return null,
-            edgePrecision = s.reqNumber("edgePrecision")
+            precision = s.reqFinite("precision") ?: return null,
+            freeScale = s.reqFinite("freeScale") ?: return null,
+            epoch = s.reqFinite("epoch") ?: return null,
+            edgePrecision = edge
         )
     }
 
@@ -376,6 +394,12 @@ private fun JSONObject.reqNumber(key: String): Double? {
     if (!has(key) || isNull(key)) return null
     return (opt(key) as? Number)?.toDouble()
 }
+
+/** Nombre REQUIS et FINI : absent, nul, non numérique, infini ou NaN → null. */
+private fun JSONObject.reqFinite(key: String): Double? = reqNumber(key)?.takeIf { it.isFinite() }
+
+/** Nombre REQUIS qui tient dans un Float (Float iOS) : sinon null. */
+private fun JSONObject.reqFloat(key: String): Float? = reqFinite(key)?.toFloat()?.takeIf { it.isFinite() }
 
 /** Chaîne REQUISE : absente, nulle ou d'un autre type → null. */
 private fun JSONObject.reqString(key: String): String? {

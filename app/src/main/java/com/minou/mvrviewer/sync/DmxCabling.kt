@@ -49,14 +49,26 @@ fun defaultDmxCores(kind: DmxDistributorKind): Int = if (kind == DmxDistributorK
  * pour une ligne simple, N (≥ 1) pour une multipaire. On expose [coreCount] plutôt
  * que `cores` directement pour qu'une ligne simple ne montre jamais qu'un départ,
  * même si un JSON abîmé lui donnait un `cores` incohérent.
+ *
+ * [kindRaw] est la chaîne BRUTE du JSON (« simple », « multi », ou un type
+ * inconnu écrit par une version plus récente) : elle est RÉÉCRITE TELLE QUELLE,
+ * comme iOS (`kind`) et le web. [kind] la résout à l'usage (iOS
+ * `kindResolved`) : un type inconnu se comporte comme une ligne simple.
  */
 data class DmxDistributor(
     val id: String,
     val name: String,
-    val kind: DmxDistributorKind,
+    val kindRaw: String,
     val colorArgb: Int,
     val cores: Int
 ) {
+    /** Construction en code (ajout d'une ligne) : type connu. */
+    constructor(id: String, name: String, kind: DmxDistributorKind, colorArgb: Int, cores: Int) :
+        this(id, name, kind.raw, colorArgb, cores)
+
+    /** Type résolu (iOS `kindResolved`) : inconnu → SIMPLE. */
+    val kind: DmxDistributorKind get() = DmxDistributorKind.from(kindRaw)
+
     /** Nombre effectif de départs : 1 forcé pour une ligne simple, sinon `cores`. */
     val coreCount: Int get() = if (kind == DmxDistributorKind.SIMPLE) 1 else maxOf(1, cores)
 
@@ -117,7 +129,7 @@ object DmxCablingCodec {
             dists.put(JSONObject()
                 .put("id", d.id)
                 .put("name", d.name)
-                .put("kind", d.kind.raw)
+                .put("kind", d.kindRaw)   // chaîne brute, réécrite telle quelle
                 .put("colorArgb", d.colorArgb)
                 .put("cores", d.cores))
         }
@@ -138,14 +150,18 @@ object DmxCablingCodec {
         val distributors = (0 until dArr.length()).mapNotNull { i ->
             val d = dArr.optJSONObject(i) ?: return@mapNotNull null
             val id = d.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val kind = DmxDistributorKind.from(d.optString("kind"))
+            // Chaîne BRUTE gardée (iOS `decodeIfPresent ?? "simple"`, web) : absente,
+            // nulle ou pas une chaîne → « simple » ; inconnue → gardée, résolue en
+            // SIMPLE à l'usage.
+            val kindRaw = d.opt("kind") as? String ?: DmxDistributorKind.SIMPLE.raw
+            val kind = DmxDistributorKind.from(kindRaw)
             // Une ligne simple est FORCÉE à 1 départ ; une multipaire garde son N
             // s'il vaut au moins 1, sinon (absent, 0, négatif : JSON abîmé) le
             // défaut 4 — règle iOS, vecteur `dmx-decode-tolerance`.
             val rawCores = d.optInt("cores", 0)
             val cores = if (kind == DmxDistributorKind.SIMPLE) 1
                 else if (rawCores >= 1) rawCores else defaultDmxCores(kind)
-            DmxDistributor(id, d.optString("name"), kind, d.optInt("colorArgb"), cores)
+            DmxDistributor(id, d.optString("name"), kindRaw, d.optInt("colorArgb"), cores)
         }
         val aArr = o.optJSONArray("assignments") ?: JSONArray()
         val assignments = (0 until aArr.length()).mapNotNull { i ->

@@ -70,14 +70,26 @@ fun defaultCircuitPhases(kind: DistributorKind): List<Int> =
  * Un distributeur (Socapex ou ligne solo). `colorArgb` est un entier ARGB (comme
  * [LayerColors] des deux plateformes). `circuitPhases` porte la phase de CHAQUE
  * circuit : sa taille = le nombre de circuits (6 soca, 1 solo).
+ *
+ * [kindRaw] est la chaîne BRUTE du JSON (« soca », « solo », ou un type inconnu
+ * écrit par une version plus récente) : elle est RÉÉCRITE TELLE QUELLE, comme
+ * iOS (`kind`) et le web. [kind] la résout à l'usage (iOS `kindResolved`) :
+ * un type inconnu se comporte comme une ligne solo, sans être écrasé.
  */
 data class Distributor(
     val id: String,
     val name: String,
-    val kind: DistributorKind,
+    val kindRaw: String,
     val colorArgb: Int,
     val circuitPhases: List<Int>
 ) {
+    /** Construction en code (ajout d'un distributeur) : type connu. */
+    constructor(id: String, name: String, kind: DistributorKind, colorArgb: Int, circuitPhases: List<Int>) :
+        this(id, name, kind.raw, colorArgb, circuitPhases)
+
+    /** Type résolu (iOS `kindResolved`) : inconnu → SOLO. */
+    val kind: DistributorKind get() = DistributorKind.from(kindRaw)
+
     /**
      * Nombre de circuits : la longueur de [circuitPhases] fait foi ; tableau vide
      * (JSON dégradé) → le standard du type (règle iOS `circuitCount`).
@@ -159,7 +171,7 @@ object PowerCablingCodec {
             dists.put(JSONObject()
                 .put("id", d.id)
                 .put("name", d.name)
-                .put("kind", d.kind.raw)
+                .put("kind", d.kindRaw)   // chaîne brute, réécrite telle quelle
                 .put("colorArgb", d.colorArgb)
                 .put("circuitPhases", JSONArray(d.circuitPhases)))
         }
@@ -189,11 +201,15 @@ object PowerCablingCodec {
             val id = d.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val phasesArr = d.optJSONArray("circuitPhases") ?: JSONArray()
             val phases = (0 until phasesArr.length()).map { phasesArr.optInt(it, 1) }
-            val kind = DistributorKind.from(d.optString("kind"))
+            // Chaîne BRUTE gardée (iOS `decodeIfPresent ?? "solo"`, web) : absente,
+            // nulle ou pas une chaîne → « solo » ; inconnue → gardée, résolue en
+            // SOLO à l'usage.
+            val kindRaw = d.opt("kind") as? String ?: DistributorKind.SOLO.raw
+            val kind = DistributorKind.from(kindRaw)
             Distributor(
                 id = id,
                 name = d.optString("name"),
-                kind = kind,
+                kindRaw = kindRaw,
                 colorArgb = d.optInt("colorArgb"),
                 // Un distributeur sans phases (JSON abîmé) retombe sur le défaut de
                 // son type plutôt que d'exister sans aucun circuit.

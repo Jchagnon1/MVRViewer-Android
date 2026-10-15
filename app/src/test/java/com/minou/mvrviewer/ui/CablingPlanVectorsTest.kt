@@ -115,16 +115,19 @@ class CablingPlanVectorsTest {
                 if (p != null) {
                     val dist = p.distributors[k]
                     assertEquals("$id id", e.getString("id"), dist.id)
-                    // iOS garde la chaîne brute (« xyz ») et RÉSOUT le type : on compare le type résolu.
+                    // Chaîne BRUTE gardée telle quelle (« xyz » compris), comme iOS et le web…
+                    assertEquals("$id kind ${dist.id}", e.getString("kind"), dist.kindRaw)
+                    // … et résolue à l'usage (iOS `kindResolved`) : inconnu → solo.
                     val resolved = if (e.getString("kind") == "soca") "soca" else "solo"
-                    assertEquals("$id kind ${dist.id}", resolved, dist.kind.raw)
+                    assertEquals("$id kind résolu ${dist.id}", resolved, dist.kind.raw)
                     assertEquals("$id phases ${dist.id}", intList(e.getJSONArray("circuitPhases")), dist.circuitPhases)
                     assertEquals("$id circuits ${dist.id}", e.getInt("circuitCount"), dist.circuitCount)
                 } else {
                     val dist = d!!.distributors[k]
                     assertEquals("$id id", e.getString("id"), dist.id)
+                    assertEquals("$id kind ${dist.id}", e.getString("kind"), dist.kindRaw)
                     val resolved = if (e.getString("kind") == "multi") "multi" else "simple"
-                    assertEquals("$id kind ${dist.id}", resolved, dist.kind.raw)
+                    assertEquals("$id kind résolu ${dist.id}", resolved, dist.kind.raw)
                     assertEquals("$id cores ${dist.id}", e.getInt("cores"), dist.cores)
                     assertEquals("$id coreCount ${dist.id}", e.getInt("coreCount"), dist.coreCount)
                 }

@@ -863,15 +863,10 @@ private fun PowerTypeRow(
     // valeur déjà affichée (consensus/GDTF).
     val canVote = (typed != null && typed > 0) || effWatts != null
 
-    val statusText = when (resolution.source) {
-        PowerSource.LIBRARY -> {
-            val n = votes ?: 1
-            // Accord porté par le NOMBRE DE VOTES (pas par les watts).
-            pluralStringResource(R.plurals.power_watts_votes, n, effWatts ?: 0, n)
-        }
-        PowerSource.GDTF -> stringResource(R.string.power_watts_gdtf_fmt, effWatts ?: 0)
-        PowerSource.NONE -> stringResource(R.string.power_to_enter)
-    }
+    // UN libellé « valeur · confiance » partagé avec la fiche de sélection (3D et
+    // plan) : pluriel porté par le NOMBRE DE VOTES (pas par les watts).
+    val statusText = SelectionCardModels.powerLabel(resolution, votes)?.text()
+        ?: stringResource(R.string.power_to_enter)
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

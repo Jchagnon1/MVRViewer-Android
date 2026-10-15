@@ -229,6 +229,11 @@ fun PlanScreen(
     onBack: () -> Unit,
     /** Sélection courante (clés d'INSTANCE) remontée à la scène — « affecter à la sélection ». */
     onSelectionChanged: (List<String>) -> Unit = {},
+    // FICHE DE SÉLECTION et BANNIÈRE MULTI (SPEC-menus-android §3.9, tranche D) :
+    // construites par SceneScreen, les MÊMES qu'en 3D. null = rien en bas.
+    selectionCard: SelectionCardHost? = null,
+    // Crochet DEBUG `MVR_AUTO_SELECT=<N°>` : pris une fois, à la scène prête.
+    takeAutoSelect: () -> String? = { null },
     modifier: Modifier = Modifier
 ) {
     val ctxPlan = androidx.compose.ui.platform.LocalContext.current
@@ -542,6 +547,16 @@ fun PlanScreen(
         androidx.compose.runtime.snapshotFlow { selected.toList() }.collect { sel ->
             onSelectionChanged(sel.mapNotNull { data.fixtures.getOrNull(it)?.key })
         }
+    }
+    // Crochet DEBUG `MVR_AUTO_SELECT=<N°>` : sélectionne ce projecteur (N° effectif)
+    // dès la scène prête — fiche ou bannière visibles sans toucher l'écran.
+    LaunchedEffect(scene) {
+        val id = takeAutoSelect()?.trim()?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+        val idx = data.fixtures.indices.filter { i ->
+            val f = data.fixtures[i]
+            ((fixtureByKey[f.key]?.let { overrides.effectiveId(it) }) ?: f.id).equals(id, ignoreCase = true)
+        }
+        if (idx.isNotEmpty()) { selected.clear(); selected.addAll(idx) }
     }
     var rectMode by remember { mutableStateOf(false) }
     /** Mode « masquer des éléments » : le toucher (ou le cadre) retire. */
@@ -1245,6 +1260,14 @@ fun PlanScreen(
         cal3FitCanvas = canvas
     }
 
+    // Fiche du bas : 1 projecteur = fiche, plusieurs = bannière — les MÊMES qu'en 3D
+    // (SPEC-menus-android §3.9). Masquées pendant l'assistant 3 points,
+    // l'affectation, la mesure et l'aide « je suis ici » : le bas leur appartient
+    // (iOS selectionBarShown) — sinon elles recouvraient leurs boutons.
+    val selectionBar = if (selectionCard == null) PlanSelectionBar.NONE else PlanBottomRules.selectionBar(
+        selected.size, threePointOpen = cal3Session != null || cal3Starting, assignOpen = assignTarget != null,
+        measuring = measureMode, anchorAid = calibrating
+    )
     Box(modifier = modifier.fillMaxSize().clipToBounds().background(planBg)
         .onGloballyPositioned { planBoundsPx = it.boundsInRoot() }) {
         Canvas(
@@ -1833,7 +1856,13 @@ fun PlanScreen(
                     lowDetail = gesturing,
                     labelHits = labelHits,
                     symbolHits = symbolHits,
-                    scaleBarAnchor = Offset(20f, h - 172f)
+                    // Au-dessus de la fiche / bannière quand elle couvre le coin bas-gauche.
+                    scaleBarAnchor = Offset(20f, SelectionCardLayout.scaleBarY(
+                        defaultY = h - 172f, barLeft = 20f, barRight = 20f + 150f * labelDensity.density,
+                        card = selectionBarPx.takeIf { selectionBar != PlanSelectionBar.NONE }
+                            ?.translate(-planBoundsPx.left, -planBoundsPx.top),
+                        gap = 16f * labelDensity.density
+                    ))
                 )
             )
 
@@ -2284,6 +2313,48 @@ fun PlanScreen(
             )
         }
 
+        // Compacte sous 480 dp de haut (téléphone en paysage), complète sinon.
+        val cardStylePlan = SelectionCardLayout.style(androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp)
+        // PROJECTEUR GARDÉ VISIBLE (fiche compacte) : s'il tombe sous la fiche (ou à
+        // moins de 28 dp), le plan GLISSE vers le haut (≈ 0,3 s) pour le poser juste
+        // au-dessus d'elle ; jamais sous la pastille « Vue », la rangée du haut ni un
+        // bandeau de mode (sinon rien ne bouge) ; un geste interrompt. Relancé à chaque
+        // nouvelle sélection, quand la fiche change de hauteur (« Détails ») et à la
+        // rotation (iOS SPEC-menus §8.4). Un plan encore « non touché » le reste : le
+        // glissement compte comme un cadrage automatique.
+        val revealKeyPlan = if (selectionBar == PlanSelectionBar.CARD)
+            selected.singleOrNull()?.let { data.fixtures.getOrNull(it)?.key } else null
+        val revealDensityPlan = labelDensity.density
+        LaunchedEffect(revealKeyPlan, selectionBarPx, canvas, cardStylePlan) {
+            val key = revealKeyPlan ?: return@LaunchedEffect
+            if (!SelectionCardLayout.revealsSelection(cardStylePlan, isMultiSelect = false, hasSelection = true)) return@LaunchedEffect
+            val card = selectionBarPx
+            if (card.height <= 0f || canvas.x <= 0f || canvas.y <= 0f) return@LaunchedEffect
+            val f = fixtureByPlanKey[key] ?: return@LaunchedEffect
+            val sp = toScreen(f.px, f.py, canvas.x, canvas.y)
+            val pRoot = Offset(sp.x + planBoundsPx.left, sp.y + planBoundsPx.top)
+            val topLimit = maxOf(
+                viewPillPx.bottom, topRowBottomPx, planBoundsPx.top,
+                if (modeBanner != null) modeBannerPx.bottom else 0f
+            )
+            val dy = revealShift(pRoot, card, topLimit, REVEAL_MARGIN_DP * revealDensityPlan)
+            if (dy >= 0f) return@LaunchedEffect
+            val untouched = planUntouched()
+            val from = offset
+            val scale0 = scale
+            var last = from
+            val start = androidx.compose.runtime.withFrameNanos { it }
+            while (true) {
+                val now = androidx.compose.runtime.withFrameNanos { it }
+                // Un geste (pan, pincement) a bougé le plan : il interrompt.
+                if (offset != last || scale != scale0) break
+                val t = ((now - start) / 300_000_000f).coerceIn(0f, 1f)
+                val e = t * t * (3f - 2f * t)
+                last = Offset(from.x, from.y + dy * e)
+                offset = last
+                if (t >= 1f) { if (untouched) autoFitView = scale to offset; break }
+            }
+        }
         // Mention OBLIGATOIRE de l'imagerie IGN (bas-droite). Elle MONTE au-dessus du
         // panneau 3 points ou de la barre d'affectation (iOS satelliteAttributionLift) :
         // jamais cachée dessous. L'opacité se règle dans le panneau Position GPS
@@ -2297,8 +2368,7 @@ fun PlanScreen(
                 if (assignTarget != null) add(assignBarAnchorPx.inDp())
                 // Fiche / bannière de sélection (contre le bas depuis le retrait de la
                 // barre flottante, la mention passait dessous — constat émulateur).
-                if (PlanBottomRules.selectionBar(selected.size, cal3Session != null || cal3Starting,
-                        assignTarget != null) != PlanSelectionBar.NONE) add(selectionBarPx.inDp())
+                if (selectionBar != PlanSelectionBar.NONE) add(selectionBarPx.inDp())
             }
             val mention = satMentionAnchorPx.inDp()
             val lift = SatelliteUi.overlayLift(
@@ -2322,8 +2392,7 @@ fun PlanScreen(
             onReframe = { reframePlan() },
             onSearch = { q -> query = q; doSearch() },
             obstacles = buildList {
-                if (PlanBottomRules.selectionBar(selected.size, cal3Session != null || cal3Starting,
-                        assignTarget != null) != PlanSelectionBar.NONE) add(selectionBarPx)
+                if (selectionBar != PlanSelectionBar.NONE) add(selectionBarPx)
                 if (calibrating || measureMode) add(bottomAidPx)
                 if (assignTarget != null) add(assignBarAnchorPx)
                 if (cal3Session != null) add(cal3PanelAnchorPx)
@@ -2608,44 +2677,18 @@ fun PlanScreen(
             }
         }
 
-        // Fiche du bas : 1 projecteur = détail ; plusieurs = compteur. Masquée
-        // pendant l'assistant 3 points et l'affectation : le bas leur appartient
-        // (iOS selectionBarShown) — sinon elle recouvrait leurs boutons.
-        val selectionBar = PlanBottomRules.selectionBar(
-            selected.size, threePointOpen = cal3Session != null || cal3Starting, assignOpen = assignTarget != null
-        )
-        if (selectionBar == PlanSelectionBar.CARD) {
-            val f = data.fixtures[selected.first()]
-            Surface(
-                color = Color.White, contentColor = Color(0xFF111111),
-                shape = RoundedCornerShape(12.dp), shadowElevation = 6.dp,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
-                    .onGloballyPositioned { selectionBarPx = it.boundsInRoot() }
-            ) {
-                Text(
-                    buildString {
-                        append(f.id?.let { "#$it  " } ?: "")
-                        append(f.name)
-                        f.spec?.let { append("\n$it") }
-                        append("\n${f.layer}")
-                        if (f.addr.isNotEmpty()) append(" · DMX ${com.minou.mvrviewer.mvr.DmxAddress.format(f.addr)}")
-                    },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        } else if (selectionBar == PlanSelectionBar.BANNER) {
-            Surface(
-                color = Color(0xFFFFC400), contentColor = Color(0xFF111111),
-                shape = RoundedCornerShape(12.dp), shadowElevation = 6.dp,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
-                    .onGloballyPositioned { selectionBarPx = it.boundsInRoot() }
-            ) {
-                Text(
-                    stringResource(R.string.sel_fixtures_selected_fmt, selected.size),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.titleSmall
-                )
+        // FICHE / BANNIÈRE (§3.9) : construites par SceneScreen, les MÊMES qu'en 3D.
+        // Croix = désélection ; toucher la fiche ne fait rien ; toucher le vide
+        // désélectionne (inchangé). Au-dessus d'une barre ancrée en bas.
+        val cardHost = selectionCard
+        if (cardHost != null && selectionBar != PlanSelectionBar.NONE) {
+            SelectionCardSlot(bottom = selectionCardBottom(toolbarLayout, toolsPlan), onBounds = { selectionBarPx = it }) {
+                val one = fixtureByKey[selected.singleOrNull()?.let { data.fixtures.getOrNull(it) }?.key]
+                if (selectionBar == PlanSelectionBar.CARD && one != null) {
+                    cardHost.card(one, cardStylePlan) { selected.clear() }
+                } else {
+                    cardHost.banner(selected.size, cardStylePlan) { selected.clear() }
+                }
             }
         }
 

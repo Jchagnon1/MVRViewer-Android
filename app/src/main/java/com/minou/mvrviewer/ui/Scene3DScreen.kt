@@ -430,6 +430,11 @@ fun Scene3DScreen(
     // Sélection courante (clés d'INSTANCE) remontée à la scène : « Enregistrer et
     // affecter à la sélection » de la bibliothèque MA s'en sert.
     onSelectionChanged: (List<String>) -> Unit = {},
+    // FICHE DE SÉLECTION et BANNIÈRE MULTI (SPEC-menus-android §3.9, tranche D) :
+    // construites par SceneScreen, les MÊMES dans le plan. null = rien en bas.
+    selectionCard: SelectionCardHost? = null,
+    // Crochet DEBUG `MVR_AUTO_SELECT=<N°>` : pris une fois, à la scène prête.
+    takeAutoSelect: () -> String? = { null },
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1542,6 +1547,11 @@ fun Scene3DScreen(
             inner = io.github.sceneview.gesture.CameraGestureDetector.DefaultCameraManipulator(fm),
         )
     }
+    // Pivot courant, translation « garder visible » comprise (DistanceZoomManipulator.shift).
+    fun pivot(): Float3 {
+        val s = manipulator.shift
+        return Float3(target.x + s.x, target.y + s.y, target.z + s.z)
+    }
 
     // ---- Sélection par cadre (rectangle) dans la vue 3D (comme la vue plan et
     // iOS) : en « mode rectangle », le glissé trace un cadre et sélectionne tous
@@ -1638,7 +1648,7 @@ fun Scene3DScreen(
     var statusBlock3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var viewPill3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var topRow3DBottomPx by remember { mutableStateOf(0f) }
-    var selectionPill3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var selectionCard3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var measureBand3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var satMention3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
 
@@ -1689,7 +1699,8 @@ fun Scene3DScreen(
             if (d0 > groupR) groupR = d0
         }
         val cam = cameraNode.worldPosition
-        var vx = cam.x - target.x; var vy = cam.y - target.y; var vz = cam.z - target.z
+        val pv = pivot()
+        var vx = cam.x - pv.x; var vy = cam.y - pv.y; var vz = cam.z - pv.z
         val len = kotlin.math.sqrt(vx * vx + vy * vy + vz * vz)
         if (!len.isFinite() || len < 1e-3f) {   // caméra sur le pivot : vue 3/4 par défaut
             vx = 0f; vy = 0.45f; vz = 1f
@@ -1711,7 +1722,8 @@ fun Scene3DScreen(
         if (i !in layout.positions.indices || !layout.valid[i]) return null
         val wp = layout.positions[i]
         val cam = cameraNode.worldPosition
-        val fdx = target.x - cam.x; val fdy = target.y - cam.y; val fdz = target.z - cam.z
+        val pv = pivot()
+        val fdx = pv.x - cam.x; val fdy = pv.y - cam.y; val fdz = pv.z - cam.z
         val dx = wp.x - cam.x; val dy = wp.y - cam.y; val dz = wp.z - cam.z
         if (fdx * dx + fdy * dy + fdz * dz <= 0f) return null // derrière la caméra
         val sp = runCatching {
@@ -1725,7 +1737,8 @@ fun Scene3DScreen(
     // cube de sélection). null si derrière la caméra ou non fini.
     fun projectPoint(x: Float, y: Float, z: Float): Offset? {
         val cam = cameraNode.worldPosition
-        val fdx = target.x - cam.x; val fdy = target.y - cam.y; val fdz = target.z - cam.z
+        val pv = pivot()
+        val fdx = pv.x - cam.x; val fdy = pv.y - cam.y; val fdz = pv.z - cam.z
         val dx = x - cam.x; val dy = y - cam.y; val dz = z - cam.z
         if (fdx * dx + fdy * dy + fdz * dz <= 0f) return null // derrière la caméra
         val sp = runCatching {
@@ -1913,7 +1926,11 @@ fun Scene3DScreen(
     // autour du projecteur trouvé — l'usage terrain). Retoucher le même y ramène.
     fun applyViewpoint(v: CameraViewpoint) {
         val (x, y, z) = v.eyeOffset(v.recoil(layout.radius * 2f, sceneBoxPx.width, sceneBoxPx.height))
-        camEye = Float3(target.x + x, target.y + y, target.z + z)
+        // Autour du pivot COURANT (décalage « garder visible » compris) : le nouveau
+        // manipulateur repart sans décalage.
+        val pv = pivot()
+        target = pv
+        camEye = Float3(pv.x + x, pv.y + y, pv.z + z)
         viewpoint = v
     }
     val tools3D: List<ToolSpec> = buildList {
@@ -2050,6 +2067,68 @@ fun Scene3DScreen(
             // câblage), fermeture : la scène.
             else -> onMainMenu(id)
         }
+    }
+
+    // ---- FICHE DE SÉLECTION / BANNIÈRE MULTI (SPEC-menus-android §3.9, tranche D) ----
+    // Même règle que le plan (SelectionCardLayout.presentation) : rien pendant la mesure.
+    val selPresentation3D = if (selectionCard == null) PlanSelectionBar.NONE
+        else SelectionCardLayout.presentation(selected.size, measuring = measureMode)
+    // Compacte sous 480 dp de haut (téléphone en paysage), complète sinon.
+    val cardStyle3D = SelectionCardLayout.style(androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp)
+    val revealDensity3D = androidx.compose.ui.platform.LocalDensity.current.density
+    // PROJECTEUR GARDÉ VISIBLE (fiche compacte) : s'il tombe sous la fiche (ou à moins
+    // de 28 dp), la caméra GLISSE — translation seule, sans tourner ni zoomer, ≈ 0,35 s
+    // — pour le poser juste au-dessus d'elle ; jamais sous la pastille « Vue », le bloc
+    // d'état ni la rangée du haut (sinon rien ne bouge) ; un geste interrompt. Relancé
+    // à chaque nouvelle sélection, quand la fiche change de hauteur (« Détails ») et à
+    // la rotation (iOS SPEC-menus §8.4).
+    val revealIndex3D = if (selPresentation3D == PlanSelectionBar.CARD) selected.singleOrNull() ?: -1 else -1
+    LaunchedEffect(revealIndex3D, selectionCard3DPx, sceneBoxPx, cardStyle3D) {
+        if (revealIndex3D < 0 ||
+            !SelectionCardLayout.revealsSelection(cardStyle3D, isMultiSelect = false, hasSelection = true)
+        ) return@LaunchedEffect
+        val card = selectionCard3DPx
+        if (card.height <= 0f || sceneBoxPx.height <= 0f) return@LaunchedEffect
+        val i = revealIndex3D
+        val p = projectFixture(i) ?: return@LaunchedEffect
+        val pRoot = Offset(p.x + sceneBoxPx.left, p.y + sceneBoxPx.top)
+        val topLimit = maxOf(viewPill3DPx.bottom, statusBlock3DPx.bottom, topRow3DBottomPx, sceneBoxPx.top)
+        val dy = revealShift(pRoot, card, topLimit, REVEAL_MARGIN_DP * revealDensity3D)
+        if (dy >= 0f) return@LaunchedEffect
+        // Pixels par mètre le long du « haut » de la caméra, à la profondeur du projecteur.
+        val m = cameraNode.worldTransform
+        val ul = kotlin.math.sqrt(m.y.x * m.y.x + m.y.y * m.y.y + m.y.z * m.y.z)
+        if (!(ul > 1e-6f)) return@LaunchedEffect
+        val ux = m.y.x / ul; val uy = m.y.y / ul; val uz = m.y.z / ul
+        val wp = layout.positions[i]
+        val q = projectPoint(wp.x + ux, wp.y + uy, wp.z + uz) ?: return@LaunchedEffect
+        val ppm = p.y - q.y
+        if (!(ppm > 1e-3f)) return@LaunchedEffect
+        // Descendre la caméra de d mètres fait MONTER le projecteur de |dy| px.
+        val d = -dy / ppm
+        val manip = manipulator
+        val from = manip.shift
+        val to = Float3(from.x - ux * d, from.y - uy * d, from.z - uz * d)
+        val gestures0 = manip.gestures
+        val start = androidx.compose.runtime.withFrameNanos { it }
+        while (true) {
+            val now = androidx.compose.runtime.withFrameNanos { it }
+            if (manip.gestures != gestures0) break   // un geste de l'utilisateur interrompt
+            val t = ((now - start) / 350_000_000f).coerceIn(0f, 1f)
+            val e = t * t * (3f - 2f * t)
+            manip.shift = Float3(from.x + (to.x - from.x) * e, from.y + (to.y - from.y) * e, from.z + (to.z - from.z) * e)
+            if (t >= 1f) break
+        }
+    }
+    // Crochet DEBUG `MVR_AUTO_SELECT=<N°>` : sélectionne ce projecteur (N° effectif)
+    // dès la scène prête — fiche ou bannière visibles sans toucher l'écran.
+    LaunchedEffect(scene) {
+        val id = takeAutoSelect()?.trim()?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+        val idx = sceneFixtures.indices.filter { i ->
+            layout.valid.getOrElse(i) { false } &&
+                (overrides.effectiveId(sceneFixtures[i]) ?: sceneFixtures[i].fixtureId).equals(id, ignoreCase = true)
+        }
+        if (idx.isNotEmpty()) { selected.clear(); selected.addAll(idx) }
     }
 
     // Contrôles Compose flottants PAR-DESSUS la SceneView : visibles ET cliquables,
@@ -2287,7 +2366,7 @@ fun Scene3DScreen(
                 fun androidx.compose.ui.geometry.Rect.inDp() =
                     androidx.compose.ui.geometry.Rect(left / satDens3D, top / satDens3D, right / satDens3D, bottom / satDens3D)
                 val obstacles = buildList {
-                    if (!measureMode && selected.isNotEmpty()) add(selectionPill3DPx.inDp())
+                    if (selPresentation3D != PlanSelectionBar.NONE) add(selectionCard3DPx.inDp())
                     if (measureMode) add(measureBand3DPx.inDp())
                 }
                 val mention = satMention3DPx.inDp()
@@ -2334,22 +2413,18 @@ fun Scene3DScreen(
                 }
             }
 
-            // Panneau d'info de sélection (bas-centre).
-            if (!measureMode && selected.isNotEmpty()) {
-                val label = if (selected.size == 1 && selected.first() in scene.fixtures.indices) {
-                    val f = scene.fixtures[selected.first()]
-                    stringResource(R.string.fixture_id_name_fmt, f.fixtureId ?: "?", overrides.effectiveName(f))
-                } else stringResource(R.string.sel_fixtures_selected_fmt, selected.size)
-                Surface(
-                    color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBand3D)
-                        .onGloballyPositioned { selectionPill3DPx = it.boundsInRoot() }
-                ) {
-                    Text(
-                        label, color = Color.White,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                    )
+            // FICHE DE SÉLECTION / BANNIÈRE MULTI (bas-centre, §3.9) : les MÊMES que dans
+            // le plan, construites par SceneScreen. Croix = désélection ; toucher la
+            // fiche ne fait rien ; toucher le vide désélectionne (inchangé).
+            val cardHost3D = selectionCard
+            if (cardHost3D != null && selPresentation3D != PlanSelectionBar.NONE) {
+                SelectionCardSlot(bottom = bottomBand3D, onBounds = { selectionCard3DPx = it }) {
+                    val one = selected.singleOrNull()?.let { sceneFixtures.getOrNull(it) }
+                    if (selPresentation3D == PlanSelectionBar.CARD && one != null) {
+                        cardHost3D.card(one, cardStyle3D) { selected.clear() }
+                    } else {
+                        cardHost3D.banner(selected.size, cardStyle3D) { selected.clear() }
+                    }
                 }
             }
 
@@ -2362,7 +2437,7 @@ fun Scene3DScreen(
             // Jamais au-dessus du bas de la rangée du haut (← et ronds de droite).
             val panelTopLimit3D = maxOf(sceneBoxPx.top, topRow3DBottomPx)
             val panelBottom3D = buildList {
-                if (!measureMode && selected.isNotEmpty()) add(selectionPill3DPx)
+                if (selPresentation3D != PlanSelectionBar.NONE) add(selectionCard3DPx)
                 if (measureMode) add(measureBand3DPx)
                 if (satCredit3D != null) add(satMention3DPx)
             }
@@ -2542,7 +2617,7 @@ fun Scene3DScreen(
                 onReframe = { reframe3D() },
                 onSearch = { q -> query = q; doSearch3D() },
                 obstacles = buildList {
-                    if (!measureMode && selected.isNotEmpty()) add(selectionPill3DPx)
+                    if (selPresentation3D != PlanSelectionBar.NONE) add(selectionCard3DPx)
                     if (measureMode) add(measureBand3DPx)
                     // La mention à sa place AFFICHÉE (sa montée ne dépend pas de la pile).
                     if (satCredit3D != null) add(satMention3DPx.translate(0f, -satLift3D.value * satDens3D))
@@ -3131,6 +3206,35 @@ internal class DistanceZoomManipulator(
         private set
 
     /**
+     * TRANSLATION MONDE (m) ajoutée à la caméra — « projecteur gardé visible » sous
+     * la fiche compacte (SPEC-menus-android §3.9). Une translation pure de la
+     * caméra équivaut à translater tout le rig (pivot compris) : orbite, pan et
+     * zoom continuent autour du pivot DÉCALÉ d'autant. Lue à chaque image par
+     * SceneView ([getTransform]) ; un nouveau manipulateur (point de vue, Recadrer,
+     * recherche) repart de zéro.
+     */
+    var shift: Float3 = Float3(0f, 0f, 0f)
+
+    /** Compteur de gestes caméra (doigt posé, pincement) : un geste interrompt le glissement. */
+    var gestures: Int = 0
+        private set
+
+    override fun getTransform(): dev.romainguy.kotlin.math.Mat4 {
+        val t = inner.getTransform()
+        val s = shift
+        if (s.x == 0f && s.y == 0f && s.z == 0f) return t
+        return dev.romainguy.kotlin.math.Mat4(
+            t.x, t.y, t.z,
+            dev.romainguy.kotlin.math.Float4(t.w.x + s.x, t.w.y + s.y, t.w.z + s.z, t.w.w)
+        )
+    }
+
+    override fun scrollBegin(x: Int, y: Int, separation: Float) {
+        gestures++
+        inner.scrollBegin(x, y, separation)
+    }
+
+    /**
      * N1 — Remappage des gestes : 1 DOIGT = déplacement (pan), 2 DOIGTS = orbite.
      * Le détecteur SceneView appelle `grabBegin(strafe=false)` pour 1 doigt (orbite
      * par défaut Filament) et `grabBegin(strafe=true)` pour 2 doigts en translation
@@ -3139,6 +3243,7 @@ internal class DistanceZoomManipulator(
      * n'est pas touché → zoom conservé.
      */
     override fun grabBegin(x: Int, y: Int, strafe: Boolean) {
+        gestures++
         inner.grabBegin(x, y, !strafe)
     }
 

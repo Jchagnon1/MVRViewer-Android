@@ -57,22 +57,21 @@ object PlanModeRules {
     fun startThreePoint(): PlanTouchModes = PlanTouchModes(threePoint = true)
 }
 
-/** Ce qui s'affiche en bas du plan pour la sélection. */
-enum class PlanSelectionBar { NONE, CARD, BANNER }
-
 object PlanBottomRules {
     /**
-     * Fiche du bas (1 projecteur) ou bannière jaune (plusieurs). Masquée pendant
-     * l'assistant 3 points et pendant une affectation de câblage : le bas de
-     * l'écran leur appartient (iOS PlanView `selectionBarShown`). La sélection,
-     * elle, est gardée et réapparaît à la fermeture.
+     * Fiche du bas (1 projecteur) ou bannière (plusieurs) — la MÊME règle que la
+     * 3D ([SelectionCardLayout.presentation]). Masquée pendant l'assistant 3
+     * points, une affectation de câblage, une mesure et l'aide « je suis ici » :
+     * le bas de l'écran leur appartient (iOS PlanView `selectionBarShown`). La
+     * sélection, elle, est gardée et réapparaît à la fermeture.
      */
-    fun selectionBar(selectedCount: Int, threePointOpen: Boolean, assignOpen: Boolean): PlanSelectionBar = when {
-        threePointOpen || assignOpen -> PlanSelectionBar.NONE
-        selectedCount == 1 -> PlanSelectionBar.CARD
-        selectedCount > 1 -> PlanSelectionBar.BANNER
-        else -> PlanSelectionBar.NONE
-    }
+    fun selectionBar(
+        selectedCount: Int, threePointOpen: Boolean, assignOpen: Boolean,
+        measuring: Boolean = false, anchorAid: Boolean = false
+    ): PlanSelectionBar = SelectionCardLayout.presentation(
+        selectedCount, measuring = measuring, threePointOpen = threePointOpen,
+        assignOpen = assignOpen, anchorAid = anchorAid
+    )
 }
 
 /**

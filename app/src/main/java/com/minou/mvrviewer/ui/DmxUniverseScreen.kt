@@ -42,6 +42,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -97,10 +100,16 @@ fun DmxUniverseScreen(
     patchOverrides: PatchOverrides = remember { PatchOverrides() },
     // Projecteurs custom V1 : empreinte + noms de canaux d'un type « custom:<id> ».
     customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
+    // « Éditer » de l'inspecteur de canal (SPEC-menus-android §3.10, tranche D) :
+    // ouvre la fiche patch existante de CE projecteur (enregistrer : Pro). null =
+    // pas de bouton.
+    onEditFixture: ((com.minou.mvrviewer.mvr.MvrSceneObject) -> Unit)? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val layerIndex = remember(scene) { LayerColors.index(scene) }
+    // Projecteur de chaque empreinte : même clé d'instance que DmxPatch.fixtureKey.
+    val fixtureByKey = remember(scene) { scene.fixtures.associateBy { mvrInstanceKey(it) } }
     val loadState by produceState<List<DmxPatch>?>(null, scene, mvrBytes, overrides.version, patchOverrides.version, customResolver.version) {
         value = withContext(Dispatchers.Default) { buildDmxPatches(scene, mvrBytes, overrides.map.toMap(), patchOverrides, customResolver) }
     }
@@ -195,6 +204,9 @@ fun DmxUniverseScreen(
                     if (ch != null) {
                         ChannelInspector(ch, occ[ch - 1], conflicts.contains(ch), layerIndex,
                             onClose = { infoChannel = null },
+                            onEdit = onEditFixture?.let { edit ->
+                                { key: String -> fixtureByKey[key]?.let(edit) }
+                            },
                             modifier = Modifier.align(Alignment.BottomCenter))
                     }
                 }
@@ -284,8 +296,12 @@ private fun ChannelInspector(
     conflict: Boolean,
     layerIndex: Map<String, Int>,
     onClose: () -> Unit,
+    /** « Éditer » par projecteur listé (clé d'instance) ; null = pas de bouton. */
+    onEdit: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    // Un bouton par projecteur (un chevauchement = un bouton par projecteur).
+    val editLabels = UniverseEditRules.targets(list).associate { it.fixtureKey to it.label }
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(14.dp),
@@ -307,7 +323,7 @@ private fun ChannelInspector(
                 Text(stringResource(R.string.universe_channel_free), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                list.forEach { p ->
+                list.forEachIndexed { idx, p ->
                     Row(verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
                         Box(Modifier.size(10.dp).clip(CircleShape)
@@ -319,6 +335,19 @@ private fun ChannelInspector(
                         p.attribute(ch)?.let {
                             Text(it, style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        // Une instance listée deux fois (deux adresses) : un seul bouton.
+                        val label = editLabels[p.fixtureKey]
+                            ?.takeIf { list.indexOfFirst { it.fixtureKey == p.fixtureKey } == idx }
+                        if (onEdit != null && label != null) {
+                            val cd = stringResource(R.string.universe_edit_cd_fmt, label)
+                            TextButton(
+                                onClick = { onEdit(p.fixtureKey) },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                modifier = Modifier.padding(start = 6.dp)
+                                    .semantics { contentDescription = cd }
+                                    .testTag("universe.edit.${p.fixtureId ?: p.fixtureKey}")
+                            ) { Text(stringResource(R.string.universe_edit)) }
                         }
                     }
                 }

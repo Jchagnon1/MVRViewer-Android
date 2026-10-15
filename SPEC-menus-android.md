@@ -6,8 +6,8 @@ fait foi pour la structure, les libellés et les règles gratuit/Pro) et
 Android, ce qui existe aujourd'hui (inventaire), ce qui change, ce qui manque,
 et dans quel ordre l'implémenter.
 
-État : **tranches A, B et C réalisées** (2026-10-15, voir *Réalisé* sous chaque
-tranche, §10) ; tranches D et E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
+État : **tranches A, B, C et D réalisées** (2026-10-15 / 16, voir *Réalisé* sous
+chaque tranche, §10) ; tranche E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
 Base : branche `feature/v1.7-tilt-formats`, commit `e110bbc`
 (539 tests unitaires verts + 4 tests réseau ignorés). Relu et corrigé après
 critique (re-parcours du code, décisions, disparitions, sûreté des
@@ -751,8 +751,9 @@ patch) et fournis aux deux vues. Ils remplacent la pastille de texte 3D
 (`Scene3DScreen.kt:2328`) et la fiche / bannière du plan (`PlanScreen.kt:2717`).
 
 **Fiche** (un projecteur sélectionné, hors mesure ; dans le plan, ni fiche ni
-bannière pendant l'assistant 3 points ou une affectation — règle existante
-`PlanBottomRules.selectionBar`) :
+bannière pendant l'assistant 3 points, une affectation ou l'aide « je suis
+ici » — règle existante `PlanBottomRules.selectionBar`, la même pour les deux
+vues depuis D : `SelectionCardLayout.presentation`) :
 
 1. En-tête : titre « Type — Nom » (nom effectif, type nettoyé, DESIGN_UI §9)
    + croix discrète « Fermer » qui désélectionne ; toucher la fiche ne fait
@@ -1320,10 +1321,13 @@ Noms de ressources proposés ; « (pl.) » = `<plurals>` one / other.
 | `models_gdtf_signed_in` | GDTF Share : connecté | GDTF Share: signed in |
 | `models_gdtf_sign_in` | Se connecter à GDTF Share… | Sign in to GDTF Share… |
 | `layers_title` | Calques | Layers |
+| `card_kind_fixture` | Projecteur | Fixture |
+| `card_title_fmt` | %1$s — %2$s | %1$s — %2$s |
 | `card_layer_fmt` | Calque : %1$s | Layer: %1$s |
 | `card_fixture_number_fmt` | N° de projecteur : %1$s | Fixture number: %1$s |
 | `card_dmx_fmt` | Adresse DMX : %1$s | DMX address: %1$s |
 | `card_details` | Détails | Details |
+| `card_power_to_enter` | Conso max : à saisir | Max power: to be entered |
 | `banner_clear_selection` | Vider la sélection | Clear selection |
 | `universe_edit` | Éditer | Edit |
 | `universe_edit_cd_fmt` | Éditer le patch du projecteur %1$s | Edit the patch of fixture %1$s |
@@ -1393,7 +1397,9 @@ Textes réutilisés tels quels : `opt_labels`, `patch_title`, `cam_top`,
 `opt_label_detached_cap` (remplacés par « Blocs séparés »), `plan_title_fmt`,
 `layers_title_3d`, `home_my_account`, `common_back_3d` (ses cinq usages,
 §2.6, disparaissent en A), `tool_ref_plan`, `tool_gps_3d`,
-`sync_sign_in_title` (si plus d'usage). `tool_models_fmt` n'est **pas**
+`sync_sign_in_title` (si plus d'usage), `sel_fixtures_selected_fmt` (devenu le
+pluriel `sel_fixtures_selected`, D), `fixture_id_name_fmt` (pastille « N° · nom »
+de la 3D, D). `tool_models_fmt` n'est **pas**
 supprimée : elle reste le titre du panneau Modèles importés
 (`ModelPlacementPanel.kt:84`), valeur changée en E. Contrôle à chaque
 tranche : `grep` de la clé dans `app/src/main` (aucun usage restant) et test
@@ -1992,17 +1998,87 @@ Tests unitaires (`SelectionCardModelTest`, `SelectionCardLayoutTest`) :
 - bannière : pluriel « 1 projecteur sélectionné » ;
 - pas de fiche pendant l'assistant 3 points ni l'affectation (règle existante).
 
-Contrôle à l'écran :
-- [ ] fiche 3D et plan identiques (captures côte à côte), portrait et paysage
-      (compacte, Détails, quart de la hauteur) ;
-- [ ] croix → désélection ; toucher la fiche → rien ; toucher le vide →
-      désélection ;
-- [ ] « Patch » → fiche patch ; gratuit : enregistrer → écran Pro ;
-- [ ] « C'est bon » dans le plan (conso connue) ;
-- [ ] multi dans les deux vues : bannière commune, ✕ ;
-- [ ] Univers avec chevauchement : un « Éditer » par projecteur ;
-- [ ] appui long → fiche patch dans les deux vues ; affectation câblage
-      intacte.
+Contrôle à l'écran (`mini.mvr`, conso semée « 450 W · 3 votes » sur
+`Acme@Wash Zoom.gdtf` dans `files/powerLibrary.json`, puis effacée par le vote) :
+- [x] fiche 3D et plan identiques (captures côte à côte), portrait et paysage
+      (compacte, Détails, quart de la hauteur) — *compacte : une rangée de
+      56 dp sur 411 dp (13,6 %) ; « Détails » déplie au-dessus ; en anglais
+      « Fixture — Spot 103 », « Layer: Face », « Max power: to be entered »* ;
+- [x] croix → désélection ; toucher la fiche → rien ; toucher le vide →
+      désélection — *le vide : règle inchangée (`SelectionRules`, testée),
+      non rejoué* ;
+- [x] « Patch » → fiche patch ; gratuit : enregistrer → écran Pro — *depuis la
+      3D ; « C'est bon » gratuit → écran Pro « renseigner une consommation »* ;
+- [x] « C'est bon » dans le plan (conso connue) — *en Pro : vote déposé, la
+      ligne passe à « 450 W · 1 vote » (backend local)* ;
+- [x] multi dans les deux vues : bannière commune, ✕ — *3D portrait, plan
+      paysage (compacte)* ;
+- [x] Univers avec chevauchement : un « Éditer » par projecteur — *variante de
+      `mini.mvr` (102 au canal 1) : « Éditer » 101 et 102, TalkBack « Éditer le
+      patch du projecteur 102 », fiche patch par-dessus l'univers* ;
+- [x] appui long → fiche patch dans les deux vues ; affectation câblage
+      intacte — *appui long rejoué dans le plan (3D : code inchangé) ;
+      affectation : fiche cachée, un projecteur affecté, « Terminé » ramène au
+      Câblage, retour → la fiche réapparaît*.
+
+*Réalisé (tranche D, 2026-10-16)* — 652 tests unitaires verts + 4 ignorés
+(628 après C ; nouveaux : `SelectionCardModelTest`, `SelectionCardLayoutTest`,
+un test de `PlanScreenRulesTest`), APK construit, contrôle à l'émulateur
+Medium_Phone (mémoire 2 Go, démarré en 20 s), puis arrêté.
+
+- Code : `SelectionCardRules.kt` (pur : `SelectionCardModels.of` — détails
+  localisés, adresse éditée du patch, libellé de conso partagé avec l'écran
+  Câblage —, `SelectionCardLayout` — style compact sous 480 dp, budget du
+  quart, titre court, « garder visible », fiche / bannière / rien,
+  `scaleBarY` —, `UniverseEditRules`, `revealShift`, portage exact d'iOS),
+  `SelectionCard.kt` (`SelectionCardHost`, `SelectionCard` complète et
+  compacte, `MultiSelectionBanner`, `SelectionCardSlot`). `SceneScreen`
+  construit l'hôte UNE fois (patch, conso, fiche patch) ; la 3D et le plan
+  le posent. La pastille de texte 3D, la fiche texte et la bannière jaune du
+  plan sont supprimées ; `PlanSelectionBar` passe dans `SelectionCardRules.kt`.
+- Titre « Projecteur — Nom » (genre d'objet + nom effectif, comme iOS
+  `selectionInfo`) ; « type nettoyé » lu comme le mot « Projecteur » et non la
+  spec brute « Fixture » (Android ne sélectionne que des projecteurs). Conso :
+  spec de câblage (`effectiveGeometrySpec`, type custom → son GDTF de base),
+  « 450 W · 3 votes » / « 450 W · GDTF » / « Conso max : à saisir » ;
+  « C'est bon » = `power.set` (garde Pro existante).
+- Même règle d'apparition dans les deux vues : rien pendant la mesure (comme
+  la 3D avant), l'assistant 3 points, l'affectation, **et l'aide « je suis
+  ici » du plan** (ajout : la fiche pleine largeur couvrait l'aide, posée à
+  84 dp du bas).
+- Projecteur gardé visible (compacte) : plan → `offset` glisse en 0,3 s (un
+  geste, vu comme un changement d'`offset` / d'échelle, interrompt ; un plan
+  « non touché » le reste) ; 3D → translation monde ajoutée par
+  `DistanceZoomManipulator.shift` dans `getTransform()` (SceneView y lit la
+  caméra à chaque image ; une translation pure = tout le rig translaté), 0,35 s,
+  interrompue par un geste (`grabBegin` / `scrollBegin`) ; les projections, la
+  recherche et les points de vue partent du pivot décalé (`pivot()`). Vérifié :
+  Wash 102 sous la fiche en paysage → posé à 28 dp au-dessus, dans les deux
+  vues, et de nouveau après « Détails ». Constat : dans le plan, le glissement
+  peut pousser la rangée du haut sous la pastille (même règle qu'iOS : seul le
+  projecteur choisi est protégé).
+- Constat émulateur corrigé : la fiche pleine largeur du portrait cachait la
+  barre d'échelle du plan (coin bas-gauche) → elle monte au-dessus de la fiche
+  (`SelectionCardLayout.scaleBarY`, testé). Fiche compacte dépliée : la croix
+  restait au milieu → largeur de la plus large rangée, croix au bout.
+- Univers : « Éditer » (TextButton) par projecteur listé dans l'inspecteur,
+  un seul par instance ; il ouvre la fiche patch existante par-dessus l'écran
+  (`onEditFixture`).
+- Crochet `MVR_AUTO_SELECT=<N°>` (`--es`) : N° effectif, pris une fois par la
+  vue d'ouverture.
+- Laissé à E : la barre ancrée gauche ne monte pas encore au-dessus de la
+  fiche (§3.9) — sur téléphone il n'y a pas de barre par défaut, et la fiche
+  compacte, centrée et étroite, ne croise pas une barre gauche ; la tablette
+  (barre préremplie, fiche complète pleine largeur jusqu'à 520 dp) relève de
+  l'évitement prévu en E (« barre gauche qui évite légende / panneaux /
+  fiche »).
+- Textes : `card_kind_fixture`, `card_title_fmt`, `card_power_to_enter` ajoutés
+  à §7.1 (repris d'iOS) ; pluriel `sel_fixtures_selected` ;
+  `sel_fixtures_selected_fmt` et `fixture_id_name_fmt` supprimés.
+- Étiquettes de test : `selectionCard`, `selectionCard.close`,
+  `selectionCard.details`, `selectionCard.patch`, `selectionCard.powerConfirm`,
+  `multiSelectionBanner`, `multiSelectionBanner.clear`, `universe.edit.<N°>`.
+- Captures : `~/.mvrviewer-tools/scratch/android-menus/D/`.
 
 ### Tranche E — Finitions : outils, tablette, accessibilité, textes
 

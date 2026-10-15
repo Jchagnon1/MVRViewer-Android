@@ -1219,6 +1219,37 @@ fun SceneScreen(
     // sous la rangée du haut dans le plan (§3.5, §8 D21) ; cachée par les écrans pleins.
     val syncBadge: (@Composable () -> Unit)? = sync?.let { s -> { SyncStatusBadge(s) } }
 
+    // FICHE DE SÉLECTION et BANNIÈRE MULTI (SPEC-menus-android §3.9, tranche D) :
+    // construites ICI (le patch, la conso et la fiche patch vivent à ce niveau) et
+    // posées par les DEUX vues — aucune n'est écrite deux fois.
+    val selectionCardHost = remember(overrides, power, customResolver) {
+        SelectionCardHost(
+            card = { obj, style, onCloseCard ->
+                // Lus ici : la fiche suit un renommage / une nouvelle adresse du patch
+                // et chaque vote (cartes réactives de la bibliothèque de puissances).
+                overrides.version
+                val spec = effectiveGeometrySpec(obj, overrides, customResolver)
+                val model = SelectionCardModels.of(
+                    key = mvrInstanceKey(obj), name = overrides.effectiveName(obj), layer = obj.layerName,
+                    fixtureId = overrides.effectiveId(obj),
+                    addresses = SelectionCardModels.addresses(obj.addresses, overrides.effectiveAddress(obj)),
+                    spec = spec, resolution = power.effective(spec), votes = power.consensusVotes(spec)
+                )
+                SelectionCard(
+                    model = model, style = style, onClose = onCloseCard,
+                    // Patch : TOUJOURS ce projecteur ; enregistrer reste Pro (fiche patch).
+                    onPatch = { editFixture = obj },
+                    // « C'est bon » : mon vote = la valeur affichée (Pro, « renseigner une consommation »).
+                    onConfirmPower = {
+                        val s = model.power.spec; val w = model.power.watts
+                        if (s != null && w != null) power.set(s, w)
+                    }
+                )
+            },
+            banner = { count, style, onClear -> MultiSelectionBanner(count, style, onClear) }
+        )
+    }
+
     // Calques du show + nombre d'objets pour la feuille « Calques », figés par
     // scène (on évite de reconstruire les paires à chaque recomposition).
     val layerRows = remember(visibleScene) {
@@ -1336,6 +1367,9 @@ fun SceneScreen(
             // Bibliothèque MA : objets 3D statiques des types MA + sélection remontée.
             fixture3DStore = fixture3DStore,
             onSelectionChanged = { selectionKeys = it },
+            // Fiche de sélection / bannière multi communes (tranche D) + crochet DEBUG.
+            selectionCard = selectionCardHost,
+            takeAutoSelect = { DebugHooks.takeAutoSelect() },
             onClose = onClose
         )
         SceneBase.PLAN -> PlanScreen(
@@ -1404,7 +1438,10 @@ fun SceneScreen(
             toolbarLayout = layoutPlan,
             onLayoutChange = { layoutPlan = it },
             // Sélection remontée (« affecter à la sélection » de la bibliothèque MA).
-            onSelectionChanged = { selectionKeys = it }
+            onSelectionChanged = { selectionKeys = it },
+            // Fiche de sélection / bannière multi communes (tranche D) + crochet DEBUG.
+            selectionCard = selectionCardHost,
+            takeAutoSelect = { DebugHooks.takeAutoSelect() }
         )
     } // when(nav.base)
     } // SceneBaseLayer
@@ -1467,6 +1504,9 @@ fun SceneScreen(
                     patchOverrides = overrides,
                     // Projecteurs custom V1 : empreinte + noms de canaux du type.
                     customResolver = customResolver,
+                    // « Éditer » de l'inspecteur (tranche D) : la fiche patch existante,
+                    // par-dessus l'univers (enregistrer : Pro).
+                    onEditFixture = { editFixture = it },
                     onBack = { closeDestination() }
                 )
                 is ProjectDestination.Cabling -> CablingScreen(

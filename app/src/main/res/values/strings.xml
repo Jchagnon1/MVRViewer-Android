@@ -218,7 +218,6 @@
     <string name="facet_type">Type</string>
     <string name="facet_universe">Univers</string>
     <string name="fixture_id_fmt">N° %1$s</string>
-    <string name="fixture_id_name_fmt">N° %1$s · %2$s</string>
     <string name="fx_addr_format_hint">Format : univers.adresse (1–512)</string>
     <string name="fx_addr_placeholder">univers.adresse</string>
     <string name="fx_channel_default_fmt"> · défaut %1$d</string>
@@ -418,7 +417,6 @@
     <string name="sat_out_of_coverage">Fond satellite disponible en France uniquement (imagerie IGN).</string>
     <string name="sat_unavailable">Pas d\'imagerie IGN pour cette zone.</string>
     <string name="search_fixture_id_hint">N° de projecteur</string>
-    <string name="sel_fixtures_selected_fmt">%1$d projecteurs sélectionnés</string>
     <string name="size_large">Grande</string>
     <string name="size_medium">Moyenne</string>
     <string name="size_small">Petite</string>
@@ -820,5 +818,20 @@
     <plurals name="status_hidden_classes">
         <item quantity="one">%1$d classe masquée</item>
         <item quantity="other">%1$d classes masquées</item>
+    </plurals>
+    <!-- Rangement des menus, tranche D (SPEC-menus-android §7.1) : fiche de sélection unique, bannière multi, « Éditer » de l'univers. -->
+    <string name="card_kind_fixture">Projecteur</string>
+    <string name="card_title_fmt">%1$s — %2$s</string>
+    <string name="card_layer_fmt">Calque : %1$s</string>
+    <string name="card_fixture_number_fmt">N° de projecteur : %1$s</string>
+    <string name="card_dmx_fmt">Adresse DMX : %1$s</string>
+    <string name="card_details">Détails</string>
+    <string name="card_power_to_enter">Conso max : à saisir</string>
+    <string name="banner_clear_selection">Vider la sélection</string>
+    <string name="universe_edit">Éditer</string>
+    <string name="universe_edit_cd_fmt">Éditer le patch du projecteur %1$s</string>
+    <plurals name="sel_fixtures_selected">
+        <item quantity="one">%1$d projecteur sélectionné</item>
+        <item quantity="other">%1$d projecteurs sélectionnés</item>
     </plurals>
 </resources>

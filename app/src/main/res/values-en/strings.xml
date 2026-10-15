@@ -218,7 +218,6 @@
     <string name="facet_type">Type</string>
     <string name="facet_universe">Universe</string>
     <string name="fixture_id_fmt">#%1$s</string>
-    <string name="fixture_id_name_fmt">#%1$s · %2$s</string>
     <string name="fx_addr_format_hint">Format: universe.address (1–512)</string>
     <string name="fx_addr_placeholder">universe.address</string>
     <string name="fx_channel_default_fmt"> · default %1$d</string>
@@ -418,7 +417,6 @@
     <string name="sat_out_of_coverage">Satellite background available in France only (IGN imagery).</string>
     <string name="sat_unavailable">No IGN imagery for this area.</string>
     <string name="search_fixture_id_hint">Fixture number</string>
-    <string name="sel_fixtures_selected_fmt">%1$d fixtures selected</string>
     <string name="size_large">Large</string>
     <string name="size_medium">Medium</string>
     <string name="size_small">Small</string>
@@ -813,5 +811,20 @@
     <plurals name="status_hidden_classes">
         <item quantity="one">%1$d hidden class</item>
         <item quantity="other">%1$d hidden classes</item>
+    </plurals>
+    <!-- Menu tidy-up, slice D (SPEC-menus-android §7.1): single selection card, multi banner, universe Edit. -->
+    <string name="card_kind_fixture">Fixture</string>
+    <string name="card_title_fmt">%1$s — %2$s</string>
+    <string name="card_layer_fmt">Layer: %1$s</string>
+    <string name="card_fixture_number_fmt">Fixture number: %1$s</string>
+    <string name="card_dmx_fmt">DMX address: %1$s</string>
+    <string name="card_details">Details</string>
+    <string name="card_power_to_enter">Max power: to be entered</string>
+    <string name="banner_clear_selection">Clear selection</string>
+    <string name="universe_edit">Edit</string>
+    <string name="universe_edit_cd_fmt">Edit the patch of fixture %1$s</string>
+    <plurals name="sel_fixtures_selected">
+        <item quantity="one">%1$d fixture selected</item>
+        <item quantity="other">%1$d fixtures selected</item>
     </plurals>
 </resources>

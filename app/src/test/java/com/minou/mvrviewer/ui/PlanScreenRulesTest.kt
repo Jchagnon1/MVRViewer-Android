@@ -64,11 +64,27 @@ class PlanScreenRulesTest {
         val plan = src("ui/PlanScreen.kt")
         assertTrue(plan.contains("PlanBottomRules.selectionBar("))
         assertTrue(plan.contains("threePointOpen = cal3Session != null || cal3Starting, assignOpen = assignTarget != null"))
-        assertTrue(plan.contains("if (selectionBar == PlanSelectionBar.CARD) {"))
-        assertTrue(plan.contains("} else if (selectionBar == PlanSelectionBar.BANNER) {"))
+        // Tranche D : mesure et aide « je suis ici » prennent aussi le bas.
+        assertTrue(plan.contains("measuring = measureMode, anchorAid = calibrating"))
+        // Fiche (1) ou bannière (plusieurs) : celles de SceneScreen, communes à la 3D.
+        assertTrue(plan.contains("if (selectionBar == PlanSelectionBar.CARD && one != null) {"))
+        assertTrue(plan.contains("cardHost.card(one, cardStylePlan) { selected.clear() }"))
+        assertTrue(plan.contains("cardHost.banner(selected.size, cardStylePlan) { selected.clear() }"))
+        // Une seule évaluation de la règle : les obstacles relisent la même valeur.
+        assertEquals(1, Regex("PlanBottomRules\\.selectionBar\\(").findAll(plan).count())
         // L'ancienne condition, qui ignorait l'assistant, a disparu.
         assertFalse(plan.contains("if (selected.size == 1) {"))
         assertFalse(plan.contains("} else if (selected.size > 1) {"))
+    }
+
+    @Test fun ficheMasqueePendantLaMesureEtLAideJeSuisIci() {
+        for (n in 0..3) {
+            assertEquals(PlanSelectionBar.NONE, PlanBottomRules.selectionBar(n, false, false, measuring = true))
+            assertEquals(PlanSelectionBar.NONE, PlanBottomRules.selectionBar(n, false, false, anchorAid = true))
+        }
+        // Même règle que la 3D (une seule fonction).
+        assertEquals(SelectionCardLayout.presentation(1), PlanBottomRules.selectionBar(1, false, false))
+        assertEquals(SelectionCardLayout.presentation(4), PlanBottomRules.selectionBar(4, false, false))
     }
 
     // ------------------------------------------- 2. recadrage après une rotation

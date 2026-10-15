@@ -19,7 +19,10 @@ import android.content.Intent
  * - `MVR_AUTO_HOME_DEST=account` : ouvre « Compte & réglages » depuis l'accueil ;
  * - `MVR_AUTO_GEOPANEL`, `MVR_AUTO_REFPLAN_PANEL`, `MVR_AUTO_LABELS_PANEL` (tranche
  *   B) : ouvrent le panneau dans la vue courante ~2 s après l'affichage (le panneau
- *   Plan importé n'apparaît que s'il y a un plan).
+ *   Plan importé n'apparaît que s'il y a un plan) ;
+ * - `MVR_AUTO_SELECT=<N°>` (tranche D) : sélectionne ce projecteur (N° effectif) dès
+ *   la scène prête, dans la vue d'ouverture — fiche (ou bannière s'il y en a
+ *   plusieurs) visible sans toucher l'écran.
  */
 object DebugHooks {
     @Volatile private var autoPlan = false
@@ -27,6 +30,7 @@ object DebugHooks {
     @Volatile private var autoPlanStart: String? = null
     @Volatile private var autoHomeDest: String? = null
     @Volatile private var autoPanels: ScenePanels? = null
+    @Volatile private var autoSelect: String? = null
 
     fun read(intent: Intent?, debuggable: Boolean) {
         if (!debuggable || intent == null) return
@@ -42,6 +46,7 @@ object DebugHooks {
         val ref = flag(intent, "MVR_AUTO_REFPLAN_PANEL")
         val labels = flag(intent, "MVR_AUTO_LABELS_PANEL")
         if (geo || ref || labels) autoPanels = ScenePanels.fromHooks(geo, ref, labels)
+        intent.getStringExtra("MVR_AUTO_SELECT")?.trim()?.takeIf { it.isNotEmpty() }?.let { autoSelect = it }
     }
 
     /** Booléen d'intent : `--ez X true` comme `--es X 1` / `true`. */
@@ -54,4 +59,5 @@ object DebugHooks {
     fun takeAutoPlanStart(): PlanStartAction = PlanStartAction.fromHook(autoPlanStart).also { autoPlanStart = null }
     fun takeAutoHomeDest(): String? = autoHomeDest.also { autoHomeDest = null }
     fun takeAutoPanels(): ScenePanels? = autoPanels.also { autoPanels = null }
+    fun takeAutoSelect(): String? = autoSelect.also { autoSelect = null }
 }

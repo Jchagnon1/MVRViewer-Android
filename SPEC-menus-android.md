@@ -8,7 +8,9 @@ et dans quel ordre l'implémenter.
 
 État : **préparation**. Aucun code d'application n'est touché par ce document.
 Base : branche `feature/v1.7-tilt-formats`, commit `e110bbc`
-(539 tests unitaires verts + 4 tests réseau ignorés).
+(539 tests unitaires verts + 4 tests réseau ignorés). Relu et corrigé après
+critique (re-parcours du code, décisions, disparitions, sûreté des
+tranches) : la liste des corrections est en §12.
 
 Toute divergence avec iOS s'écrit ici d'abord (§8), jamais dans le code seul.
 Specs Android livrées qu'il ne faut PAS casser : câblage sur le plan (barre
@@ -26,14 +28,14 @@ Leur traduction :
 | # | Décision iOS | Sur Android |
 |---|---|---|
 | 1 | Pastille « Vue » = points de vue de la vue courante + bascule ; « Vue plan » quitte le ⋯ | Même pastille (composable `ViewPill`), dans les deux vues. En 3D : Perspective, Dessus, Face, Arrière, Gauche, Droite, puis « Vue plan 2D ». Dans le plan : « Dessus » seul (le plan Android n'a pas d'autre projection, §8 D6) puis « Vue 3D ». Le menu « Points de vue » (icône caméra) de la barre 3D disparaît. |
-| 2 | « Terminé » à gauche dans le plan | La flèche ← en haut à gauche du plan reste (TalkBack « Terminé ») ; pendant une affectation elle ramène au Câblage (déjà en place, `SceneScreen.kt:1226`). |
+| 2 | « Terminé » à gauche dans le plan | La flèche ← en haut à gauche du plan reste (TalkBack « Terminé », aujourd'hui « Vue 3D ») ; pendant une affectation elle ramène au Câblage (déjà en place, `SceneScreen.kt:1226`). Place et rôle conformes ; la forme (icône ← et non le mot « Terminé ») est une divergence visible, §8 D19. |
 | 3 | Compte, Pro, GDTF Share dans « Compte & réglages », hors des familles de la scène | Écran plein « Compte & réglages » (remplace `AccountDialog`), ouvert par l'avant-dernière ligne du ⋯, par l'accueil et par l'outil `account`. |
 | 4 | Fiche : portée unique, croix de fermeture | Croix « Fermer » : oui. Portée : **sans objet tant qu'Android n'a ni Pan 180°, ni Tilt 180°, ni côté d'étiquette** (rien à quoi l'appliquer) → absente, question ouverte Q3. |
 | 5 | Même fiche dans le plan | Une seule `SelectionCard` dans les deux vues (aujourd'hui : une pastille de texte en 3D, une fiche texte dans le plan). |
 | 6 | Plan importé lisible en gratuit, modifier = Pro | Le panneau s'ouvre pour tous ; chaque modification est gardée au toucher (aujourd'hui Pro à l'entrée, `PlanScreen.kt:1150`). |
 | 7 | « Je suis ici » ET 3 points | Les deux dans le panneau Position GPS, dans les deux vues. |
 | 8 | Opacité du satellite dans le panneau GPS seulement | Le curseur flottant du plan (`PlanScreen.kt:2259`) et les curseurs du ⋯ (`SceneOptions.kt:351`) disparaissent. |
-| 9 | iPad : barre préremplie | **Tablette Android** (plus petite largeur ≥ 600 dp) : barre gauche préremplie Patch, Univers, Câblage, Calques, dans les deux vues. Téléphone : voir Q1 (barre flottante historique). |
+| 9 | iPad : barre préremplie | **Tablette Android** (plus petite largeur ≥ 600 dp) : barre gauche préremplie Patch, Univers, Câblage, Calques, dans les deux vues. Téléphone : aucune barre ancrée. La barre flottante historique (les deux appareils) : Q1. |
 | 10 | Fiche compacte en paysage | Même règle sur téléphone en paysage (hauteur < 480 dp, le seuil déjà utilisé par `PlanScreen.kt:2452`). |
 | 11 | Pastille FR à moitié visible acceptée | Sans objet sur Android (la pastille n'a pas de section « Mes vues ») ; si un menu demande un court défilement en paysage, il est accepté de même. |
 
@@ -71,8 +73,11 @@ Les chaînes **touchées par ce chantier** passent en pluriels ; la liste des
   plan, Placement sur le plan en 3D) ou si **la fonction n'existe pas sur
   Android** (§8 D5).
 - Ouvrir « Partager ce projet » devient **gratuit** (la garde reste à la
-  publication, `SyncViewModel.kt:292`) : les gardes à l'entrée de
+  publication, `SyncViewModel.kt:291`) : les gardes à l'entrée de
   `SceneScreen.kt:1109` et `:1221` sont retirées.
+- Une **ligne de liste ne déclenche jamais une action destructive** à elle
+  seule (se déconnecter, retirer, réinitialiser) : l'action est un bouton
+  nommé, rouge s'il détruit.
 
 ### 1.3 Présentation : destinations en surimpression
 
@@ -154,8 +159,9 @@ Chemins relatifs à `app/src/main/java/com/minou/mvrviewer/`.
 | Profil MA reçu | `:161-163` | `mode = MA_LIBRARY` |
 | Retour système | `:1047` (3D → `onClose`), `:1051` (sous-vue → 3D ; plan en affectation → `finishAssign`), `:1055` (dialogue de synchro → fermer) | |
 | Classes | `:1319-1332` | `ClassesSheet` hors du `when`, valable en 3D et plan |
-| Bannière « nouvelle version » | `:1337-1345` | haut-centre |
-| Pastille de synchro | `:1348-1350` | **bas-droite** (« ☁ … ») |
+| Bannière « nouvelle version » | `:1337-1345` | haut-centre, **carte pleine largeur** (`SyncUI.kt:438`) posée par-dessus la barre du haut, dans tous les modes |
+| Pastille de synchro | `:1348-1350` | **bas-droite** (« ☁ … »), seulement si un projet partagé est ouvert ; posée hors du `when` : visible par-dessus **tous** les modes (3D, plan, Patch, Univers, Câblage, GDTF Share, Bibliothèque MA) |
+| Plan importé : import, persistance, synchro | `onSetReferencePlan` `:1143-1177` (persiste, téléverse, pousse le manifeste, masque les calques éteints du DXF) ; `commitTransform` `:952` ; mais la **persistance débouncée du placement** est dans `PlanScreen.kt:819-834` | |
 | Dialogues Compte / Partager / Historique / Rejoindre | `:1034-1037`, `:1352-1362` | `AlertDialog`s |
 | Garde « partager un projet » à l'entrée | `:1109`, `:1221` | |
 | Garde des calques DXF | `:1188` | « modifier les calques du plan importé » |
@@ -183,7 +189,7 @@ Chemins relatifs à `app/src/main/java/com/minou/mvrviewer/`.
 | Feuille Calques (LOD) | `:2435-2448` | `LayersSheet` « Calques · Vue 3D » |
 | Personnaliser la barre | `:2450-2459` | `ToolbarCustomizeSheet` |
 | Couleur du fond (outil) | `:2463-2471` | `BackgroundColorDialog` |
-| Outils (description unifiée) | `tools3D` `:1834-1954` | RECT, MEASURE, SOLO, CLEAR_SEL, GPS, GPS_MARKER_SIZE, IMPORT_MODEL (libellé variable), LAYERS (« Calques » en dur), LABELS, LAYER_COLORS, SATELLITE, LABEL_SIZE (cycle), BACKGROUND, CAM_RESET, PLAN_VIEW, PATCH, UNIVERSE, CABLING, GDTF_SHARE (« GDTF Share » en dur), ACCOUNT (« Compte » en dur), SHARE_PROJECT, HISTORY |
+| Outils (description unifiée) | `tools3D` `:1834-1954` | RECT, MEASURE, SOLO, CLEAR_SEL, GPS, GPS_MARKER_SIZE, IMPORT_MODEL (libellé variable), LAYERS (« Calques » en dur), LABELS, LAYER_COLORS, SATELLITE, LABEL_SIZE (cycle), BACKGROUND, CAM_RESET, PLAN_VIEW, PATCH, UNIVERSE, CABLING (« Câblage électrique »), GDTF_SHARE (« GDTF Share » en dur, `:1938` : ouvre l'écran combiné connexion + modèles), ACCOUNT (« Compte » en dur), SHARE_PROJECT, HISTORY (ces trois-là seulement si la synchro est branchée) |
 | Toucher | `handleTap` `:1711` | **ajoute / retire** le projecteur visé (sélection multiple d'office) ; vide → tout désélectionner ; en mesure, désigne A puis B |
 | Appui long | `handleLongPress` `:1695` | sélection unique puis fiche patch |
 | Pas de double-toucher, pas de panneau Plan importé, pas d'import de plan en 3D | | |
@@ -221,6 +227,13 @@ Fond satellite + opacité (si calibré) — Couleurs par calque — Coloration :
 
 Les bascules gardent le menu ouvert, les actions le ferment (`:98-107`).
 
+Le ⋯ de la **3D** montre aussi « ↳ bloc séparé » par champ et « Masquer si
+trop dézoomé » (même composable) alors que ces deux réglages **n'ont aucun
+effet en 3D** (`labelDetached` et `hideLabelsWhenZoomedOut` ne sont lus que
+par le plan, `PlanRender.kt:395`) : ils ne sont pas portés dans le panneau
+3D (§3.8), ce qui est dit ici pour que leur départ de la 3D ne passe pas
+inaperçu.
+
 ### 2.4 Vue plan — `ui/PlanScreen.kt`
 
 | Élément | Où | Détail |
@@ -241,7 +254,9 @@ Les bascules gardent le menu ouvert, les actions le ferment (`:98-107`).
 | Aide de calibrage | `:2675-2689` | bas-centre, jaune |
 | Aide de mesure | `:2693-2712` | bas-centre |
 | Fiche / bannière | `:2717-2751` | fiche texte (« #N  nom / type / calque · DMX x ») ou bannière jaune « n projecteurs sélectionnés », sans action |
-| Personnaliser / fond / étiquettes | `:2756`, `:2768`, `:2783` | panneau `LabelSettingsPanel` (`:2803`) **seulement par l'outil ancré** `LABEL_SETTINGS` |
+| Personnaliser / fond / étiquettes | `:2756`, `:2768`, `:2783` | panneau `LabelSettingsPanel` (`:2803`) **seulement par l'outil ancré** `LABEL_SETTINGS`, `MovablePanel(LABELS_PLAN)` **déjà en bas-gauche** ; contenu : « Afficher les étiquettes », champs + « Bloc séparé » par champ, Taille (cycle), « Fermer » en texte — **ni Écart ni « Masquer si trop dézoomé »** |
+| Import du plan | `importLauncher` `:452-516` | analyse du fichier, puis **centrage sur `data.cx` / `data.cy`** (données du plan) avant `onSetReferencePlan` ; ouvre le panneau |
+| Persistance du placement | `:819-834` | `dxfVersion` → `onTransformTouched` (immédiat) ; sauvegarde **débouncée** `ProjectStore.saveTransform` + `onTransformChanged` (journal, push) — vit dans le plan |
 | Outils | `toolsPlan` `:1076-1177` | RECT, MASK, SOLO, MEASURE, SHOW_ALL, CLEAR_SOLO, CLEAR_SEL, GPS, CALIBRATE, CALIBRATE_3, SATELLITE, EXPORT_PDF, DXF (libellé variable), LABELS, LABEL_SETTINGS, LAYER_COLORS, STRUCTURE, LEGEND, BACKGROUND — **ni Patch, ni Univers, ni Câblage, ni Calques** |
 | Modes de toucher | `toggleTouchTool` `:1026`, `PlanScreenRules.kt:26` | cadre, masquer, solo, mesure, ancre (exclusifs) |
 | Gestes | glisser (cadre, masque) `:1229`, pincer/glisser `:1330`, toucher / appui long `:1370-1600`, glisser une étiquette saisie `:1626` | toucher = sélection **unique** (en mode cadre : ajoute / retire) |
@@ -256,6 +271,9 @@ Les bascules gardent le menu ouvert, les actions le ferment (`:98-107`).
   pas ancré ailleurs.
 - `ToolbarLayoutStore` (`ToolbarLayoutStore.kt:12`) : clés
   `toolbar.layout.scene3D` / `toolbar.layout.plan`.
+- `ToolId` **sans aucun `ToolSpec`** (jamais rendus, jamais ancrables) :
+  `COLOR_MODE` (`colorMode`), `SEARCH` (`search`), `CAM_PRESETS`
+  (`cameraPresets`).
 - `ToolbarCustomizeSheet` (`:49`) : texte d'aide `toolbar_customize_help`,
   puces Haut / Bas / Gauche / Droite / Aucun, « Réinitialiser », « Terminé ».
 - Boutons : `FilledIconToggleButton` jaune quand actif (`AnchoredToolbars.kt:145`),
@@ -274,13 +292,25 @@ Les bascules gardent le menu ouvert, les actions le ferment (`:98-107`).
 | Calques | `ui/LayersSheet.kt:55` | `Dialog` | LOD par calque seulement (« Calques · Vue 3D »), « Tout en Auto », « Terminé » |
 | Classes | `ui/ClassesSheet.kt:44` | `Dialog` | bascules, Tout masquer/afficher, « Terminé » |
 | Couleur personnalisée | `ui/BackgroundColorPicker.kt` | `AlertDialog` | « OK » (`:82`) |
+| Panneau Modèles importés | `ui/ModelPlacementPanel.kt:84` | flottant 3D | titre « Modèles 3D (%d) » (clé `tool_models_fmt`, partagée avec l'outil) |
+
+Flèche ← : TalkBack **« Retour 3D »** (`common_back_3d`) sur Patch
+(`PatchListScreen.kt:105`), Univers (`DmxUniverseScreen.kt:124`), Câblage
+(`CablingScreen.kt:277`), GDTF Share (`GdtfShareScreen.kt:169`) et
+Bibliothèque MA (`MaLibraryScreen.kt:457`, faux aussi quand elle est ouverte
+depuis l'**accueil**). Les volets internes (recherche GDTF Share, connexion,
+pages de la bibliothèque MA) ont leur propre ← « Retour » et leur propre
+retour système : ce sont des **sous-volets** de l'écran, pas des écrans de
+`SceneScreen`.
 
 ### 2.7 Compte et synchro — `ui/SyncUI.kt`
 
 - `AccountDialog` `:101` : `AlertDialog`, titre **variable** (« Compte » /
   « Créer un compte » / « Connexion »), section Pro (`ProAccountSection` `:67`,
-  **textes en dur non traduits**), compte ou formulaire, « Supprimer mon
-  compte » en rouge, libellé du serveur (« Firebase » / « Local (démo) »).
+  **textes en dur non traduits**, dont un message de refus de rattachement de
+  l'achat, `ProAccess.accountLinkMessage`), compte ou formulaire, « Supprimer
+  mon compte » en rouge, libellé du serveur (« Firebase » / « Local (démo) »),
+  bouton « Déconnexion » (`sync_sign_out`, iOS : « Se déconnecter »).
 - `ShareProjectDialog` `:247`, `JoinProjectDialog` `:321`, `HistoryDialog`
   `:365` (annuler : garde Pro, `SceneScreen.kt:985`), `SyncStatusBadge` `:420`,
   `MvrVersionBanner` `:438`.
@@ -292,8 +322,10 @@ Les bascules gardent le menu ouvert, les actions le ferment (`:98-107`).
 - Accueil (`HomeScreen.kt:53`) : « Ouvrir un fichier .mvr » (principal),
   formats, « Bibliothèque MA », carte « Créez votre compte (gratuit) »
   (`:264-280`, **texte en dur**), « Mon compte » / « Se connecter », « Rejoindre
-  un projet », projets partagés, erreur (`:177-184`), projets récents, rapport
-  de diagnostic.
+  un projet », projets partagés, erreur (`:177-184`), projets récents (✕ pour
+  en retirer un), rapport de diagnostic. Le compte s'y ouvre en
+  `AccountDialog` posé par `HomeScreen` lui-même (`:237`) ; la bibliothèque MA
+  de l'accueil est hébergée par `App` (`HomeMaLibraryHost`, `MainActivity.kt:153`).
 - Lecture du .mvr : le même écran affiche barre + étape + nom de fichier
   (`:89-111`) — **aucun bouton pour abandonner**.
 - Erreur d'ouverture : message sur l'accueil, bouton Ouvrir toujours là
@@ -334,6 +366,14 @@ hauteur — DESIGN_UI §6 : l'habillage se fait oublier) :
     d'affectation lit déjà le cadre mesuré de la légende).
 - Pendant le chargement 3D : la fine barre de progression pleine largeur reste
   tout en haut, au-dessus de la rangée.
+- La bannière « nouvelle version » (carte pleine largeur) se pose **sous** la
+  rangée, jamais sur ← ni sur ⋯ (aujourd'hui elle couvre la barre du haut),
+  dans les deux vues ; elle peut couvrir le bloc d'état et la pastille le
+  temps qu'on y réponde (« Rouvrir » / « Plus tard »).
+- Dans le **plan**, la pastille de synchro (projet partagé seulement) se pose
+  dans la colonne de droite sous la rangée, alignée à droite, bornée par le
+  cadre mesuré de la pastille « Vue » centrée (sinon elle passe sous la
+  pastille, toujours à droite) — §8 D21.
 - Comportements inchangés : le cadre force le multi et coupe la mesure ;
   couper le multi vide la sélection et coupe le cadre ; dans le plan, armer le
   cadre ferme l'assistant 3 points.
@@ -348,7 +388,11 @@ le débordement Android, §8 D3), TalkBack « Plus d'options ».
 menu par la famille, avec en tête une ligne « ‹ Affichage » qui revient au
 premier niveau ; un choix de valeur (Couleur du fond, Colorer par câblage)
 ouvre de même une 3e page (liste à boutons radio). Le retour système dans une
-page revient au premier niveau ; au premier niveau, il ferme le menu.
+page revient au premier niveau ; au premier niveau, il ferme le menu. (Le
+`Popup` du `DropdownMenu` reçoit lui-même le retour et ferme tout : le
+`BackHandler` des pages se pose **dans** le contenu du menu — à vérifier à
+l'émulateur en tranche C ; repli : le retour ferme le menu entier, la ligne
+« ‹ Famille » restant le chemin vers le premier niveau.)
 Profondeur maximale : menu → famille → valeur (iOS §2.8).
 
 Les **bascules gardent le menu ouvert** (comportement Android actuel) ; les
@@ -408,7 +452,7 @@ Absents (fonctions inexistantes sur Android, §8 D5) : section « Rendu 3D »
 | fr | en | Type | Apparition |
 |---|---|---|---|
 | Masquer des éléments | Hide items | bascule du mode masquage | **plan** |
-| Isoler (solo) | Isolate (solo) | plan : bascule du mode solo ; 3D : isole la sélection / retire l'isolement (action actuelle de l'outil SOLO) | toujours ; en 3D, grisée sans sélection ni solo (absence de donnée) |
+| Isoler (solo) | Isolate (solo) | plan : bascule du mode solo ; 3D : isole la sélection / retire l'isolement (action actuelle de l'outil SOLO) | toujours ; en 3D, grisée sans sélection ni solo (absence de donnée, §8 D23) |
 | Tout réafficher | Show everything again | action | plan, s'il y a des éléments masqués |
 | Vider l'isolement | Clear the solo | action | s'il y a un solo actif |
 
@@ -439,8 +483,8 @@ sur Android, §8 D5).
 
 | Section | fr | en | Action | Apparition |
 |---|---|---|---|---|
-| Équipe / Team | Partager ce projet… | Share this project… | `ShareProjectDialog` (ouvrir gratuit, publier Pro) | toujours (le service de synchro existe toujours sur Android) |
-| Équipe | Historique des modifications | Change history | `HistoryDialog` (annuler : Pro) | toujours |
+| Équipe / Team | Partager ce projet… | Share this project… | `ShareProjectDialog` (ouvrir gratuit, publier Pro) | si la synchro est branchée (toujours dans l'app : `App` crée le `SyncViewModel`) |
+| Équipe | Historique des modifications | Change history | `HistoryDialog` (annuler : Pro) | idem |
 | Exporter / Export | PDF du plan (composer les vues)… | Plan PDF (compose the views)… | plan : ouvre le panneau d'export ; 3D : ouvre le plan en mode export (`PlanStartAction.EXPORT_PDF`) | toujours |
 | PDF de câblage / Cabling PDF | Dossier câblage complet | Full cabling pack | génère puis feuille de partage Android | s'il existe un câblage (un distributeur électrique ou une ligne DMX) |
 | PDF de câblage | Distribution élec | Power distro | idem | idem |
@@ -496,6 +540,16 @@ Pendant une affectation de câblage, « Vue 3D » désarme puis ferme le plan
 **sans** rouvrir le Câblage (iOS §3) ; ← garde son comportement (retour au
 Câblage).
 
+**Cadrage sous la pastille** (iOS §3, restes 2026-10-15) : le cadrage
+automatique de l'affectation (`CablingAssignBarPlacement.fitAbove`, qui ne
+réserve aujourd'hui que le bas) et le futur Recadrer du plan posent le
+contenu **entre** le bas mesuré de la pastille « Vue » (+ 24 dp) et le haut
+de la barre du bas (barre d'affectation, panneau 3 points) — portage de
+`PanelPlacementMath.planFitMargins(height, topReserve, bottomReserve)`, pur
+et testé. Sans cela, la rangée de projecteurs du haut passe sous la
+pastille centrée (défaut constaté sur iOS). Refait quand la pastille est
+mesurée ou change (rotation), tant que le plan n'a pas été touché.
+
 ### 3.4 Bas-droite : Rechercher puis Recadrer (les deux vues)
 
 Une pile verticale alignée à droite, même gabarit 48 dp :
@@ -514,11 +568,18 @@ Une pile verticale alignée à droite, même gabarit 48 dp :
   d'affectation, panneau 3 points, panneau flottant ouvert dans sa colonne, et
   la **mention IGN** lue à sa place sans sa propre montée (la mention ne dépend
   pas de la pile : pas de boucle ; elle n'est jamais recouverte).
-- Masquée si son outil est ancré (`search` pour Rechercher, `resetCamera`
-  pour Recadrer).
+- Recadrer est masqué si l'outil `resetCamera` est ancré. Rechercher n'est
+  **jamais** masqué : l'identifiant `search` n'a aucun `ToolSpec` (il n'est
+  dans aucun catalogue, il ne peut pas être ancré) et iOS n'a pas d'outil de
+  recherche ; il reste inerte (§6 A23).
 - Les panneaux flottants qui étaient en **bas-droite** (Modèles importés,
   Plan importé, Export PDF) passent en **bas-gauche** avec un nouvel
-  identifiant `PanelID` (§8 D13).
+  identifiant `PanelID` (§8 D13) : `IMPORTED_MODELS_3D_LEADING`
+  (`importedModels3DLeading`), `REF_PLAN_PLAN_LEADING`
+  (`refPlanPlacementPlanLeading`), `EXPORT_PLAN_LEADING`
+  (`exportPlanLeading`) — clés propres à Android (iOS ne les a jamais eus à
+  droite). Les anciennes clés restent dans l'énumération (jamais renommées),
+  sans usage.
 
 ### 3.5 Bloc d'état (3D, haut-gauche sous ←)
 
@@ -531,10 +592,17 @@ elle a quelque chose à dire :
 | « %d objets » (pluriel « 1 objet »), suivi de « (tronqué) » si le plafond d'objets est atteint | « %d objects » / « 1 object » | toujours (pendant le chargement : étape + « %d % ») |
 | « %d classes masquées » (pluriel « 1 classe masquée ») | « %d hidden classes » / « 1 hidden class » | classes masquées |
 | « Modèles GDTF en cours… » + petit indicateur | « Loading GDTF models… » | pendant la phase des silhouettes GDTF |
-| pastille de synchro (`SyncStatusBadge`) | inchangée | synchro ; **quitte le bas-droite** |
+| pastille de synchro (`SyncStatusBadge`) | inchangée | projet partagé ouvert ; **quitte le bas-droite** |
+
+Absent : « %lld sur %lld calques masqués » d'iOS (Android ne masque pas les
+calques MVR, D10) et le repère de build DEBUG.
 
 Le plan n'a pas de bloc d'état ; la pastille « Plan · N projecteur(s) » est
-retirée (la légende donne les nombres par calque).
+retirée (la légende donne les nombres par calque). La pastille de synchro du
+plan est posée à droite sous la rangée (§3.1, D21). Les écrans pleins
+(destinations, §3.10) étant opaques et posés par-dessus la vue de base, la
+pastille de synchro n'y est **plus visible** (aujourd'hui elle flotte
+au-dessus de Patch, Univers, Câblage…) : elle se relit en fermant l'écran.
 
 ### 3.6 Panneau « Position GPS »
 
@@ -542,9 +610,14 @@ Composable `GeoPositionPanel` (fichier à part), le même dans les deux vues,
 contenu décrit par une fonction pure `GeoPanelContent.make(surface,
 calibrated, showSatellite, satelliteCovered, satelliteStatus)`.
 `MovablePanel(GEO_POSITION_3D)` / `MovablePanel(GEO_POSITION_PLAN)` (nouveaux
-`PanelID`), coin bas-gauche, hauteur bornée entre ce qui occupe le haut de sa
-colonne (bloc d'état 3D, pastille du plan) et ce qui occupe le bas (fiche,
-bannière, barre d'affectation, panneau 3 points), comme iOS §5.5. En-tête
+`PanelID`, clés iOS `geoPosition3D` / `geoPositionPlan`), coin bas-gauche,
+hauteur bornée entre ce qui occupe le haut de sa colonne (bloc d'état 3D,
+pastille du plan) et ce qui occupe le bas (fiche, bannière, barre
+d'affectation, panneau 3 points, mention IGN lue sans sa montée), comme iOS
+§5.5 (portage de `floatingPanelSlot`). En tranche B (avant la rangée, la
+pastille et le bloc d'état de la tranche C), la borne du haut est la barre
+du haut 3D et, dans le plan, le titre et le champ de recherche ; la tranche C
+la rebranche sur les nouveaux éléments. En-tête
 « Position GPS » (en « GPS position »), croix discrète. Ouvert par : ⋯ ›
 Position GPS…, l'outil `geoPanel` (nouveau), le crochet `MVR_AUTO_GEOPANEL`.
 
@@ -552,7 +625,9 @@ Position GPS…, l'outil `geoPanel` (nouveau), le crochet `MVR_AUTO_GEOPANEL`.
 
 1. Interrupteur « Afficher ma position » (`showLocation` de la vue ; démarre /
    arrête le GPS comme aujourd'hui). En 3D, désactivé tant que la scène n'est
-   pas calibrée (absence de donnée : le marqueur 3D en dépend).
+   pas calibrée (absence de donnée : le marqueur 3D en dépend ; l'outil 3D
+   actuel est déjà indisponible sans calibration) — §8 D20. Dans le plan,
+   toujours actif (il sert à poser « je suis ici »).
 2. Interrupteur « Fond satellite » : désactivé tant que la scène n'est pas
    calibrée ; **hors de France**, désactivé et suivi de « Fond satellite
    disponible en France uniquement (imagerie IGN). » (`sat_out_of_coverage`,
@@ -598,7 +673,8 @@ Les outils `myLocation`, `calibrate`, `threePointCalibration`, `satellite`,
 
 Composable `RefPlanPanel` (fichier à part, extrait de `PlanScreen.kt:2283-2441`)
 posé **dans les deux vues** (nouveau en 3D). Coin bas-gauche, `MovablePanel`
-`REF_PLAN_3D` / `REF_PLAN_PLAN_LEADING` (nouveaux).
+`REF_PLAN_3D` (clé iOS `referencePlan3D`) / `REF_PLAN_PLAN_LEADING`
+(`refPlanPlacementPlanLeading`), nouveaux.
 
 - S'ouvre pour tous (⋯ › Plan & décor › Régler le plan importé…, outil
   `refPlanPanel`, crochet `MVR_AUTO_REFPLAN_PANEL`) ; plus de garde à l'entrée.
@@ -613,15 +689,34 @@ posé **dans les deux vues** (nouveau en 3D). Coin bas-gauche, `MovablePanel`
   calques du plan importé » (garde existante `SceneScreen.kt:1188`).
 - Section « Calques » (DXF à plus d'un calque) : la même dans les deux
   panneaux.
-- L'import (`importLauncher` et l'analyse du fichier, `PlanScreen.kt:449-500`)
+- L'import (`importLauncher` et l'analyse du fichier, `PlanScreen.kt:452-516`)
   est **hissé dans `SceneScreen`** pour être appelable depuis les deux vues ;
-  l'outil `importDXF` et l'entrée de menu l'appellent.
+  l'outil `importDXF` et l'entrée de menu l'appellent. Hisser l'import ne
+  suffit pas — sont hissés **avec lui**, sinon un réglage fait en 3D ne
+  serait ni enregistré ni partagé :
+  - le **centrage** du plan importé, qui lit aujourd'hui `data.cx` /
+    `data.cy` du plan : `SceneScreen` le calcule par `planData(scene,
+    overrides)` (même centre, test de non-régression sur `mini.mvr` +
+    `mini.dxf`) ;
+  - le traitement `onSetReferencePlan` (`SceneScreen.kt:1143-1177` :
+    persistance, téléversement DXP1, manifeste, calques éteints du DXF),
+    devenu une fonction de `SceneScreen` appelée par les deux vues ;
+  - la **persistance débouncée du placement** et `onTransformChanged`
+    (`PlanScreen.kt:819-834`) : un seul effet dans `SceneScreen`, déclenché
+    par un compteur de retouche commun (`refPlanTransformVersion`), que le
+    panneau incrémente dans les deux vues (la 3D refait déjà son quad sur
+    ce compteur).
+- Après un import, le panneau s'ouvre dans la vue d'où l'import a été lancé
+  (comportement actuel du plan, étendu à la 3D).
 
 ### 3.8 Panneau « Réglage des étiquettes »
 
 Composable `LabelSettingsPanel` (extrait de `PlanScreen.kt:2803`) posé dans
-les **deux** vues, même titre « Réglage des étiquettes ». Entrée toujours
-visible (⋯ › Affichage). Tout est gratuit, hauteur bornée.
+les **deux** vues, même titre « Réglage des étiquettes », croix discrète
+« Fermer » (au lieu du bouton texte actuel). `MovablePanel(LABELS_3D)` (clé
+iOS `labels3D`, nouveau) en 3D ; `LABELS_PLAN` gardé dans le plan (déjà en
+bas-gauche). Entrée toujours visible (⋯ › Affichage). Tout est gratuit,
+hauteur bornée.
 
 1. « Afficher les étiquettes » (interrupteur, existant).
 2. Section « Contenu » (comme iOS, `opt_label_content`) : une case par champ
@@ -642,6 +737,9 @@ visible (⋯ › Affichage). Tout est gratuit, hauteur bornée.
 
 L'outil `labelSize` (cycle) devient l'ouverture de ce panneau (comme iOS, titre
 « Réglage des étiquettes »).
+
+En 3D, ni « Blocs séparés » ni « Masquer les étiquettes trop dézoomées » :
+sans effet en 3D (§2.3), ils quittent la 3D (A27).
 
 ### 3.9 Fiche de sélection et bannière multi (même fiche en 3D et dans le plan)
 
@@ -690,15 +788,24 @@ geste ; jamais sous la pastille), comme iOS §8.4.
 Toutes ouvertes par `SceneScreen.open(destination)` (§4.1), en surimpression
 au-dessus de la vue courante (§1.3). Barre de chaque écran plein : ← à gauche
 (TalkBack « Retour » ; l'actuel « Retour 3D » serait faux ouvert depuis le
-plan), titre = ce que l'écran montre, outils en icônes à droite (§8 D1).
+plan — et l'est déjà pour la Bibliothèque MA ouverte depuis l'accueil),
+titre = ce que l'écran montre, outils en icônes à droite (§8 D1). Cela vaut
+pour **les cinq** écrans qui disent aujourd'hui « Retour 3D » (§2.6).
+
+**Sous-volets** : un écran ouvert *depuis* une destination (Bibliothèque MA
+depuis Modèles de projecteurs, connexion GDTF Share depuis Modèles ou depuis
+Compte & réglages, recherche GDTF Share d'un type) est un **sous-volet
+interne** de cet écran, comme `GdtfSearchPane` aujourd'hui : son ← et le
+retour système ramènent à l'écran parent, pas à la vue de base.
+`SceneNavState` ne porte qu'une destination (pas de pile).
 
 | Destination | Écran | Changements |
 |---|---|---|
 | Liste de patch | `PatchListScreen` | retour à la vue d'origine ; sinon inchangée |
 | Univers DMX | `DmxUniverseScreen` | inspecteur : bouton secondaire **« Éditer »** par projecteur listé (TalkBack « Éditer le patch du projecteur %s »), qui ouvre la fiche patch existante (tranche D) |
 | Câblage | `CablingScreen(initialTab)` | ouvre sur l'onglet demandé (`CablingScreenTab.opening(requested, memory.tab)` existe déjà) ; « Sur le plan » depuis une origine plan arme l'affectation sur le plan déjà ouvert (§4.3) |
-| Modèles de projecteurs | `GdtfShareScreen` retitré « Modèles de projecteurs » | la liste des types s'affiche **toujours** ; en tête : ligne « GDTF Share : connecté » (`CloudDone`, toucher → se déconnecter) ou bouton « Se connecter à GDTF Share… » (ouvre `GdtfShareLoginPane`) ; 2e ligne « Bibliothèque MA » (ouvre la bibliothèque) ; « Améliorer tous » et la recherche par type restent réservés à l'état connecté ; relance de la résolution à la connexion inchangée |
-| Bibliothèque MA | `MaLibraryScreen` | ouverte depuis Modèles de projecteurs, l'accueil et un profil reçu (par-dessus la vue courante) ; rapport « OK » → « Terminé » (tranche E) |
+| Modèles de projecteurs | `GdtfShareScreen` retitré « Modèles de projecteurs » | la liste des types (avec leur état Générique / Auto / Manuel) s'affiche **toujours** ; en tête : ligne « GDTF Share : connecté » (`CloudDone`) avec un bouton « Se déconnecter » à droite (jamais une déconnexion au simple toucher de la ligne, §1.2), ou bouton « Se connecter à GDTF Share… » (sous-volet `GdtfShareLoginPane`) ; 2e ligne « Bibliothèque MA » (sous-volet) ; « Améliorer tous » réservé à l'état connecté ; toucher un type **déconnecté** ouvre la connexion puis, connecté, la recherche de ce type (même enchaînement que la bibliothèque MA) ; relance de la résolution à la connexion inchangée |
+| Bibliothèque MA | `MaLibraryScreen` | destination quand elle est ouverte par un profil reçu (par-dessus la vue courante) ou le crochet ; sous-volet de Modèles de projecteurs sinon ; l'accueil garde son hôte (`HomeMaLibraryHost`) ; rapport « OK » → « Terminé » (tranche E) |
 | Calques | une feuille « Calques » (fusion de `LayersSheet` et `ClassesSheet`) | si le fichier déclare des classes, sélecteur segmenté « Calques \| Classes » en première ligne ; onglet Calques : chaque calque (pastille de couleur, nom, nombre d'objets) + en 3D le réglage « fluidité en navigation » (LOD, contenu actuel) ; depuis le plan : sans réglage LOD (liste en lecture, §8 D10) ; onglet Classes : contenu actuel |
 | Compte & réglages | §3.11 | |
 | Partager / Historique | dialogues actuels | ouverts par le ⋯ des deux vues ; Partager sans garde à l'entrée |
@@ -708,25 +815,37 @@ plan), titre = ce que l'écran montre, outils en icônes à droite (§8 D1).
 Écran plein (remplace `AccountDialog`), titre **fixe** « Compte & réglages »
 (en « Account & settings »), ← (désactivée pendant une suppression de compte).
 Ouvert par : ⋯ › Compte & réglages…, l'accueil (bouton « Compte & réglages »
-et la carte « Créez votre compte (gratuit) »), l'outil `account`, le crochet
-`MVR_AUTO_DEST=account`.
+et la carte « Créez votre compte (gratuit) »), l'outil `account`, l'outil
+`gdtfShare` (tranche E, §4.6), le crochet `MVR_AUTO_DEST=account`. Depuis
+l'accueil, il est hébergé par `App` (`MainActivity.kt`, comme
+`HomeMaLibraryHost`) avec son propre retour système vers l'accueil ; depuis
+un projet, c'est une destination de `SceneScreen`.
 
 Sections, dans l'ordre :
 
 1. **« Compte »** : déconnecté → formulaire actuel (Se connecter / Créer un
    compte, bascule « J'ai déjà un compte » / « Créer un compte ») ; connecté →
-   nom, e-mail, serveur (« Firebase » / « Local (démo) »), « Se déconnecter » ;
-   isolé en rouge : « Supprimer mon compte » (dialogue actuel, gratuit).
-2. **« MVR Viewer Pro »** : contenu actuel de `ProAccountSection`, **textes
-   passés en ressources** avec les valeurs iOS : « Version Pro active —
+   nom, e-mail, serveur (« Firebase » / « Local (démo) »), « Se déconnecter »
+   (`sync_sign_out` passe de « Déconnexion » à « Se déconnecter », valeur
+   iOS) ; isolé en rouge : « Supprimer mon compte » (dialogue actuel,
+   gratuit).
+2. **« MVR Viewer Pro »** : contenu actuel de `ProAccountSection` (message
+   de refus de rattachement compris), **textes passés en ressources** avec
+   les valeurs iOS : « Version Pro active —
    édition débloquée » (« Pro version active — editing unlocked »), « La
    lecture est gratuite ; l'édition (patch, câblage, imports…) passe en Pro. »,
    « Débloquer la version Pro » (« Unlock Pro »), « Restaurer un achat »
    (« Restore a purchase »).
 3. **« Services »** : ligne « GDTF Share » avec la valeur « Connecté » /
-   « Non connecté » ; la toucher ouvre `GdtfShareLoginPane` (connexion) ou
-   propose la déconnexion. À l'ouverture, reconnexion silencieuse habituelle
-   (`GdtfShareClient.ensureLoggedIn`, aucune requête sans identifiants gardés).
+   « Non connecté ». Non connecté : toucher la ligne ouvre le sous-volet
+   `GdtfShareLoginPane`. Connecté : bouton « Se déconnecter » au bout de la
+   ligne (efface les identifiants gardés, comme le bouton actuel de l'écran
+   GDTF Share) ; toucher la ligne elle-même ne déconnecte pas (§1.2). À
+   l'ouverture, reconnexion silencieuse habituelle
+   (`GdtfShareClient.ensureLoggedIn`, aucune requête sans identifiants
+   gardés). Fermée depuis un projet : si GDTF Share est passé à « connecté »,
+   la résolution des modèles repart (comme à la fermeture de l'écran GDTF
+   Share aujourd'hui).
 4. Pas de section « Débogage » (aucune bascule de serveur à l'écran sur
    Android, §8 D5).
 
@@ -744,18 +863,25 @@ Sections, dans l'ordre :
 - **Tablette** (plus petite largeur ≥ 600 dp, `ToolbarIdiom.of(config)`) :
   disposition par défaut **propre à la tablette**, dans les deux vues : barre
   **gauche** = `patchList`, `universe`, `cabling`, `layers`.
-- **Téléphone** : aucune barre ancrée par défaut ; la barre flottante
-  historique dépend de Q1 (recommandation : retirée).
+- **Téléphone** : aucune barre ancrée par défaut.
+- **Barre flottante historique** (bas-gauche, les deux appareils) : Q1
+  (recommandation : retirée sur téléphone **et** tablette). Si elle était
+  gardée, elle ne s'afficherait pas sur tablette quand la disposition
+  préremplie s'applique (deux barres à gauche se gêneraient).
 - `ToolbarLayoutStore.load(view, idiom)` : une disposition **enregistrée** est
   toujours respectée (vidée, elle reste vide). Comme `SceneScreen.kt:141-142`
   enregistre aujourd'hui la disposition vide dès la première ouverture, la
   tranche E pose une **migration une fois** (clé `toolbar.layout.v2.done`) :
   une disposition enregistrée **vide** d'avant la migration compte comme « non
   personnalisée » (elle équivalait au défaut) et est effacée ; ensuite, on
-  n'enregistre plus qu'au changement fait par l'utilisateur.
+  n'enregistre plus qu'au changement fait par l'utilisateur. La même
+  migration remplace `gdtfShare` par `gdtfMapping` dans toute disposition
+  enregistrée : l'ancien outil Android `gdtfShare` ouvrait l'écran des
+  modèles, qui devient « Modèles de projecteurs » (`gdtfMapping`, §4.6).
 - Catalogue du plan : + `patchList`, `universe`, `cabling`, `layers`,
   `multiSelect`, `geoPanel`, `refPlanPanel` ; catalogue 3D : + `multiSelect`,
-  `geoPanel`, `refPlanPanel`, `importDXF`, `modelsPanel`.
+  `geoPanel`, `refPlanPanel`, `importDXF`, `modelsPanel`, `gdtfMapping`
+  (après `gdtfShare`, ordre iOS).
 - La barre gauche **évite** la légende du plan, les panneaux flottants
   ouverts, la fiche et la bannière (cadres mesurés, `clearanceLift`) ; sans
   place, elle passe à droite de l'obstacle (iOS `leadingBarOffset`).
@@ -816,12 +942,15 @@ sealed interface ProjectDestination {
     data class Cabling(val tab: CablingScreenTab?) : ProjectDestination   // null = dernier onglet
     data class Layers(val tab: LayersTab) : ProjectDestination            // LAYERS / CLASSES
     data object FixtureModels : ProjectDestination
-    data object MaLibrary : ProjectDestination
+    data object MaLibrary : ProjectDestination      // profil reçu, crochet ; sinon sous-volet de FixtureModels
     data object AccountSettings : ProjectDestination
     data object ShareProject : ProjectDestination   // dialogue
     data object History : ProjectDestination        // dialogue
 }
 ```
+
+- Une seule destination à la fois (pas de pile) ; ce qui s'ouvre *depuis*
+  une destination est un sous-volet interne (§3.10).
 
 - `SceneScreen.open(dest, from: ProjectSurface)` est le **seul** point
   d'entrée (menu, outils ancrés, fiche, crochets DEBUG, profil MA reçu).
@@ -860,8 +989,10 @@ Mémoire (onglet, voie travaillée, position) : `cablingMemory`, inchangée.
 ### 4.4 Modèle du menu et de la pastille
 
 - `MainMenuContext` (valeur) : surface, plan importé ?, nombre de modèles
-  importés, câblage existant ?, modes de coloration disponibles, éléments
-  masqués ?, solo actif ?, sélection non vide ?. **Pas de `isPro`.**
+  importés, synchro branchée ? (`sync != null`, toujours vrai dans l'app,
+  faux dans les tests sans service : section Équipe absente, règle iOS),
+  câblage existant ?, modes de coloration disponibles, éléments masqués ?,
+  solo actif ?, sélection non vide ?. **Pas de `isPro`.**
 - `MainMenuModel.sections(ctx): List<MainMenuSection>` — entrées
   (`MainMenuItemId` stable, clé de texte, icône, type : action / bascule /
   choix de valeur / famille) dans l'ordre §3.2.
@@ -885,11 +1016,37 @@ idiom)` + migration §3.13. Table pure `ToolId.home` : l'autre place de chaque
 outil (menu ⋯, panneau, bouton permanent, pastille, fenêtre), testée contre
 `MainMenuModel` et `GeoPanelContent`.
 
-Nouveaux `ToolId` (rawId = valeurs iOS) : `MULTI_SELECT` (`multiSelect`),
-`GEO_PANEL` (`geoPanel`), `REF_PLAN_PANEL` (`refPlanPanel`), `MODELS_PANEL`
-(`modelsPanel`). `DXF` (`importDXF`) ne fait plus qu'importer et
-`IMPORT_MODEL` (`importModel`) qu'importer ; leurs libellés ne changent plus
-selon l'état.
+Nouveaux `ToolId` (rawId = valeurs iOS), **chacun créé dans la tranche qui
+en a besoin** :
+
+| ToolId | rawId | Titre | Tranche | Pourquoi là |
+|---|---|---|---|---|
+| `GEO_PANEL` | `geoPanel` | Position GPS | B | ouvre le panneau créé en B (tests B) |
+| `MULTI_SELECT` | `multiSelect` | Multi-sélection | C (si Q2 = oui) | le bouton permanent se masque quand l'outil est ancré : l'outil doit exister avec le bouton |
+| `REF_PLAN_PANEL` | `refPlanPanel` | Régler le plan importé | E | jusque-là, l'outil `importDXF` garde ses deux états (importer / ouvrir le panneau, désormais sans garde) |
+| `MODELS_PANEL` | `modelsPanel` | Modèles importés | E | idem pour `importModel` |
+| `GDTF_MAPPING` | `gdtfMapping` | Modèles de projecteurs | E | catalogue 3D, ouvre Modèles de projecteurs (iOS `gdtfMapping`) |
+
+En E, `DXF` (`importDXF`) ne fait plus qu'importer et `IMPORT_MODEL`
+(`importModel`) qu'importer ; leurs libellés ne changent plus selon l'état.
+`GDTF_SHARE` (`gdtfShare`) prend le sens iOS — la **connexion** GDTF Share,
+titre « GDTF Share » — et ouvre « Compte & réglages » (section Services) ;
+la migration v2 (§3.13) remplace `gdtfShare` par `gdtfMapping` dans les
+dispositions enregistrées. Avant E, l'outil `gdtfShare` ouvre « Modèles de
+projecteurs » (l'écran qu'il ouvrait déjà).
+
+Table `ToolId.home` pour les outils propres à Android ou dont la place
+diffère d'iOS (les autres suivent iOS) :
+
+| ToolId | Autre place |
+|---|---|
+| `clearSelection` | ✕ « Vider la sélection » de la fiche et de la bannière (D) |
+| `gpsMarkerSize`, `threePointCalibration` | intérieur du panneau Position GPS |
+| `structure`, `legend` | ⋯ › Affichage (plan) |
+| `labelSize` | ⋯ › Affichage › Réglage des étiquettes… |
+| `solo` (3D), `showAll`, `clearSolo` | ⋯ › Masquer & isoler (iOS : `showAll` dans la feuille Éléments masqués, absente sur Android) |
+| `gdtfShare` | intérieur de Compte & réglages (Services) |
+| `colorMode`, `search`, `cameraPresets` | aucun `ToolSpec`, dans aucun catalogue : inertes, hors table |
 
 ### 4.7 Crochets DEBUG
 
@@ -899,6 +1056,7 @@ Extras d'intent lus par `MainActivity` **seulement si l'app est débogable**
 | Crochet | Effet | Tranche |
 |---|---|---|
 | `MVR_AUTO_PLAN=1` | ouvre le plan comme vue de base | A |
+| `MVR_AUTO_HOME_DEST=account` | ouvre Compte & réglages depuis l'accueil (sans projet) | A |
 | `MVR_AUTO_DEST=<patch\|universe\|cabling[:electrical\|dmx\|powers]\|layers\|classes\|models\|ma\|account\|share\|history>` | ouvre la destination ~2 s après l'affichage, par-dessus la vue courante | A |
 | `MVR_AUTO_PLAN_START=<export\|cal3\|here>` | ouvre le plan avec cette action | A |
 | `MVR_AUTO_GEOPANEL=1`, `MVR_AUTO_REFPLAN_PANEL=1`, `MVR_AUTO_LABELS_PANEL=1` | ouvre le panneau dans la vue courante | B |
@@ -927,7 +1085,7 @@ pointerait dans le vide). Tranches : §10.
 |---|---|---|---|---|
 | 1 | Indicateur « GDTF Share en cours » | aucun (titre 3D « … proj. GDTF… » pendant la construction) | pastille « Modèles GDTF en cours… » du bloc d'état | C |
 | 2 | Sélection par cadre | outil RECT : barre flottante (3D, plan), ⋯ › Outils | bouton permanent haut-droite des deux vues, masqué s'il est ancré ; retiré du ⋯ | C |
-| 3 | Multi-sélection | n'existe pas (3D : le toucher ajoute toujours ; plan : le cadre fait office de multi) | bouton permanent + outil `multiSelect` (Q2) | C |
+| 3 | Multi-sélection | n'existe pas (3D : le toucher ajoute toujours ; plan : le cadre fait office de multi) | bouton permanent + outil `multiSelect` créé dans la même tranche (Q2) | C |
 | 4 | Menu ⋯ | un `SceneOptionsMenu` (⋮) au contenu différent par vue, ~25 lignes à plat | un seul menu, même place, même contenu (`MainMenuModel` + `MainMenu`) | C |
 | 5 | Projets récents… | ← de la 3D, retour système | ⋯ › « Fermer le projet » (dernière ligne) ; ← gardée (§8 D2) | C |
 | 6 | Mesurer | outil MEASURE (barre flottante, ⋯ › Outils) | ⋯ › rangée 1 ; outil gardé | C |
@@ -965,7 +1123,7 @@ pointerait dans le vide). Tranches : §10.
 | 38 | Liste de patch | ⋯ 1er niveau (3D et plan), outil PATCH (3D) ; retour toujours vers la 3D | ⋯ › rangée 2 « Patch », par-dessus la vue courante, retour à l'origine | C |
 | 39 | Univers DMX | ⋯ 1er niveau (3D), outil | rangée 2 « Univers » | C |
 | 40 | Câblage | ⋯ « Câblage électrique » (3D), dernier onglet retenu | rangée 2 « Câblage » + Patch & câblage › 3 entrées par onglet | C |
-| 41 | Modèles de projecteurs | ⋯ « GDTF Share (modèles 3D) » (3D) | Patch & câblage › « Modèles de projecteurs… » (deux vues) | C |
+| 41 | Modèles de projecteurs | ⋯ « GDTF Share (modèles 3D) » (3D), outil `gdtfShare` « GDTF Share » (3D) | Patch & câblage › « Modèles de projecteurs… » (deux vues) ; outil `gdtfMapping` en E (`gdtfShare` = connexion, migration §3.13) | C |
 | 42 | GDTF Share (connexion) | formulaire dans l'écran GDTF Share | Compte & réglages › Services + ligne d'état en tête de Modèles de projecteurs | A |
 | 43 | Compte | ⋯ › Synchro « Compte », accueil « Mon compte / Se connecter », outil ACCOUNT ; `AlertDialog` | écran « Compte & réglages » | A |
 | 44 | Partager ce projet… | ⋯ › Synchro (Pro à l'entrée) | Partager & exporter › Équipe (ouvrir gratuit, publier Pro) | C |
@@ -977,8 +1135,8 @@ pointerait dans le vide). Tranches : §10.
 | 50 | Vue 1/2/3 | n'existe pas | absent | C |
 | 51 | Pastille de projection du plan | n'existe pas (dessus seulement) | pastille Vue (plan) « Plan · Dessus » : Dessus + « Vue 3D » | C |
 | 52 | « Génération des icônes… » | n'existe pas | sans objet | C |
-| 53 | Pastilles d'état | titre de la barre 3D ; pastille synchro bas-droite ; classes masquées jamais signalées | bloc d'état §3.5 (pluriels) | C |
-| 54 | Bannière « Nouvelle version » | haut-centre | inchangée | C |
+| 53 | Pastilles d'état | titre de la barre 3D ; pastille synchro bas-droite au-dessus de tous les modes ; classes masquées jamais signalées | bloc d'état §3.5 (pluriels) ; synchro : bloc d'état en 3D, à droite sous la rangée dans le plan (D21), plus visible sur les écrans pleins | C |
+| 54 | Bannière « Nouvelle version » | haut-centre, pleine largeur, par-dessus la barre du haut | contenu inchangé ; posée sous la rangée du haut (jamais sur ← ni ⋯) | C |
 | 55 | Recherche par N° | champ permanent haut-droite (deux vues), « N° projecteur », pas de retour si rien | bas-droite, loupe → champ « N° de projecteur », « Aucun projecteur nº %s » | C |
 | 56 | Recadrer | 3D : « Réinitialiser la vue » + outil CAM_RESET « Recentrer la caméra » ; plan : n'existe pas | bas-droite sous la recherche, deux vues, icône unique | C |
 | 57 | Double-toucher 3D | n'existe pas | sans objet | C |
@@ -993,7 +1151,7 @@ pointerait dans le vide). Tranches : §10.
 | 66 | Appui long → patch | deux vues | inchangé | D |
 | 67 | Panneau Plan importé (3D) | n'existe pas | **nouveau** : panneau partagé, avec Rotation verticale | B |
 | 68 | Panneau Plan importé (plan) | Pro à l'entrée, bas-droite, avec Rotation verticale | lisible, setters Pro, bas-gauche, sans Rotation verticale | B |
-| 69 | Panneau Modèles importés | flottant 3D, Pro à l'entrée | inchangé (passe en bas-gauche, §8 D13) | B |
+| 69 | Panneau Modèles importés | flottant 3D bas-droite, Pro à l'entrée, titre « Modèles 3D (%d) » | Pro à l'entrée inchangé ; titre « Modèles importés (%d) » en E (clé `tool_models_fmt` gardée, valeur changée) ; passe en bas-gauche en C (`IMPORTED_MODELS_3D_LEADING`, §8 D13) | B |
 | 70 | Feuille Calques | `Dialog` LOD « Calques · Vue 3D » (3D seulement) | feuille « Calques » des deux vues, segment Calques \| Classes | A |
 | 71 | Feuille Classes | `Dialog` à part | onglet de la feuille Calques | A |
 | 72 | Fenêtre « Mettre le plan à l'échelle » | n'existe pas | sans objet | C |
@@ -1008,14 +1166,14 @@ pointerait dans le vide). Tranches : §10.
 | 81 | Nommer la vue | champ du panneau + dialogue Renommer | inchangé | E |
 | 82 | Vues du PDF | n'existe pas (liste dans le panneau) | sans objet | E |
 | 83 | Barres ancrables (accessibilité) | `contentDescription` = libellé ; état coché par `FilledIconToggleButton` | vérifié à TalkBack ; table `ToolId.home` testée | E |
-| 84 | Libellés des outils | « Sélection rectangle », « Taille des étiquettes », « Recentrer la caméra », « Calibrer : je suis ici », « Vue plan », « Export PDF », « Ma position GPS / (3D) », « Solo (sélection seule) », « Vider le solo », « Effacer la sélection », « Taille du marqueur », « Calques » / « Compte » / « GDTF Share » en dur | titres iOS (§7.2) | E |
-| 85 | Liste de patch | écran plein, ← « Retour 3D » ; pas de multi | retour à la vue d'origine (« Retour ») ; pas de multi-édition (Q3) | A |
+| 84 | Libellés des outils | « Sélection rectangle », « Taille des étiquettes », « Recentrer la caméra », « Calibrer : je suis ici », « Vue plan », « Export PDF », « Ma position GPS / (3D) », « Solo (sélection seule) », « Vider le solo », « Effacer la sélection », « Taille du marqueur », « Câblage électrique », « Calques » / « Compte » / « GDTF Share » en dur | titres iOS (§7.2) ; `gdtfShare` / `gdtfMapping` (§4.6) | E |
+| 85 | Liste de patch | écran plein, ← « Retour 3D » (comme Univers, Câblage, GDTF Share, Bibliothèque MA) ; pas de multi | retour à la vue d'origine, ← « Retour » sur les cinq écrans ; pas de multi-édition (Q3) | A |
 | 86 | Univers DMX | inspecteur sans action | + « Éditer » par projecteur | D |
 | 87 | Câblage : onglets | déjà Électrique / DMX / Puissances, dernier onglet retenu | + ouverture sur l'onglet demandé | A |
 | 88 | Câblage : le reste | écran Câblage | inchangé | D |
 | 89 | Éditer le patch (fenêtre) | fiche patch (« N° », votes en pluriel déjà) | relecture du vocabulaire seulement | E |
-| 90 | Modèles de projecteurs : ligne GDTF Share | déconnecté → formulaire seul | ligne d'état + liste toujours visible | A |
-| 91 | GDTF Share (identifiants) | dans l'écran GDTF Share | `GdtfShareLoginPane` depuis Compte & réglages ou la ligne d'état | A |
+| 90 | Modèles de projecteurs : ligne GDTF Share | déconnecté → formulaire seul ; « Déconnexion » en bas | ligne d'état + bouton « Se déconnecter » au bout de la ligne ; liste toujours visible ; type touché déconnecté → connexion puis recherche | A |
+| 91 | GDTF Share (identifiants) | dans l'écran GDTF Share | sous-volet `GdtfShareLoginPane` depuis Compte & réglages ou la ligne d'état | A |
 | 92 | Bibliothèque MA : rapport | « OK » | « Terminé » | E |
 | 93 | Création d'un type MA (fin) | n'existe pas (pas d'écran de fin « OK ») | sans objet | E |
 | 94 | Type personnalisé | depuis la fiche patch | inchangé | A |
@@ -1035,17 +1193,17 @@ Récapitulatif : A = 15 lignes, B = 23, C = 45, D = 10, E = 8 (101).
 
 | # | Option Android | Où aujourd'hui | Après | Tr. |
 |---|---|---|---|---|
-| A1 | Barre flottante historique (3D 6 outils, plan 12) | `AnchoredToolbars.kt:112`, `ToolbarLayout.kt:183-193` | Q1 : retirée sur téléphone (recommandé), chaque outil ayant une autre place (`ToolId.home`) | C |
+| A1 | Barre flottante historique (3D 6 outils, plan 12) | `AnchoredToolbars.kt:112`, `ToolbarLayout.kt:183-193` | Q1 : retirée sur téléphone et tablette (recommandé), chaque outil ayant une autre place (`ToolId.home`) ; seule exception transitoire : « Vider la sélection », dont le ✕ arrive en D (entre C et D : toucher le vide désélectionne, comme aujourd'hui) | C |
 | A2 | ← en 3D (ferme le projet) | `Scene3DScreen.kt:1979` | gardée dans la rangée commune (§8 D2) | C |
 | A3 | Menu « Points de vue » (icône caméra) | `Scene3DScreen.kt:1987` | pastille Vue + Recadrer | C |
 | A4 | Section *Outils* du ⋯ (doublon des barres, `toMenuTools`) | `SceneOptions.kt:280-307` | supprimée | C |
 | A5 | « Décor / structure » (plan) | ⋯ + outil STRUCTURE | Affichage (plan) ; outil gardé | C |
 | A6 | « Légende » (plan) | ⋯ + outil LEGEND | Affichage (plan) ; outil gardé | C |
-| A7 | « Masquer si trop dézoomé » | ⋯ (deux vues) | panneau d'étiquettes (plan), libellé iOS « Masquer les étiquettes trop dézoomées » | B |
+| A7 | « Masquer si trop dézoomé » | ⋯ (deux vues ; sans effet en 3D) | panneau d'étiquettes (plan), libellé iOS « Masquer les étiquettes trop dézoomées » ; quitte la 3D (A27) | B |
 | A8 | Taille / Écart en cycles dans le ⋯ | `SceneOptions.kt:417-442` | panneau d'étiquettes, segments | B |
 | A9 | Champs + « ↳ bloc séparé » dans le ⋯ | `SceneOptions.kt:392-408` | panneau (Contenu ; Blocs séparés dans Placement) | B |
 | A10 | « Taille du marqueur » (outil 3 crans) | `Scene3DScreen.kt:1860` | panneau GPS (curseur) ; outil gardé, titre « Taille du point GPS » | B |
-| A11 | « Effacer la sélection » (outil) | barre flottante, ⋯ | ✕ de la fiche et de la bannière ; outil gardé, titre « Vider la sélection » | C |
+| A11 | « Effacer la sélection » (outil) | barre flottante, ⋯ | ✕ de la fiche et de la bannière (D) ; outil gardé, titre « Vider la sélection » (E) ; entre C et D, toucher le vide désélectionne (A1) | C |
 | A12 | « Calibrer en 3 points (guidé)… » en outil | `PlanScreen.kt:1121` | panneau GPS ; outil gardé | B |
 | A13 | Solo en 3D (isole la sélection) | outil SOLO 3D | ⋯ › Masquer & isoler en 3D (§8 D4) | C |
 | A14 | « Rejoindre un projet » dans le ⋯ | `SceneOptions.kt:317` | accueil seulement | C |
@@ -1053,13 +1211,18 @@ Récapitulatif : A = 15 lignes, B = 23, C = 45, D = 10, E = 8 (101).
 | A16 | Écran combiné « GDTF Share (modèles 3D) » | `GdtfShareScreen.kt` | « Modèles de projecteurs » (§3.10) | A |
 | A17 | Panneau Export PDF (Envoyer, Imprimer) | `PlanScreen.kt:2517` | gardé, titre « PDF du plan », bas-gauche | E |
 | A18 | Rotation verticale dans le panneau du plan | `PlanScreen.kt:2342` | panneau Plan importé en 3D seulement | B |
-| A19 | Pastille de synchro bas-droite | `SceneScreen.kt:1348` | bloc d'état 3D | C |
+| A19 | Pastille de synchro bas-droite, au-dessus de tous les modes | `SceneScreen.kt:1348` | bloc d'état 3D ; dans le plan, à droite sous la rangée (D21) ; plus visible sur les écrans pleins (dit au §3.5) | C |
 | A20 | Titre « Plan · N projecteur(s) » | `PlanScreen.kt:1980` | retiré | C |
 | A21 | Curseur d'opacité dans le ⋯ (deux vues) | `SceneOptions.kt:351` | panneau GPS | B |
 | A22 | Libellés d'outils variables (DXF, IMPORT_MODEL) | `PlanScreen.kt:1140`, `Scene3DScreen.kt:1871` | outils séparés à libellé fixe (`importDXF` / `refPlanPanel`, `importModel` / `modelsPanel`) | E |
-| A23 | Outils sans équivalent iOS : `clearSelection`, `gpsMarkerSize`, `threePointCalibration`, `structure`, `legend`, `colorMode`, `search`, `cameraPresets` | `ToolbarLayout.kt:30` | rawId gardés ; `cameraPresets` (sans `ToolSpec`) reste inerte | E |
+| A23 | Outils sans équivalent iOS : `clearSelection`, `gpsMarkerSize`, `threePointCalibration`, `structure`, `legend`, `colorMode`, `search`, `cameraPresets` | `ToolbarLayout.kt:30` | rawId gardés ; `colorMode`, `search` et `cameraPresets` n'ont aucun `ToolSpec` et restent inertes (hors catalogues, hors table `home`) ; les autres ont leur place dans la table `ToolId.home` (§4.6) | E |
 | A24 | Rapport de diagnostic (accueil) | `HomeScreen.kt:224` | inchangé | — |
 | A25 | Aide « Touchez VOTRE position… » (bas-centre) | `PlanScreen.kt:2675` | inchangée, armée aussi depuis le panneau | B |
+| A26 | Outil `gdtfShare` « GDTF Share » (3D) | `Scene3DScreen.kt:1938` | A : ouvre Modèles de projecteurs ; E : sens iOS (connexion → Compte & réglages), `gdtfMapping` ajouté, migration des dispositions (§3.13, §4.6, D24) | E |
+| A27 | « ↳ bloc séparé » et « Masquer si trop dézoomé » dans le ⋯ **3D** | `SceneOptions.kt:403`, `:446` | sans effet en 3D : absents du panneau 3D, présents dans celui du plan | B |
+| A28 | Panneau Modèles importés : titre « Modèles 3D (%d) » | `ModelPlacementPanel.kt:84` | « Modèles importés (%d) » (même clé, valeur changée) | E |
+| A29 | Plan importé : persistance du placement dans le plan | `PlanScreen.kt:819-834` | hissée dans `SceneScreen` avec l'import (le panneau 3D doit enregistrer et partager) | B |
+| A30 | Bouton « Déconnexion » (compte) et bouton de déconnexion en bas de l'écran GDTF Share | `SyncUI.kt:153`, `GdtfShareScreen.kt:264` | « Se déconnecter » (compte) ; GDTF Share : bouton au bout de la ligne d'état | A |
 
 ---
 
@@ -1167,6 +1330,10 @@ Noms de ressources proposés ; « (pl.) » = `<plurals>` one / other.
 | `mode_isolate_box` | Tracez un cadre à isoler | Drag a box to isolate |
 | `toolbar_all_off` | Tout remettre hors barres | Put everything back off the bars |
 | `cabling_pdf_generating` | Génération du PDF… | Generating the PDF… |
+| `tool_ref_plan_panel` | Régler le plan importé | Adjust the imported plan |
+| `tool_models_panel` | Modèles importés | Imported models |
+
+Titres d'outils repris de clés de ce tableau : `geoPanel` = `geo_panel_title`, `multiSelect` = `perm_multi_select`, `gdtfMapping` = `models_title`, `account` = `account_settings_title`, `layers` = `menu_layers`, `cabling` = `menu_cabling` (valeurs iOS de `ToolId.title`).
 
 ### 7.2 Textes modifiés
 
@@ -1196,7 +1363,10 @@ Noms de ressources proposés ; « (pl.) » = `<plurals>` one / other.
 | `edge_none` | Aucun | Hors barres | Off the bars |
 | `menu_options` | Options | → remplacée par `menu_more_options` | |
 | — (en dur) | « Calques », « Compte », « GDTF Share » (outils), section Pro, carte de l'accueil | ressources (`menu_layers`, `account_settings_title`, `models_title`, `pro_*`, `home_account_prompt_*`) | |
-| `fx_power_confirm` | C'est bon | inchangé | **Looks right** gardé (l'`en` iOS « Done » se confondrait avec « Terminé ») |
+| `fx_power_confirm` | C'est bon | inchangé | **Looks right** gardé (l'`en` iOS « Done » se confondrait avec « Terminé ») — §8 D22 |
+| `sync_sign_out` | Déconnexion | Se déconnecter | Sign out (inchangé) |
+| `tool_models_fmt` (titre du panneau Modèles importés) | Modèles 3D (%1$d) | Modèles importés (%1$d) | Imported models (%1$d) |
+| `nav_power_cabling` (titre de l'outil `cabling`) | Câblage électrique | → `menu_cabling` « Câblage » (titre iOS) | Cabling |
 
 Textes réutilisés tels quels : `opt_labels`, `patch_title`, `cam_top`,
 `cam_front`, `nav_view_3d`, `menu_section_background`, `nav_custom_color`,
@@ -1215,10 +1385,14 @@ Textes réutilisés tels quels : `opt_labels`, `patch_title`, `cam_top`,
 `nav_power_cabling` (si plus d'usage), `cam_viewpoints`, `cam_side`, `cam_iso`,
 `cam_reset_view`, `opt_coloring_fmt`, `opt_satellite_map`, `opt_size_fmt`,
 `opt_gap_fmt` (remplacés par les segments), `opt_label_detached`,
-`plan_title_fmt`, `layers_title_3d`, `home_my_account`, `common_back_3d`,
-`tool_ref_plan`, `tool_models_fmt`, `tool_gps_3d`, `sync_sign_in_title` (si plus
-d'usage). Contrôle à chaque tranche : `grep` de la clé dans `app/src/main`
-(aucun usage restant) et test de présence fr / en.
+`opt_label_detached_cap` (remplacés par « Blocs séparés »), `plan_title_fmt`,
+`layers_title_3d`, `home_my_account`, `common_back_3d` (ses cinq usages,
+§2.6, disparaissent en A), `tool_ref_plan`, `tool_gps_3d`,
+`sync_sign_in_title` (si plus d'usage). `tool_models_fmt` n'est **pas**
+supprimée : elle reste le titre du panneau Modèles importés
+(`ModelPlacementPanel.kt:84`), valeur changée en E. Contrôle à chaque
+tranche : `grep` de la clé dans `app/src/main` (aucun usage restant) et test
+de présence fr / en.
 
 ---
 
@@ -1246,19 +1420,28 @@ d'usage). Contrôle à chaque tranche : `grep` de la clé dans `app/src/main`
 | D16 | Destinations en surimpression au-dessus de la vue de base (et non feuilles iOS). | Équivalent Android de « par-dessus le plan » ; évite aussi la reconstruction 3D au retour du patch. |
 | D17 | Les PDF de câblage du ⋯ partagent le moteur de l'écran Câblage (fonction extraite). | Un seul code de génération. |
 | D18 | rawId propres à Android (`threePointCalibration`, `clearSelection`, `gpsMarkerSize`, `structure`, `legend`, `colorMode`, `search`, `cameraPresets`) gardés. | JSON persistant : une disposition existante doit se relire. |
+| D19 | **VISIBLE** — Dans le plan, « Terminé » est la flèche ← (icône, TalkBack « Terminé »), pas le mot. | Même place (gauche) et même rôle que la décision 2 ; une flèche de navigation est la forme Android (D1), et la 3D garde la même flèche (D2) : un mot à gauche dans le plan seul serait la seule exception de l'app. |
+| D20 | **VISIBLE** — En 3D, « Afficher ma position » est désactivé tant que la scène n'est pas calibrée (légende « Calibrez d'abord… » dessous). | Le point GPS 3D n'existe que par la calibration (l'outil 3D actuel est déjà indisponible sans elle) ; absence de donnée, jamais Pro. |
+| D21 | **VISIBLE** — Pastille de synchro aussi dans le plan (à droite sous la rangée) ; plus sur les écrans pleins. | Android la montre aujourd'hui dans le plan : la retirer ferait disparaître l'état de synchro (erreur comprise) pendant tout le travail sur le plan. Les écrans pleins, opaques, la cachent (iOS : 3D seulement). |
+| D22 | **VISIBLE (en)** — « C'est bon » reste « Looks right » en anglais (iOS : « Done »). | « Done » se confondrait avec « Terminé » / « Done » des fenêtres. |
+| D23 | **VISIBLE** — En 3D, « Isoler (solo) » est grisé sans sélection ni solo (iOS : une entrée sans donnée est plutôt absente). | Laisser la famille « Masquer & isoler » vide en 3D serait pire ; le grisé dit pourquoi rien ne se passe. Jamais selon Pro. |
+| D24 | **VISIBLE** — L'outil `gdtfShare` (« GDTF Share ») ouvre « Compte & réglages » (Services), pas une fenêtre GDTF Share à part ; les dispositions Android qui l'avaient sont migrées vers `gdtfMapping`. | Android n'a pas de fenêtre de réglages GDTF Share séparée ; la connexion vit dans Compte & réglages (décision 3). L'ancien outil Android ouvrait les modèles : la migration garde ce que l'utilisateur avait voulu. |
 
 ---
 
 ## 9. Questions ouvertes (à poser à l'utilisateur)
 
-**Q1 — Barre flottante historique sur téléphone.** Aujourd'hui, la 3D montre
-en bas à gauche 6 boutons d'outils et le plan 12, par défaut. iOS a tranché :
-iPhone sans barre par défaut, tout est dans les boutons permanents, le ⋯ et
-les panneaux (décision 9). **Recommandation : la retirer** sur téléphone
-(une disposition déjà personnalisée par l'utilisateur est gardée ; chaque
-outil reste ancrable et a une autre place ; bandeaux de mode ajoutés, §3.14).
-Sinon : la garder, réduite aux outils sans autre bouton à l'écran (Masquer,
-Isoler, Tout réafficher, Vider l'isolement) — divergence visible de plus.
+**Q1 — Barre flottante historique (téléphone et tablette).** Aujourd'hui, la
+3D montre en bas à gauche 6 boutons d'outils et le plan 12, par défaut, sur
+tous les appareils. iOS a tranché : iPhone sans barre par défaut, iPad avec
+la barre gauche préremplie, tout le reste dans les boutons permanents, le ⋯
+et les panneaux (décision 9). **Recommandation : la retirer** partout (une
+disposition déjà personnalisée par l'utilisateur est gardée ; chaque outil
+reste ancrable et a une autre place ; bandeaux de mode ajoutés, §3.14 ; la
+tablette reçoit la barre gauche préremplie). Sinon : la garder sur
+téléphone, réduite aux outils sans autre bouton à l'écran (Masquer, Isoler,
+Tout réafficher, Vider l'isolement) — divergence visible de plus — et jamais
+en même temps que la barre préremplie de la tablette.
 
 **Q2 — Toucher en 3D.** Aujourd'hui, toucher un projecteur en 3D l'**ajoute**
 à la sélection (on en accumule plusieurs sans le vouloir), alors que dans le
@@ -1301,17 +1484,26 @@ Périmètre :
    (§4.3) — parcours livrés inchangés.
 3. Feuille « Calques » (fusion `LayersSheet` + `ClassesSheet`, segment) ;
    depuis le plan sans LOD.
-4. Écran « Modèles de projecteurs » (ligne GDTF Share, Bibliothèque MA, liste
-   toujours visible).
+4. Écran « Modèles de projecteurs » (ligne GDTF Share avec « Se
+   déconnecter » au bout, sous-volets Bibliothèque MA et connexion, liste
+   toujours visible, type touché déconnecté → connexion puis recherche).
+   L'outil `gdtfShare` et l'ancienne entrée « GDTF Share (modèles 3D) »
+   l'ouvrent (libellés inchangés jusqu'à C / E).
 5. « Compte & réglages » plein écran (§3.11) + accueil (bouton, carte, textes
-   en ressources) + outil `account`.
+   en ressources ; hôte dans `App` avec son retour système) + outil `account`
+   ; `sync_sign_out` → « Se déconnecter ».
 6. « Fermer le projet » pendant la lecture du .mvr.
-7. Liste de patch / Univers / Câblage : ← « Retour », retour à la vue d'origine.
+7. Les **cinq** écrans pleins qui disent « Retour 3D » (Patch, Univers,
+   Câblage, Modèles de projecteurs, Bibliothèque MA — aussi depuis l'accueil)
+   : ← « Retour », retour à la vue d'origine ; `common_back_3d` supprimée.
 8. `PlanStartAction` (§4.2) ; crochets `MVR_AUTO_PLAN`, `MVR_AUTO_DEST`,
-   `MVR_AUTO_PLAN_START` ; `testTagsAsResourceId` en DEBUG ; données
-   `app/src/test/resources/menus/`.
+   `MVR_AUTO_PLAN_START`, `MVR_AUTO_HOME_DEST` ; `testTagsAsResourceId` en
+   DEBUG ; données `app/src/test/resources/menus/`.
 9. Les anciennes entrées du ⋯ pointent vers `open(…)` (le menu lui-même change
-   en C).
+   en C) : « Compte » → Compte & réglages, « Classes… » → Calques sur
+   l'onglet Classes, « Calques… » (3D) → Calques, « GDTF Share (modèles 3D) »
+   → Modèles de projecteurs, « Bibliothèque MA » → destination MaLibrary ;
+   profil MA reçu → `open(MaLibrary)` par-dessus la vue courante.
 
 Lignes : 9, 42, 43, 70, 71, 85, 87, 90, 91, 94, 95, 96, 97, 98, 100.
 
@@ -1323,7 +1515,9 @@ Tests unitaires (`ProjectNavigationTest`) :
 - `CablingAssignRoute` : les 10 cas du tableau §4.3.
 - `PlanStartAction` consommée une seule fois.
 - `AccountSettingsSections` : ordre Compte, MVR Viewer Pro, Services ; pas de
-  Débogage.
+  Débogage ; Compte absent sans synchro.
+- Sous-volets : MaLibrary ouverte depuis Modèles → retour vers Modèles, pas
+  vers la base (réducteur ou état de l'écran, testé).
 - Textes : chaque nouvelle clé de la tranche existe en fr et en (`TestRes`).
 
 Contrôle à l'écran (émulateur Medium_Phone, `mini.mvr`, portrait et paysage) :
@@ -1337,7 +1531,11 @@ Contrôle à l'écran (émulateur Medium_Phone, `mini.mvr`, portrait et paysage)
       « Terminé » de la barre → Câblage par-dessus le plan, sur la voie
       travaillée ; parcours depuis la 3D inchangé ;
 - [ ] Compte & réglages depuis l'accueil (bouton et carte) ; GDTF Share s'y
-      connecte ; la résolution des modèles repart après connexion ;
+      connecte et s'y déconnecte (bouton, pas la ligne) ; la résolution des
+      modèles repart après connexion ;
+- [ ] Modèles de projecteurs déconnecté : liste visible, un type touché →
+      connexion → recherche ; Bibliothèque MA → ← revient à Modèles ;
+- [ ] ← des cinq écrans pleins : TalkBack « Retour » (`uiautomator dump`) ;
 - [ ] lecture de `test-gc-v1.mvr` : « Fermer le projet » → accueil, aucun
       plantage, aucun journal d'erreur après coup ;
 - [ ] en anglais (`adb shell cmd locale set-app-locales com.minou.mvrviewer
@@ -1347,17 +1545,33 @@ Contrôle à l'écran (émulateur Medium_Phone, `mini.mvr`, portrait et paysage)
 
 Périmètre :
 1. `GeoPositionPanel` + `GeoPanelContent` (§3.6) dans les deux vues, nouveaux
-   `PanelID`, outil `geoPanel`, « Réinitialiser la calibration », calibrations
-   depuis la 3D par `PlanStartAction`, `armHereAnchor` unique.
+   `PanelID` (`geoPosition3D`, `geoPositionPlan`), **`ToolId.GEO_PANEL`
+   créé ici** (catalogues 3D et plan), « Réinitialiser la calibration »,
+   calibrations depuis la 3D par `PlanStartAction`, `armHereAnchor` unique.
 2. Retraits : curseur flottant d'opacité du plan ; satellite, opacité et ligne
-   d'état du ⋯ (anciennes entrées re-pointées vers le panneau jusqu'à C).
-3. `RefPlanPanel` partagé (§3.7) dans les deux vues, import hissé dans
-   `SceneScreen`, lecture pour tous, `ProGate` / `gatedSetter` + throttle ;
-   Rotation verticale en 3D seulement.
-4. `LabelSettingsPanel` partagé (§3.8) dans les deux vues ; options
-   d'étiquettes du ⋯ re-pointées vers le panneau ; outil `labelSize` ouvre le
-   panneau.
-5. Crochets `MVR_AUTO_GEOPANEL`, `MVR_AUTO_REFPLAN_PANEL`, `MVR_AUTO_LABELS_PANEL`.
+   d'état du ⋯.
+3. `RefPlanPanel` partagé (§3.7) dans les deux vues, lecture pour tous,
+   `ProGate` / `gatedSetter` + throttle ; Rotation verticale en 3D
+   seulement ; `PanelID` `referencePlan3D` / `refPlanPlacementPlanLeading` ;
+   **hissés dans `SceneScreen`** : import, centrage (`planData`),
+   `onSetReferencePlan`, persistance débouncée du placement + push (§3.7).
+   L'outil `importDXF` du plan garde ses deux états jusqu'à E (importer ;
+   sinon ouvrir / fermer le panneau, **sans garde** désormais).
+4. `LabelSettingsPanel` partagé (§3.8) dans les deux vues (`labels3D`
+   nouveau, `labelsPlan` gardé) ; Écart et « Masquer les étiquettes trop
+   dézoomées » ajoutés ; outil `labelSize` ouvre le panneau.
+5. **Entrées provisoires de l'ancien ⋯** (jusqu'à C), sans quoi les panneaux
+   de la 3D ne seraient joignables que par crochet :
+   - les deux vues : « Position GPS… » (toujours, à la place du satellite,
+     de son curseur et de la ligne d'état) ; « Réglage des étiquettes… » (à
+     la place des champs, blocs, taille, écart, dézoom, sélection, même
+     type, replacer ; la bascule « Étiquettes » reste) ;
+   - 3D : « Importer un plan (DXF, image, PDF)… » (Pro au toucher) et, s'il
+     y a un plan, « Régler le plan importé… » (gratuit) ;
+   - plan : l'entrée de l'outil DXF reste (deux états, sans garde pour
+     ouvrir le panneau) ; « Calibrer : je suis ici » et « Calibrer en 3
+     points » quittent les *Outils* du ⋯ pour le panneau.
+6. Crochets `MVR_AUTO_GEOPANEL`, `MVR_AUTO_REFPLAN_PANEL`, `MVR_AUTO_LABELS_PANEL`.
 
 Lignes : 11, 12, 13, 14, 15, 16, 25, 26, 29, 30, 31, 32, 33, 34, 35, 36, 37,
 67, 68, 69, 78, 99, 101.
@@ -1372,12 +1586,18 @@ Tests unitaires (`GeoPanelContentTest`, `ProGateTest`, `RefPlanPanelRulesTest`,
   0,8 s ; Pro → valeur écrite ;
 - panneau Plan importé : Rotation verticale en 3D seulement ; section Calques
   si plus d'un calque ;
-- panneau d'étiquettes : Placement dans le plan seulement ;
-- `ToolId.GEO_PANEL` dans les deux catalogues, rawId « geoPanel ».
+- panneau d'étiquettes : Placement, Blocs séparés et dézoom dans le plan
+  seulement ;
+- `ToolId.GEO_PANEL` dans les deux catalogues, rawId « geoPanel » ;
+- centrage du plan importé calculé par `SceneScreen` = centrage historique
+  du plan (`mini.mvr` + `mini.dxf`).
 
 Contrôle à l'écran (`mini.mvr` / `mini.dxf`, `--ez MVR_PRO false` puis `true`) :
-- [ ] 3D et plan : panneau Position GPS réductible, borné, entre la pastille /
-      le bloc d'état et la fiche, en portrait et en paysage ;
+- [ ] 3D et plan : panneau Position GPS réductible, borné sous la barre du
+      haut (3D) / le titre et la recherche (plan), au-dessus de la pastille
+      de sélection et de la bannière actuelles, en portrait et en paysage
+      (la borne passe sur la pastille « Vue » et le bloc d'état en C) ;
+- [ ] chaque panneau 3D s'ouvre par l'ancien ⋯ (entrées provisoires) ;
 - [ ] satellite + opacité en gratuit ; plus aucun curseur flottant ;
 - [ ] « Je suis ici » depuis la 3D → plan, aide d'ancre, pose → « 1 point
       posé… » ; « Réinitialiser la calibration » → « Non calibré » ;
@@ -1387,7 +1607,9 @@ Contrôle à l'écran (`mini.mvr` / `mini.dxf`, `--ez MVR_PRO false` puis `true`
       curseur / calque ouvre l'écran Pro, rien ne bouge, un seul écran Pro par
       glissé ; en Pro : modifications visibles ; en 3D, la rotation verticale
       se voit ;
-- [ ] import d'un plan depuis la 3D (Pro) ;
+- [ ] import d'un plan depuis la 3D (Pro) : panneau 3D ouvert, plan centré
+      comme depuis le plan ; un réglage fait en 3D est retrouvé après
+      fermeture / réouverture du projet et part au projet partagé ;
 - [ ] panneau d'étiquettes 3D et plan : champs, taille, écart ; plan :
       sélection, même type, désactiver, blocs séparés, replacer ;
 - [ ] en anglais.
@@ -1402,15 +1624,25 @@ Périmètre :
 3. `ViewPill` + `ViewPillModel` (§3.3), presets Arrière / Gauche, suppression
    du menu « Points de vue ».
 4. `SceneTopRow` (§3.1) : suppression de la `TopAppBar` 3D et des boutons
-   flottants du plan ; Multi-sélection (selon Q2) ; boutons masqués quand
-   l'outil est ancré.
+   flottants du plan ; Multi-sélection (selon Q2) avec **`ToolId.MULTI_SELECT`
+   créé ici** ; boutons masqués quand l'outil est ancré ; bannière « nouvelle
+   version » sous la rangée.
 5. Pile bas-droite Rechercher + Recadrer (§3.4) ; panneaux en bas-gauche
-   (nouveaux `PanelID`).
-6. Bloc d'état 3D (§3.5), pastille de synchro déplacée, pastille « Plan · N »
-   retirée, `LEGEND_TOP_ANDROID` ajusté.
+   (`importedModels3DLeading`, `exportPlanLeading`) ; cadrage du plan sous
+   la pastille (`planFitMargins`, §3.3) pour l'affectation, les 3 points et
+   Recadrer ; borne haute des panneaux rebranchée sur la pastille et le bloc
+   d'état.
+6. Bloc d'état 3D (§3.5), pastille de synchro déplacée (3D : bloc d'état ;
+   plan : à droite sous la rangée, D21), pastille « Plan · N » retirée,
+   `LEGEND_TOP_ANDROID` ajusté.
 7. Masquer & isoler (§3.2.3) + bandeaux de mode (§3.14).
-8. Barre flottante historique (selon Q1).
-9. Retrait de « Rejoindre un projet » et de « Bibliothèque MA » du ⋯.
+8. Barre flottante historique (selon Q1). Seul manque transitoire jusqu'à D :
+   « Vider la sélection » n'a plus de bouton à l'écran (sauf s'il est ancré)
+   — toucher le vide désélectionne, comme aujourd'hui (cadre armé dans le
+   plan : le couper d'abord par son bouton permanent).
+9. Retrait de « Rejoindre un projet » et de « Bibliothèque MA » du ⋯ ;
+   suppression des entrées provisoires de la tranche B (remplacées par le
+   menu).
 
 Lignes : 1, 2, 3, 4, 5, 6, 7, 8, 10, 17, 18, 19, 20, 21, 22, 23, 24, 27, 28,
 38, 39, 40, 41, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
@@ -1431,7 +1663,11 @@ Tests unitaires (`MainMenuModelTest`, `ViewPillModelTest`, `SelectionRulesTest`,
 - sélection : toucher remplace / ajoute selon Multi ; le cadre force le multi ;
   couper le multi vide la sélection et coupe le cadre (si Q2 = oui) ;
 - pile bas-droite : montée au-dessus d'une fiche, d'une barre d'affectation,
-  de la mention IGN (cadres mesurés du simulateur) ;
+  de la mention IGN (cadres mesurés à l'émulateur) ;
+- `planFitMargins` : contenu entre le bas de la pastille + 24 dp et le haut
+  de la barre du bas ; règle d'origine sans pastille mesurée ;
+- 3D : « Masquer & isoler » ne contient que « Isoler (solo) » (grisé sans
+  sélection ni solo) et « Vider l'isolement » (si solo) ;
 - textes : clés nouvelles fr / en, clés supprimées absentes.
 
 Contrôle à l'écran (`mini.mvr`, MF, portrait et paysage, fr et en, gratuit et
@@ -1448,8 +1684,12 @@ dump`) :
 - [ ] pile bas-droite : au-dessus de la fiche, de la barre d'affectation, du
       panneau 3 points ; jamais sur la mention IGN ; « Aucun projecteur nº 999 » ;
 - [ ] légende, barre d'affectation et panneau 3 points sans chevauchement
-      avec la pastille (portrait, paysage) — tests `CablingPlanScreenTest`
-      verts ;
+      avec la pastille (portrait, paysage) ; en affectation, la rangée de
+      projecteurs du haut n'est pas sous la pastille — tests
+      `CablingPlanScreenTest` verts ;
+- [ ] pastille de synchro (projet partagé) : bloc d'état en 3D, à droite sous
+      la rangée dans le plan, jamais sous la pastille « Vue » ; bannière
+      « nouvelle version » sans recouvrir ← ni ⋯ ;
 - [ ] PDF du plan depuis la 3D (plan ouvert en mode export) ; PDF de câblage
       depuis le ⋯ (attente puis partage) ;
 - [ ] « Fermer le projet » depuis les deux vues ;
@@ -1489,10 +1729,14 @@ Contrôle à l'écran :
 ### Tranche E — Finitions : outils, tablette, accessibilité, textes
 
 Périmètre :
-1. Titres des outils (§7.2), nouveaux `ToolId` (`multiSelect`, `geoPanel`,
-   `refPlanPanel`, `modelsPanel`), outils à libellé fixe, catalogues (§3.13).
+1. Titres des outils (§7.2, dont `cabling` → « Câblage »), nouveaux
+   `ToolId` `refPlanPanel`, `modelsPanel`, `gdtfMapping` (`geoPanel` est né
+   en B, `multiSelect` en C), outils à libellé fixe (`importDXF`,
+   `importModel` n'importent plus que), `gdtfShare` au sens iOS (§4.6),
+   catalogues (§3.13).
 2. Tablette : `ToolbarIdiom`, défaut tablette, `ToolbarLayoutStore.load(view,
-   idiom)`, migration v2, enregistrement au seul changement utilisateur,
+   idiom)`, migration v2 (dispositions vides effacées une fois, `gdtfShare` →
+   `gdtfMapping`), enregistrement au seul changement utilisateur,
    barre gauche qui évite légende / panneaux / fiche ; crochets
    `MVR_RESET_TOOLBARS`, `MVR_FORCE_TABLET_LAYOUT`.
 3. `ToolbarCustomizeSheet` : texte iOS, « Hors barres », « Tout remettre hors
@@ -1500,7 +1744,7 @@ Périmètre :
 4. Table `ToolId.home` testée.
 5. Pluriels et vocabulaire des surfaces touchées (§7.2) ; « OK » → « Terminé »
    (rapport MA, couleur personnalisée) ; panneau Export PDF titré « PDF du
-   plan ».
+   plan » ; panneau Modèles importés titré « Modèles importés (%d) ».
 6. TalkBack : boutons des barres, cases des rangées du menu, pastille, fiche.
 
 Lignes : 80, 81, 82, 83, 84, 89, 92, 93.
@@ -1509,7 +1753,8 @@ Tests unitaires (`ToolbarDefaultsTest`, `ToolHomeTest`, `LocalizationTest`) :
 - tablette sans disposition → barre gauche [patchList, universe, cabling,
   layers] dans les deux vues ; téléphone → vide ; disposition enregistrée vide
   → reste vide ; migration : une disposition vide d'avant compte comme non
-  personnalisée, une fois ;
+  personnalisée, une fois ; `gdtfShare` enregistré devient `gdtfMapping`, une
+  fois ;
 - instantané des `rawId` de tous les `ToolId` (aucun renommé) ;
 - chaque outil des deux catalogues a une autre place (`ToolId.home` contre
   `MainMenuModel` et `GeoPanelContent`) ;
@@ -1526,7 +1771,11 @@ Contrôle à l'écran :
       personnalisées d'avant gardées ;
 - [ ] TalkBack (ou `uiautomator dump`) : chaque bouton nommé, état coché ;
 - [ ] pluriels « 1 vue », « 2 vues », « 1 projecteur sélectionné » (fr et en) ;
-- [ ] rapport d'import MA et couleur personnalisée : « Terminé ».
+- [ ] rapport d'import MA et couleur personnalisée : « Terminé » ;
+- [ ] outil `gdtfShare` ancré → Compte & réglages ; une disposition d'avant
+      qui contenait `gdtfShare` montre « Modèles de projecteurs » et l'ouvre ;
+      outils `importDXF` / `refPlanPanel` et `importModel` / `modelsPanel` à
+      libellé fixe.
 
 ---
 
@@ -1544,3 +1793,70 @@ Contrôle à l'écran :
   « Enregistrer » (DESIGN_UI §8).
 - Fonctions de Q3.
 - Web : même portage, document séparé dans le dépôt `MVRViewerWeb`.
+- Cadre de sélection : il **ajoute** à la sélection en 3D
+  (`Scene3DScreen.kt:2146`) mais la **remplace** dans le plan
+  (`PlanScreen.kt:1312`). À aligner avec la réponse à Q2 (règle iOS : le
+  cadre force le multi, donc ajoute).
+- Les sections partagées `labelSides` et `fixtureOrientations` sont reçues
+  mais pas appliquées (`SceneScreen.kt:545`) : un Pan / Tilt 180° fait sur
+  iOS ne se voit pas sur Android. Même chantier que Q3.
+
+---
+
+## 12. Relecture du plan (2026-10-15) — corrections apportées
+
+Critique en lecture seule du commit `88610b8`, re-parcours du code Android
+(`SceneScreen`, `Scene3DScreen`, `PlanScreen`, `SceneOptions`,
+`ToolbarLayout`, `AnchoredToolbars`, `HomeScreen`, `SyncUI`,
+`GdtfShareScreen`, `MaLibraryScreen`, `CablingScreen`, `DmxUniverseScreen`,
+`PatchListScreen`, `ModelPlacementPanel`, `MainActivity`). Corrigé dans ce
+document :
+
+1. **Options oubliées par l'inventaire** : outil `gdtfShare` « GDTF Share »
+   (`Scene3DScreen.kt:1938`) sans devenir (A26, §4.6) ; titre « Modèles 3D
+   (%d) » du panneau Modèles importés (`ModelPlacementPanel.kt:84`) dont la
+   clé était promise à la suppression (A28, §7.3) ; « Retour 3D » aussi sur
+   GDTF Share et la Bibliothèque MA (y compris depuis l'accueil) (§2.6,
+   tranche A) ; « ↳ bloc séparé » et « Masquer si trop dézoomé » du ⋯ 3D,
+   sans effet en 3D (A27) ; pastille de synchro visible au-dessus de **tous**
+   les modes et bannière « nouvelle version » pleine largeur sur la barre
+   (§2.1, §3.1, §3.5, D21) ; bouton « Déconnexion » (A30) ; `colorMode` et
+   `search` sans `ToolSpec`, comme `cameraPresets` (§2.5, A23) — d'où la
+   pile bas-droite : Rechercher n'est jamais masqué (§3.4).
+2. **Hissage du plan importé incomplet** : sans la persistance débouncée du
+   placement (`PlanScreen.kt:819-834`), le centrage sur les données du plan
+   et `onSetReferencePlan`, un réglage fait dans le panneau 3D n'était ni
+   enregistré ni partagé (§3.7, A29, tranche B).
+3. **Tranche B non sûre** : les panneaux 3D (Position GPS, Plan importé,
+   étiquettes) et l'import depuis la 3D n'avaient aucune entrée avant le
+   menu de la tranche C (le contrôle « import depuis la 3D » était
+   infaisable). Entrées provisoires de l'ancien ⋯ ajoutées (tranche B, 5) ;
+   l'outil DXF garde ses deux états jusqu'à E.
+4. **`ToolId` créés trop tard** : `geoPanel` (testé en B) et `multiSelect`
+   (bouton masqué quand ancré, en C) étaient listés en E. Chaque `ToolId`
+   naît dans sa tranche (§4.6).
+5. **Manque transitoire C → D** dit explicitement : « Vider la sélection »
+   n'a plus de bouton entre la tranche C et la fiche de la tranche D (toucher
+   le vide désélectionne) (A1, A11, tranche C).
+6. **Cadrage sous la pastille** (défaut corrigé sur iOS dans ses restes) :
+   `fitAbove` ne réserve que le bas ; la pastille centrée du plan cacherait la
+   rangée de projecteurs du haut pendant une affectation (§3.3, tranche C).
+7. **Sous-volets** : une destination unique ne permettait pas de revenir de
+   la Bibliothèque MA vers Modèles de projecteurs ; les écrans ouverts depuis
+   une destination sont des sous-volets internes (§3.10, §4.1).
+8. **Actions destructives au toucher d'une ligne** (« toucher → se
+   déconnecter » de GDTF Share) remplacées par un bouton nommé (§1.2, §3.10,
+   §3.11) ; type touché déconnecté → connexion puis recherche (plus de ligne
+   inerte).
+9. **Compte & réglages depuis l'accueil** : hôte dans `App` et crochet
+   `MVR_AUTO_HOME_DEST` (§3.11, §4.7).
+10. **Décisions** : forme de « Terminé » dans le plan (D19), « Afficher ma
+    position » désactivé en 3D sans calibration (D20), « Looks right » (D22),
+    « Isoler » grisé en 3D (D23), sens de `gdtfShare` (D24) écrits comme
+    divergences ; barre flottante et tablette tranchées ensemble (Q1, §3.13).
+11. Divers : clés iOS des `PanelID` (`labels3D`, `referencePlan3D`,
+    `geoPosition3D`, `geoPositionPlan`) et nouvelles clés Android nommées ;
+    `sync_sign_out` → « Se déconnecter » ; titres d'outils `refPlanPanel`,
+    `modelsPanel`, `gdtfMapping`, `cabling` ; `hasSync` dans
+    `MainMenuContext` ; retour système dans les pages du ⋯ à vérifier ;
+    `SyncViewModel.kt:291` (et non `:292`).

@@ -186,96 +186,28 @@ fun CablingScreen(
     val exportScope = rememberCoroutineScope()
     var exportMenu by remember { mutableStateOf(false) }
     var exportBusy by remember { mutableStateOf(false) }
-    // Titres/messages d'export résolus ICI (contexte composable) : runExport et les
-    // coroutines qu'il lance ne peuvent pas appeler stringResource.
-    val sPdfCablingTitle = stringResource(R.string.cabling_pdf_title)
-    val sPdfPlanSoca = stringResource(R.string.cabling_pdf_plan_soca)
-    val sPdfPlanDmx = stringResource(R.string.cabling_pdf_plan_dmx)
-    val sPdfFail = stringResource(R.string.cabling_pdf_failed)
-    val sPdfFull = stringResource(R.string.cabling_export_full)
-    val sPdfElec = stringResource(R.string.cabling_export_elec_doc)
-    val sPdfDmx = stringResource(R.string.cabling_export_dmx)
-    val sPdfPlans = stringResource(R.string.cabling_export_plans)
-    // Lance la génération HORS thread principal puis partage le PDF. Les données
-    // sont figées sur le thread principal (DTO, cartes uuid→libellé/conso), puis
-    // les calculs/empreintes viennent EXCLUSIVEMENT des fonctions déjà à l'écran
-    // (PowerCablingCalc/DmxCablingCalc + resolveDmxFootprints partagé) → aucune
-    // duplication. Les pages plan réutilisent le moteur de page plan existant.
+    // Titres/messages d'export résolus ICI (contexte composable) : les coroutines
+    // de l'export ne peuvent pas appeler stringResource.
+    val pdfTexts = cablingPdfTexts()
+    val sPdfFull = pdfTexts.full
+    val sPdfElec = pdfTexts.elec
+    val sPdfDmx = pdfTexts.dmx
+    val sPdfPlans = pdfTexts.plans
+    // Lance la génération HORS thread principal puis partage le PDF : MÊME moteur
+    // que le menu ⋯ des vues (CablingPdfShare.kt, SPEC-menus-android §8 D17). Les
+    // données sont figées ici, sur le thread principal.
     fun runExport(parts: Set<CablingPdfPart>, title: String) {
         if (exportBusy) return
         exportBusy = true
-        val fx = fixtures
-        val labelMap = fx.associate { it.uuid to it.label }
-        val specMap = fx.associate { it.uuid to it.spec }
-        val wattsMap = fx.associate { it.uuid to it.watts }
-        val cablingDto = cabling.toDTO()
-        val dmxDto = dmxCabling.toDTO()
-        val settings = cabling.settings
-        val needDmx = CablingPdfPart.DMX in parts
-        val needPlans = CablingPdfPart.PLANS in parts
-        val ovVersion = gdtfOverrides.version
-        val ovMap = gdtfOverrides.map.toMap()
-        val refPlan = referencePlan
-        val sat = satellite
-        val hidden = hiddenLayers
+        val inputs = CablingPdfInputs.freeze(
+            scene, mvrBytes, overrides, gdtfOverrides, customResolver, power,
+            cabling, dmxCabling, referencePlan, satellite, hiddenLayers
+        )
         exportScope.launch {
-            val file = withContext(Dispatchers.Default) {
-                runCatching {
-                    val labelOf = { u: String -> labelMap[u] }
-                    val specOf = { u: String -> specMap[u] }
-                    val wattsOf2 = { u: String -> wattsMap[u] }
-                    var channelsOf: (String) -> Int? = { null }
-                    var universeOf: (String) -> Int? = { null }
-                    var addressOf: (String) -> String? = { null }
-                    var modeOf: (String) -> String? = { null }
-                    if (needDmx) {
-                        val resolved = resolveDmxFootprints(scene, mvrBytes, overrides, gdtfOverrides, customResolver)
-                        val chMap = resolved.associate { it.uuid to it.channels }
-                        val uniMap = resolved.associate { it.uuid to it.universe }
-                        val addrMap = resolved.associate { it.uuid to it.address }
-                        val modeMap = resolved.associate { it.uuid to it.mode }
-                        channelsOf = { chMap[it] }
-                        universeOf = { uniMap[it] }
-                        addressOf = { addrMap[it] }
-                        modeOf = { modeMap[it] }
-                    }
-                    var planSrc: PlanExportSource? = null
-                    var socaView: PlanViewCapture? = null
-                    var dmxView: PlanViewCapture? = null
-                    if (needPlans) {
-                        val data = planData(scene, overrides)
-                        val coloring = buildCablingColoring(ctxCabling, data, cablingDto, dmxDto)
-                        planSrc = PlanExportSource(
-                            data = data,
-                            layerIndex = LayerColors.index(scene),
-                            wire = PlanWireCache.buildStructures(scene, mvrBytes),
-                            fixWire = PlanWireCache.buildFixtures(scene, mvrBytes, ovVersion, ovMap),
-                            dxfPaths = refPlan?.plan?.let { buildDxfPaths(it) },
-                            rasterPlan = refPlan?.raster,
-                            satellite = sat,
-                            legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
-                                .toList().sortedByDescending { it.second },
-                            documentTitle = sPdfCablingTitle
-                        )
-                        // ANNEAU 2e dimension (E3) : la page Socapex porte l'anneau
-                        // DMX, la page DMX porte l'anneau Socapex.
-                        socaView = cablingPlanView(sPdfPlanSoca, data, PlanColorMode.SOCAPEX,
-                            coloring.socaColor, coloring.socaLegend, coloring.cablingText, sat, hidden, refPlan,
-                            cablingRingColor = coloring.dmxColor)
-                        dmxView = cablingPlanView(sPdfPlanDmx, data, PlanColorMode.DMX_LINE,
-                            coloring.dmxColor, coloring.dmxLegend, coloring.cablingText, sat, hidden, refPlan,
-                            cablingRingColor = coloring.socaColor)
-                    }
-                    buildCablingPdf(
-                        ctxCabling, parts, cablingDto, dmxDto, settings,
-                        wattsOf2, channelsOf, universeOf, addressOf, modeOf, labelOf, specOf,
-                        title, planSrc, socaView, dmxView
-                    )
-                }.getOrNull()
-            }
+            val file = generateCablingPdf(ctxCabling, inputs, parts, title, pdfTexts)
             exportBusy = false
             if (file != null) sharePlanPdf(ctxCabling, file)
-            else android.widget.Toast.makeText(ctxCabling, sPdfFail, android.widget.Toast.LENGTH_SHORT).show()
+            else android.widget.Toast.makeText(ctxCabling, pdfTexts.failed, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 

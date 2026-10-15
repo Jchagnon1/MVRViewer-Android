@@ -436,13 +436,16 @@ class CablingPlanScreenTest {
             "CablingHaptic.of(result)", "CablingHaptic.ofFrame(written)", "CablingHaptic.STEP",
             "CablingAssignColoring.effectiveMode(", "CablingAssignColoring.showsSecondRing(",
             "CablingVoieStatus.power(", "CablingVoieStatus.dmx(", "CablingAssignBarUi.display(",
-            "CablingAssignBarPlacement.assignBarInsetsTopLegend(", "CablingAssignBarPlacement.fitAbove(",
+            "CablingAssignBarPlacement.assignBarInsetsTopLegend(", "fitUnderPill(reserve)",
             "CablingAssignBarUi.targetColorArgb(barTarget, cabling.distributors, dmxCabling.distributors)",
             "assigning = assignMode", "assignBarHeightPx / dens.density",
             "padding(top = CablingAssignBarPlacement.LEGEND_TOP_ANDROID.dp",
             "start = CablingAssignBarPlacement.LEGEND_START_ANDROID.dp)",
             "CablingAssignBar(", "resolveDmxFootprints("
         )) assertTrue("PlanScreen n'appelle plus $needle", plan.contains(needle))
+        // Le cadrage au-dessus de la barre passe désormais par le cadrage sous la
+        // pastille « Vue » (SPEC-menus-android §3.3), qui garde fitAbove pour règle d'origine.
+        assertTrue(src("SceneChromeRules.kt").contains("CablingAssignBarPlacement.fitAbove("))
         // L'ancien bandeau (libellé sans point médian) a disparu.
         assertFalse(plan.contains("assign_banner_fmt"))
         assertFalse(plan.contains("\"\$name C\${at.index}\""))

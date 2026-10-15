@@ -5,20 +5,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Crop
@@ -35,25 +32,15 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectSmall
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Straighten
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.ViewInAr
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -67,11 +54,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.graphics.Color
@@ -320,13 +307,26 @@ fun Scene3DScreen(
     /// l'accueil » (la scène est alors vide). Consommé une seule fois.
     initialModelUri: android.net.Uri? = null,
     onInitialModelConsumed: () -> Unit = {},
-    /** Ouvre le panneau « Classes… ». null = ce fichier n'a aucune classe. */
-    onShowClasses: (() -> Unit)? = null,
     /**
      * Ouvre la feuille « Calques » (SPEC-menus-android §3.10) : posée par
      * SceneScreen, partagée avec le plan (sans le réglage LOD depuis le plan).
+     * Outil ancrable `layers` ; le menu ⋯ passe par [onMainMenu].
      */
     onShowLayers: () -> Unit = {},
+    // ---- Rangement des menus, tranche C (SPEC-menus-android §3.1–3.5) ----
+    /**
+     * Entrées du menu ⋯ que la 3D ne traite pas elle-même (destinations, import
+     * du plan, PDF, fermeture…) : transmises à SceneScreen.
+     */
+    onMainMenu: (MainMenuItemId) -> Unit = {},
+    /** Synchro branchée (section « Équipe » du menu). */
+    hasSync: Boolean = false,
+    /** Un câblage existe (section « PDF de câblage » du menu). */
+    hasCabling: Boolean = false,
+    /** Nombre de classes masquées (bloc d'état). */
+    hiddenClassCount: Int = 0,
+    /** Pastille de synchro (projet partagé), posée dans le bloc d'état ; null = aucune. */
+    syncBadge: (@Composable () -> Unit)? = null,
     /**
      * Un écran plein opaque recouvre la 3D (destination en surimpression) : la
      * boucle de rendu SceneView est mise en attente (cycle de vie plafonné à
@@ -393,17 +393,15 @@ fun Scene3DScreen(
     // champs, la 3D n'utilise pas le câblage.
     cabling: PowerCablingState = remember { PowerCablingState() },
     dmxCabling: DmxCablingState = remember { DmxCablingState() },
+    // Outils ancrables de navigation (le menu ⋯ passe par [onMainMenu]).
     onShowPlan: () -> Unit,
     onShowPatch: () -> Unit,
     onShowGdtfShare: () -> Unit,
-    /** Ouvre la bibliothèque MA (menu, à côté de GDTF Share). null = entrée masquée. */
-    onShowMaLibrary: (() -> Unit)? = null,
     onShowUniverse: () -> Unit = {},
     onShowCabling: () -> Unit = {},
     onShowAccount: (() -> Unit)? = null,
     onShareProject: (() -> Unit)? = null,
     onShowHistory: (() -> Unit)? = null,
-    onJoinProject: (() -> Unit)? = null,
     // Solo (parité iOS / vue plan) : ensemble d'INSTANCES à isoler (mvrInstanceKey).
     // Vide = aucun filtre (on montre tout). Hissé dans SceneScreen et PARTAGÉ avec
     // la vue plan → le solo survit aux bascules 3D ↔ plan.
@@ -534,14 +532,12 @@ fun Scene3DScreen(
     val gps by locFeed3D.location
     // Chaînes de statut localisées, résolues ICI (contexte composable) puis
     // utilisées dans des effets/coroutines qui, eux, ne peuvent pas appeler stringResource.
-    val sStatusLoading3D = stringResource(R.string.status_loading_3d)
-    val sStatusObjectsLoadingFmt = stringResource(R.string.status_objects_3d_loading_fmt)
-    val sStatusObjectsGdtfFmt = stringResource(R.string.status_objects_gdtf_fmt)
-    val sStatusObjects3DFmt = stringResource(R.string.status_objects_3d_fmt)
-    val sStatusGdtfSuffixFmt = stringResource(R.string.status_gdtf_suffix_fmt)
-    val sStatusTruncated = stringResource(R.string.status_truncated)
     val sModelTooManyFmt = stringResource(R.string.model_too_many_fmt)
-    var status by remember(scene) { mutableStateOf(sStatusLoading3D) }
+    // BLOC D'ÉTAT (SPEC-menus-android §3.5) : objets posés (null = rien encore),
+    // plafond atteint (« (tronqué) »), phase des silhouettes GDTF en cours.
+    var placedObjects by remember(scene) { mutableStateOf<Int?>(null) }
+    var truncatedObjects by remember(scene) { mutableStateOf(false) }
+    var gdtfLoading by remember(scene) { mutableStateOf(false) }
     // LOD d'interaction : les petits objets (sièges, accessoires) sont masqués
     // pendant que la caméra bouge, réaffichés à l'arrêt — divise les draw calls
     // en navigation (comme iOS), sans toucher au rendu au repos.
@@ -585,6 +581,8 @@ fun Scene3DScreen(
         // premier coup, sans attendre la ré-application de fin de build.
         lod.modes = layerLod
         gdtfFixtures = emptySet()
+        gdtfLoading = false
+        truncatedObjects = false
         // Détacher TOUT d'un coup : removeChildNode() recalcule le Set d'enfants à
         // CHAQUE appel (O(n)) → détacher des milliers de nœuds un par un = O(n²) et
         // gelait le thread principal au rebuild GDTF. clearChildNodes() = un seul
@@ -839,7 +837,7 @@ fun Scene3DScreen(
             }
             placed++
             if (placed % 40 == 0) {
-                status = sStatusObjectsLoadingFmt.format(placed)
+                placedObjects = placed
                 // MÊME cadence que le statut (tous les 40 objets, jamais par
                 // objet) : l'écriture d'état est en plus filtrée par le % entier.
                 progress?.report(LoadStep.BUILD, placed.toFloat() / totalRefs)
@@ -905,7 +903,7 @@ fun Scene3DScreen(
                         }
                         nodes += take
                         placed += take
-                        status = sStatusObjectsLoadingFmt.format(placed)
+                        placedObjects = placed
                         // Une fois par FICHIER .glb (cadence existante du statut).
                         progress?.report(LoadStep.BUILD, placed.toFloat() / totalRefs)
                     }
@@ -938,6 +936,8 @@ fun Scene3DScreen(
             }
         }
         val gdtfDone = HashSet<Int>()
+        // Pastille « Modèles GDTF en cours… » du bloc d'état, le temps de la phase.
+        gdtfLoading = bySpec.isNotEmpty() || byModel.isNotEmpty()
         // Dénominateur d'avancement de l'étape « Chargement des GDTF… » : nombre de
         // projecteurs qui attendent une silhouette (tous specs confondus).
         val gdtfTotal = (bySpec.values.sumOf { it.size } + byModel.values.sumOf { it.second.size }).coerceAtLeast(1)
@@ -1062,7 +1062,7 @@ fun Scene3DScreen(
                         }
                     }
                     if (gdtfDone.size % 40 == 0) {
-                        status = sStatusObjectsGdtfFmt.format(placed, gdtfDone.size)
+                        placedObjects = placed
                         progress?.report(LoadStep.GDTF, gdtfDone.size.toFloat() / gdtfTotal)
                     }
                     slice()
@@ -1135,9 +1135,9 @@ fun Scene3DScreen(
         if (referencePlan != null && !planPassDone) progress?.report(LoadStep.PLAN, 0f)
         buildTick++   // scène prête → le solo (s'il est actif) sera ré-appliqué
 
-        status = sStatusObjects3DFmt.format(placed) +
-            (if (gdtfDone.isNotEmpty()) sStatusGdtfSuffixFmt.format(gdtfDone.size) else "") +
-            if (truncated) sStatusTruncated else ""
+        placedObjects = placed
+        truncatedObjects = truncated
+        gdtfLoading = false
     }
 
     // Solo (3D) : n'afficher QUE les projecteurs soloés — le reste (décor,
@@ -1556,6 +1556,13 @@ fun Scene3DScreen(
         }
     }
     var rectMode by remember(scene) { mutableStateOf(false) }
+    // MULTI-SÉLECTION (SPEC-menus-android §9.0, Q2) : toucher REMPLACE la sélection
+    // (comme le plan et iOS) ; avec Multi-sélection — ou le cadre armé, qui la
+    // force — il ajoute / retire. Règles pures : SelectionRules.
+    var multiMode by remember(scene) { mutableStateOf(false) }
+    fun selectionModes() = SelectionModes(multi = multiMode, rect = rectMode)
+    // Point de vue de la pastille « Vue » (§3.3) : « Perspective » à l'ouverture.
+    var viewpoint by remember(scene) { mutableStateOf(CameraViewpoint.PERSPECTIVE) }
     var rectStart by remember { mutableStateOf<Offset?>(null) }
     var rectEnd by remember { mutableStateOf<Offset?>(null) }
     // Bumpé quand la caméra bouge → force le re-calcul des projections écran des
@@ -1624,11 +1631,13 @@ fun Scene3DScreen(
     // SceneView = celui de worldToScreenPoint (comme la position d'un geste Compose).
     var scenePos by remember { mutableStateOf(Offset.Zero) }
     // Cadres (px racine) qui bornent les panneaux du bas-gauche (tranche B,
-    // PanelPlacementMath.floatingPanelSlot) : haut de la scène (sous la barre du
-    // haut) et champ de recherche ; en bas la pastille de sélection, le bandeau de
-    // mesure et la mention IGN.
+    // PanelPlacementMath.floatingPanelSlot) et font monter la pile bas-droite : en
+    // haut la rangée du haut, le bloc d'état et la pastille « Vue » (tranche C) ; en
+    // bas la pastille de sélection, le bandeau de mesure et la mention IGN.
     var sceneBoxPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
-    var searchField3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var statusBlock3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var viewPill3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var topRow3DBottomPx by remember { mutableStateOf(0f) }
     var selectionPill3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var measureBand3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var satMention3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
@@ -1637,8 +1646,9 @@ fun Scene3DScreen(
     // montre s'il est à l'écran ; sinon l'utilisateur oriente l'orbite pour le
     // trouver). Classement : id exact > préfixe > contenu > nom.
     var query by remember(scene) { mutableStateOf("") }
-    fun doSearch3D() {
-        val q = query.trim(); if (q.isEmpty()) return
+    /** Rend vrai si au moins un projecteur a été trouvé (sinon « Aucun projecteur nº … »). */
+    fun doSearch3D(): Boolean {
+        val q = query.trim(); if (q.isEmpty()) return false
         val fx = scene.fixtures
         fun usable(i: Int) = i in layout.positions.indices && layout.valid[i]
         // Un même N° est souvent porté par PLUSIEURS projecteurs (multicellules,
@@ -1661,7 +1671,7 @@ fun Scene3DScreen(
             }
             if (best >= 0) listOf(best) else emptyList()
         }
-        if (matches.isEmpty()) return
+        if (matches.isEmpty()) return false
         selected.clear(); selected.addAll(matches)
         // …et on Y VA : le pivot se pose sur le centroïde du groupe et la caméra
         // se place en CONSERVANT la direction de vue courante (on ne désoriente
@@ -1691,6 +1701,7 @@ fun Scene3DScreen(
         val d = (near + groupR * 2.2f).coerceAtMost((layout.radius * 3f).coerceAtLeast(near))
         target = ctr
         camEye = Float3(ctr.x + vx * d, ctr.y + vy * d, ctr.z + vz * d)
+        return true
     }
 
     // Projette la position monde (Filament) d'un projecteur en pixels écran de la
@@ -1770,8 +1781,10 @@ fun Scene3DScreen(
             projVersion++
             return
         }
-        if (best < 0) selected.clear()
-        else if (!selected.remove(best)) selected.add(best)
+        // Toucher = remplace ; en multi (ou cadre armé) = ajoute / retire ; le
+        // vide désélectionne, sauf en multi (SelectionRules, Q2).
+        val next = SelectionRules.tap(selected.toList(), best.takeIf { it >= 0 }, selectionModes())
+        if (next != selected.toList()) { selected.clear(); selected.addAll(next) }
     }
 
     // Tap via le détecteur natif de SceneView (il FIRE bien, contrairement à
@@ -1859,45 +1872,70 @@ fun Scene3DScreen(
         }
     }
     // N11 — DESCRIPTION UNIFIÉE des outils de la vue 3D : UNE seule liste consommée
-    // à la fois par la barre flottante / les 4 barres ancrables (AnchoredToolbars)
-    // ET par la section « Outils » du menu (toMenuTools). Les 6 premiers forment la
-    // BARRE FLOTTANTE historique (ToolbarLayout.floating3D). Les suivants sont
-    // DOCKABLES (catalogue de personnalisation) mais restent hors de la barre
-    // flottante et hors du menu « Outils » (inMenu=false) : soit ils ont déjà leur
-    // bascule dédiée au menu (étiquettes, couleurs), soit ils sont déjà rendus
-    // ailleurs dans le menu (navigation, synchro, presets caméra) — pas de double.
+    // par les 4 barres ancrables (AnchoredToolbars), les boutons permanents de la
+    // rangée du haut (cadre, multi) et le catalogue « Barre d'outils de cette
+    // vue… ». La barre flottante historique est retirée (§9.0, Q1) et le menu ⋯ a
+    // ses propres entrées (MainMenuModel) : chaque outil a une autre place.
     val ctx3dSat = androidx.compose.ui.platform.LocalContext.current
+    // Cadre et multi (rangée du haut, outils ancrés) : armer le cadre force le
+    // multi et coupe la mesure ; couper le multi vide la sélection et coupe le cadre.
+    fun toggleRectTool() {
+        val t = SelectionRules.toggleRect(selectionModes())
+        rectMode = t.modes.rect; multiMode = t.modes.multi
+        if (rectMode && measureMode) { measureMode = false; measureI = null; measureJ = null }
+        if (!rectMode) { rectStart = null; rectEnd = null }
+    }
+    fun toggleMultiTool() {
+        val t = SelectionRules.toggleMulti(selectionModes())
+        rectMode = t.modes.rect; multiMode = t.modes.multi
+        if (t.clearSelection) selected.clear()
+        if (!rectMode) { rectStart = null; rectEnd = null }
+    }
+    // Mesurer (⋯ › rangée 1, outil ancré) : exclusif du cadre ; repart de zéro.
+    fun toggleMeasureTool() {
+        measureMode = !measureMode
+        if (measureMode) { rectMode = false; rectStart = null; rectEnd = null }
+        measureI = null; measureJ = null
+    }
+    // Isoler (solo) de la sélection / retirer l'isolement (outil SOLO, ⋯ › Masquer & isoler).
+    fun toggleSolo3D() {
+        if (soloElements.isEmpty()) {
+            val keys = selected.mapNotNull { fixtureKeys.getOrNull(it) }.toSet()
+            if (keys.isNotEmpty()) onSetSoloElements(keys)
+        } else onSetSoloElements(emptySet())
+    }
+    // Recadrer (pile bas-droite, outil `resetCamera`) : pivot au centre du show,
+    // caméra à sa position d'ensemble — la pastille revient à « Perspective ».
+    fun reframe3D() {
+        target = Float3(0f, 0f, 0f); camEye = camHome; viewpoint = CameraViewpoint.PERSPECTIVE
+    }
+    // Point de vue de la pastille : autour du pivot courant (après une recherche,
+    // autour du projecteur trouvé — l'usage terrain). Retoucher le même y ramène.
+    fun applyViewpoint(v: CameraViewpoint) {
+        val (x, y, z) = v.eyeOffset(v.recoil(layout.radius * 2f, sceneBoxPx.width, sceneBoxPx.height))
+        camEye = Float3(target.x + x, target.y + y, target.z + z)
+        viewpoint = v
+    }
     val tools3D: List<ToolSpec> = buildList {
+        // Boutons permanents de la rangée du haut (masqués quand ancrés, §3.1).
         add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
-            available = true, checked = rectMode, onInvoke = {
-                rectMode = !rectMode
-                if (rectMode) measureMode = false
-                if (!rectMode) { rectStart = null; rectEnd = null }
-            }))
+            available = true, checked = rectMode, onInvoke = { toggleRectTool() }))
+        add(ToolSpec(ToolId.MULTI_SELECT, stringResource(R.string.perm_multi_select), Icons.Filled.Checklist,
+            available = true, checked = multiMode || rectMode, onInvoke = { toggleMultiTool() }))
         add(ToolSpec(ToolId.MEASURE, stringResource(R.string.tool_measure), Icons.Filled.Straighten,
-            available = true, checked = measureMode, onInvoke = {
-                measureMode = !measureMode
-                if (measureMode) { rectMode = false; rectStart = null; rectEnd = null }
-                measureI = null; measureJ = null
-            }))
+            available = true, checked = measureMode, onInvoke = { toggleMeasureTool() }))
         add(ToolSpec(ToolId.SOLO, stringResource(R.string.tool_solo), Icons.Filled.CenterFocusStrong,
             available = selected.isNotEmpty() || soloElements.isNotEmpty(),
-            checked = soloElements.isNotEmpty(), onInvoke = {
-                if (soloElements.isEmpty()) {
-                    val keys = selected.mapNotNull { fixtureKeys.getOrNull(it) }.toSet()
-                    if (keys.isNotEmpty()) onSetSoloElements(keys)
-                } else onSetSoloElements(emptySet())
-            }))
+            checked = soloElements.isNotEmpty(), onInvoke = { toggleSolo3D() }))
         add(ToolSpec(ToolId.CLEAR_SEL, stringResource(R.string.tool_clear_selection), Icons.Filled.Close,
             available = selected.isNotEmpty(), checked = null, onInvoke = { selected.clear() }))
         add(ToolSpec(ToolId.GPS, stringResource(R.string.tool_gps_3d), Icons.Filled.MyLocation,
             available = calibration?.isCalibrated == true, checked = showLocation,
             onInvoke = { showLocation = !showLocation }))
-        // Panneau « Position GPS » (tranche B) : ouvre / referme (actif = jaune) ;
-        // l'entrée « Position GPS… » du ⋯ est rendue par le menu (pas de doublon).
+        // Panneau « Position GPS » (tranche B) : ouvre / referme (actif = jaune).
         add(ToolSpec(ToolId.GEO_PANEL, stringResource(R.string.geo_panel_title), Icons.Filled.LocationOn,
             available = true, checked = panels.geo,
-            onInvoke = { onPanels(panels.toggle(ScenePanel.GEO)) }, inMenu = false))
+            onInvoke = { onPanels(panels.toggle(ScenePanel.GEO)) }))
         add(ToolSpec(ToolId.GPS_MARKER_SIZE, stringResource(R.string.tool_marker_size), Icons.Filled.PhotoSizeSelectSmall,
             available = calibration?.isCalibrated == true && showLocation, checked = null, onInvoke = {
                 options.gpsMarkerScale = when {
@@ -1907,8 +1945,8 @@ fun Scene3DScreen(
                 }
             }))
         // Importer un modèle 3D de décor (chantier #3). Le ToolSpec étant reconstruit
-        // à chaque recomposition, le libellé suit l'état ; `busy` donne l'indicateur
-        // « Chargement… » pendant le décodage. Présent au menu ⋯ ET dockable.
+        // à chaque recomposition, le libellé suit l'état (deux états jusqu'à la
+        // tranche E) ; `busy` donne l'indicateur pendant le décodage.
         add(ToolSpec(ToolId.IMPORT_MODEL,
             if (importedModels.isEmpty()) stringResource(R.string.tool_import_model) else stringResource(R.string.tool_models_fmt, importedModels.size),
             Icons.Filled.ViewInAr,
@@ -1923,167 +1961,105 @@ fun Scene3DScreen(
                     ProAccess.gate("régler les objets 3D importés") { showModelsPanel = true }
                 }
             }))
-        // Panneau des calques : dockable en barre ; l'entrée de menu dédiée
-        // (« Calques… ») est rendue par SceneOptionsMenu → inMenu=false ici pour
-        // ne pas la doubler.
-        add(ToolSpec(ToolId.LAYERS, "Calques", Icons.Filled.Layers,
-            available = true, checked = null,
-            onInvoke = onShowLayers, inMenu = false))
-        // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
+        // Feuille « Calques » (la même que ⋯ › Calques).
+        add(ToolSpec(ToolId.LAYERS, stringResource(R.string.menu_layers), Icons.Filled.Layers,
+            available = true, checked = null, onInvoke = onShowLayers))
         add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,
             available = true, checked = options.showLabels,
-            onInvoke = { options.showLabels = !options.showLabels }, inMenu = false))
+            onInvoke = { options.showLabels = !options.showLabels }))
         add(ToolSpec(ToolId.LAYER_COLORS, stringResource(R.string.opt_layer_colors), Icons.Filled.Palette,
             available = true, checked = options.layerColors,
-            onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
-        // Fond satellite AUSSI dockable en 3D (le quad satellite géo-référencé existe
-        // déjà à l'écran) : parité avec la vue plan. Disponible seulement une fois la
-        // position calibrée ; bascule dédiée déjà au menu (inMenu=false, pas de double).
-        // Hors couverture IGN (France seulement) : Toast, PAS de bascule.
+            onInvoke = { options.layerColors = !options.layerColors }))
+        // Fond satellite AUSSI ancrable en 3D, une fois la position calibrée. Hors
+        // couverture IGN (France seulement) : Toast, PAS de bascule.
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
             available = calibration?.isCalibrated == true, checked = options.showSatellite && satelliteCovered,
             onInvoke = {
                 SatelliteUi.onToolTap(satelliteCovered, options::toggleSatelliteByUser)
                     ?.let { SatelliteUi.toast(ctx3dSat, it) }
-            }, inMenu = false))
-        // « Réglage des étiquettes » (outil `labelSize`, comme iOS) : ouvre / referme
-        // le panneau (champs, taille, écart). Dockable ; hors « Outils » (entrée du ⋯).
+            }))
+        // « Réglage des étiquettes » (outil `labelSize`, comme iOS) : ouvre / referme le panneau.
         add(ToolSpec(ToolId.LABEL_SIZE, stringResource(R.string.tool_label_size), Icons.Filled.Tune,
             available = true, checked = panels.labels,
-            onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }, inMenu = false))
-        // Couleur du fond : ouvre le sélecteur (le menu garde ses presets). Dockable.
+            onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }))
+        // Couleur du fond : ouvre le sélecteur fin (⋯ › Affichage garde les préréglages).
         add(ToolSpec(ToolId.BACKGROUND, stringResource(R.string.menu_section_background), Icons.Filled.FormatColorFill,
             available = true, checked = null,
-            onInvoke = { showBackgroundDialog = true }, inMenu = false))
-        // Recentrer la caméra (« Réinitialiser la vue ») : remet le pivot au centre
-        // du show et la caméra à sa position d'ensemble. Dockable ; déjà au menu
-        // « Points de vue ».
-        add(ToolSpec(ToolId.CAM_RESET, stringResource(R.string.tool_recenter_camera), Icons.Filled.RestartAlt,
-            available = true, checked = null,
-            onInvoke = { target = Float3(0f, 0f, 0f); camEye = camHome }, inMenu = false))
-        // ---- Navigation / actions ponctuelles, DOCKABLES (déjà au menu, donc
-        // inMenu=false pour ne pas doublonner la section « Outils »). ----
+            onInvoke = { showBackgroundDialog = true }))
+        // Recadrer : même icône que le bouton de la pile bas-droite, qu'il masque
+        // quand il est ancré (§3.4).
+        add(ToolSpec(ToolId.CAM_RESET, stringResource(R.string.tool_recenter_camera), Icons.Filled.ZoomOutMap,
+            available = true, checked = null, onInvoke = { reframe3D() }))
+        // ---- Navigation, ancrable (ailleurs : pastille « Vue », menu ⋯) ----
         add(ToolSpec(ToolId.PLAN_VIEW, stringResource(R.string.nav_view_plan), Icons.Filled.Map,
-            available = true, checked = null, onInvoke = onShowPlan, inMenu = false))
+            available = true, checked = null, onInvoke = onShowPlan))
         add(ToolSpec(ToolId.PATCH, stringResource(R.string.nav_patch_list), Icons.AutoMirrored.Filled.List,
-            available = true, checked = null, onInvoke = onShowPatch, inMenu = false))
+            available = true, checked = null, onInvoke = onShowPatch))
         add(ToolSpec(ToolId.UNIVERSE, stringResource(R.string.nav_dmx_universe), Icons.Filled.GridView,
-            available = true, checked = null, onInvoke = onShowUniverse, inMenu = false))
+            available = true, checked = null, onInvoke = onShowUniverse))
         add(ToolSpec(ToolId.CABLING, stringResource(R.string.nav_power_cabling), Icons.Filled.Bolt,
-            available = true, checked = null, onInvoke = onShowCabling, inMenu = false))
+            available = true, checked = null, onInvoke = onShowCabling))
         add(ToolSpec(ToolId.GDTF_SHARE, "GDTF Share", Icons.Filled.CloudDownload,
-            available = true, checked = null, onInvoke = onShowGdtfShare, inMenu = false))
-        // Synchro cloud : présentes seulement si le service est branché (callbacks
-        // non nuls) — mêmes conditions que les entrées de menu.
-        // « Compte & réglages » : toujours disponible, même sans synchro (le bloc
-        // Pro et GDTF Share y vivent aussi — SPEC-menus-android §3.11).
+            available = true, checked = null, onInvoke = onShowGdtfShare))
+        // « Compte & réglages » : toujours disponible (Pro et GDTF Share y vivent aussi).
         onShowAccount?.let { cb ->
             add(ToolSpec(ToolId.ACCOUNT, stringResource(R.string.account_settings_title), Icons.Filled.AccountCircle,
-                available = true, checked = null, onInvoke = cb, inMenu = false))
+                available = true, checked = null, onInvoke = cb))
         }
         onShareProject?.let { cb ->
             add(ToolSpec(ToolId.SHARE_PROJECT, stringResource(R.string.nav_share_project), Icons.Filled.Share,
-                available = true, checked = null, onInvoke = cb, inMenu = false))
+                available = true, checked = null, onInvoke = cb))
         }
         onShowHistory?.let { cb ->
             add(ToolSpec(ToolId.HISTORY, stringResource(R.string.nav_history), Icons.Filled.History,
-                available = true, checked = null, onInvoke = cb, inMenu = false))
+                available = true, checked = null, onInvoke = cb))
         }
     }
 
-    // Barre du haut dans une vraie TopAppBar (au-dessus de la SceneView). NB :
-    // contrairement à ce qu'on croyait, des contrôles Compose flottants PAR-DESSUS
-    // la SceneView SONT bien visibles ET cliquables, et un overlay pointerInput
-    // capte le glissé avant la caméra — c'est ce qui rend possible la barre d'outils
-    // de sélection et le cadre de sélection plus bas.
-    Column(modifier = modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                // Pendant le chargement : LIBELLÉ DE L'ÉTAPE en cours + pourcentage
-                // GLOBAL (#4). Une fois terminé, le titre reprend le récapitulatif
-                // habituel (« N objets 3D · M proj. GDTF »).
-                val loading = progress?.takeIf { it.active }
-                Text(
-                    when {
-                        loading != null -> "${loading.step?.let { stringResource(it.labelRes) }.orEmpty()} ${loading.percent} %"
-                        status.isBlank() -> stringResource(R.string.nav_view_3d)
-                        else -> "3D · $status"
-                    },
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1
-                )
-            },
-            navigationIcon = {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.nav_projects))
-                }
-            },
-            actions = {
-                // Points de vue caméra (dessus / face / côté / iso / reset) : on
-                // change camEye → le manipulateur est re-créé (remember keyé) et
-                // SceneView re-sème la caméra à ce point de vue, orbite préservée.
-                var camMenu by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { camMenu = true }) {
-                        Icon(Icons.Filled.Videocam, contentDescription = stringResource(R.string.cam_viewpoints),
-                            tint = LocalContentColor.current)
-                    }
-                    DropdownMenu(expanded = camMenu, onDismissRequest = { camMenu = false }) {
-                        val r = layout.radius * 2f
-                        fun set(x: Float, y: Float, z: Float) {
-                            camEye = Float3(target.x + x, target.y + y, target.z + z); camMenu = false
-                        }
-                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_top)) }, onClick = { set(0f, r, 0.001f) })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_front)) }, onClick = { set(0f, 0f, r) })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_side)) }, onClick = { set(r, 0f, 0f) })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_iso)) }, onClick = { set(0.7f * r, 0.7f * r, 0.7f * r) })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.cam_reset_view)) },
-                            // Remet AUSSI le pivot au centre du show : sinon, après
-                            // une recherche, on « réinitialisait » autour du
-                            // projecteur trouvé.
-                            onClick = { target = Float3(0f, 0f, 0f); camEye = camHome; camMenu = false })
-                    }
-                }
-                SceneOptionsMenu(
-                    options = options, tint = LocalContentColor.current,
-                    onShowPlan = onShowPlan, onShowPatch = onShowPatch,
-                    onShowGdtfShare = onShowGdtfShare, onShowMaLibrary = onShowMaLibrary, onShowUniverse = onShowUniverse,
-                    onShowCabling = onShowCabling,
-                    onShowAccount = onShowAccount, onShareProject = onShareProject,
-                    onShowHistory = onShowHistory, onJoinProject = onJoinProject,
-                    // Outils de la vue 3D exposés DANS le menu (N10) : dérivés de la
-                    // MÊME description unifiée que les barres (tools3D) → plus de
-                    // duplication. Mêmes actions, mêmes bascules, mêmes conditions.
-                    tools = tools3D.toMenuTools(),
-                    onCustomizeToolbar = { showCustomize = true },
-                    // Panneau des calques (LOD d'interaction par calque).
-                    onShowLayers = onShowLayers,
-                    onShowClasses = onShowClasses,
-                    // Étiquettes de projecteurs aussi en 3D : même bascule que le plan ;
-                    // champs, taille et écart dans le panneau (SceneOptions partagé).
-                    showLabelsToggle = true,
-                    // Entrées provisoires (tranche B, jusqu'au menu de la tranche C) : les
-                    // panneaux de la 3D ne seraient sinon joignables que par crochet.
-                    onShowLabelSettings = { onPanels(panels.open(ScenePanel.LABELS)) },
-                    onShowGeoPanel = { onPanels(panels.open(ScenePanel.GEO)) },
-                    onImportRefPlan = onImportRefPlan,
-                    onAdjustRefPlan = if (referencePlan == null) null else ({ onPanels(panels.open(ScenePanel.REF_PLAN)) }),
-                    background = options.background3D,
-                    backgroundDefault = BackgroundColorStore.DEFAULT_3D,
-                    backgroundPresets = bg3dPresets(),
-                    onPickBackground = { options.background3D = it }
-                )
-            }
-        )
-        // Barre DÉTERMINÉE fine, pleine largeur, sous la barre du haut : elle
-        // prolonge visuellement celle de l'accueil (même pourcentage global).
-        progress?.takeIf { it.active }?.let { p ->
-            LinearProgressIndicator(
-                progress = { p.percent / 100f },
-                modifier = Modifier.fillMaxWidth()
-            )
+    // Menu ⋯ (SPEC-menus-android §3.2) : contexte (apparitions) et répartiteur. La
+    // 3D traite ses entrées (bascules, panneaux, décor importé, barre d'outils) et
+    // transmet le reste à SceneScreen (destinations, import du plan, PDF, fermeture).
+    val menuCtx3D = MainMenuContext(
+        surface = ProjectSurface.SCENE_3D,
+        hasRefPlan = referencePlan != null,
+        importedModelCount = importedModels.size,
+        hasSync = hasSync,
+        hasCabling = hasCabling,
+        hasHiddenItems = false,
+        soloActive = soloElements.isNotEmpty(),
+        hasSelection = selected.isNotEmpty()
+    )
+    val menuState3D = MainMenuState(
+        measure = measureMode, labels = options.showLabels, layerColors = options.layerColors,
+        isolate = soloElements.isNotEmpty()
+    )
+    fun onMenuItem3D(id: MainMenuItemId) {
+        when (id) {
+            MainMenuItemId.MEASURE -> toggleMeasureTool()
+            MainMenuItemId.LABELS -> options.showLabels = !options.showLabels
+            MainMenuItemId.LAYER_COLORS -> options.layerColors = !options.layerColors
+            MainMenuItemId.LABEL_SETTINGS -> onPanels(panels.open(ScenePanel.LABELS))
+            MainMenuItemId.TOOLBAR_THIS_VIEW -> showCustomize = true
+            MainMenuItemId.ISOLATE -> toggleSolo3D()
+            MainMenuItemId.CLEAR_SOLO -> onSetSoloElements(emptySet())
+            MainMenuItemId.GPS_POSITION -> onPanels(panels.open(ScenePanel.GEO))
+            MainMenuItemId.ADJUST_PLAN -> onPanels(panels.open(ScenePanel.REF_PLAN))
+            MainMenuItemId.IMPORT_MODEL -> ProAccess.gate("importer un objet 3D") { showModelImportFormats = true }
+            MainMenuItemId.IMPORTED_MODELS -> ProAccess.gate("régler les objets 3D importés") { showModelsPanel = true }
+            // Destinations, import du plan, PDF (du plan : ouvert en mode export ; de
+            // câblage), fermeture : la scène.
+            else -> onMainMenu(id)
         }
-        Box(modifier = Modifier.fillMaxSize().background(options.background3D)
+    }
+
+    // Contrôles Compose flottants PAR-DESSUS la SceneView : visibles ET cliquables,
+    // et un overlay pointerInput capte le glissé avant la caméra (cadre de sélection).
+    // Plus de barre du haut opaque : la scène prend toute la hauteur, l'habillage
+    // flotte (rangée du haut, pastille, bloc d'état, pile bas-droite — §3.1).
+    Box(modifier = modifier.fillMaxSize()) {
+        // Rogné à ses bornes : sans barre du haut opaque, une étiquette de projecteur
+        // projetée au-dessus de la vue débordait sur la barre d'état (constat émulateur).
+        Box(modifier = Modifier.fillMaxSize().clipToBounds().background(options.background3D)
             .onGloballyPositioned { scenePos = it.positionInWindow(); sceneBoxPx = it.boundsInRoot() }) {
             Scene(
                 modifier = Modifier.fillMaxSize(),
@@ -2293,37 +2269,6 @@ fun Scene3DScreen(
                 }
             }
 
-            // Recherche d'un projecteur par N° (haut-droite) — le sélectionne.
-            OutlinedTextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                placeholder = { Text(stringResource(R.string.search_fixture_id_hint)) },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { doSearch3D() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Black.copy(alpha = 0.45f),
-                    unfocusedContainerColor = Color.Black.copy(alpha = 0.35f),
-                    focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                    cursorColor = Color.White,
-                    focusedBorderColor = Color.White.copy(alpha = 0.7f),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.4f),
-                    focusedLeadingIconColor = Color.White,
-                    unfocusedLeadingIconColor = Color.White.copy(alpha = 0.7f),
-                    focusedPlaceholderColor = Color.White.copy(alpha = 0.6f),
-                    unfocusedPlaceholderColor = Color.White.copy(alpha = 0.6f)
-                ),
-                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).width(180.dp)
-                    .onGloballyPositioned { searchField3DPx = it.boundsInRoot() }
-            )
-
-            // N11 — BARRE FLOTTANTE historique (bas-gauche) : rendue par DÉFAUT
-            // (dispositions vides). Elle montre les outils permanents SAUF ceux
-            // déplacés dans une barre ancrée (gating iOS → jamais en double).
-            FloatingToolbar(
-                permanentIds = ToolbarLayout.floating3D,
-                specs = tools3D,
-                layout = toolbarLayout
-            )
             // N11 — barres d'outils ANCRABLES (défaut = vide). AnchoredToolbars rend
             // les 4 bords d'après `layout` en filtrant tools3D au disponible : rien
             // tant que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas
@@ -2331,13 +2276,32 @@ fun Scene3DScreen(
             AnchoredToolbars(layout = toolbarLayout, specs = tools3D)
 
             // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte), tant que le
-            // quad satellite est affiché : bas-droite, au-dessus des barres du bas.
+            // quad satellite est affiché : bas-droite, au-dessus des barres du bas. Elle
+            // MONTE au-dessus de la pastille de sélection et du bandeau de mesure de sa
+            // colonne (contre le bas depuis le retrait de la barre flottante, elle
+            // passait dessous — constat émulateur, tranche C).
             val satShown = satellite
             val satCredit3D = SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)
+            val satDens3D = androidx.compose.ui.platform.LocalDensity.current.density
+            val (satLift3D, satOnTop3D) = run {
+                fun androidx.compose.ui.geometry.Rect.inDp() =
+                    androidx.compose.ui.geometry.Rect(left / satDens3D, top / satDens3D, right / satDens3D, bottom / satDens3D)
+                val obstacles = buildList {
+                    if (!measureMode && selected.isNotEmpty()) add(selectionPill3DPx.inDp())
+                    if (measureMode) add(measureBand3DPx.inDp())
+                }
+                val mention = satMention3DPx.inDp()
+                val lift = SatelliteUi.overlayLift(mention, null, obstacles, topLimit = sceneBoxPx.top / satDens3D + 60f)
+                lift.dp to SatelliteUi.mentionOnTop(mention, lift, obstacles)
+            }
             satCredit3D?.let { credit ->
-                SatelliteAttribution(credit, toolbarLayout, tools3D, onAnchor = { satMention3DPx = it })
+                SatelliteAttribution(credit, toolbarLayout, tools3D, lift = satLift3D,
+                    onAnchor = { satMention3DPx = it }, onTop = satOnTop3D)
             }
 
+            // Bas-centre : contre le bas, sauf si une barre est ancrée en bas (au-dessus
+            // d'elle) — la barre flottante historique n'est plus là (§9.0, Q1).
+            val bottomBand3D = if (toolbarLayout.bottom.any { id -> tools3D.any { it.id == id && it.available } }) 76.dp else 16.dp
             // Cote de la mesure (bas-centre) : le chiffre est ici plutôt que sur
             // le trait, pour ne pas mesurer du texte dans le Canvas redessiné à
             // chaque frame de mouvement caméra.
@@ -2359,7 +2323,7 @@ fun Scene3DScreen(
                 else stringResource(R.string.measure_tap_fixture)
                 Surface(
                     color = MEASURE_3D_COLOR, shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBand3D)
                         .onGloballyPositioned { measureBand3DPx = it.boundsInRoot() }
                 ) {
                     Text(
@@ -2378,7 +2342,7 @@ fun Scene3DScreen(
                 } else stringResource(R.string.sel_fixtures_selected_fmt, selected.size)
                 Surface(
                     color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBand3D)
                         .onGloballyPositioned { selectionPill3DPx = it.boundsInRoot() }
                 ) {
                     Text(
@@ -2392,15 +2356,18 @@ fun Scene3DScreen(
             // ---- PANNEAUX DU BAS-GAUCHE (SPEC-menus-android §3.6–3.8) : Position GPS,
             // Plan importé, Réglage des étiquettes. Chacun MONTE au-dessus de la
             // pastille de sélection, du bandeau de mesure et de la mention IGN de sa
-            // colonne ; sa hauteur est bornée sous le haut de la scène et la recherche. ----
-            val panelTop3D = listOf(searchField3DPx)
+            // colonne ; sa hauteur est bornée sous la rangée du haut, le bloc d'état et
+            // la pastille « Vue » (tranche C). ----
+            val panelTop3D = listOf(statusBlock3DPx, viewPill3DPx)
+            // Jamais au-dessus du bas de la rangée du haut (← et ronds de droite).
+            val panelTopLimit3D = maxOf(sceneBoxPx.top, topRow3DBottomPx)
             val panelBottom3D = buildList {
                 if (!measureMode && selected.isNotEmpty()) add(selectionPill3DPx)
                 if (measureMode) add(measureBand3DPx)
                 if (satCredit3D != null) add(satMention3DPx)
             }
             if (panels.labels) BottomLeadingPanel(
-                PanelLayoutStore.PanelID.LABELS_3D, sceneBoxPx.top, panelTop3D, panelBottom3D,
+                PanelLayoutStore.PanelID.LABELS_3D, panelTopLimit3D, panelTop3D, panelBottom3D,
                 Modifier.zIndex(panels.zIndex(ScenePanel.LABELS))
             ) { maxH ->
                 LabelSettingsPanel(options = options, surface = ProjectSurface.SCENE_3D, placement = null,
@@ -2408,7 +2375,7 @@ fun Scene3DScreen(
             }
             val rpPanel3D = referencePlan
             if (panels.refPlan && rpPanel3D != null) BottomLeadingPanel(
-                PanelLayoutStore.PanelID.REF_PLAN_3D, sceneBoxPx.top, panelTop3D, panelBottom3D,
+                PanelLayoutStore.PanelID.REF_PLAN_3D, panelTopLimit3D, panelTop3D, panelBottom3D,
                 Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN))
             ) { maxH ->
                 RefPlanPanel(
@@ -2419,7 +2386,7 @@ fun Scene3DScreen(
                 )
             }
             if (panels.geo) BottomLeadingPanel(
-                PanelLayoutStore.PanelID.GEO_POSITION_3D, sceneBoxPx.top, panelTop3D, panelBottom3D,
+                PanelLayoutStore.PanelID.GEO_POSITION_3D, panelTopLimit3D, panelTop3D, panelBottom3D,
                 Modifier.zIndex(panels.zIndex(ScenePanel.GEO))
             ) { maxH ->
                 val calibrated3D = calibration?.isCalibrated == true
@@ -2451,9 +2418,11 @@ fun Scene3DScreen(
 
             // ---- Décor 3D importé : panneau de placement + messages ----
             if (showModelsPanel && importedModels.isNotEmpty()) {
+                // Bas-GAUCHE (le coin bas-droit revient à la pile Rechercher / Recadrer),
+                // nouvelle clé de position (§3.4, §8 D13).
                 MovablePanel(
-                    id = PanelLayoutStore.PanelID.IMPORTED_MODELS_3D,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+                    id = PanelLayoutStore.PanelID.IMPORTED_MODELS_3D_LEADING,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp).width(240.dp)
                 ) {
                 ModelPlacementPanel(
                     models = importedModels,
@@ -2514,6 +2483,72 @@ fun Scene3DScreen(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
                 }
             }
+
+            // ---- HABILLAGE (SPEC-menus-android §3.1–3.5) : rangée du haut, pastille
+            // « Vue », bloc d'état, pile bas-droite, fine barre de chargement. ----
+            val dens3D = androidx.compose.ui.platform.LocalDensity.current
+            SceneTopRow(
+                backDescription = stringResource(R.string.menu_close_project),
+                onBack = onClose,
+                rect = tools3D.firstOrNull { it.id == ToolId.RECT }?.takeIf { SceneTopRowRules.showsRect(toolbarLayout) },
+                multi = tools3D.firstOrNull { it.id == ToolId.MULTI_SELECT }?.takeIf { SceneTopRowRules.showsMulti(toolbarLayout) },
+                menu = {
+                    MainMenuButton(
+                        ctx = menuCtx3D, state = menuState3D,
+                        values = MainMenuValues(
+                            background = options.background3D,
+                            backgroundPresets = bg3dPresets(),
+                            onBackground = { options.background3D = it },
+                            onCustomBackground = { showBackgroundDialog = true }
+                        ),
+                        onItem = { onMenuItem3D(it) }
+                    )
+                },
+                onRowBottom = { topRow3DBottomPx = it }
+            )
+            ViewPill(
+                surface = ProjectSurface.SCENE_3D, current = viewpoint,
+                onViewpoint = { applyViewpoint(it) }, onShowPlan = onShowPlan, onShow3D = {},
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp)
+                    .onGloballyPositioned { viewPill3DPx = it.boundsInRoot() }
+            )
+            val loading3D = progress?.takeIf { it.active }
+            StatusBlock(
+                lines = StatusBlockRules.lines(
+                    loading = loading3D != null, stepRes = loading3D?.step?.labelRes, percent = loading3D?.percent ?: 0,
+                    placed = placedObjects, truncated = truncatedObjects,
+                    hiddenClasses = hiddenClassCount, gdtfLoading = gdtfLoading
+                ),
+                syncBadge = syncBadge,
+                // Borné par la pastille « Vue » mesurée : jamais dessous.
+                maxWidth = with(dens3D) {
+                    if (viewPill3DPx.width > 0f) ((viewPill3DPx.left - sceneBoxPx.left).toDp() - 24.dp).coerceAtLeast(96.dp) else null
+                },
+                modifier = Modifier.align(Alignment.TopStart).padding(top = 58.dp, start = 8.dp)
+                    .onGloballyPositioned { statusBlock3DPx = it.boundsInRoot() }
+            )
+            // Fine barre DÉTERMINÉE pleine largeur, tout en haut : elle prolonge
+            // visuellement celle de l'accueil (même pourcentage global).
+            loading3D?.let { p ->
+                LinearProgressIndicator(
+                    progress = { p.percent / 100f },
+                    modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                )
+            }
+            // Pile bas-droite : Rechercher puis Recadrer ; elle monte au-dessus de la
+            // pastille de sélection, du bandeau de mesure et de la mention IGN.
+            SearchReframeStack(
+                showReframe = SceneTopRowRules.showsReframe(toolbarLayout),
+                onReframe = { reframe3D() },
+                onSearch = { q -> query = q; doSearch3D() },
+                obstacles = buildList {
+                    if (!measureMode && selected.isNotEmpty()) add(selectionPill3DPx)
+                    if (measureMode) add(measureBand3DPx)
+                    // La mention à sa place AFFICHÉE (sa montée ne dépend pas de la pile).
+                    if (satCredit3D != null) add(satMention3DPx.translate(0f, -satLift3D.value * satDens3D))
+                },
+                topLimitPx = maxOf(sceneBoxPx.top, topRow3DBottomPx)
+            )
 
             // LIBÉRATION À LA SORTIE — correctif du GEL confirmé par le journal de
             // Stéphane (Samsung A55, gros show Vega) : en quittant/fermant la vue 3D,

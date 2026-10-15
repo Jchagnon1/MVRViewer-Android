@@ -39,6 +39,14 @@ object PanelLayoutStore {
         REF_PLAN_PLAN_LEADING("refPlanPlacementPlanLeading"),
         /** Panneau « Réglage des étiquettes » de la 3D (clé iOS `labels3D`). */
         LABELS_3D("labels3D"),
+        // ---- Rangement des menus, tranche C (§3.4, §8 D13) : le coin bas-droit
+        // revient à la pile Rechercher / Recadrer ; ces panneaux passent en
+        // BAS-GAUCHE avec une nouvelle clé (les anciennes, mesurées depuis le coin
+        // bas-droit, restent sans usage).
+        /** Panneau « Modèles importés » de la 3D, bas-gauche (clé propre à Android). */
+        IMPORTED_MODELS_3D_LEADING("importedModels3DLeading"),
+        /** Panneau d'export PDF du plan, bas-gauche (clé propre à Android). */
+        EXPORT_PLAN_LEADING("exportPlanLeading"),
     }
 
     data class Placement(val dx: Float = 0f, val dy: Float = 0f, val collapsed: Boolean = false) {

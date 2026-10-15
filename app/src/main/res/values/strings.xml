@@ -117,11 +117,7 @@
     <string name="calib_status_none">Non calibré</string>
     <string name="calib_status_one">1 point posé. Avec un seul, le nord = le haut du plan. Posez un 2e point à un autre endroit pour corriger l\'orientation du plan et l\'échelle.</string>
     <string name="cam_front">Face</string>
-    <string name="cam_iso">Isométrique</string>
-    <string name="cam_reset_view">Réinitialiser la vue</string>
-    <string name="cam_side">Côté</string>
     <string name="cam_top">Dessus</string>
-    <string name="cam_viewpoints">Points de vue</string>
     <string name="cfx_add_channel">Ajouter un canal</string>
     <string name="cfx_base_gdtf">GDTF de base (géométrie 3D)</string>
     <string name="cfx_channel_fmt">Canal %1$d</string>
@@ -306,7 +302,6 @@
         <item quantity="one">%1$d objet</item>
         <item quantity="other">%1$d objets</item>
     </plurals>
-    <string name="tool_classes">Classes…</string>
     <string name="legend_more_fmt">+%1$d autre(s)</string>
     <string name="legend_more_layers_fmt">+%1$d autre(s) calque(s)</string>
     <string name="load_build">Construction de la scène…</string>
@@ -325,10 +320,7 @@
     <string name="measure_tap_fixture">Mesure : touchez un projecteur</string>
     <string name="measure_tap_second_fixture">Touchez le 2e projecteur</string>
     <string name="measure_tap_start">Mesure : touchez le point de départ</string>
-    <string name="menu_options">Options</string>
     <string name="menu_section_background">Couleur du fond</string>
-    <string name="menu_section_sync">Synchro</string>
-    <string name="menu_section_tools">Outils</string>
     <string name="model_add">Ajouter un modèle…</string>
     <string name="model_err_budget_exceeded_fmt">%1$s : il ne reste que %2$s sur le plafond cumulé de %3$s triangles pour les modèles importés. Retirez un modèle avant d\'en ajouter un autre, ou allégez le maillage.</string>
     <string name="model_err_budget_full_fmt">Plafond cumulé de %1$s triangles atteint pour les modèles importés. Retirez un modèle avant d\'en ajouter un autre.</string>
@@ -350,18 +342,13 @@
     <string name="model_too_many_fmt">Trop de modèles importés (%1$d au maximum).</string>
     <string name="mvr_err_no_scene_xml">GeneralSceneDescription.xml introuvable dans le .mvr.</string>
     <string name="nav_custom_color">Personnalisée…</string>
-    <string name="nav_customize_toolbar">Personnaliser la barre d\'outils…</string>
     <string name="nav_dmx_universe">Univers DMX</string>
-    <string name="nav_gdtf_share_models">GDTF Share (modèles 3D)</string>
     <string name="nav_history">Historique des modifications</string>
-    <string name="nav_layers">Calques…</string>
     <string name="nav_patch_list">Liste de patch</string>
     <string name="nav_power_cabling">Câblage électrique</string>
-    <string name="nav_projects">Projets</string>
     <string name="nav_share_project">Partager ce projet</string>
     <string name="nav_view_3d">Vue 3D</string>
     <string name="nav_view_plan">Vue plan</string>
-    <string name="opt_coloring_fmt">Coloration : %1$s</string>
     <string name="opt_hide_when_zoomed_out">Masquer les étiquettes trop dézoomées</string>
     <string name="opt_label_content">Contenu</string>
     <string name="opt_labels">Étiquettes</string>
@@ -404,7 +391,6 @@
     <string name="plan_image_default_name">Plan image</string>
     <string name="plan_pdf_default_name">Plan PDF</string>
     <string name="plan_pdf_doc_title">Plan</string>
-    <string name="plan_title_fmt">Plan · %1$d projecteur(s)</string>
     <string name="power_no_type">Aucun type de projecteur (spec GDTF) dans ce show.</string>
     <string name="power_tab_hint">Réglez la conso par TYPE : votre valeur profite à tous les projecteurs de ce type et alimente la bibliothèque partagée. Le câblage se met à jour aussitôt.</string>
     <string name="power_to_enter">à saisir</string>
@@ -431,16 +417,12 @@
     <string name="sat_loading">Téléchargement du satellite…</string>
     <string name="sat_out_of_coverage">Fond satellite disponible en France uniquement (imagerie IGN).</string>
     <string name="sat_unavailable">Pas d\'imagerie IGN pour cette zone.</string>
-    <string name="search_fixture_id_hint">N° projecteur</string>
+    <string name="search_fixture_id_hint">N° de projecteur</string>
     <string name="sel_fixtures_selected_fmt">%1$d projecteurs sélectionnés</string>
     <string name="size_large">Grande</string>
     <string name="size_medium">Moyenne</string>
     <string name="size_small">Petite</string>
-    <string name="status_gdtf_suffix_fmt"> · %1$d proj. GDTF</string>
     <string name="status_loading_3d">chargement 3D…</string>
-    <string name="status_objects_3d_fmt">%1$d objets 3D</string>
-    <string name="status_objects_3d_loading_fmt">%1$d objets 3D…</string>
-    <string name="status_objects_gdtf_fmt">%1$d objets · %2$d proj. GDTF…</string>
     <string name="status_truncated"> (tronqué)</string>
     <string name="sync_audit_by_fmt">par %1$s · %2$s</string>
     <string name="sync_backend_fmt">Backend : %1$s</string>
@@ -500,7 +482,7 @@
     <string name="tool_calibrate">Calibrer : je suis ici</string>
     <string name="tool_calibrate_3">Calibrer en 3 points (guidé)…</string>
     <string name="tool_clear_selection">Effacer la sélection</string>
-    <string name="tool_clear_solo">Vider le solo</string>
+    <string name="tool_clear_solo">Vider l\'isolement</string>
     <string name="tool_export_pdf">Export PDF</string>
     <string name="tool_gps">Ma position GPS</string>
     <string name="tool_gps_3d">Ma position (3D)</string>
@@ -515,11 +497,11 @@
     <string name="tool_measure">Mesurer une distance</string>
     <string name="tool_models_fmt">Modèles 3D (%1$d)</string>
     <string name="tool_recenter_camera">Recentrer la caméra</string>
-    <string name="tool_rect_select">Sélection rectangle</string>
+    <string name="tool_rect_select">Sélection par cadre</string>
     <string name="tool_ref_plan">Plan de repère</string>
     <string name="tool_satellite">Fond satellite</string>
     <string name="tool_show_all">Tout réafficher</string>
-    <string name="tool_solo">Solo (sélection seule)</string>
+    <string name="tool_solo">Isoler (solo)</string>
     <string name="toolbar_customize_help">Placez chaque outil sur un bord de l\'écran ou hors des barres. Tous les outils restent accessibles dans le menu ⋯.</string>
     <string name="toolbar_title_3d">Barre d\'outils · Vue 3D</string>
     <string name="toolbar_title_plan">Barre d\'outils · Vue plan</string>
@@ -784,4 +766,59 @@
     <string name="labels_placement_help">Touchez une étiquette pour la saisir, puis faites-la glisser ; retouchez-la pour la relâcher.</string>
     <string name="labels_turn_off_fmt">Désactiver (%1$d)</string>
     <string name="labels_separate_blocks">Blocs séparés</string>
+
+    <!-- Rangement des menus, tranche C (SPEC-menus-android §7.1) : menu ⋯ unique, pastille « Vue », rangée du haut, pile bas-droite, bloc d'état, bandeaux de mode. -->
+    <string name="menu_more_options">Plus d\'options</string>
+    <string name="menu_measure">Mesurer</string>
+    <string name="menu_layers">Calques</string>
+    <string name="menu_universes">Univers</string>
+    <string name="menu_cabling">Câblage</string>
+    <string name="menu_hide_isolate">Masquer &amp; isoler</string>
+    <string name="menu_patch_cabling">Patch &amp; câblage</string>
+    <string name="menu_plan_scenery">Plan &amp; décor</string>
+    <string name="menu_share_export">Partager &amp; exporter</string>
+    <string name="menu_section_colours">Couleurs</string>
+    <string name="menu_colour_by_cabling">Colorer par câblage</string>
+    <string name="menu_toolbar_this_view">Barre d\'outils de cette vue…</string>
+    <string name="menu_fixture_models">Modèles de projecteurs…</string>
+    <string name="menu_section_cabling">Câblage</string>
+    <string name="menu_socapex_pc16">Socapex &amp; lignes PC16</string>
+    <string name="menu_dmx_lines">Lignes &amp; multipaires DMX</string>
+    <string name="menu_power_per_type">Puissances par type</string>
+    <string name="menu_section_imported_plan">Plan importé</string>
+    <string name="menu_section_scenery_3d">Décor 3D</string>
+    <string name="menu_imported_models_fmt">Modèles importés (%1$d)…</string>
+    <string name="menu_section_team">Équipe</string>
+    <string name="menu_share_project">Partager ce projet…</string>
+    <string name="menu_section_export">Exporter</string>
+    <string name="menu_plan_pdf">PDF du plan (composer les vues)…</string>
+    <string name="menu_section_cabling_pdf">PDF de câblage</string>
+    <string name="pill_view">Vue</string>
+    <string name="pill_3d_fmt">3D · %1$s</string>
+    <string name="pill_plan_fmt">Plan · %1$s</string>
+    <string name="pill_section_viewpoint">Point de vue</string>
+    <string name="view_perspective">Perspective</string>
+    <string name="view_back">Arrière</string>
+    <string name="view_left">Gauche</string>
+    <string name="view_right">Droite</string>
+    <string name="pill_plan_view_2d">Vue plan 2D</string>
+    <string name="pill_section_projection">Projection 2D</string>
+    <string name="perm_multi_select">Multi-sélection</string>
+    <string name="search_fixture_cd">Rechercher un projecteur par N°</string>
+    <string name="search_none_fmt">Aucun projecteur nº %1$s</string>
+    <string name="reframe_cd">Recadrer la vue</string>
+    <string name="status_gdtf_loading">Modèles GDTF en cours…</string>
+    <string name="mode_hide_tap">Touchez un élément à masquer</string>
+    <string name="mode_hide_box">Tracez un cadre à masquer</string>
+    <string name="mode_isolate_tap">Touchez un élément à isoler</string>
+    <string name="mode_isolate_box">Tracez un cadre à isoler</string>
+    <string name="cabling_pdf_generating">Génération du PDF…</string>
+    <plurals name="status_objects">
+        <item quantity="one">%1$d objet</item>
+        <item quantity="other">%1$d objets</item>
+    </plurals>
+    <plurals name="status_hidden_classes">
+        <item quantity="one">%1$d classe masquée</item>
+        <item quantity="other">%1$d classes masquées</item>
+    </plurals>
 </resources>

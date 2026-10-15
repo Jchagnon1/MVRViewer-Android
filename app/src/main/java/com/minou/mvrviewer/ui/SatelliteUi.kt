@@ -258,14 +258,15 @@ fun BoxScope.SatelliteAttribution(
 internal fun LayoutCoordinates.anchorBounds(): Rect = Rect(positionInRoot(), size.toSize())
 
 /**
- * Marge basse de la mention : juste au-dessus de la barre flottante du bas (12 dp +
- * bouton 40 dp), ou de la flottante RELEVÉE quand une barre est ancrée en bas
- * (72 dp + 40 dp). Le curseur d'opacité du plan se pose 24 dp plus haut.
+ * Marge basse de la mention : contre le bas (12 dp) — la barre flottante historique
+ * est retirée (SPEC-menus-android §9.0, Q1) — ou juste au-dessus d'une barre ancrée
+ * en bas (12 dp + bouton 48 dp + 12 dp). La pile Rechercher / Recadrer, au même
+ * coin, monte au-dessus d'elle (§3.4) : la mention n'est jamais recouverte.
  */
 fun satelliteAttributionBottom(layout: ToolbarLayout, specs: List<ToolSpec>): Dp {
     val byId = specs.associateBy { it.id }
     val bottomBar = layout.bottom.mapNotNull { byId[it] }.any { it.available }
-    return if (bottomBar) 116.dp else 56.dp
+    return if (bottomBar) 72.dp else 12.dp
 }
 
 /**

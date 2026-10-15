@@ -6,8 +6,8 @@ fait foi pour la structure, les libellés et les règles gratuit/Pro) et
 Android, ce qui existe aujourd'hui (inventaire), ce qui change, ce qui manque,
 et dans quel ordre l'implémenter.
 
-État : **tranches A et B réalisées** (2026-10-15, voir *Réalisé* sous chaque
-tranche, §10) ; tranches C à E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
+État : **tranches A, B et C réalisées** (2026-10-15, voir *Réalisé* sous chaque
+tranche, §10) ; tranches D et E à faire. Décisions de l'utilisateur sur Q1–Q3 : §9.0.
 Base : branche `feature/v1.7-tilt-formats`, commit `e110bbc`
 (539 tests unitaires verts + 4 tests réseau ignorés). Relu et corrigé après
 critique (re-parcours du code, décisions, disparitions, sûreté des
@@ -1431,6 +1431,7 @@ de présence fr / en.
 | D22 | **VISIBLE (en)** — « C'est bon » reste « Looks right » en anglais (iOS : « Done »). | « Done » se confondrait avec « Terminé » / « Done » des fenêtres. |
 | D23 | **VISIBLE** — En 3D, « Isoler (solo) » est grisé sans sélection ni solo (iOS : une entrée sans donnée est plutôt absente). | Laisser la famille « Masquer & isoler » vide en 3D serait pire ; le grisé dit pourquoi rien ne se passe. Jamais selon Pro. |
 | D24 | **VISIBLE** — L'outil `gdtfShare` (« GDTF Share ») ouvre « Compte & réglages » (Services), pas une fenêtre GDTF Share à part ; les dispositions Android qui l'avaient sont migrées vers `gdtfMapping`. | Android n'a pas de fenêtre de réglages GDTF Share séparée ; la connexion vit dans Compte & réglages (décision 3). L'ancien outil Android ouvrait les modèles : la migration garde ce que l'utilisateur avait voulu. |
+| D25 | **VISIBLE** — Pastille 3D : Face, Arrière, Gauche et Droite reculent davantage quand la vue est plus haute que large (téléphone en portrait : ×hauteur/largeur, marge ×1,35, borné ×3,5). Dessus, Perspective et le paysage gardent le recul d'avant. | Le champ horizontal d'un téléphone en portrait est étroit : avec le recul d'avant, « Gauche » / « Droite » montraient un écran noir sur `mini.mvr` (rangées hors du cadre). Constat émulateur, tranche C. |
 
 ---
 
@@ -1846,27 +1847,131 @@ Tests unitaires (`MainMenuModelTest`, `ViewPillModelTest`, `SelectionRulesTest`,
 Contrôle à l'écran (`mini.mvr`, MF, portrait et paysage, fr et en, gratuit et
 Pro ; menus ouverts par `adb shell input tap`, cibles lues par `uiautomator
 dump`) :
-- [ ] captures du premier niveau et de chaque famille, 3D et plan ; en
-      paysage, un court défilement est accepté (décision 11) ;
-- [ ] Patch / Univers / Câblage en 2 touchers depuis les deux vues ;
-- [ ] pastille : bascules 3D ↔ plan ; Face et Droite = mêmes côtés qu'iOS sur
+- [x] captures du premier niveau et de chaque famille, 3D et plan ; en
+      paysage, un court défilement est accepté (décision 11) — *en paysage, le
+      premier niveau défile à partir de « Position GPS… »* ;
+- [x] Patch / Univers / Câblage en 2 touchers depuis les deux vues — *Patch
+      depuis le plan (retour : plan intact), Univers et Câblage depuis la 3D* ;
+- [x] pastille : bascules 3D ↔ plan ; Face et Droite = mêmes côtés qu'iOS sur
       `mini.mvr` ; pendant une affectation, « Vue 3D » ramène à la 3D sans
-      rouvrir le Câblage ;
-- [ ] rangée du haut : ← à gauche, trois ronds à droite, actif jaune / glyphe
-      noir ; outil ancré → bouton permanent masqué ;
-- [ ] pile bas-droite : au-dessus de la fiche, de la barre d'affectation, du
-      panneau 3 points ; jamais sur la mention IGN ; « Aucun projecteur nº 999 » ;
-- [ ] légende, barre d'affectation et panneau 3 points sans chevauchement
+      rouvrir le Câblage — *Face : caméra en +Z Filament (−Y MVR), rangée
+      #101–#103 devant ; Droite : caméra en +X, la rangée de face à gauche
+      de l'image (même convention qu'iOS, comparée au code iOS, pas à un
+      simulateur) ; Gauche et Droite étaient NOIRES en portrait (voir Réalisé)* ;
+- [x] rangée du haut : ← à gauche, trois ronds à droite, actif jaune / glyphe
+      noir ; outil ancré → bouton permanent masqué — *cadre ancré à gauche par
+      « Barre d'outils de cette vue… » : le rond disparaît, l'outil est dans la
+      barre ; « Réinitialiser » le remet* ;
+- [x] pile bas-droite : au-dessus de la fiche, de la barre d'affectation, du
+      panneau 3 points ; jamais sur la mention IGN ; « Aucun projecteur nº 999 » —
+      *fiche, bannière multi et barre d'affectation vérifiées ; panneau 3 points
+      : même règle (`clearanceLift`, testée), non rejoué* ;
+- [x] légende, barre d'affectation et panneau 3 points sans chevauchement
       avec la pastille (portrait, paysage) ; en affectation, la rangée de
       projecteurs du haut n'est pas sous la pastille — tests
       `CablingPlanScreenTest` verts ;
 - [ ] pastille de synchro (projet partagé) : bloc d'état en 3D, à droite sous
       la rangée dans le plan, jamais sous la pastille « Vue » ; bannière
-      « nouvelle version » sans recouvrir ← ni ⋯ ;
-- [ ] PDF du plan depuis la 3D (plan ouvert en mode export) ; PDF de câblage
+      « nouvelle version » sans recouvrir ← ni ⋯ — *non rejoué : pas de
+      projet partagé sur l'émulateur ; placement prouvé en JVM
+      (`PlanSyncBadgeRules`) et branchement vérifié dans le code* ;
+- [x] PDF du plan depuis la 3D (plan ouvert en mode export) ; PDF de câblage
       depuis le ⋯ (attente puis partage) ;
-- [ ] « Fermer le projet » depuis les deux vues ;
-- [ ] bandeaux masquage / solo, sortie par leur icône.
+- [x] « Fermer le projet » depuis les deux vues — *depuis le plan par le ⋯ ;
+      depuis la 3D, ← (TalkBack « Fermer le projet ») et même entrée du ⋯* ;
+- [x] bandeaux masquage / solo, sortie par leur icône — *« Touchez un élément à
+      masquer », puis cadre armé « Tracez un cadre à masquer » ; la croix quitte
+      le mode ; la légende passe sous le bandeau*.
+
+*Réalisé (tranche C, 2026-10-15)* — 628 tests unitaires verts + 4 ignorés
+(595 après B ; nouveaux : `MainMenuModelTest`, `SceneChromeRulesTest` ;
+`ToolbarLayoutTest`, `SatelliteScreenTest`, `CablingPlanScreenTest`,
+`LabelSettingsSectionsTest` suivent le retrait de la barre flottante, du ⋯
+d'avant et le nouveau cadrage), APK construit, contrôle à l'émulateur
+Medium_Phone (mémoire 2 Go, démarré en 30 s, API 37), puis arrêté.
+
+- Code : `MainMenuModel.kt` (pur : pages, entrées, contexte SANS Pro, routage
+  des entrées « projet » vers les destinations et les PDF de câblage),
+  `MainMenu.kt` (bouton ⋯, pages dans le même `DropdownMenu`, `MenuIconRow`,
+  pages de valeurs à boutons radio), `SceneChromeRules.kt` (pur :
+  `CameraViewpoint`, `ViewPillModel`, `SceneTopRowRules`, `SelectionRules`,
+  `PlanFitRules`, `PlanSyncBadgeRules`, `StatusBlockRules`, `PlanModeBanner`),
+  `SceneChrome.kt` (`SceneTopRow`, `ViewPill`, `SearchReframeStack`,
+  `StatusBlock`, `PlanModeBannerBar`, `BusyBanner`), `CablingPdfShare.kt`
+  (génération des PDF de câblage extraite de l'écran Câblage, appelée aussi
+  par le ⋯ — §8 D17). `SceneOptionsMenu`, `MenuTool`, `toMenuTools`,
+  `FloatingToolbar`, `floating3D` / `floatingPlan` et le paramètre `inMenu`
+  des outils sont supprimés ; la `TopAppBar` 3D, le menu « Points de vue »,
+  les champs de recherche permanents, la pastille « Plan · N » et le ← / titre
+  flottants du plan aussi.
+- `ToolId.MULTI_SELECT` (« multiSelect ») dans les deux catalogues. Sélection
+  (Q2) : toucher REMPLACE, Multi-sélection (ou le cadre armé) ajoute / retire,
+  le vide désélectionne sauf en multi ; le cadre AJOUTE aussi dans le plan ;
+  couper le multi vide la sélection et coupe le cadre. Dans le plan, l'outil
+  cadre passe toujours par `toggleTouchTool(PlanTouchTool.RECT)` (assistant 3
+  points fermé), puis force le multi.
+- Pastille : Arrière et Gauche ajoutés. **Défaut trouvé à l'émulateur** :
+  « Gauche » / « Droite » (et l'ancien « Côté ») montraient un écran NOIR en
+  portrait — le champ horizontal d'un téléphone en portrait est étroit, les
+  deux rangées de `mini.mvr` sortaient par les bords. Les quatre vues de côté
+  reculent désormais d'autant que la vue est haute (×hauteur/largeur, marge
+  ×1,35, borné ×3,5 ; `CameraViewpoint.recoil`, testé) ; Dessus, Perspective
+  et le paysage sont inchangés (§8 D25).
+- Cadrage du plan sous la pastille (`PlanFitRules.underPill`) : ouverture,
+  rotation, affectation, assistant 3 points et Recadrer. Règle d'origine
+  intacte sans pastille mesurée ou quand le contenu passe déjà dessous ; sinon
+  marges d'iOS (`planFitMargins` : pastille + 24 dp, bas + 20 à 50 dp). Une
+  seule mémoire « plan touché » (`autoFitView`) pour tous les cadrages
+  automatiques. Constat : en paysage, la rangée du haut passait sous la
+  pastille à l'ouverture, et sans marge basse la rangée du bas était coupée
+  par le bord — les deux corrigés.
+- Retour système dans une page du ⋯ : le `Popup` enregistre son propre rappel
+  de retour à l'attache (retour prédictif, cible 36, API 33+) et ne le retire
+  pas quand ses propriétés changent ; un rappel plus récent de même priorité,
+  posé sur la fenêtre du menu par la page, passe devant (vérifié API 37 : une
+  page → premier niveau → fermeture). Avant API 33 : touche Retour lue par le
+  contenu. La page n'est plus remise au premier niveau pendant le fondu de
+  fermeture (constat : le premier niveau réapparaissait le temps du fondu).
+- Habillage : boutons ronds 48 dp neutres (`surfaceVariant`), jaunes
+  seulement quand une bascule est active ; bloc d'état « %d objets » (pluriel,
+  « 0 objet » sur `mini.mvr` qui n'a que des projecteurs), « (tronqué) »,
+  « %d classes masquées », « Modèles GDTF en cours… » ; « proj. GDTF » retiré
+  (D14). `LEGEND_TOP_ANDROID` gardé à 100 dp : mesuré, la pastille finit à
+  ~90 dp sous le haut du plan (10 dp d'écart) ; un bandeau de mode pousse la
+  légende sous lui.
+- Mention IGN : contre le bas (12 dp, 72 dp avec une barre ancrée en bas) ;
+  elle MONTE au-dessus de la fiche / bannière (plan) et de la pastille de
+  sélection / bandeau de mesure (3D) — constat : contre le bas, la fiche la
+  recouvrait. La pile Rechercher / Recadrer la lit à sa place affichée.
+- Recherche : la loupe ouvre le champ ; Entrée (clavier physique) ou la
+  loupe du champ lance ; sans résultat, le clavier se range pour que
+  « Aucun projecteur nº … » (sous le champ) se voie. Constat : pendant la
+  saisie, le système fait glisser toute la fenêtre vers le haut (pas
+  d'`adjustResize` dans l'app) — la rangée du haut sort de l'écran le temps
+  de taper ; laissé tel quel (§11).
+- La vue 3D et le plan sont rognés à leurs bornes : sans barre du haut opaque,
+  une étiquette 3D projetée au-dessus de la vue débordait sur la barre d'état.
+- Textes : clés §7.1 de la tranche ; valeurs finales posées dès C parce que
+  les surfaces C les lisent : `tool_rect_select` (« Sélection par cadre »,
+  TalkBack du rond), `tool_solo` (« Isoler (solo) ») et `tool_clear_solo`
+  (« Vider l'isolement ») — ⋯ › Masquer & isoler —, `search_fixture_id_hint`,
+  `opt_layer_colors` (en), `cabling_export_full_menu` (en « Full cabling
+  pack »), `cabling_export_elec_menu` (en « Power distro »). Supprimées :
+  `menu_options`, `menu_section_tools`, `menu_section_sync`, `nav_layers`,
+  `tool_classes`, `nav_customize_toolbar`, `nav_gdtf_share_models`,
+  `cam_viewpoints`, `cam_side`, `cam_iso`, `cam_reset_view`,
+  `opt_coloring_fmt`, `plan_title_fmt`, `nav_projects`,
+  `status_objects_3d_fmt`, `status_objects_3d_loading_fmt`,
+  `status_objects_gdtf_fmt`, `status_gdtf_suffix_fmt`.
+- Panneaux du coin bas-droit passés en bas-gauche : `importedModels3DLeading`,
+  `exportPlanLeading` (anciennes clés gardées). Les panneaux du bas-gauche
+  sont bornés sous la rangée du haut, le bloc d'état / la pastille « Vue » et
+  le bandeau de mode.
+- Étiquettes de test : `mainMenu`, `menu.<entrée>`, `menu.back`, `viewPill`,
+  `viewPill.<action>`, `topRow.back`, `topRow.rect`, `topRow.multi`, `search`,
+  `searchField`, `searchNone`, `reframe`, `statusBlock`, `modeBanner`,
+  `modeBanner.exit`, `busyBanner`.
+- Captures : `~/.mvrviewer-tools/scratch/android-menus/C/`.
 
 ### Tranche D — Fiche de sélection unique, bannière multi, Univers « Éditer »
 
@@ -1966,10 +2071,20 @@ Contrôle à l'écran :
   « Enregistrer » (DESIGN_UI §8).
 - Fonctions de Q3.
 - Web : même portage, document séparé dans le dépôt `MVRViewerWeb`.
-- Cadre de sélection : il **ajoute** à la sélection en 3D
-  (`Scene3DScreen.kt:2146`) mais la **remplace** dans le plan
-  (`PlanScreen.kt:1312`). Aligné en tranche C (Q2 tranchée, §9.0 ; règle iOS : le
-  cadre force le multi, donc ajoute).
+- Cadre de sélection : il **ajoutait** à la sélection en 3D mais la
+  **remplaçait** dans le plan. Aligné en tranche C (Q2 tranchée, §9.0 ; règle
+  iOS : le cadre force le multi, donc ajoute) — fait.
+- Nom de fichier des PDF de câblage : les lettres accentuées deviennent
+  « _ » (« C_blage_complet.pdf », `writePdfToCache`, `PlanPdfExport.kt:175`) —
+  existant, vu en tranche C (même nom depuis l'écran Câblage).
+- Clavier : l'app n'est pas en `adjustResize` ; un champ du bas (recherche par
+  N°) fait glisser toute la fenêtre vers le haut le temps de la saisie
+  (rangée du haut hors de l'écran). Vu en tranche C.
+- Cadrage de l'affectation en portrait (règle d'origine `fitAbove`, pastille
+  non gênante) : contenu limité par la largeur → aucune marge sous la rangée
+  du bas, ses étiquettes passent sous la barre d'affectation. Existant ; la
+  règle d'iOS (marge basse 20 à 50 dp) n'est appliquée que quand la pastille
+  gêne (tranche C).
 - Les sections partagées `labelSides` et `fixtureOrientations` sont reçues
   mais pas appliquées (`SceneScreen.kt:545`) : un Pan / Tilt 180° fait sur
   iOS ne se voit pas sur Android. Même chantier que Q3.

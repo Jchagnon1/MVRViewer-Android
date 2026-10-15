@@ -58,9 +58,12 @@ class LabelSettingsSectionsTest {
 
     @Test fun ancienMenuAllegeEtCodeSansClesRetirees() {
         val root = listOf(File("src/main/java"), File("app/src/main/java")).first { it.isDirectory }
-        val menu = File(root, "com/minou/mvrviewer/ui/SceneOptions.kt").readText()
-        // Les options d'étiquettes, le satellite, son curseur et la ligne d'état
-        // de la calibration quittent le ⋯ (panneaux) ; « Étiquettes » reste.
+        // Le ⋯ (tranche C : modèle + composable du menu unique). Les options
+        // d'étiquettes, le satellite, son curseur et la ligne d'état de la
+        // calibration en restent absents (panneaux) ; « Étiquettes » reste.
+        val menu = listOf("MainMenuModel.kt", "MainMenu.kt").joinToString("\n") {
+            File(root, "com/minou/mvrviewer/ui/$it").readText()
+        }
         for (gone in listOf("opt_size_fmt", "opt_gap_fmt", "opt_label_detached", "opt_hide_when_zoomed_out",
                 "opt_reset_label_offsets", "opt_labels_of_selection", "opt_satellite_map", "Slider(",
                 "calibrationStatus")) assertFalse("⋯ : $gone", menu.contains(gone))

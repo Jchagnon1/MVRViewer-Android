@@ -100,7 +100,9 @@ object ThreePointPlanFit {
     fun refit(
         canvasW: Float, canvasH: Float, spanX: Float, spanY: Float,
         planTop: Float, planBottom: Float, panelTop: Float,
-        fittedReserve: Float, untouched: Boolean, sizeChanged: Boolean, slack: Float
+        fittedReserve: Float, untouched: Boolean, sizeChanged: Boolean, slack: Float,
+        /** Du haut du plan au bas de la pastille « Vue » (0 = non mesurée : règle d'origine). */
+        topReserve: Float = 0f, topGap: Float = 0f, minContent: Float = 0f, dp: Float = 1f
     ): Fit? {
         if (planBottom - planTop <= 0f || canvasW <= 0f || canvasH <= 0f) return null
         // Panneau pas encore mesuré, ou mesuré dans l'ancienne taille.
@@ -108,7 +110,8 @@ object ThreePointPlanFit {
         if (!untouched) return null
         val reserve = CablingAssignBarPlacement.reserve(planTop, planBottom, panelTop)
         if (!sizeChanged && reserve <= fittedReserve + slack) return null
-        val (s, dy) = CablingAssignBarPlacement.fitAbove(canvasW, canvasH, spanX, spanY, reserve)
+        // Au-dessus du panneau ET sous la pastille (SPEC-menus-android §3.3).
+        val (s, dy) = PlanFitRules.underPill(canvasW, canvasH, spanX, spanY, topReserve, reserve, topGap, minContent, dp)
         return Fit(s, dy, reserve)
     }
 }

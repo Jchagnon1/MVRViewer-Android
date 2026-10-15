@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.minou.mvrviewer.R
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
 import com.minou.mvrviewer.mvr.ProjectStore
@@ -63,7 +64,7 @@ private fun rememberNetworkEpoch(): Int {
 
 /**
  * Hôte d'un .mvr ouvert. Comme iOS, la **vue 3D est l'écran principal** ; la
- * vue plan s'atteint depuis le menu d'options (⋯). Les réglages d'affichage
+ * vue plan s'atteint par la pastille « Vue ». Les réglages d'affichage
  * (fond, couleurs par calque, étiquettes) sont partagés entre les vues.
  *
  * NAVIGATION (SPEC-menus-android §1.3, §4.1) : une VUE DE BASE (3D ou plan) et
@@ -1179,8 +1180,44 @@ fun SceneScreen(
         }
     }
 
-    // « Rejoindre un projet » (ancien ⋯, jusqu'à la tranche C ; l'accueil le garde).
-    var showJoin by remember { mutableStateOf(false) }
+    // ---- MENU ⋯ UNIQUE (SPEC-menus-android §3.2) : entrées « projet » transmises
+    // par les deux vues — destinations, import du plan, PDF du plan (la 3D ouvre le
+    // plan en mode export), PDF de câblage, fermeture. ----
+    // PDF de câblage depuis le ⋯ : MÊME moteur que l'écran Câblage (§8 D17) ; attente
+    // « Génération du PDF… » au-dessus de la vue courante, puis feuille de partage.
+    var cablingPdfBusy by remember { mutableStateOf(false) }
+    val pdfTexts = cablingPdfTexts()
+    fun exportCablingPdf(parts: Set<CablingPdfPart>) {
+        if (cablingPdfBusy) return
+        cablingPdfBusy = true
+        val inputs = CablingPdfInputs.freeze(
+            scene, mvrBytes, overrides, gdtfOverrides, customResolver, power,
+            cabling, dmxCabling, referencePlan, satellite, hiddenLayers
+        )
+        scope.launch {
+            val file = try {
+                generateCablingPdf(ctx, inputs, parts, pdfTexts.titleOf(parts), pdfTexts)
+            } finally { cablingPdfBusy = false }
+            if (file != null) sharePlanPdf(ctx, file)
+            else android.widget.Toast.makeText(ctx, pdfTexts.failed, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    fun onMainMenu(id: MainMenuItemId) {
+        MainMenuModel.destinationOf(id)?.let { open(it); return }
+        MainMenuModel.cablingPdfOf(id)?.let { exportCablingPdf(it); return }
+        when (id) {
+            MainMenuItemId.IMPORT_PLAN -> importRefPlan()
+            // Depuis la 3D : le plan s'ouvre en mode export (PlanStartAction).
+            MainMenuItemId.PLAN_PDF -> openPlanWith(PlanStartAction.EXPORT_PDF)
+            // Pas de confirmation : tout est enregistré au fil de l'eau (§3.2.7).
+            MainMenuItemId.CLOSE_PROJECT -> onClose()
+            else -> {}
+        }
+    }
+    val hasCabling = cabling.distributors.isNotEmpty() || dmxCabling.distributors.isNotEmpty()
+    // Pastille de synchro (projet partagé) : dans le bloc d'état de la 3D, à droite
+    // sous la rangée du haut dans le plan (§3.5, §8 D21) ; cachée par les écrans pleins.
+    val syncBadge: (@Composable () -> Unit)? = sync?.let { s -> { SyncStatusBadge(s) } }
 
     // Calques du show + nombre d'objets pour la feuille « Calques », figés par
     // scène (on évite de reconstruire les paires à chaque recomposition).
@@ -1197,7 +1234,6 @@ fun SceneScreen(
     // dialogues et feuilles reçoivent le retour eux-mêmes. L'accueil (HomeScreen)
     // n'a AUCUN handler : seul lui laisse l'OS réduire l'appli.
     BackHandler { navigate(SceneNavEvent.SystemBack) }
-    BackHandler(enabled = showJoin) { showJoin = false }
 
     // Un écran plein OPAQUE recouvre la vue de base : 3D en pause de rendu, vue de
     // base muette pour l'accessibilité.
@@ -1209,8 +1245,13 @@ fun SceneScreen(
         SceneBase.THREE_D -> Scene3DScreen(
             scene = visibleScene,
             mvrBytes = mvrBytes,
-            onShowClasses = if (classRows.isEmpty()) null else ({ open(ProjectDestination.Layers(LayersTab.CLASSES)) }),
             onShowLayers = { open(ProjectDestination.Layers(LayersTab.LAYERS)) },
+            // Menu ⋯ unique, bloc d'état, pastille de synchro (tranche C).
+            onMainMenu = { onMainMenu(it) },
+            hasSync = sync != null,
+            hasCabling = hasCabling,
+            hiddenClassCount = hiddenClasses.size,
+            syncBadge = syncBadge,
             // Sous un écran plein (Patch, Câblage…), la boucle de rendu 3D attend.
             renderPaused = coveredByScreen,
             initialModelUri = initialModelUri,
@@ -1278,7 +1319,6 @@ fun SceneScreen(
             // (SyncViewModel.publishCurrentProject) — SPEC-menus-android §1.2.
             onShareProject = sync?.let { { open(ProjectDestination.ShareProject) } },
             onShowHistory = sync?.let { { open(ProjectDestination.History) } },
-            onJoinProject = sync?.let { { showJoin = true } },
             // Solo partagé avec la vue plan (survit aux bascules 3D ↔ plan).
             soloElements = soloElements,
             onSetSoloElements = { soloElements = it },
@@ -1296,14 +1336,16 @@ fun SceneScreen(
             // Bibliothèque MA : objets 3D statiques des types MA + sélection remontée.
             fixture3DStore = fixture3DStore,
             onSelectionChanged = { selectionKeys = it },
-            onShowMaLibrary = { open(ProjectDestination.MaLibrary) },
             onClose = onClose
         )
         SceneBase.PLAN -> PlanScreen(
             scene = visibleScene,
             mvrBytes = mvrBytes,
-            onShowClasses = if (classRows.isEmpty()) null else ({ open(ProjectDestination.Layers(LayersTab.CLASSES)) }),
-            onShowLayers = { open(ProjectDestination.Layers(LayersTab.LAYERS)) },
+            // Menu ⋯ unique, pastille de synchro (tranche C).
+            onMainMenu = { onMainMenu(it) },
+            hasSync = sync != null,
+            hasCabling = hasCabling,
+            syncBadge = syncBadge,
             // Lancement du plan (export PDF, 3 points, « je suis ici ») : demande à usage unique.
             startTick = planStartTick,
             takeStartAction = { planStart.take() },
@@ -1350,24 +1392,18 @@ fun SceneScreen(
             customResolver = customResolver,
             // « Vue 3D » : désarme une affectation et ferme le plan, SANS rouvrir le Câblage.
             onShow3D = { navigate(SceneNavEvent.Cabling(CablingAssignEvent.VIEW_3D)) },
-            onShowAccount = { open(ProjectDestination.AccountSettings) },
-            onShareProject = sync?.let { { open(ProjectDestination.ShareProject) } },
-            onShowHistory = sync?.let { { open(ProjectDestination.History) } },
-            onJoinProject = sync?.let { { showJoin = true } },
             // Flèche haut-gauche : pendant une affectation, elle vaut « Terminé »
             // (le plan se ferme, le Câblage rouvre) ; sinon retour à la 3D.
             onBack = {
                 navigate(if (assignTarget != null) SceneNavEvent.Cabling(CablingAssignEvent.BACK)
                          else SceneNavEvent.ShowBase(SceneBase.THREE_D))
             },
-            onShowPatch = { open(ProjectDestination.PatchList) },
             // N12 : appui long sur un projecteur → ouvre la fiche d'édition patch.
             onEditFixture = { editFixture = it },
             // N11 — disposition des barres d'outils plan (persistée globalement).
             toolbarLayout = layoutPlan,
             onLayoutChange = { layoutPlan = it },
-            // Bibliothèque MA : entrée de menu + sélection remontée (affectation).
-            onShowMaLibrary = { open(ProjectDestination.MaLibrary) },
+            // Sélection remontée (« affecter à la sélection » de la bibliothèque MA).
             onSelectionChanged = { selectionKeys = it }
         )
     } // when(nav.base)
@@ -1492,9 +1528,16 @@ fun SceneScreen(
         }
 
         // ---- Superposition de synchro (visible/cliquable au-dessus de la SurfaceView) ----
+        // PDF de câblage lancé depuis le ⋯ : attente au-dessus de la vue courante.
+        if (cablingPdfBusy) BusyBanner(
+            androidx.compose.ui.res.stringResource(R.string.cabling_pdf_generating),
+            Modifier.align(Alignment.Center)
+        )
         if (sync != null) {
-            // Bannière « nouvelle version → rouvrir » (haut).
-            Box(Modifier.align(Alignment.TopCenter)) {
+            // Bannière « nouvelle version → rouvrir » : SOUS la rangée du haut, jamais
+            // sur ← ni sur ⋯ (§3.1) ; elle peut couvrir le bloc d'état et la pastille
+            // le temps qu'on y réponde.
+            Box(Modifier.align(Alignment.TopCenter).padding(top = 54.dp)) {
                 MvrVersionBanner(sync) { notice ->
                     scope.launch {
                         val bytes = runCatching { sync.downloadMvr(notice.sha256, notice.projectId) }.getOrNull()
@@ -1503,24 +1546,11 @@ fun SceneScreen(
                     }
                 }
             }
-            // Pastille de statut seule (les actions compte/partage/historique/
-            // rejoindre vivent dans le menu ⋯, pas dans un bouton flottant). Les écrans
-            // pleins, opaques, la cachent : elle se relit en les fermant (§3.5).
-            if (!coveredByScreen) Box(modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
-                SyncStatusBadge(sync)
-            }
 
             if (dest == ProjectDestination.ShareProject) ShareProjectDialog(sync, fileName,
                 onDismiss = { closeDestination() },
                 onPublished = { scope.launch { pushAllLocalState() } })
             if (dest == ProjectDestination.History) HistoryDialog(sync, onUndo = { e -> undoAudit(e) }) { closeDestination() }
-            if (showJoin) JoinProjectDialog(sync, onDismiss = { showJoin = false }) { project ->
-                scope.launch {
-                    runCatching { sync.downloadMvr(project) }.getOrNull()?.let {
-                        onReopenBytes(it, project.name)
-                    }
-                }
-            }
         }
 
         // N12 — FICHE D'ÉDITION PATCH ouverte par appui long (3D ou plan). La MÊME

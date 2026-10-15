@@ -30,9 +30,9 @@
     <string name="cabling_empty_hint">Add a Socapex or a single 16 A line to start cabling.</string>
     <string name="cabling_export_dmx">DMX cabling</string>
     <string name="cabling_export_elec_doc">Power distribution</string>
-    <string name="cabling_export_elec_menu">Power distribution</string>
+    <string name="cabling_export_elec_menu">Power distro</string>
     <string name="cabling_export_full">Full cabling</string>
-    <string name="cabling_export_full_menu">Complete cabling pack</string>
+    <string name="cabling_export_full_menu">Full cabling pack</string>
     <string name="cabling_export_pdf_cd">Export the cabling as PDF</string>
     <string name="cabling_export_plans">Marked-up plans</string>
     <string name="cabling_filter_hint">Filter (ID, name, type…)</string>
@@ -117,11 +117,7 @@
     <string name="calib_status_none">Not calibrated</string>
     <string name="calib_status_one">One anchor set. With a single anchor, north = the top of the plan. Set a second anchor elsewhere to correct the plan orientation and scale.</string>
     <string name="cam_front">Front</string>
-    <string name="cam_iso">Isometric</string>
-    <string name="cam_reset_view">Reset the view</string>
-    <string name="cam_side">Side</string>
     <string name="cam_top">Top</string>
-    <string name="cam_viewpoints">Viewpoints</string>
     <string name="cfx_add_channel">Add a channel</string>
     <string name="cfx_base_gdtf">Base GDTF (3D geometry)</string>
     <string name="cfx_channel_fmt">Channel %1$d</string>
@@ -306,7 +302,6 @@
         <item quantity="one">%1$d object</item>
         <item quantity="other">%1$d objects</item>
     </plurals>
-    <string name="tool_classes">Classes…</string>
     <string name="legend_more_fmt">+%1$d more</string>
     <string name="legend_more_layers_fmt">+%1$d more layer(s)</string>
     <string name="load_build">Building the scene…</string>
@@ -325,10 +320,7 @@
     <string name="measure_tap_fixture">Measure: tap a fixture</string>
     <string name="measure_tap_second_fixture">Tap the 2nd fixture</string>
     <string name="measure_tap_start">Measure: tap the start point</string>
-    <string name="menu_options">Options</string>
     <string name="menu_section_background">Background colour</string>
-    <string name="menu_section_sync">Sync</string>
-    <string name="menu_section_tools">Tools</string>
     <string name="model_add">Add a model…</string>
     <string name="model_err_budget_exceeded_fmt">%1$s: only %2$s left of the combined %3$s-triangle cap for imported models. Remove a model before adding another, or simplify the mesh.</string>
     <string name="model_err_budget_full_fmt">Combined cap of %1$s triangles reached for imported models. Remove a model before adding another.</string>
@@ -350,24 +342,19 @@
     <string name="model_too_many_fmt">Too many imported models (%1$d maximum).</string>
     <string name="mvr_err_no_scene_xml">GeneralSceneDescription.xml not found in the .mvr file.</string>
     <string name="nav_custom_color">Custom…</string>
-    <string name="nav_customize_toolbar">Customize the toolbar…</string>
     <string name="nav_dmx_universe">DMX universes</string>
-    <string name="nav_gdtf_share_models">GDTF Share (3D models)</string>
     <string name="nav_history">Change history</string>
-    <string name="nav_layers">Layers…</string>
     <string name="nav_patch_list">Patch list</string>
     <string name="nav_power_cabling">Power cabling</string>
-    <string name="nav_projects">Projects</string>
     <string name="nav_share_project">Share this project</string>
     <string name="nav_view_3d">3D view</string>
     <string name="nav_view_plan">Plan view</string>
-    <string name="opt_coloring_fmt">Colouring: %1$s</string>
     <string name="opt_hide_when_zoomed_out">Hide labels when zoomed too far out</string>
     <string name="opt_label_content">Content</string>
     <string name="opt_labels">Labels</string>
     <string name="opt_labels_of_selection">Labels of the selection</string>
     <string name="opt_labels_same_type">Labels of the same type (this layer)</string>
-    <string name="opt_layer_colors">Colour by layer</string>
+    <string name="opt_layer_colors">Colours per layer</string>
     <string name="opt_legend">Legend</string>
     <string name="opt_reset_label_offsets">Reset label positions</string>
     <string name="opt_show_labels">Show labels</string>
@@ -404,7 +391,6 @@
     <string name="plan_image_default_name">Image plan</string>
     <string name="plan_pdf_default_name">PDF plan</string>
     <string name="plan_pdf_doc_title">Plan</string>
-    <string name="plan_title_fmt">Plan · %1$d fixture(s)</string>
     <string name="power_no_type">No fixture type (GDTF spec) in this show.</string>
     <string name="power_tab_hint">Set power draw by TYPE: your value applies to every fixture of that type and feeds the shared library. The cabling updates immediately.</string>
     <string name="power_to_enter">to be entered</string>
@@ -431,16 +417,12 @@
     <string name="sat_loading">Downloading satellite imagery…</string>
     <string name="sat_out_of_coverage">Satellite background available in France only (IGN imagery).</string>
     <string name="sat_unavailable">No IGN imagery for this area.</string>
-    <string name="search_fixture_id_hint">Fixture ID</string>
+    <string name="search_fixture_id_hint">Fixture number</string>
     <string name="sel_fixtures_selected_fmt">%1$d fixtures selected</string>
     <string name="size_large">Large</string>
     <string name="size_medium">Medium</string>
     <string name="size_small">Small</string>
-    <string name="status_gdtf_suffix_fmt"> · %1$d GDTF fixtures</string>
     <string name="status_loading_3d">loading 3D…</string>
-    <string name="status_objects_3d_fmt">%1$d 3D objects</string>
-    <string name="status_objects_3d_loading_fmt">%1$d 3D objects…</string>
-    <string name="status_objects_gdtf_fmt">%1$d objects · %2$d GDTF fixtures…</string>
     <string name="status_truncated"> (truncated)</string>
     <string name="sync_audit_by_fmt">by %1$s · %2$s</string>
     <string name="sync_backend_fmt">Backend: %1$s</string>
@@ -515,7 +497,7 @@
     <string name="tool_measure">Measure a distance</string>
     <string name="tool_models_fmt">3D models (%1$d)</string>
     <string name="tool_recenter_camera">Recentre the camera</string>
-    <string name="tool_rect_select">Box selection</string>
+    <string name="tool_rect_select">Rectangle selection</string>
     <string name="tool_ref_plan">Reference plan</string>
     <string name="tool_satellite">Satellite background</string>
     <string name="tool_show_all">Show everything again</string>
@@ -777,4 +759,59 @@
     <string name="labels_placement_help">Tap a label to pick it up, then drag it; tap it again to let go.</string>
     <string name="labels_turn_off_fmt">Turn off (%1$d)</string>
     <string name="labels_separate_blocks">Separate blocks</string>
+
+    <!-- Menu tidy-up, slice C (SPEC-menus-android §7.1): single ⋯ menu, View pill, top row, bottom-right stack, status block, mode banners. -->
+    <string name="menu_more_options">More options</string>
+    <string name="menu_measure">Measure</string>
+    <string name="menu_layers">Layers</string>
+    <string name="menu_universes">Universes</string>
+    <string name="menu_cabling">Cabling</string>
+    <string name="menu_hide_isolate">Hide &amp; isolate</string>
+    <string name="menu_patch_cabling">Patch &amp; cabling</string>
+    <string name="menu_plan_scenery">Plan &amp; scenery</string>
+    <string name="menu_share_export">Share &amp; export</string>
+    <string name="menu_section_colours">Colours</string>
+    <string name="menu_colour_by_cabling">Colour by cabling</string>
+    <string name="menu_toolbar_this_view">Toolbar for this view…</string>
+    <string name="menu_fixture_models">Fixture models…</string>
+    <string name="menu_section_cabling">Cabling</string>
+    <string name="menu_socapex_pc16">Socapex &amp; PC16 lines</string>
+    <string name="menu_dmx_lines">DMX lines &amp; multicores</string>
+    <string name="menu_power_per_type">Power per type</string>
+    <string name="menu_section_imported_plan">Imported plan</string>
+    <string name="menu_section_scenery_3d">3D scenery</string>
+    <string name="menu_imported_models_fmt">Imported models (%1$d)…</string>
+    <string name="menu_section_team">Team</string>
+    <string name="menu_share_project">Share this project…</string>
+    <string name="menu_section_export">Export</string>
+    <string name="menu_plan_pdf">Plan PDF (compose the views)…</string>
+    <string name="menu_section_cabling_pdf">Cabling PDF</string>
+    <string name="pill_view">View</string>
+    <string name="pill_3d_fmt">3D · %1$s</string>
+    <string name="pill_plan_fmt">Plan · %1$s</string>
+    <string name="pill_section_viewpoint">Viewpoint</string>
+    <string name="view_perspective">Perspective</string>
+    <string name="view_back">Back</string>
+    <string name="view_left">Left</string>
+    <string name="view_right">Right</string>
+    <string name="pill_plan_view_2d">2D plan view</string>
+    <string name="pill_section_projection">2D projection</string>
+    <string name="perm_multi_select">Multi-select</string>
+    <string name="search_fixture_cd">Search for a fixture by number</string>
+    <string name="search_none_fmt">No fixture #%1$s</string>
+    <string name="reframe_cd">Reframe the view</string>
+    <string name="status_gdtf_loading">Loading GDTF models…</string>
+    <string name="mode_hide_tap">Tap an item to hide</string>
+    <string name="mode_hide_box">Drag a box to hide</string>
+    <string name="mode_isolate_tap">Tap an item to isolate</string>
+    <string name="mode_isolate_box">Drag a box to isolate</string>
+    <string name="cabling_pdf_generating">Generating the PDF…</string>
+    <plurals name="status_objects">
+        <item quantity="one">%1$d object</item>
+        <item quantity="other">%1$d objects</item>
+    </plurals>
+    <plurals name="status_hidden_classes">
+        <item quantity="one">%1$d hidden class</item>
+        <item quantity="other">%1$d hidden classes</item>
+    </plurals>
 </resources>

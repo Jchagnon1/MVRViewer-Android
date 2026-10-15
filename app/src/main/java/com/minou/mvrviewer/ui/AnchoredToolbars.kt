@@ -17,16 +17,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 /**
- * DESCRIPTION UNIFIÉE d'un outil (N11) : une SEULE source consommée à la fois par
- * les 4 barres ancrées ET par la section « Outils » du menu déroulant (N10) —
- * supprime l'ancienne duplication barre/menu. [checked] non-null ⇒ BASCULE (reflète
- * l'état RÉEL : rectangle actif, solo actif…) ; null ⇒ ACTION ponctuelle. [available]
- * porte la visibilité conditionnelle actuelle (ex. « Effacer la sélection » n'apparaît
- * qu'avec une sélection). [inMenu] = présent dans la section « Outils » du menu (les
- * outils qui ont DÉJÀ une bascule dédiée ailleurs dans le menu — étiquettes,
- * satellite… — sont à false pour ne pas doublonner). [onInvoke] APPLIQUE l'action
- * (une bascule flippe son état elle-même), donc la barre et le menu partagent le
- * même comportement.
+ * DESCRIPTION UNIFIÉE d'un outil (N11) : une SEULE source consommée par les 4
+ * barres ancrées et par le panneau « Barre d'outils de cette vue… » (catalogue).
+ * [checked] non-null ⇒ BASCULE (reflète l'état RÉEL : cadre actif, solo actif…) ;
+ * null ⇒ ACTION ponctuelle. [available] porte la visibilité conditionnelle (ex.
+ * « Effacer la sélection » n'apparaît qu'avec une sélection). [onInvoke] APPLIQUE
+ * l'action (une bascule flippe son état elle-même). Le menu ⋯ (MainMenuModel) a
+ * ses propres entrées : un outil n'y est plus recopié (SPEC-menus-android §3.2,
+ * la section « Outils » a disparu).
  */
 data class ToolSpec(
     val id: ToolId,
@@ -35,28 +33,8 @@ data class ToolSpec(
     val available: Boolean,
     val checked: Boolean?,
     val onInvoke: () -> Unit,
-    val busy: Boolean = false,
-    val inMenu: Boolean = true
+    val busy: Boolean = false
 )
-
-/**
- * Décalage vertical appliqué à la BARRE FLOTTANTE quand la barre ANCRÉE du bas est
- * présente : les deux partagent le bord bas-gauche (BottomStart), donc sans décalage
- * elles se superposeraient dès qu'un outil est docké en bas. On lève la flottante
- * juste au-dessus de la barre ancrée du bas — hauteur d'un bouton d'outil (~48 dp)
- * + sa marge basse (12 dp) + un interstice (12 dp) — pour les EMPILER sans jamais
- * les chevaucher. Bord bas VIDE (défaut) ⇒ pas de décalage : la flottante reste
- * EXACTEMENT à sa position historique (invariant de non-régression).
- */
-private val FloatingBottomClearance = 72.dp
-
-/** Descripteurs → items de la section « Outils » du menu (ordre préservé). */
-fun List<ToolSpec>.toMenuTools(): List<MenuTool> =
-    filter { it.available && it.inMenu }.map { s ->
-        val c = s.checked
-        if (c != null) MenuTool.Toggle(s.label, s.icon, c, s.onInvoke)
-        else MenuTool.Action(s.label, s.icon, s.onInvoke)
-    }
 
 /** Entrée du catalogue affichée dans le panneau « Personnaliser » (id + libellé + icône). */
 fun List<ToolSpec>.toCatalog(): List<ToolCatalogEntry> =
@@ -99,43 +77,12 @@ fun BoxScope.AnchoredToolbars(layout: ToolbarLayout, specs: List<ToolSpec>) {
 }
 
 /**
- * BARRE D'OUTILS FLOTTANTE historique (défaut, modèle iOS N11). Rend en bas-gauche
- * — exactement l'ancienne barre bas-gauche remplacée par les barres ancrées — les
- * outils « permanents » [permanentIds] de la vue, dans leur ordre, en FILTRANT :
- *  1. ceux indisponibles (`available == false`) ;
- *  2. ceux DÉJÀ placés dans une barre ancrée ([ToolbarLayout.allAssigned]) — GATING
- *     identique à iOS : un outil docké disparaît de la flottante (jamais en double).
- * Vide → rien n'est rendu. Comme les barres ancrées, elle ne capte que ses boutons
- * (le reste du Box laisse passer les gestes vers la SceneView / le Canvas plan).
+ * Bouton d'outil rond (barres ancrées, rangée du haut, pile bas-droite) : jaune
+ * plein et glyphe NOIR quand une bascule est active, TalkBack = libellé, état
+ * coché porté par le bouton bascule.
  */
 @Composable
-fun BoxScope.FloatingToolbar(
-    permanentIds: List<ToolId>,
-    specs: List<ToolSpec>,
-    layout: ToolbarLayout
-) {
-    val byId = specs.associateBy { it.id }
-    val assigned = layout.allAssigned()
-    val items = permanentIds.mapNotNull { byId[it] }
-        .filter { it.available && it.id !in assigned }
-    if (items.isEmpty()) return
-    // La BARRE ANCRÉE DU BAS (AnchoredToolbars) et cette barre flottante s'ancrent
-    // toutes deux en bas-gauche (BottomStart) : si un outil est docké au bord bas ET
-    // disponible, on décale la flottante VERS LE HAUT pour l'empiler par-dessus la
-    // barre ancrée du bas — elles ne se chevauchent JAMAIS. Bord bas vide ⇒ la
-    // flottante reste à sa marge basse historique (12 dp).
-    val bottomBarPresent = layout.bottom.mapNotNull { byId[it] }.any { it.available }
-    val bottomPad = if (bottomBarPresent) FloatingBottomClearance else 12.dp
-    Row(
-        modifier = Modifier.align(Alignment.BottomStart)
-            .padding(start = 12.dp, end = 12.dp, bottom = bottomPad),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) { items.forEach { ToolbarButton(it) } }
-}
-
-@Composable
-private fun ToolbarButton(s: ToolSpec) {
+internal fun ToolbarButton(s: ToolSpec, modifier: Modifier = Modifier) {
     val checked = s.checked
     if (checked != null) {
         // La bascule flippe son propre état dans onInvoke → on ignore la valeur
@@ -143,11 +90,11 @@ private fun ToolbarButton(s: ToolSpec) {
         // Outil ACTIF = surface d'identité : jaune plein, glyphe NOIR
         // (blanc sur jaune = 1,6:1, illisible — cf. theme/Color.kt).
         FilledIconToggleButton(checked = checked, onCheckedChange = { s.onInvoke() },
-                               colors = com.minou.mvrviewer.ui.theme.accentToggleColors()) {
+                               colors = com.minou.mvrviewer.ui.theme.accentToggleColors(), modifier = modifier) {
             ButtonContent(s)
         }
     } else {
-        FilledIconButton(onClick = s.onInvoke) { ButtonContent(s) }
+        FilledIconButton(onClick = s.onInvoke, modifier = modifier) { ButtonContent(s) }
     }
 }
 

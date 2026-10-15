@@ -38,7 +38,12 @@ enum class ToolId {
     MASK, SHOW_ALL, CLEAR_SOLO, CALIBRATE, CALIBRATE_3, EXPORT_PDF, DXF, STRUCTURE, LEGEND, COLOR_MODE, LABEL_SETTINGS,
     // Rangement des menus (SPEC-menus-android §4.6) — chacun créé dans sa tranche.
     /** Panneau « Position GPS » (tranche B), 3D et plan. */
-    GEO_PANEL;
+    GEO_PANEL,
+    /**
+     * Multi-sélection (tranche C) : le bouton permanent de la rangée du haut se
+     * masque quand l'outil est ancré — l'outil naît donc avec le bouton.
+     */
+    MULTI_SELECT;
 
     /**
      * Identifiant STABLE persisté (JSON) — MÊME chaîne camelCase que la `rawValue`
@@ -90,6 +95,8 @@ enum class ToolId {
             COLOR_MODE -> "colorMode"
             // Valeur iOS (`ToolId.geoPanel`).
             GEO_PANEL -> "geoPanel"
+            // Valeur iOS (`ToolId.multiSelect`).
+            MULTI_SELECT -> "multiSelect"
         }
 
     companion object {
@@ -169,33 +176,16 @@ data class ToolbarLayout(
 
     companion object {
         /**
-         * DÉFAUT = VIDE (modèle iOS N11, invariant de non-régression). Au premier
-         * lancement AUCUNE barre ancrée n'est affichée : c'est la BARRE FLOTTANTE
-         * historique ([floating3D]) qui reste à l'écran, inchangée. Un outil
-         * n'apparaît dans une barre ancrée QUE lorsque l'utilisateur l'y place — il
-         * disparaît alors de la barre flottante (gating, cf. [allAssigned]).
+         * DÉFAUT = VIDE (modèle iOS) : au premier lancement AUCUNE barre ancrée.
+         * La barre flottante historique est RETIRÉE (SPEC-menus-android §9.0, Q1) :
+         * chaque outil a une autre place (bouton permanent, menu ⋯, panneau,
+         * pastille), et reste ancrable. Un outil n'apparaît dans une barre que
+         * lorsque l'utilisateur l'y place.
          */
         val default3D = ToolbarLayout()
 
-        /** Défaut plan = VIDE (idem : la barre flottante [floatingPlan] tient lieu de défaut). */
+        /** Défaut plan = VIDE (idem). */
         val defaultPlan = ToolbarLayout()
-
-        /**
-         * BARRE FLOTTANTE historique de la vue 3D (l'ancienne barre bas-gauche).
-         * Rendue par défaut ; chaque outil en est masqué s'il a été placé dans une
-         * barre ancrée (jamais le même outil en double flottant/ancré).
-         */
-        val floating3D = listOf(
-            ToolId.RECT, ToolId.MEASURE, ToolId.SOLO, ToolId.CLEAR_SEL,
-            ToolId.GPS, ToolId.GPS_MARKER_SIZE
-        )
-
-        /** BARRE FLOTTANTE historique de la vue plan (l'ancienne barre bas-gauche). */
-        val floatingPlan = listOf(
-            ToolId.RECT, ToolId.MASK, ToolId.SOLO, ToolId.MEASURE, ToolId.SHOW_ALL,
-            ToolId.CLEAR_SOLO, ToolId.CLEAR_SEL, ToolId.GPS, ToolId.CALIBRATE,
-            ToolId.SATELLITE, ToolId.EXPORT_PDF, ToolId.DXF
-        )
 
         /**
          * Décode une disposition JSON, en TOLÉRANT les ids inconnus (ignorés) et

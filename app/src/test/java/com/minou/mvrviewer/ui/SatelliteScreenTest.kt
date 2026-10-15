@@ -112,12 +112,13 @@ class SatelliteScreenTest {
 
     @Test fun mentionEcranAuDessusDesBarresDuBas() {
         val specs = listOf(tool(ToolId.RECT), tool(ToolId.MEASURE, available = false))
-        // Barre flottante seule (12 dp + bouton 40 dp) : juste au-dessus.
-        assertEquals(56.dp, satelliteAttributionBottom(ToolbarLayout(), specs))
-        // Barre ancrée en bas : la flottante est relevée (72 dp + 40 dp).
-        assertEquals(116.dp, satelliteAttributionBottom(ToolbarLayout(bottom = listOf(ToolId.RECT)), specs))
+        // Plus de barre flottante (SPEC-menus-android §9.0, Q1) : contre le bas (12 dp) ;
+        // la pile Rechercher / Recadrer, au même coin, monte au-dessus d'elle.
+        assertEquals(12.dp, satelliteAttributionBottom(ToolbarLayout(), specs))
+        // Barre ancrée en bas : juste au-dessus d'elle (12 dp + bouton 48 dp + 12 dp).
+        assertEquals(72.dp, satelliteAttributionBottom(ToolbarLayout(bottom = listOf(ToolId.RECT)), specs))
         // Barre du bas sans outil disponible = pas rendue.
-        assertEquals(56.dp, satelliteAttributionBottom(ToolbarLayout(bottom = listOf(ToolId.MEASURE)), specs))
+        assertEquals(12.dp, satelliteAttributionBottom(ToolbarLayout(bottom = listOf(ToolId.MEASURE)), specs))
     }
 
     // ------------------------------------------------ couverture, outil, menu

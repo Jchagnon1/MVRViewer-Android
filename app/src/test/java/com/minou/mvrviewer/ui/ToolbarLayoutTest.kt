@@ -7,7 +7,7 @@ import org.junit.Test
 
 /**
  * Verrouille le modèle N11 harmonisé iOS/Android : défauts = VIDE (la barre
- * flottante historique tient lieu de défaut, invariant de non-régression),
+ * flottante historique est retirée — SPEC-menus-android §9.0, Q1),
  * identifiants persistés = CHAÎNES camelCase canoniques (mêmes rawValues qu'iOS),
  * round-trip JSON exact, tolérance aux ids inconnus (le catalogue peut évoluer),
  * et les helpers d'édition (moved / reordered / edgeOf).
@@ -15,40 +15,47 @@ import org.junit.Test
 class ToolbarLayoutTest {
 
     @Test
-    fun `defaut 3D est vide (barre flottante par defaut)`() {
+    fun `defaut 3D est vide`() {
         val d = ToolbarLayout.default3D
         assertTrue(d.top.isEmpty() && d.bottom.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
         assertTrue(d.allAssigned().isEmpty())
     }
 
     @Test
-    fun `defaut plan est vide (barre flottante par defaut)`() {
+    fun `defaut plan est vide`() {
         val d = ToolbarLayout.defaultPlan
         assertTrue(d.top.isEmpty() && d.bottom.isEmpty() && d.left.isEmpty() && d.right.isEmpty())
         assertTrue(d.allAssigned().isEmpty())
     }
 
     @Test
-    fun `barre flottante 3D = ancienne barre bas-gauche`() {
-        assertEquals(
-            listOf(
-                ToolId.RECT, ToolId.MEASURE, ToolId.SOLO, ToolId.CLEAR_SEL,
-                ToolId.GPS, ToolId.GPS_MARKER_SIZE
-            ),
-            ToolbarLayout.floating3D
-        )
+    fun `barre flottante historique retiree (SPEC-menus-android Q1) - aucun outil hors des barres ancrees`() {
+        // Plus de liste « flottante » : un outil n'est à l'écran que dans une barre
+        // ancrée par l'utilisateur, sinon il a une autre place (bouton permanent,
+        // menu ⋯, panneau, pastille).
+        val root = listOf(java.io.File("src/main/java"), java.io.File("app/src/main/java")).first { it.isDirectory }
+        val code = root.walkTopDown().filter { it.extension == "kt" }.joinToString("\n") { it.readText() }
+        for (gone in listOf("floating3D", "floatingPlan", "FloatingToolbar", "toMenuTools", "SceneOptionsMenu", "inMenu"))
+            assertTrue("reste : $gone", !Regex("""\b$gone\b""").containsMatchIn(code))
     }
 
     @Test
-    fun `barre flottante plan = ancienne barre bas-gauche`() {
-        assertEquals(
-            listOf(
-                ToolId.RECT, ToolId.MASK, ToolId.SOLO, ToolId.MEASURE, ToolId.SHOW_ALL,
-                ToolId.CLEAR_SOLO, ToolId.CLEAR_SEL, ToolId.GPS, ToolId.CALIBRATE,
-                ToolId.SATELLITE, ToolId.EXPORT_PDF, ToolId.DXF
-            ),
-            ToolbarLayout.floatingPlan
-        )
+    fun `multiSelect cree avec le bouton permanent (tranche C), dans les deux catalogues`() {
+        assertEquals("multiSelect", ToolId.MULTI_SELECT.rawId)
+        assertEquals(ToolId.MULTI_SELECT, ToolId.fromRawId("multiSelect"))
+        val root = listOf(java.io.File("src/main/java"), java.io.File("app/src/main/java")).first { it.isDirectory }
+        for (f in listOf("Scene3DScreen.kt", "PlanScreen.kt")) {
+            val code = java.io.File(root, "com/minou/mvrviewer/ui/$f").readText()
+            assertTrue("$f : outil multiSelect au catalogue", code.contains("ToolSpec(ToolId.MULTI_SELECT,"))
+        }
+        // Un bouton permanent se masque quand son outil est ancré ; Recadrer aussi.
+        val anchored = ToolbarLayout(left = listOf(ToolId.RECT), right = listOf(ToolId.MULTI_SELECT, ToolId.CAM_RESET))
+        assertTrue(!SceneTopRowRules.showsRect(anchored))
+        assertTrue(!SceneTopRowRules.showsMulti(anchored))
+        assertTrue(!SceneTopRowRules.showsReframe(anchored))
+        assertTrue(SceneTopRowRules.showsRect(ToolbarLayout()))
+        assertTrue(SceneTopRowRules.showsMulti(ToolbarLayout()))
+        assertTrue(SceneTopRowRules.showsReframe(ToolbarLayout()))
     }
 
     @Test

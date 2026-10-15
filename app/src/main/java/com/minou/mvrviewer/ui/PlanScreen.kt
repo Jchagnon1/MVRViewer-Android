@@ -24,15 +24,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Architecture
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.CenterFocusWeak
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -48,7 +46,6 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TrackChanges
@@ -56,10 +53,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
@@ -143,10 +139,18 @@ fun PlanScreen(
     satelliteCovered: Boolean = true,
     onCalibrationChanged: () -> Unit = {},
     hiddenLayers: Set<String> = emptySet(),
-    /** Ouvre le panneau « Classes… ». null = ce fichier n'a aucune classe. */
-    onShowClasses: (() -> Unit)? = null,
-    /** Ouvre la feuille « Calques » (sans réglage LOD depuis le plan, D10). */
-    onShowLayers: (() -> Unit)? = null,
+    // ---- Rangement des menus, tranche C (SPEC-menus-android §3.1–3.4) ----
+    /**
+     * Entrées du menu ⋯ que le plan ne traite pas lui-même (destinations, import du
+     * plan, PDF de câblage, fermeture…) : transmises à SceneScreen.
+     */
+    onMainMenu: (MainMenuItemId) -> Unit = {},
+    /** Synchro branchée (section « Équipe » du menu). */
+    hasSync: Boolean = false,
+    /** Un câblage existe (section « PDF de câblage » du menu). */
+    hasCabling: Boolean = false,
+    /** Pastille de synchro (projet partagé), à droite sous la rangée du haut ; null = aucune. */
+    syncBadge: (@Composable () -> Unit)? = null,
     /**
      * Action à lancer à l'APPARITION du plan (export PDF, calibration 3 points,
      * « je suis ici ») — SPEC-menus-android §4.2. [takeStartAction] la rend UNE
@@ -210,12 +214,8 @@ fun PlanScreen(
      */
     power: PowerLibraryState? = null,
     customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
-    /** Entrée « Vue 3D » du menu (sort aussi d'une affectation) ; défaut = [onBack]. */
+    /** « Vue 3D » de la pastille (sort aussi d'une affectation, sans rouvrir le Câblage) ; défaut = [onBack]. */
     onShow3D: (() -> Unit)? = null,
-    onShowAccount: (() -> Unit)? = null,
-    onShareProject: (() -> Unit)? = null,
-    onShowHistory: (() -> Unit)? = null,
-    onJoinProject: (() -> Unit)? = null,
     // N12 — APPUI LONG sur un projecteur → ouvre la fiche d'édition de la patch
     // (mêmes champs que la liste de patch). Le TAP simple garde son comportement
     // (sélection). Ne se déclenche qu'en interaction normale (pas rectangle/
@@ -227,9 +227,6 @@ fun PlanScreen(
     toolbarLayout: ToolbarLayout = ToolbarLayout.defaultPlan,
     onLayoutChange: (ToolbarLayout) -> Unit = {},
     onBack: () -> Unit,
-    onShowPatch: () -> Unit,
-    /** Bibliothèque MA (entrée de menu). null = entrée masquée. */
-    onShowMaLibrary: (() -> Unit)? = null,
     /** Sélection courante (clés d'INSTANCE) remontée à la scène — « affecter à la sélection ». */
     onSelectionChanged: (List<String>) -> Unit = {},
     modifier: Modifier = Modifier
@@ -659,10 +656,14 @@ fun PlanScreen(
     // Mention du fond satellite et curseur d'opacité : cadres SANS montée (px).
     var satMentionAnchorPx by remember { mutableStateOf(Rect.Zero) }
     // Cadres (px racine) qui bornent les panneaux du bas-gauche (Position GPS, Plan
-    // importé, Réglage des étiquettes — PanelPlacementMath.floatingPanelSlot) :
-    // en haut le titre et la recherche, en bas la fiche / bannière et les aides.
-    var titlePillPx by remember { mutableStateOf(Rect.Zero) }
-    var searchFieldPx by remember { mutableStateOf(Rect.Zero) }
+    // importé, Réglage des étiquettes — PanelPlacementMath.floatingPanelSlot) et
+    // font monter la pile bas-droite : en bas la fiche / bannière et les aides.
+    // Habillage (tranche C) : bas de la rangée du haut, pastille « Vue » centrée,
+    // bandeau de mode, pastille de synchro.
+    var topRowBottomPx by remember { mutableStateOf(0f) }
+    var viewPillPx by remember { mutableStateOf(Rect.Zero) }
+    var modeBannerPx by remember { mutableStateOf(Rect.Zero) }
+    var syncBadgeWidthPx by remember { mutableStateOf(0f) }
     var selectionBarPx by remember { mutableStateOf(Rect.Zero) }
     var bottomAidPx by remember { mutableStateOf(Rect.Zero) }
 
@@ -926,10 +927,9 @@ fun PlanScreen(
     var cal3PanelHeightPx by remember { mutableStateOf(0f) }
     // Même cadre d'ancrage, entier : obstacle de la mention du fond satellite.
     var cal3PanelAnchorPx by remember { mutableStateOf(Rect.Zero) }
-    // Plus grande réserve déjà cadrée, et vue (échelle, décalage) posée par ce
-    // cadrage : si l'utilisateur a bougé le plan depuis, on ne recadre plus.
+    // Plus grande réserve déjà cadrée (la vue posée par ce cadrage est retenue
+    // par `autoFitView` : si l'utilisateur a bougé le plan depuis, on ne recadre plus).
     var cal3FitReserve by remember { mutableStateOf(0f) }
-    var cal3FitView by remember { mutableStateOf<Pair<Float, Offset>?>(null) }
     // Taille du plan (canevas) lors du dernier cadrage : une autre taille =
     // rotation → recadrer même si la réserve a baissé (SPEC §2).
     var cal3FitCanvas by remember { mutableStateOf<Offset?>(null) }
@@ -943,7 +943,7 @@ fun PlanScreen(
         cal3Session?.cancel()
         cal3Session = null
         cal3PanelTopPx = 0f; cal3PanelHeightPx = 0f; cal3PanelAnchorPx = Rect.Zero
-        cal3FitReserve = 0f; cal3FitView = null; cal3FitCanvas = null
+        cal3FitReserve = 0f; cal3FitCanvas = null
     }
     // MODES DE TOUCHER : état réduit lu/posé ici, décisions dans PlanModeRules
     // (pure, testée). Armer un mode y ferme l'assistant 3 points.
@@ -1011,17 +1011,29 @@ fun PlanScreen(
         if (!calibrating) toggleTouchTool(PlanTouchTool.ANCHOR_TAP)
     }
 
-    // N11 — DESCRIPTION UNIFIÉE des outils de la vue plan : UNE liste consommée à la
-    // fois par les 4 barres ancrables (AnchoredToolbars) ET la section « Outils » du
-    // menu (toMenuTools) — supprime la duplication barre/menu. Les 12 premiers
-    // reproduisent l'ancienne barre bas-gauche (mêmes actions, mêmes exclusions
-    // mutuelles, mêmes conditions). SATELLITE reste hors du menu « Outils »
-    // (inMenu=false) car il a déjà sa bascule dédiée (avec opacité) ; idem pour les
-    // extras plaçables (étiquettes/couleurs/structure/légende).
+    // MULTI-SÉLECTION (SPEC-menus-android §9.0, Q2) : toucher un projecteur REMPLACE
+    // la sélection ; avec Multi-sélection — ou le cadre armé, qui la force — il
+    // ajoute / retire. Couper le multi vide la sélection et coupe le cadre.
+    var multiMode by remember(scene) { mutableStateOf(false) }
+    fun selectionModes() = SelectionModes(multi = multiMode, rect = rectMode)
+
+    // N11 — DESCRIPTION UNIFIÉE des outils de la vue plan : UNE liste consommée par
+    // les 4 barres ancrables (AnchoredToolbars), les boutons permanents de la rangée
+    // du haut (cadre, multi), le catalogue « Barre d'outils de cette vue… » et les
+    // entrées du menu ⋯ qui font la même chose (mêmes actions, mêmes exclusions).
+    // La barre flottante historique est retirée (§9.0, Q1).
     val toolsPlan: List<ToolSpec> = buildList {
         add(ToolSpec(ToolId.RECT, stringResource(R.string.tool_rect_select), Icons.Filled.Crop,
             available = true, checked = rectMode, onInvoke = {
-                toggleTouchTool(PlanTouchTool.RECT)
+                // Armer le cadre force le multi (SelectionRules.toggleRect).
+                if (toggleTouchTool(PlanTouchTool.RECT).rect) multiMode = true
+            }))
+        add(ToolSpec(ToolId.MULTI_SELECT, stringResource(R.string.perm_multi_select), Icons.Filled.Checklist,
+            available = true, checked = multiMode || rectMode, onInvoke = {
+                val t = SelectionRules.toggleMulti(selectionModes())
+                multiMode = t.modes.multi
+                if (rectMode && !t.modes.rect) toggleTouchTool(PlanTouchTool.RECT)
+                if (t.clearSelection) selected.clear()
             }))
         add(ToolSpec(ToolId.MASK, stringResource(R.string.tool_mask), Icons.Filled.VisibilityOff,
             available = true, checked = maskMode, onInvoke = {
@@ -1051,7 +1063,7 @@ fun PlanScreen(
                 showLocation = !showLocation; if (!showLocation) calibrating = false
             }))
         // Calibrations : leur place est le panneau Position GPS (SPEC-menus-android
-        // §3.6) ; les outils restent ancrables mais quittent la section « Outils » du ⋯.
+        // §3.6) ; les outils restent ancrables.
         add(ToolSpec(ToolId.CALIBRATE, stringResource(R.string.tool_calibrate), Icons.Filled.Place,
             available = showLocation, checked = calibrating, onInvoke = {
                 // Calibration GPS = donnée de show PARTAGÉE (poussée, journalisée,
@@ -1061,7 +1073,7 @@ fun PlanScreen(
                     // Rappel éventuellement différé (achat) : armer, jamais rebasculer.
                     armHereAnchor()
                 }
-            }, inMenu = false))
+            }))
         // Calibration GUIDÉE EN 3 POINTS (SPEC-calibration-3-points) : même place que
         // « je suis ici ». Disponible sans « Ma position » : l'assistant démarre
         // lui-même le GPS. Fonction Pro (calibration = donnée partagée).
@@ -1069,12 +1081,12 @@ fun PlanScreen(
             available = true, checked = cal3Session != null || cal3Starting, onInvoke = {
                 if (cal3Session != null || cal3Starting) closeThreePoint()
                 else ProAccess.gate(GeoPanelContent.PRO_REASON) { startThreePoint() }
-            }, inMenu = false))
+            }))
         // Panneau « Position GPS » (tranche B) : ouvre / referme (actif = jaune) ;
         // l'entrée du ⋯ « Position GPS… » est rendue par le menu (pas de doublon).
         add(ToolSpec(ToolId.GEO_PANEL, stringResource(R.string.geo_panel_title), Icons.Filled.LocationOn,
             available = true, checked = panels.geo,
-            onInvoke = { onPanels(panels.toggle(ScenePanel.GEO)) }, inMenu = false))
+            onInvoke = { onPanels(panels.toggle(ScenePanel.GEO)) }))
         // Fond IGN = France seulement : hors couverture, Toast et PAS de bascule (le
         // réglage mémorisé est gardé pour un retour en France).
         add(ToolSpec(ToolId.SATELLITE, stringResource(R.string.tool_satellite), Icons.Filled.Public,
@@ -1082,7 +1094,7 @@ fun PlanScreen(
             onInvoke = {
                 SatelliteUi.onToolTap(satelliteCovered, options::toggleSatelliteByUser)
                     ?.let { SatelliteUi.toast(ctxPlan, it) }
-            }, inMenu = false))
+            }))
         add(ToolSpec(ToolId.EXPORT_PDF, stringResource(R.string.tool_export_pdf), Icons.Filled.PictureAsPdf,
             available = true, checked = exportMode, onInvoke = { exportMode = !exportMode }))
         // POINT D'ENTRÉE UNIQUE du plan de repère (Android n'a pas d'import en 3D) :
@@ -1103,27 +1115,26 @@ fun PlanScreen(
         // Extras plaçables (défaut hors barres) — bascule dédiée déjà au menu.
         add(ToolSpec(ToolId.LABELS, stringResource(R.string.opt_labels), Icons.Filled.Label,
             available = true, checked = options.showLabels,
-            onInvoke = { options.showLabels = !options.showLabels }, inMenu = false))
+            onInvoke = { options.showLabels = !options.showLabels }))
         // Réglage des étiquettes (parité iOS catalogPlan) : ACTION ponctuelle qui
-        // ouvre les réglages/champs d'étiquette existants (mêmes contrôles que le
-        // menu). Dockable ; hors menu « Outils » (déjà accessible au menu).
+        // ouvre le panneau « Réglage des étiquettes » (⋯ › Affichage aussi).
         add(ToolSpec(ToolId.LABEL_SETTINGS, stringResource(R.string.tool_label_settings), Icons.Filled.Tune,
             available = true, checked = null,
-            onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }, inMenu = false))
+            onInvoke = { onPanels(panels.toggle(ScenePanel.LABELS)) }))
         add(ToolSpec(ToolId.LAYER_COLORS, stringResource(R.string.opt_layer_colors), Icons.Filled.Palette,
             available = true, checked = options.layerColors,
-            onInvoke = { options.layerColors = !options.layerColors }, inMenu = false))
+            onInvoke = { options.layerColors = !options.layerColors }))
         add(ToolSpec(ToolId.STRUCTURE, stringResource(R.string.opt_structure), Icons.Filled.Architecture,
             available = true, checked = options.showStructure,
-            onInvoke = { options.showStructure = !options.showStructure }, inMenu = false))
+            onInvoke = { options.showStructure = !options.showStructure }))
         add(ToolSpec(ToolId.LEGEND, stringResource(R.string.opt_legend), Icons.Filled.FormatListBulleted,
             available = true, checked = options.showLegend,
-            onInvoke = { options.showLegend = !options.showLegend }, inMenu = false))
-        // Couleur du fond (parité iOS catalogPlan) : ouvre le sélecteur ; le menu
-        // garde ses presets. Dockable ; hors menu « Outils » (déjà au menu).
+            onInvoke = { options.showLegend = !options.showLegend }))
+        // Couleur du fond (parité iOS catalogPlan) : ouvre le sélecteur fin ;
+        // ⋯ › Affichage › Couleur du fond garde les préréglages.
         add(ToolSpec(ToolId.BACKGROUND, stringResource(R.string.menu_section_background), Icons.Filled.FormatColorFill,
             available = true, checked = null,
-            onInvoke = { showBackgroundDialog = true }, inMenu = false))
+            onInvoke = { showBackgroundDialog = true }))
     }
 
     // LANCEMENT DU PLAN (PlanStartAction) : pris UNE fois à l'apparition (ou à une
@@ -1140,49 +1151,101 @@ fun PlanScreen(
         }
     }
 
+    // CADRAGE AUTOMATIQUE SOUS LA PASTILLE « VUE » (SPEC-menus-android §3.3,
+    // PlanFitRules) : ouverture, affectation, assistant 3 points et Recadrer posent le
+    // contenu entre le bas mesuré de la pastille (+ 24 dp) et le haut de la barre du
+    // bas. `autoFitView` = dernière vue posée par un cadrage automatique : une autre
+    // vue = le plan a été touché, plus aucun recadrage automatique.
+    var autoFitView by remember { mutableStateOf<Pair<Float, Offset>?>(null) }
+    fun planUntouched(): Boolean = (scale to offset) == (autoFitView ?: (1f to Offset.Zero))
+    /** Du haut du plan au bas de la pastille (px) ; 0 tant qu'elle n'est pas mesurée. */
+    fun pillReservePx(): Float {
+        val pb = planBoundsPx
+        return if (viewPillPx.height > 0f && pb.height > 0f) (viewPillPx.bottom - pb.top).coerceAtLeast(0f) else 0f
+    }
+    fun fitUnderPill(bottomReserve: Float): Pair<Float, Float> = PlanFitRules.underPill(
+        canvas.x, canvas.y, data.spanX, data.spanY, pillReservePx(), bottomReserve,
+        PlanFitRules.TOP_GAP_DP * labelDensity.density, PlanFitRules.MIN_CONTENT_DP * labelDensity.density,
+        labelDensity.density
+    )
+    fun applyAutoFit(s: Float, dy: Float) {
+        scale = s; offset = Offset(0f, dy); autoFitView = s to offset
+    }
+    /** Place prise EN BAS par la barre d'affectation ou le panneau 3 points (mesurés). */
+    fun bottomReservePx(): Float {
+        val pb = planBoundsPx
+        if (pb.height <= 0f) return 0f
+        var r = 0f
+        if (assignTarget != null && assignBarTopPx > pb.top && assignBarTopPx < pb.bottom)
+            r = maxOf(r, CablingAssignBarPlacement.reserve(pb.top, pb.bottom, assignBarTopPx))
+        if (cal3Session != null && cal3PanelTopPx > pb.top && cal3PanelTopPx < pb.bottom)
+            r = maxOf(r, CablingAssignBarPlacement.reserve(pb.top, pb.bottom, cal3PanelTopPx))
+        return r
+    }
+    /**
+     * RECADRER (pile bas-droite, nouveau dans le plan) : zoom et décalage remis,
+     * sous la pastille et au-dessus de la barre d'affectation / du panneau 3 points.
+     */
+    fun reframePlan() {
+        if (canvas.x <= 0f || canvas.y <= 0f) { scale = 1f; offset = Offset.Zero; autoFitView = null; return }
+        val (s, dy) = fitUnderPill(bottomReservePx())
+        applyAutoFit(s, dy)
+    }
+
+    // Ouverture et rotation : le contenu ne passe pas sous la pastille, tant que le
+    // plan n'a pas été touché (règle d'origine si la pastille ne gêne pas).
+    LaunchedEffect(viewPillPx.bottom, canvas) {
+        if (assignTarget != null || cal3Session != null || cal3Starting) return@LaunchedEffect
+        if (canvas.x <= 0f || canvas.y <= 0f || !planUntouched()) return@LaunchedEffect
+        val (s, dy) = fitUnderPill(0f)
+        applyAutoFit(s, dy)
+    }
+
     // CADRAGE en mode affectation : au premier affichage de la barre (une fois
     // qu'elle est mesurée), le plan est recadré AU-DESSUS d'elle — la hauteur
-    // qu'elle occupe en bas est retirée de la zone de cadrage, bornée à 60 %.
-    // Seulement si l'utilisateur n'a pas encore bougé le plan.
-    var assignFitDone by remember { mutableStateOf(false) }
-    LaunchedEffect(assignTarget != null, assignBarTopPx, planBoundsPx, canvas) {
-        if (assignTarget == null || assignFitDone) return@LaunchedEffect
+    // qu'elle occupe en bas est retirée de la zone de cadrage, bornée à 60 % — et
+    // SOUS la pastille. Refait si la taille du plan ou la pastille change
+    // (rotation), seulement si l'utilisateur n'a pas encore bougé le plan.
+    var assignFitKey by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(assignTarget != null, assignBarTopPx, planBoundsPx, canvas, viewPillPx.bottom) {
+        if (assignTarget == null) { assignFitKey = null; return@LaunchedEffect }
         val pb = planBoundsPx
         if (pb.height <= 0f || canvas.x <= 0f || canvas.y <= 0f) return@LaunchedEffect
         if (assignBarTopPx <= pb.top || assignBarTopPx >= pb.bottom) return@LaunchedEffect
-        assignFitDone = true
-        if (scale != 1f || offset != Offset.Zero) return@LaunchedEffect
+        val key = canvas to viewPillPx.bottom
+        if (assignFitKey == key) return@LaunchedEffect
+        assignFitKey = key
+        if (!planUntouched()) return@LaunchedEffect
         val reserve = CablingAssignBarPlacement.reserve(pb.top, pb.bottom, assignBarTopPx)
-        val (s, dy) = CablingAssignBarPlacement.fitAbove(canvas.x, canvas.y, data.spanX, data.spanY, reserve)
-        scale = s
-        offset = Offset(0f, dy)
+        val (s, dy) = fitUnderPill(reserve)
+        applyAutoFit(s, dy)
     }
 
     // CADRAGE pendant l'assistant 3 points : tant que le plan n'a pas été touché,
-    // il est recadré AU-DESSUS du panneau quand celui-ci dépasse la plus grande
-    // hauteur déjà cadrée (+ 4 dp) — jamais à chaque étape (pas de sautillement) —
-    // et après une rotation, même si le panneau y prend moins de place
-    // (décisions : ThreePointPlanFit, pure et testée).
+    // il est recadré AU-DESSUS du panneau (et sous la pastille) quand celui-ci
+    // dépasse la plus grande hauteur déjà cadrée (+ 4 dp) — jamais à chaque étape
+    // (pas de sautillement) — et après une rotation, même si le panneau y prend
+    // moins de place (décisions : ThreePointPlanFit, pure et testée).
     LaunchedEffect(cal3Session != null, cal3PanelTopPx, planBoundsPx, canvas) {
         if (cal3Session == null) return@LaunchedEffect
         val pb = planBoundsPx
-        val untouched = if (cal3FitView == null) scale == 1f && offset == Offset.Zero
-            else cal3FitView == (scale to offset)
         val fitted = cal3FitCanvas
         val fit = ThreePointPlanFit.refit(
             canvas.x, canvas.y, data.spanX, data.spanY, pb.top, pb.bottom, cal3PanelTopPx,
-            fittedReserve = cal3FitReserve, untouched = untouched,
+            fittedReserve = cal3FitReserve, untouched = planUntouched(),
             sizeChanged = fitted != null && fitted != canvas,
-            slack = 4f * labelDensity.density
+            slack = 4f * labelDensity.density,
+            topReserve = pillReservePx(),
+            topGap = PlanFitRules.TOP_GAP_DP * labelDensity.density,
+            minContent = PlanFitRules.MIN_CONTENT_DP * labelDensity.density,
+            dp = labelDensity.density
         ) ?: return@LaunchedEffect
         cal3FitReserve = fit.reserve
-        scale = fit.scale
-        offset = Offset(0f, fit.dy)
-        cal3FitView = fit.scale to offset
+        applyAutoFit(fit.scale, fit.dy)
         cal3FitCanvas = canvas
     }
 
-    Box(modifier = modifier.fillMaxSize().background(planBg)
+    Box(modifier = modifier.fillMaxSize().clipToBounds().background(planBg)
         .onGloballyPositioned { planBoundsPx = it.boundsInRoot() }) {
         Canvas(
             modifier = Modifier.fillMaxSize()
@@ -1273,7 +1336,9 @@ fun PlanScreen(
                                         }
                                         onSetSoloElements(add)
                                     } else {
-                                        selected.clear()
+                                        // Le cadre AJOUTE à la sélection (plusieurs cadres
+                                        // cumulent), comme en 3D et sur iOS — Q2, §9.0.
+                                        val enclosed = ArrayList<Int>()
                                         data.fixtures.forEachIndexed { i, f ->
                                             // Ne sélectionne que le visible : effectiveHidden
                                             // (pas hiddenElements brut), comme le tap-select
@@ -1283,8 +1348,10 @@ fun PlanScreen(
                                             // d'adressage DMX pollués, sans anneau visible).
                                             if (f.key in effectiveHidden) return@forEachIndexed
                                             val s = toScreen(f.px, f.py, canvas.x, canvas.y)
-                                            if (s.x in l..r && s.y in t..bo) selected.add(i)
+                                            if (s.x in l..r && s.y in t..bo) enclosed.add(i)
                                         }
+                                        val next = SelectionRules.frame(selected.toList(), enclosed)
+                                        if (next.size != selected.size) { selected.clear(); selected.addAll(next) }
                                     }
                                 }
                                 rectStart = null; rectEnd = null
@@ -1568,10 +1635,10 @@ fun PlanScreen(
                             val d = dx * dx + dy * dy
                             if (d < bestD) { bestD = d; best = i }
                         }
-                        if (best < 0) { if (!rectMode) selected.clear() }
-                        else if (rectMode) { // toggle dans la sélection multiple
-                            if (!selected.remove(best)) selected.add(best)
-                        } else { selected.clear(); selected.add(best) }
+                        // Toucher = remplace ; en multi (ou cadre armé) = ajoute / retire ;
+                        // le vide désélectionne, sauf en multi (SelectionRules, Q2).
+                        val next = SelectionRules.tap(selected.toList(), best.takeIf { it >= 0 }, selectionModes())
+                        if (next != selected.toList()) { selected.clear(); selected.addAll(next) }
                     }
                     )
                 }
@@ -1940,28 +2007,6 @@ fun PlanScreen(
             )
         }
 
-        // Barre du haut : retour + stats. Le voile s'inverse sur fond sombre.
-        Surface(
-            color = if (bgDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.05f),
-            contentColor = inkColor,
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.align(Alignment.TopStart).padding(top = 52.dp, start = 56.dp)
-                .onGloballyPositioned { titlePillPx = it.boundsInRoot() }
-        ) {
-            Text(
-                stringResource(R.string.plan_title_fmt, scene.fixtures.size),
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        // Pendant une affectation, la flèche vaut « Terminé » : retour à l'écran
-        // Câblage sur la dernière voie (SceneScreen), comme le « Terminé » de la barre.
-        IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(if (assignMode) R.string.common_done else R.string.nav_view_3d),
-                tint = inkColor)
-        }
-
         // (La barre d'affectation est posée EN BAS, plus loin : CablingAssignBar.)
 
         // Légende : couleur de chaque calque de projecteurs + compte (comme iOS).
@@ -1975,6 +2020,12 @@ fun PlanScreen(
                 .filter { it.key !in effectiveHidden }
                 .groupingBy { it.layer }.eachCount()
                 .toList().sortedByDescending { it.second }
+        }
+        // Bandeau de mode (§3.14) : masquage ou isolement armé ; la légende passe dessous.
+        val modeBanner = PlanModeBanner.of(maskMode, soloMode, rectMode)
+        val legendPushPx = if (modeBanner == null || modeBannerPx.height <= 0f) 0 else {
+            val naturalTop = planBoundsPx.top + CablingAssignBarPlacement.LEGEND_TOP_ANDROID * labelDensity.density
+            kotlin.math.round(modeBannerPx.bottom + 8f * labelDensity.density - naturalTop).coerceAtLeast(0f).toInt()
         }
         // En mode CÂBLAGE (ou d'office en affectation), la légende passe de
         // « couleur → calque » à « couleur → distributeur » (ceux réellement utilisés).
@@ -1994,6 +2045,9 @@ fun PlanScreen(
                         // Place partagée avec la barre d'affectation (dégagement).
                         .padding(top = CablingAssignBarPlacement.LEGEND_TOP_ANDROID.dp,
                                  start = CablingAssignBarPlacement.LEGEND_START_ANDROID.dp)
+                        // Un bandeau de mode (masquer / isoler) sous la pastille la pousse
+                        // plus bas : jamais l'un sur l'autre.
+                        .layoutOffset { androidx.compose.ui.unit.IntOffset(0, legendPushPx) }
                         .onGloballyPositioned { legendBoundsPx = it.boundsInRoot() }
                 ) {
                     androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -2087,39 +2141,6 @@ fun PlanScreen(
                 }
             }
         )
-        Box(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
-            SceneOptionsMenu(
-                options = options, tint = inkColor,
-                onShow3D = onShow3D ?: onBack, onShowPatch = onShowPatch,
-                onShowMaLibrary = onShowMaLibrary,
-                onShowAccount = onShowAccount, onShareProject = onShareProject,
-                onShowHistory = onShowHistory, onJoinProject = onJoinProject,
-                onShowClasses = onShowClasses,
-                onShowLayers = onShowLayers,
-                // Outils de la vue plan exposés DANS le menu (N10) : dérivés de la
-                // MÊME description unifiée que les barres (toolsPlan) → plus de
-                // duplication. Les calibrations n'y sont plus (panneau Position GPS).
-                tools = toolsPlan.toMenuTools(),
-                onCustomizeToolbar = { showCustomize = true },
-                showLabelsToggle = true, showStructureToggle = true,
-                showLegendToggle = true,
-                // Entrées provisoires (tranche B, jusqu'au menu de la tranche C) : les
-                // panneaux remplacent le satellite, son curseur, la ligne d'état de la
-                // calibration et les options d'étiquettes du menu.
-                onShowLabelSettings = { onPanels(panels.open(ScenePanel.LABELS)) },
-                onShowGeoPanel = { onPanels(panels.open(ScenePanel.GEO)) },
-                // Coloration câblage (phase 4) : proposée seulement s'il existe un
-                // câblage colorable ; le nav cycle entre les modes disponibles.
-                showColorModeSelector = hasSocaColoring || hasDmxColoring,
-                colorModeHasSoca = hasSocaColoring,
-                colorModeHasDmx = hasDmxColoring,
-                background = options.background2D,
-                backgroundDefault = BackgroundColorStore.DEFAULT_2D,
-                backgroundPresets = bg2dPresets(),
-                onPickBackground = { options.background2D = it }
-            )
-        }
-
         // Recherche par Fixture ID : SÉLECTIONNE le(s) projecteur(s) et CADRE
         // dessus (comme le bouton loupe iOS — usage terrain « où est le #152 »).
         // Un même N° est souvent porté par PLUSIEURS projecteurs (multicellules,
@@ -2127,9 +2148,9 @@ fun PlanScreen(
         // sélectionne en entier (la surbrillance + le cadre de sélection le
         // montrent) et on cadre sur sa boîte englobante. À défaut de N° exact, on
         // retombe sur une correspondance partielle (N° puis nom).
-        fun doSearch() {
+        fun doSearch(): Boolean {
             val q = query.trim()
-            if (q.isEmpty()) return
+            if (q.isEmpty()) return false
             val exact = data.fixtures.indices.filter { data.fixtures[it].id.equals(q, true) }
             val matches = when {
                 exact.isNotEmpty() -> exact
@@ -2137,7 +2158,7 @@ fun PlanScreen(
                     .filter { data.fixtures[it].id?.contains(q, true) == true }
                     .ifEmpty { data.fixtures.indices.filter { data.fixtures[it].name.contains(q, true) } }
             }
-            if (matches.isEmpty()) return
+            if (matches.isEmpty()) return false
             selected.clear(); selected.addAll(matches)
             // Cadre = boîte englobante du groupe (coordonnées plan, mm), centrée.
             val fx = matches.map { data.fixtures[it] }
@@ -2162,43 +2183,106 @@ fun PlanScreen(
             val bs = base * z
             scale = z
             offset = Offset(-bs * (cX - data.cx), -bs * (cY - data.cy))
+            return true
         }
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            singleLine = true,
-            placeholder = { Text(stringResource(R.string.search_fixture_id_hint), style = MaterialTheme.typography.bodySmall) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { doSearch() }),
-            // Couleurs pilotées par le fond (le thème ne suit pas la couleur de
-            // fond choisie) → sinon le champ est illisible sur fond sombre.
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = inkColor, unfocusedTextColor = inkColor,
-                cursorColor = inkColor,
-                focusedBorderColor = inkColor.copy(alpha = 0.7f),
-                unfocusedBorderColor = inkColor.copy(alpha = 0.4f),
-                focusedLeadingIconColor = inkColor, unfocusedLeadingIconColor = inkColor.copy(alpha = 0.7f),
-                focusedPlaceholderColor = inkColor.copy(alpha = 0.6f),
-                unfocusedPlaceholderColor = inkColor.copy(alpha = 0.6f)
-            ),
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 44.dp, end = 8.dp).width(170.dp)
-                .onGloballyPositioned { searchFieldPx = it.boundsInRoot() }
-        )
-
-        // N11 — BARRE FLOTTANTE historique (bas-gauche) : rendue par DÉFAUT
-        // (dispositions vides). Montre les outils permanents (rectangle, masquer,
-        // solo, mesure, réafficher, GPS, calibrer, satellite, PDF, DXF…) SAUF ceux
-        // déplacés dans une barre ancrée (gating iOS → jamais en double).
-        FloatingToolbar(
-            permanentIds = ToolbarLayout.floatingPlan,
-            specs = toolsPlan,
-            layout = toolbarLayout
-        )
         // N11 — barres d'outils ANCRABLES (défaut = vide). AnchoredToolbars rend les
         // 4 bords d'après `layout` en filtrant toolsPlan au disponible : rien tant
         // que l'utilisateur n'a pas personnalisé. Une barre vide n'est pas rendue.
         AnchoredToolbars(layout = toolbarLayout, specs = toolsPlan)
+
+        // ---- HABILLAGE (SPEC-menus-android §3.1, §3.3, §3.14) : rangée du haut
+        // (← « Terminé », cadre, multi, ⋯), pastille « Vue » centrée, pastille de
+        // synchro à droite sous la rangée, bandeau de mode sous la pastille. ----
+        fun planTool(id: ToolId) = toolsPlan.firstOrNull { it.id == id }?.onInvoke?.invoke()
+        val menuCtxPlan = MainMenuContext(
+            surface = ProjectSurface.PLAN,
+            hasRefPlan = referencePlan != null,
+            hasSync = hasSync,
+            hasCabling = hasCabling,
+            colorModes = MainMenuModel.colorModes(hasSocaColoring, hasDmxColoring),
+            hasHiddenItems = hiddenElements.isNotEmpty(),
+            soloActive = soloElements.isNotEmpty(),
+            hasSelection = selected.isNotEmpty()
+        )
+        val menuStatePlan = MainMenuState(
+            measure = measureMode, labels = options.showLabels, layerColors = options.layerColors,
+            structure = options.showStructure, legend = options.showLegend,
+            hideItems = maskMode, isolate = soloMode
+        )
+        // Le plan traite ses entrées (bascules, modes, panneaux, export du plan) ; le
+        // reste part à SceneScreen (destinations, import, PDF de câblage, fermeture).
+        fun onMenuItemPlan(id: MainMenuItemId) {
+            when (id) {
+                MainMenuItemId.MEASURE -> planTool(ToolId.MEASURE)
+                MainMenuItemId.LABELS -> options.showLabels = !options.showLabels
+                MainMenuItemId.LAYER_COLORS -> options.layerColors = !options.layerColors
+                MainMenuItemId.STRUCTURE -> options.showStructure = !options.showStructure
+                MainMenuItemId.LEGEND -> options.showLegend = !options.showLegend
+                MainMenuItemId.LABEL_SETTINGS -> onPanels(panels.open(ScenePanel.LABELS))
+                MainMenuItemId.TOOLBAR_THIS_VIEW -> showCustomize = true
+                MainMenuItemId.HIDE_ITEMS -> planTool(ToolId.MASK)
+                MainMenuItemId.ISOLATE -> planTool(ToolId.SOLO)
+                MainMenuItemId.SHOW_ALL -> onSetHiddenElements(emptySet())
+                MainMenuItemId.CLEAR_SOLO -> onSetSoloElements(emptySet())
+                MainMenuItemId.GPS_POSITION -> onPanels(panels.open(ScenePanel.GEO))
+                MainMenuItemId.ADJUST_PLAN -> onPanels(panels.open(ScenePanel.REF_PLAN))
+                MainMenuItemId.PLAN_PDF -> exportMode = true
+                else -> onMainMenu(id)
+            }
+        }
+        SceneTopRow(
+            // Dans le plan, la flèche vaut « Terminé » (décision 2, §8 D19) : retour
+            // à la 3D, ou au Câblage pendant une affectation.
+            backDescription = stringResource(R.string.common_done),
+            onBack = onBack,
+            rect = toolsPlan.firstOrNull { it.id == ToolId.RECT }?.takeIf { SceneTopRowRules.showsRect(toolbarLayout) },
+            multi = toolsPlan.firstOrNull { it.id == ToolId.MULTI_SELECT }?.takeIf { SceneTopRowRules.showsMulti(toolbarLayout) },
+            menu = {
+                MainMenuButton(
+                    ctx = menuCtxPlan, state = menuStatePlan,
+                    values = MainMenuValues(
+                        colorMode = options.planColorMode,
+                        onColorMode = { options.planColorMode = it },
+                        background = options.background2D,
+                        backgroundPresets = bg2dPresets(),
+                        onBackground = { options.background2D = it },
+                        onCustomBackground = { showBackgroundDialog = true }
+                    ),
+                    onItem = { onMenuItemPlan(it) }
+                )
+            },
+            onRowBottom = { topRowBottomPx = it }
+        )
+        ViewPill(
+            surface = ProjectSurface.PLAN, current = CameraViewpoint.TOP,
+            onViewpoint = {}, onShowPlan = {}, onShow3D = { (onShow3D ?: onBack)() },
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 58.dp)
+                .onGloballyPositioned { viewPillPx = it.boundsInRoot() }
+        )
+        // Pastille de synchro (projet partagé) : à droite sous la rangée, sous la
+        // pastille « Vue » si elle la chevaucherait (§8 D21).
+        syncBadge?.let { badge ->
+            val d = labelDensity.density
+            val topPx = PlanSyncBadgeRules.top(
+                rowBottom = if (topRowBottomPx > 0f) topRowBottomPx else planBoundsPx.top + 52f * d,
+                pill = viewPillPx, badgeWidth = syncBadgeWidthPx, containerRight = planBoundsPx.right,
+                margin = 8f * d, gap = 6f * d
+            )
+            Box(Modifier.align(Alignment.TopEnd)
+                .padding(top = ((topPx - planBoundsPx.top) / d).coerceAtLeast(0f).dp, end = 8.dp)
+                .onGloballyPositioned { syncBadgeWidthPx = it.size.width.toFloat() }) { badge() }
+        }
+        modeBanner?.let { b ->
+            val d = labelDensity.density
+            val top = if (viewPillPx.height > 0f) ((viewPillPx.bottom - planBoundsPx.top) / d + 8f).dp else 100.dp
+            PlanModeBannerBar(
+                banner = b,
+                // L'icône de tête quitte le mode (même chemin que l'outil).
+                onExit = { if (maskMode) planTool(ToolId.MASK) else if (soloMode) planTool(ToolId.SOLO) },
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = top, start = 16.dp, end = 16.dp)
+                    .onGloballyPositioned { modeBannerPx = it.boundsInRoot() }
+            )
+        }
 
         // Mention OBLIGATOIRE de l'imagerie IGN (bas-droite). Elle MONTE au-dessus du
         // panneau 3 points ou de la barre d'affectation (iOS satelliteAttributionLift) :
@@ -2211,6 +2295,10 @@ fun PlanScreen(
             val satObstacles = buildList {
                 if (cal3Session != null) add(cal3PanelAnchorPx.inDp())
                 if (assignTarget != null) add(assignBarAnchorPx.inDp())
+                // Fiche / bannière de sélection (contre le bas depuis le retrait de la
+                // barre flottante, la mention passait dessous — constat émulateur).
+                if (PlanBottomRules.selectionBar(selected.size, cal3Session != null || cal3Starting,
+                        assignTarget != null) != PlanSelectionBar.NONE) add(selectionBarPx.inDp())
             }
             val mention = satMentionAnchorPx.inDp()
             val lift = SatelliteUi.overlayLift(
@@ -2224,6 +2312,25 @@ fun PlanScreen(
             SatelliteAttribution(credit, toolbarLayout, toolsPlan, lift = satLift,
                 onAnchor = { satMentionAnchorPx = it }, onTop = satMentionOnTop)
         }
+
+        // ---- PILE BAS-DROITE (§3.4) : Rechercher puis Recadrer. Elle monte au-dessus
+        // de la fiche / bannière, des aides, de la barre d'affectation, du panneau 3
+        // points et de la mention IGN (à sa place affichée : sa montée ne dépend pas
+        // de la pile, pas de boucle). ----
+        SearchReframeStack(
+            showReframe = SceneTopRowRules.showsReframe(toolbarLayout),
+            onReframe = { reframePlan() },
+            onSearch = { q -> query = q; doSearch() },
+            obstacles = buildList {
+                if (PlanBottomRules.selectionBar(selected.size, cal3Session != null || cal3Starting,
+                        assignTarget != null) != PlanSelectionBar.NONE) add(selectionBarPx)
+                if (calibrating || measureMode) add(bottomAidPx)
+                if (assignTarget != null) add(assignBarAnchorPx)
+                if (cal3Session != null) add(cal3PanelAnchorPx)
+                if (satCredit != null) add(satMentionAnchorPx.translate(0f, -satLift.value * labelDensity.density))
+            },
+            topLimitPx = maxOf(planBoundsPx.top, topRowBottomPx)
+        )
 
         // ---- BARRE D'AFFECTATION (SPEC-cablage-plan §4) ----
         // En BAS, centrée, déplaçable : 84 dp au-dessus du bas en portrait, contre
@@ -2302,8 +2409,10 @@ fun PlanScreen(
         // deux ajouts de page.
         if (exportMode) {
             MovablePanel(
-                id = PanelLayoutStore.PanelID.EXPORT_PLAN,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 76.dp, end = 12.dp)
+                // Bas-GAUCHE (le coin bas-droit revient à la pile Rechercher / Recadrer),
+                // nouvelle clé de position (§3.4, §8 D13).
+                id = PanelLayoutStore.PanelID.EXPORT_PLAN_LEADING,
+                modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 76.dp, start = 12.dp).width(268.dp)
             ) {
             Surface(
                 color = Color.White, contentColor = Color(0xFF111111),
@@ -2569,8 +2678,10 @@ fun PlanScreen(
         // Plan importé, Réglage des étiquettes. Chacun MONTE au-dessus de ce qui
         // occupe le bas de sa colonne (fiche / bannière, aides, barre d'affectation,
         // panneau 3 points, mention IGN lue sans sa montée) et sa hauteur est bornée
-        // sous le titre et la recherche (PanelPlacementMath.floatingPanelSlot). ----
-        val panelTop = listOf(titlePillPx, searchFieldPx)
+        // sous la rangée du haut, la pastille « Vue » et le bandeau de mode
+        // (PanelPlacementMath.floatingPanelSlot). ----
+        val panelTop = listOfNotNull(viewPillPx, modeBannerPx.takeIf { modeBanner != null })
+        val panelTopLimit = maxOf(planBoundsPx.top, topRowBottomPx)
         val panelBottom = buildList {
             if (selectionBar != PlanSelectionBar.NONE) add(selectionBarPx)
             if (calibrating || measureMode) add(bottomAidPx)
@@ -2579,7 +2690,7 @@ fun PlanScreen(
             if (satCredit != null) add(satMentionAnchorPx)
         }
         if (panels.labels) BottomLeadingPanel(
-            PanelLayoutStore.PanelID.LABELS_PLAN, planBoundsPx.top, panelTop, panelBottom,
+            PanelLayoutStore.PanelID.LABELS_PLAN, panelTopLimit, panelTop, panelBottom,
             Modifier.zIndex(panels.zIndex(ScenePanel.LABELS))
         ) { maxH ->
             LabelSettingsPanel(options = options, surface = ProjectSurface.PLAN, placement = labelPlacement,
@@ -2587,7 +2698,7 @@ fun PlanScreen(
         }
         val rpPanel = referencePlan
         if (panels.refPlan && rpPanel != null) BottomLeadingPanel(
-            PanelLayoutStore.PanelID.REF_PLAN_PLAN_LEADING, planBoundsPx.top, panelTop, panelBottom,
+            PanelLayoutStore.PanelID.REF_PLAN_PLAN_LEADING, panelTopLimit, panelTop, panelBottom,
             Modifier.zIndex(panels.zIndex(ScenePanel.REF_PLAN))
         ) { maxH ->
             RefPlanPanel(
@@ -2597,7 +2708,7 @@ fun PlanScreen(
             )
         }
         if (panels.geo) BottomLeadingPanel(
-            PanelLayoutStore.PanelID.GEO_POSITION_PLAN, planBoundsPx.top, panelTop, panelBottom,
+            PanelLayoutStore.PanelID.GEO_POSITION_PLAN, panelTopLimit, panelTop, panelBottom,
             Modifier.zIndex(panels.zIndex(ScenePanel.GEO))
         ) { maxH ->
             GeoPositionPanel(

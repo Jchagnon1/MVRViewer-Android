@@ -188,4 +188,55 @@ object PanelPlacementMath {
         if (shift <= 0f || anchor.right + shift > maxX - edgeMargin) return LeadingBarOffset.NONE
         return LeadingBarOffset(0f, shift)
     }
+
+    /**
+     * Place de la barre ancrée du HAUT : la bande libre [freeLeft]–[freeRight]
+     * (au-delà, la barre DÉFILE) et le haut [top] de la barre.
+     */
+    data class TopBarSlot(val freeLeft: Float, val freeRight: Float, val top: Float) {
+        /** Largeur au-delà de laquelle la barre défile. */
+        val maxWidth: Float get() = maxOf(0f, freeRight - freeLeft)
+
+        /** Bord gauche d'une barre large de [width] : centrée sur [center] si elle tient, sinon contre le bord libre. */
+        fun left(width: Float, center: Float): Float =
+            (center - width / 2f).coerceIn(freeLeft, maxOf(freeLeft, freeRight - width))
+    }
+
+    /**
+     * Où poser la barre ancrée du HAUT (SPEC-menus-android §3.13, §13) : DANS la
+     * rangée du haut, entre ses occupants — ← d'un côté, le groupe
+     * `[Sélection par cadre] [Multi-sélection] [⋯]` de l'autre —, jamais sous
+     * eux ni sur la pastille « Vue », le bloc d'état ou le bandeau de mode posés
+     * sous la rangée. Elle s'aligne sur le haut de la rangée ; centrée sur la vue
+     * si elle tient, sinon poussée contre le bord libre ; plus longue que la
+     * place, elle défile ([TopBarSlot.maxWidth]). Sans place pour un seul bouton
+     * ([minWidth], écran minuscule), elle passe SOUS la rangée, sur toute la
+     * largeur moins [margin].
+     *
+     * Repère : celui du conteneur des barres (px) ; [rowOccupants] y sont déjà
+     * ramenés. Cadres vides ou non finis ignorés ; sans occupant mesuré, la barre
+     * se pose à [margin] du haut, sur toute la largeur moins [margin].
+     */
+    fun topBarSlot(
+        containerWidth: Float, rowOccupants: List<Rect>, gap: Float = CORNER_STACK_GAP,
+        minWidth: Float = 48f, margin: Float = 12f
+    ): TopBarSlot {
+        val whole = TopBarSlot(margin, containerWidth - margin, margin)
+        if (!(containerWidth > 0f) || !containerWidth.isFinite()) return TopBarSlot(0f, 0f, margin)
+        val row = rowOccupants.filter {
+            it.width > 0f && it.height > 0f &&
+                it.left.isFinite() && it.top.isFinite() && it.right.isFinite() && it.bottom.isFinite()
+        }
+        if (row.isEmpty()) return whole
+        // Bande libre autour du centre : à droite de ce qui est à gauche du centre,
+        // à gauche de ce qui est à droite (quel que soit le sens de lecture).
+        val center = containerWidth / 2f
+        var lo = margin
+        var hi = containerWidth - margin
+        for (o in row) {
+            if (o.center.x < center) lo = maxOf(lo, o.right + gap) else hi = minOf(hi, o.left - gap)
+        }
+        if (hi - lo >= minWidth) return TopBarSlot(lo, hi, row.minOf { it.top })
+        return TopBarSlot(margin, containerWidth - margin, row.maxOf { it.bottom } + gap)
+    }
 }

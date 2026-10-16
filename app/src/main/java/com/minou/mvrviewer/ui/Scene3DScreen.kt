@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1656,6 +1657,9 @@ fun Scene3DScreen(
     var statusBlock3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var viewPill3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var topRow3DBottomPx by remember { mutableStateOf(0f) }
+    // ← et groupe de droite de la rangée : la barre ancrée du haut se pose entre eux.
+    var topRow3DBackPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var topRow3DTrailingPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var selectionCard3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var measureBand3DPx by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     // Cadres AFFICHÉS des panneaux flottants (barre ancrée gauche, §3.13).
@@ -2249,9 +2253,16 @@ fun Scene3DScreen(
             // trace le cadre. IMPORTANT : hors de ce mode on ne met AUCUN overlay
             // pointerInput — même inerte, il capterait le tap et empêcherait le
             // détecteur natif de la SceneView (tapListener) de le recevoir.
+            // Elle capte donc AUSSI le toucher : il est rendu à handleTap (même repère
+            // que le cadre et worldToScreenPoint) pour que, cadre armé, toucher un
+            // projecteur l'ajoute ou le retire comme dans le plan (Q2, SelectionRules :
+            // le cadre force le multi). Le glissé, consommé passé le seuil, annule le
+            // toucher : un cadre n'est jamais pris pour un toucher.
             if (rectMode) {
                 Box(
                     Modifier.fillMaxSize().pointerInput(scene) {
+                        detectTapGestures(onTap = { handleTap(it) })
+                    }.pointerInput(scene) {
                         detectDragGestures(
                             onDragStart = { rectStart = it; rectEnd = it },
                             onDrag = { change, _ -> change.consume(); rectEnd = change.position },
@@ -2386,6 +2397,11 @@ fun Scene3DScreen(
                 },
                 topLimitPx = { maxOf(sceneBoxPx.top, topRow3DBottomPx) },
                 bottomLimitPx = { if (sceneBoxPx.height > 0f) sceneBoxPx.bottom else Float.POSITIVE_INFINITY }
+            ), top = TopBarClearance(
+                // Barre du HAUT : DANS la rangée, entre ← et le groupe de droite — jamais
+                // sous eux ni sur la pastille « Vue » ou le bloc d'état posés dessous.
+                rowOccupants = { listOf(topRow3DBackPx, topRow3DTrailingPx) },
+                container = { sceneBoxPx }
             ))
 
             // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte), tant que le
@@ -2573,14 +2589,15 @@ fun Scene3DScreen(
                     }
                 )
             }
-            // Chargement d'un modèle ou d'un plan importé (tranche B : l'import du plan
-            // se lance aussi depuis la 3D) : état explicite, jamais un gel silencieux.
-            if (importingModel || modelBusy || importingRefPlan) {
+            // Chargement d'un modèle importé : état explicite, jamais un gel silencieux.
+            // La lecture d'un plan importé a son indicateur au niveau de la scène
+            // (SceneScreen, « Lecture du plan… »), commun aux deux vues.
+            if (importingModel || modelBusy) {
                 Surface(
                     color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
                 ) {
-                    Text(stringResource(if (importingModel || modelBusy) R.string.model_loading else R.string.refplan_reading),
+                    Text(stringResource(R.string.model_loading),
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
@@ -2617,7 +2634,9 @@ fun Scene3DScreen(
                         onItem = { onMenuItem3D(it) }
                     )
                 },
-                onRowBottom = { topRow3DBottomPx = it }
+                onRowBottom = { topRow3DBottomPx = it },
+                onLeading = { topRow3DBackPx = it },
+                onTrailing = { topRow3DTrailingPx = it }
             )
             ViewPill(
                 surface = ProjectSurface.SCENE_3D, current = viewpoint,

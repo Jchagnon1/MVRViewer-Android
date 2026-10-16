@@ -684,6 +684,9 @@ fun PlanScreen(
     // Habillage (tranche C) : bas de la rangée du haut, pastille « Vue » centrée,
     // bandeau de mode, pastille de synchro.
     var topRowBottomPx by remember { mutableStateOf(0f) }
+    // ← et groupe de droite de la rangée : la barre ancrée du haut se pose entre eux.
+    var topRowBackPx by remember { mutableStateOf(Rect.Zero) }
+    var topRowTrailingPx by remember { mutableStateOf(Rect.Zero) }
     var viewPillPx by remember { mutableStateOf(Rect.Zero) }
     var modeBannerPx by remember { mutableStateOf(Rect.Zero) }
     var syncBadgeWidthPx by remember { mutableStateOf(0f) }
@@ -2248,6 +2251,11 @@ fun PlanScreen(
             },
             topLimitPx = { maxOf(planBoundsPx.top, topRowBottomPx) },
             bottomLimitPx = { if (planBoundsPx.height > 0f) planBoundsPx.bottom else Float.POSITIVE_INFINITY }
+        ), top = TopBarClearance(
+            // Barre du HAUT : DANS la rangée, entre ← et le groupe de droite — jamais
+            // sous eux ni sur la pastille « Vue » / le bandeau de mode posés dessous.
+            rowOccupants = { listOf(topRowBackPx, topRowTrailingPx) },
+            container = { planBoundsPx }
         ))
 
         // ---- HABILLAGE (SPEC-menus-android §3.1, §3.3, §3.14) : rangée du haut
@@ -2311,7 +2319,9 @@ fun PlanScreen(
                     onItem = { onMenuItemPlan(it) }
                 )
             },
-            onRowBottom = { topRowBottomPx = it }
+            onRowBottom = { topRowBottomPx = it },
+            onLeading = { topRowBackPx = it },
+            onTrailing = { topRowTrailingPx = it }
         )
         ViewPill(
             surface = ProjectSurface.PLAN, current = CameraViewpoint.TOP,
@@ -2758,9 +2768,13 @@ fun PlanScreen(
         // Plan importé, Réglage des étiquettes. Chacun MONTE au-dessus de ce qui
         // occupe le bas de sa colonne (fiche / bannière, aides, barre d'affectation,
         // panneau 3 points, mention IGN lue sans sa montée) et sa hauteur est bornée
-        // sous la rangée du haut, la pastille « Vue » et le bandeau de mode
-        // (PanelPlacementMath.floatingPanelSlot). ----
-        val panelTop = listOfNotNull(viewPillPx, modeBannerPx.takeIf { modeBanner != null })
+        // sous la rangée du haut, la pastille « Vue », le bandeau de mode et la
+        // LÉGENDE (haut-gauche, même colonne, §8 D11 : en portrait, le panneau Plan
+        // importé la recouvrait) — PanelPlacementMath.floatingPanelSlot. Sans place
+        // (paysage), le panneau garde sa hauteur minimale et son haut passe dessus. ----
+        val panelTop = listOfNotNull(
+            viewPillPx, modeBannerPx.takeIf { modeBanner != null }, legendBoundsPx?.takeIf { legendShown }
+        )
         val panelTopLimit = maxOf(planBoundsPx.top, topRowBottomPx)
         val panelBottom = buildList {
             if (selectionBar != PlanSelectionBar.NONE) add(selectionBarPx)

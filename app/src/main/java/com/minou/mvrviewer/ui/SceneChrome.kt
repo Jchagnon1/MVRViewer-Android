@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
@@ -90,7 +91,8 @@ private val EDGE = 4.dp
  * RANGÉE DU HAUT, identique dans les deux vues : ← à gauche ; à droite
  * `[Sélection par cadre] [Multi-sélection] [⋯]`. Un bouton permanent dont l'outil
  * est ancré est passé à null (masqué, [SceneTopRowRules]). [onRowBottom] reçoit le
- * bas de la rangée (px racine) ; [onTrailing] le cadre du groupe de droite.
+ * bas de la rangée (px racine) ; [onLeading] le cadre de ← et [onTrailing] celui du
+ * groupe de droite (la barre ancrée du haut se pose entre les deux, §3.13).
  */
 @Composable
 fun BoxScope.SceneTopRow(
@@ -100,13 +102,14 @@ fun BoxScope.SceneTopRow(
     multi: ToolSpec?,
     menu: @Composable () -> Unit,
     onRowBottom: (Float) -> Unit = {},
+    onLeading: (Rect) -> Unit = {},
     onTrailing: (Rect) -> Unit = {}
 ) {
     FilledIconButton(
         onClick = onBack,
         colors = neutralRoundButtonColors(),
         modifier = Modifier.align(Alignment.TopStart).padding(EDGE).size(SCENE_ROUND).testTag("topRow.back")
-            .onGloballyPositioned { onRowBottom(it.boundsInRoot().bottom) }
+            .onGloballyPositioned { val b = it.boundsInRoot(); onRowBottom(b.bottom); onLeading(b) }
     ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDescription) }
     Row(
         Modifier.align(Alignment.TopEnd).padding(EDGE).onGloballyPositioned { onTrailing(it.boundsInRoot()) },
@@ -210,6 +213,11 @@ fun BoxScope.SearchReframeStack(
     var query by remember { mutableStateOf("") }
     var notFound by remember { mutableStateOf<String?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
+    // RETOUR système, champ ouvert : il referme d'abord le champ (le 1er retour range
+    // le clavier, c'est l'OS). Sans lui, le retour partait à la scène : la 3D
+    // fermait le projet, le plan rebasculait en 3D. Composé APRÈS le retour de la
+    // scène (SceneScreen), il passe devant tant que le champ est ouvert.
+    BackHandler(enabled = searchOpen) { searchOpen = false; notFound = null; keyboard?.hide() }
     val lift = with(density) {
         PanelPlacementMath.clearanceLift(anchor, obstacles, topLimitPx, PanelPlacementMath.CORNER_STACK_GAP.dp.toPx())
     }

@@ -560,7 +560,9 @@ Une pile verticale alignée à droite, même gabarit 48 dp :
 - **Rechercher** (`Search`), TalkBack « Rechercher un projecteur par N° » :
   ouvre un champ « N° de projecteur » à gauche de la pile (clavier, action
   Rechercher) ; résultat vide : « Aucun projecteur nº %s » sous le champ. Le
-  champ permanent du haut disparaît (3D `:2254`, plan `:2200`).
+  champ permanent du haut disparaît (3D `:2254`, plan `:2200`). Le **retour
+  système** referme d'abord le champ ouvert (le premier retour range le
+  clavier) ; il ne ferme ni le projet ni la vue plan (§13).
 - **Recadrer** (`ZoomOutMap`, même icône pour l'outil `resetCamera`), TalkBack
   « Recadrer la vue ». 3D : action actuelle de « Réinitialiser la vue » ;
   plan : **nouveau** — remet zoom et décalage, en respectant la place de la
@@ -711,6 +713,11 @@ posé **dans les deux vues** (nouveau en 3D). Coin bas-gauche, `MovablePanel`
     ce compteur).
 - Après un import, le panneau s'ouvre dans la vue d'où l'import a été lancé
   (comportement actuel du plan, étendu à la 3D).
+- Pendant la lecture du fichier, un bandeau d'attente « Lecture du plan… »
+  (`refplan_reading`, « Reading the plan… ») est posé au centre par
+  `SceneScreen`, **commun aux deux vues** ; l'import ne se relance pas tant
+  que la lecture dure (§13). Avant, le seul signe était l'outil DXF « occupé »
+  de la barre flottante, retirée (Q1).
 
 ### 3.8 Panneau « Réglage des étiquettes »
 
@@ -889,6 +896,14 @@ Sections, dans l'ordre :
 - La barre gauche **évite** la légende du plan, les panneaux flottants
   ouverts, la fiche et la bannière (cadres mesurés, `clearanceLift`) ; sans
   place, elle passe à droite de l'obstacle (iOS `leadingBarOffset`).
+- La barre du **haut** se pose **dans la rangée du haut**, entre ← et le
+  groupe `[Sélection par cadre] [Multi-sélection] [⋯]` (cadres mesurés,
+  `PanelPlacementMath.topBarSlot`), alignée sur leurs boutons : jamais sous
+  eux, ni sur la pastille « Vue », le bloc d'état ou le bandeau de mode posés
+  sous la rangée. Centrée sur la vue si elle tient, sinon poussée contre le
+  bord libre ; plus longue que la place, elle **défile** horizontalement.
+  Sans place pour un seul bouton (écran minuscule), elle passe sous la rangée
+  (§13).
 - `ToolbarCustomizeSheet` : texte d'aide iOS §12.1 ; puce « Aucun » → « Hors
   barres » ; + « Tout remettre hors barres » (persiste le vide) ; « Réinitialiser »
   remet le défaut de l'appareil.
@@ -2235,9 +2250,12 @@ l'émulateur Medium_Phone (mémoire 2 Go, démarré en 30 s, API 37), puis arrê
 - Restent hors chantier : le journal d'audit (`AuditCoding.kt`, « n ancre(s) »
   fabriqué et champ « Fixture ID ») — texte de journal partagé, pas une
   surface de menu ; la chevron de repli des panneaux déplaçables
-  (`MovablePanel`) n'a pas de nom TalkBack ; en paysage, le panneau Position
-  GPS du plan recouvre la légende (il n'est borné que par la rangée du haut,
-  la pastille et le bandeau de mode).
+  (`MovablePanel`) n'a pas de nom TalkBack. Les panneaux du bas-gauche du
+  plan (Position GPS, Plan importé, Réglage des étiquettes) sont désormais
+  bornés aussi par la **légende** (§13) : en portrait, ils commencent sous
+  elle ; en paysage, sans place, ils gardent leur hauteur minimale (120 dp)
+  et leur haut passe sur la légende (règle `floatingPanelSlot`, on les replie
+  ou on les tire d'un geste).
 - Dialogue « Renommer le distributeur » du Câblage (`CablingScreen.kt:736`,
   `DmxCablingScreen.kt:486`) : « OK » + « Fermer » au lieu de « Annuler » /
   « Enregistrer » (DESIGN_UI §8).
@@ -2320,3 +2338,40 @@ document :
     `modelsPanel`, `gdtfMapping`, `cabling` ; `hasSync` dans
     `MainMenuContext` ; retour système dans les pages du ⋯ à vérifier ;
     `SyncViewModel.kt:291` (et non `:292`).
+
+---
+
+## 13. Relecture du rangement (2026-10-16) — défauts corrigés
+
+Relecture à l'émulateur (Medium_Phone, 411 dp) du commit `9224e11`. Les cinq
+défauts ont été reproduits sur l'APK de `9224e11`, puis vérifiés corrigés sur
+le nouvel APK. Tests : `MenusReviewFixesTest`.
+
+1. **Barre ancrée du haut sous la rangée du haut** (les deux vues). Centrée à
+   12 dp du haut, elle passait sous `[Sélection par cadre]` et sur la pastille
+   « Vue » : avec 3 outils, l'un était caché et plus touchable. Elle se pose
+   maintenant **dans** la rangée, entre ← et le groupe de droite, et défile si
+   elle est trop longue (`PanelPlacementMath.topBarSlot`, §3.13).
+2. **Cadre armé en 3D : le toucher ne faisait rien.** La couche du cadre
+   captait le toucher, qui n'atteignait plus la SceneView. Elle le rend
+   maintenant à `handleTap` : toucher un projecteur l'ajoute ou le retire,
+   comme dans le plan (Q2, `SelectionRules.tap`, le cadre force le multi) ; un
+   glissé reste un cadre.
+3. **Import d'un plan sans signe d'attente dans le plan** (téléphone). Bandeau
+   « Lecture du plan… » commun aux deux vues, posé par `SceneScreen` ; import
+   non relançable pendant la lecture (§3.7). La 3D n'a plus son propre texte.
+4. **Retour système, champ « N° de projecteur » ouvert** : il fermait le
+   projet (3D) ou rebasculait en 3D (plan). Il referme d'abord le champ
+   (`BackHandler` de `SearchReframeStack`, §3.4).
+5. **Panneau « Plan importé » sur la légende en portrait** (plan). La légende
+   compte parmi les obstacles du haut des panneaux du bas-gauche (§11).
+
+Observé en passant, non corrigé (existant, hors liste) : sur l'émulateur très
+chargé, un cadre 3D tracé vite (0,8 s) n'a rien sélectionné dans deux essais
+sur trois ; tracé lentement (3 s), il a marché. Cause probable, la même dans
+les deux vues : `onDragStart` reçoit le point où le seuil de glissé est
+franchi, pas le point de contact (vérifié dans le code de Compose 1.11.2) ;
+si les mouvements arrivent en un seul paquet, ce point est la fin du geste et
+le cadre est vide. Sur un vrai appareil, le seuil est franchi dès les
+premiers millimètres. À vérifier sur appareil ; correctif possible : partir
+du point de contact (variante de `detectDragGestures` qui le donne).

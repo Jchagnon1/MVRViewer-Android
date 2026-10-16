@@ -1165,6 +1165,8 @@ fun SceneScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) importPickedRefPlan(uri) }
     fun importRefPlan() {
+        // Une lecture est en cours (« Lecture du plan… ») : on ne la relance pas.
+        if (importingRefPlan) return
         ProAccess.gate(RefPlanPanelRules.IMPORT_PRO_REASON) { refPlanLauncher.launch(arrayOf("*/*")) }
     }
 
@@ -1597,6 +1599,14 @@ fun SceneScreen(
         // PDF de câblage lancé depuis le ⋯ : attente au-dessus de la vue courante.
         if (cablingPdfBusy) BusyBanner(
             androidx.compose.ui.res.stringResource(R.string.cabling_pdf_generating),
+            Modifier.align(Alignment.Center)
+        )
+        // Lecture d'un plan importé (DXF, image, PDF) : même attente, commune aux
+        // deux vues. Sans elle, le plan restait muet pendant la lecture d'un gros
+        // fichier (~18 s pour 400 000 segments) depuis le retrait de la barre
+        // flottante, qui en portait le seul signe (outil DXF « occupé »).
+        if (importingRefPlan) BusyBanner(
+            androidx.compose.ui.res.stringResource(R.string.refplan_reading),
             Modifier.align(Alignment.Center)
         )
         if (sync != null) {

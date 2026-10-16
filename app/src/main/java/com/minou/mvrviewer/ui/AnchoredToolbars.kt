@@ -17,8 +17,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.layout.layout
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,19 +75,34 @@ class LeadingBarClearance(
 )
 
 /**
+ * Ce qui occupe la RANGÉE DU HAUT, où se pose la barre ancrée du HAUT
+ * (SPEC-menus-android §3.13) : cadres RACINE (px) de ← et du groupe de droite
+ * `[cadre] [multi] [⋯]`, et cadre RACINE de la vue qui porte les barres. Des
+ * FONCTIONS, lues au placement seulement (la vue ne se recompose pas quand la
+ * rangée bouge).
+ */
+class TopBarClearance(
+    val rowOccupants: () -> List<Rect>,
+    val container: () -> Rect
+)
+
+/**
  * Rend les 4 barres ancrées d'après [layout], en filtrant [specs] au disponible.
  * Une barre vide n'est pas rendue (aucun encombrement). Chaque barre n'occupe que
  * la place de ses boutons, ancrée à son bord — le centre reste libre pour les
  * gestes de navigation (patron déjà validé : les overlays Compose ne captent que
  * leur propre zone au-dessus de la SceneView / du Canvas plan). La barre GAUCHE
  * (préremplie sur tablette) se déplace pour ne rien cacher ([leading],
- * [PanelPlacementMath.leadingBarOffset]).
+ * [PanelPlacementMath.leadingBarOffset]) ; la barre du HAUT se pose dans la
+ * rangée du haut, entre ← et le groupe de droite, et défile si elle est trop
+ * longue ([top], [PanelPlacementMath.topBarSlot]).
  */
 @Composable
 fun BoxScope.AnchoredToolbars(
     layout: ToolbarLayout,
     specs: List<ToolSpec>,
-    leading: LeadingBarClearance? = null
+    leading: LeadingBarClearance? = null,
+    top: TopBarClearance? = null
 ) {
     val byId = specs.associateBy { it.id }
     ToolbarEdge.entries.forEach { edge ->
@@ -97,7 +115,9 @@ fun BoxScope.AnchoredToolbars(
             ToolbarEdge.RIGHT -> Alignment.CenterEnd
         }
         val mod = Modifier.align(align).padding(12.dp)
-        if (edge == ToolbarEdge.TOP || edge == ToolbarEdge.BOTTOM) {
+        if (edge == ToolbarEdge.TOP && top != null) {
+            TopBar(items, top)
+        } else if (edge == ToolbarEdge.TOP || edge == ToolbarEdge.BOTTOM) {
             Row(
                 modifier = mod,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -141,6 +161,45 @@ private fun LeadingBar(items: List<ToolSpec>, leading: LeadingBarClearance, modi
             .testTag("dockedBar.left"),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
+    ) { items.forEach { DockedToolButton(it) } }
+}
+
+/**
+ * Barre du HAUT posée DANS la rangée du haut ([PanelPlacementMath.topBarSlot]) :
+ * alignée sur ses boutons, entre ← et le groupe de droite, centrée si elle tient ;
+ * plus longue que la place, elle défile horizontalement. Avant, centrée à 12 dp
+ * du haut, elle passait sous le groupe de droite et sur la pastille « Vue »
+ * (un outil caché, plus touchable — relecture du rangement). Le placement lit les
+ * cadres mesurés dans la phase de PLACEMENT seulement (pas de recomposition).
+ */
+@Composable
+private fun BoxScope.TopBar(items: List<ToolSpec>, top: TopBarClearance) {
+    Row(
+        modifier = Modifier
+            .align(Alignment.TopStart)
+            .layout { measurable, constraints ->
+                val box = top.container()
+                val width = if (box.width > 0f) box.width else constraints.maxWidth.toFloat()
+                val slot = PanelPlacementMath.topBarSlot(
+                    containerWidth = width,
+                    rowOccupants = top.rowOccupants().map { it.translate(-box.left, -box.top) },
+                    gap = PanelPlacementMath.CORNER_STACK_GAP.dp.toPx(),
+                    minWidth = SCENE_ROUND.toPx(),
+                    margin = 12.dp.toPx()
+                )
+                val maxW = slot.maxWidth.toInt().coerceIn(0, constraints.maxWidth)
+                val p = measurable.measure(constraints.copy(minWidth = 0, maxWidth = maxW, minHeight = 0))
+                val x = slot.left(p.width.toFloat(), center = width / 2f).roundToInt()
+                val y = slot.top.roundToInt()
+                // Boîte transparente aux gestes (aucun pointerInput hors des boutons).
+                val w = if (constraints.hasBoundedWidth) constraints.maxWidth else x + p.width
+                val h = (y + p.height).let { if (constraints.hasBoundedHeight) minOf(it, constraints.maxHeight) else it }
+                layout(w, h) { p.place(x, y) }
+            }
+            .testTag("dockedBar.top")
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) { items.forEach { DockedToolButton(it) } }
 }
 

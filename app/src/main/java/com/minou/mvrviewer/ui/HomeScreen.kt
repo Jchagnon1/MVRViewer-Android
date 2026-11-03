@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -236,13 +237,18 @@ fun HomeScreen(
                         }
                     }
                 }
-                // Rapport de diagnostic : n'apparaît que si un plantage/gel a été
-                // journalisé. Le testeur (Stéphane) peut ainsi nous l'envoyer.
-                val hasDiag = remember(state) {
-                    com.minou.mvrviewer.CrashReporter.logFile(ctx).let { it.exists() && it.length() > 0L }
+                // Rapport de diagnostic (guide C9) : n'apparaît que si le journal contient
+                // un PLANTAGE ou un GEL — pas pour la simple ligne « démarrage » écrite à
+                // chaque lancement. Il part par e-mail, prérempli vers l'assistance.
+                // Lu hors du thread principal (le journal peut peser 512 Ko).
+                val hasIncident by produceState(initialValue = false, state) {
+                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.minou.mvrviewer.CrashReporter.hasIncident(ctx)
+                    }
                 }
-                if (hasDiag) {
-                    TextButton(onClick = { shareDiag(ctx) }, modifier = Modifier.padding(top = 20.dp)) {
+                if (hasIncident) {
+                    TextButton(onClick = { com.minou.mvrviewer.DiagnosticReport.send(ctx) },
+                        modifier = Modifier.padding(top = 20.dp).testTag("home.sendDiag")) {
                         Icon(Icons.Filled.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("  " + stringResource(R.string.home_send_diag))
                     }
@@ -257,22 +263,6 @@ fun HomeScreen(
             }
         }
     }
-}
-
-/** Partage le journal de diagnostic (plantages + gels) via ACTION_SEND. */
-private fun shareDiag(ctx: android.content.Context) {
-    val f = com.minou.mvrviewer.CrashReporter.logFile(ctx)
-    if (!f.exists() || f.length() == 0L) return
-    val uri = runCatching {
-        androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
-    }.getOrNull() ?: return
-    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(android.content.Intent.EXTRA_STREAM, uri)
-        putExtra(android.content.Intent.EXTRA_SUBJECT, ctx.getString(R.string.diag_subject))
-        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    runCatching { ctx.startActivity(android.content.Intent.createChooser(send, ctx.getString(R.string.diag_share))) }
 }
 
 

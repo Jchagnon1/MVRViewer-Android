@@ -6,8 +6,26 @@
     <!-- Retour du réseau : retente les téléchargements de 3D des types MA (permission
          normale, déjà apportée par Firebase ; déclarée ici car l'app s'en sert). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Position de l'utilisateur en direct sur le plan (après calibrage). -->
+    <!-- Position de l'utilisateur en direct sur le plan (après calibrage). Les DEUX
+         permissions, demandées ensemble (guide C8) : Android 12+ ignore une demande
+         de la seule position précise et laisse choisir « Approximative », avec
+         laquelle l'app marche en dégradé (UserLocation.kt, LocationAccess). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- « Envoyer le rapport » (accueil) : trouver les messageries (elles ouvrent un
+         mailto: ET acceptent un fichier) pour n'ouvrir qu'elles, et écarter les autres
+         applis de partage (Android 11+ : visibilité des paquets ; DiagnosticReport). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="true"

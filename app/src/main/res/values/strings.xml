@@ -171,7 +171,14 @@
     <string name="common_unnamed">(sans nom)</string>
     <string name="common_visible">Visible</string>
     <string name="diag_share">Envoyer le rapport</string>
-    <string name="diag_subject">MVR Viewer — rapport de diagnostic</string>
+    <!-- E-mail prérempli vers l'assistance (guide C9) : %1$s = version (« 1.10.0 (21) »),
+         %2$s = appareil, %3$s = version d'Android (« 14 (API 34) »). -->
+    <string name="diag_mail_subject_fmt">MVR Viewer %1$s (Android) — rapport de plantage ou de gel</string>
+    <string name="diag_mail_body_fmt">Bonjour,\n\nMVR Viewer s\'est fermé de façon inattendue ou a cessé de répondre. Le journal de diagnostic est joint à ce message.\n\nCe que je faisais à ce moment-là (facultatif) :\n\n\n—\nVersion : %1$s\nAppareil : %2$s\nAndroid : %3$s</string>
+    <!-- Position approximative seule (guide C8). -->
+    <string name="location_approximate_toast">Position approximative seulement : précision limitée.</string>
+    <string name="location_approximate_panel">Position approximative seulement : précision limitée (jusqu\'à 2 km environ). « Je suis ici » et votre position restent utilisables, mais imprécis. Position exacte : Paramètres › Applications › MVR Viewer › Autorisations › Position.</string>
+    <string name="location_approximate_short">Position approximative : précision limitée</string>
     <string name="dmx_already_here">déjà sur ce départ</string>
     <string name="dmx_analysing">Analyse des empreintes DMX…</string>
     <string name="dmx_clear_core_cd">Vider le départ</string>

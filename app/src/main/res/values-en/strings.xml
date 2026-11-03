@@ -171,7 +171,11 @@
     <string name="common_unnamed">(untitled)</string>
     <string name="common_visible">Visible</string>
     <string name="diag_share">Send the report</string>
-    <string name="diag_subject">MVR Viewer — diagnostic report</string>
+    <string name="diag_mail_subject_fmt">MVR Viewer %1$s (Android) — crash or freeze report</string>
+    <string name="diag_mail_body_fmt">Hello,\n\nMVR Viewer closed unexpectedly or stopped responding. The diagnostic log is attached to this message.\n\nWhat I was doing at the time (optional):\n\n\n—\nVersion: %1$s\nDevice: %2$s\nAndroid: %3$s</string>
+    <string name="location_approximate_toast">Approximate location only: limited accuracy.</string>
+    <string name="location_approximate_panel">Approximate location only: limited accuracy (up to about 2 km). “I am here” and your position still work, but imprecisely. Precise location: Settings › Apps › MVR Viewer › Permissions › Location.</string>
+    <string name="location_approximate_short">Approximate location: limited accuracy</string>
     <string name="dmx_already_here">already on this line</string>
     <string name="dmx_analysing">Analysing DMX footprints…</string>
     <string name="dmx_clear_core_cd">Clear the core</string>

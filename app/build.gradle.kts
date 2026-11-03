@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,67 @@ plugins {
     // Le plugin google-services N'est PAS appliqué ici : il l'est plus bas, mais
     // SEULEMENT si app/google-services.json est présent (voir en bas du fichier) →
     // un clone sans ce fichier compile quand même (backend LOCAL de démo).
+}
+
+// ---------------------------------------------------------------------------
+// SIGNATURE DE RELEASE (guide de mise en vente, C7) — README, « Signature de release ».
+// La clé d'ENVOI n'est JAMAIS dans le dépôt : son chemin et ses mots de passe sont lus
+// dans `keystore.properties`, à la RACINE du projet, ignoré par git (modèle :
+// keystore.properties.example). Play App Signing garde la clé de distribution.
+// `-PkeystoreProperties=<chemin>` lit un autre fichier (intégration continue, essai
+// avec une clé jetable) sans rien écrire dans le dépôt.
+// Le debug n'en a pas besoin : seul l'empaquetage d'une RELEASE est refusé, avec un
+// message qui dit quoi faire (garde en bas du fichier).
+// ---------------------------------------------------------------------------
+val releaseSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+/** Valeur laissée telle quelle depuis le modèle : comptée comme absente. */
+val releaseSigningPlaceholder = "A_REMPLACER"
+fun expandHome(path: String): String =
+    if (path == "~" || path.startsWith("~/")) System.getProperty("user.home") + path.substring(1) else path
+val keystorePropertiesFile: File = providers.gradleProperty("keystoreProperties").orNull
+    ?.takeIf { it.isNotBlank() }?.let { rootProject.file(expandHome(it.trim())) }
+    ?: rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    // Lu en UTF-8 (et non en ISO-8859-1, le défaut des .properties) : un chemin
+    // avec accents (« ~/Documents/Clés/… ») reste juste.
+    if (keystorePropertiesFile.isFile) keystorePropertiesFile.reader(Charsets.UTF_8).use { load(it) }
+}
+fun keystoreValue(key: String): String? = keystoreProperties.getProperty(key)?.trim()
+    ?.takeIf { it.isNotEmpty() && it != releaseSigningPlaceholder }
+val releaseStoreFile: File? = keystoreValue("storeFile")?.let { rootProject.file(expandHome(it)) }
+val releaseSigningReady: Boolean = keystorePropertiesFile.isFile &&
+    releaseSigningKeys.all { keystoreValue(it) != null } && releaseStoreFile?.isFile == true
+
+/** Ce qui manque pour empaqueter une release (textes pour la personne qui la lance) ; vide = prêt. */
+fun releasePrerequisiteProblems(): List<String> = buildList {
+    if (!keystorePropertiesFile.isFile) {
+        add("""
+            |Signature de release impossible : keystore.properties est introuvable
+            |(${keystorePropertiesFile.path}).
+            |  1. Copiez keystore.properties.example en keystore.properties, à la racine du projet
+            |     (fichier ignoré par git : ne le committez jamais).
+            |  2. Renseignez storeFile (chemin du .jks de la clé d'envoi, rangé HORS du dépôt),
+            |     storePassword, keyAlias et keyPassword.
+            |  3. Pas encore de clé d'envoi : README.md, section « Signature de release ».
+            """.trimMargin())
+    } else {
+        val missing = releaseSigningKeys.filter { keystoreValue(it) == null }
+        if (missing.isNotEmpty()) add(
+            "${keystorePropertiesFile.name} (${keystorePropertiesFile.path}) : à renseigner : " +
+                missing.joinToString(", ") + " (modèle : keystore.properties.example)."
+        )
+        val store = releaseStoreFile
+        if (store != null && !store.isFile) add(
+            "${keystorePropertiesFile.name} : le fichier de clé indiqué par storeFile est introuvable : ${store.path}\n" +
+                "  Indiquez le chemin du .jks de la clé d'envoi (absolu, ou ~/…)."
+        )
+    }
+    if (!project.file("google-services.json").isFile) add("""
+        |app/google-services.json est introuvable : une release sans lui partirait SANS synchro
+        |cloud (backend local de démo).
+        |  Téléchargez-le depuis la console Firebase (projet mvrviewermulti, app Android
+        |  com.minou.mvrviewer) et déposez-le dans app/ : voir ANDROID_FIREBASE_SETUP.md.
+        """.trimMargin())
 }
 
 android {
@@ -15,13 +78,25 @@ android {
         applicationId = "com.minou.mvrviewer"
         minSdk = 28  // requis par SceneView/Filament (vue 3D)
         targetSdk = 36  // exigence Google Play (niveau d'API cible) pour les nouvelles soumissions
-        versionCode = 20
-        versionName = "1.9.0"
+        versionCode = 21
+        versionName = "1.10.0"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    signingConfigs {
+        // Créée seulement si keystore.properties est complet ; sinon la release reste
+        // sans signature et la garde (en bas du fichier) refuse de l'empaqueter.
+        if (releaseSigningReady) create("release") {
+            storeFile = releaseStoreFile
+            storePassword = keystoreValue("storePassword")
+            keyAlias = keystoreValue("keyAlias")
+            keyPassword = keystoreValue("keyPassword")
+        }
     }
 
     buildTypes {
         release {
+            if (releaseSigningReady) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -50,6 +125,24 @@ kotlin {
 // dans .gitignore (config projet, non versionnée).
 if (project.file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+}
+
+// GARDE DE RELEASE (guide C7 et C9) : empaqueter une release (bundleRelease,
+// assembleRelease…) sans clé d'envoi complète, ou sans app/google-services.json,
+// échoue AVANT toute compilation, avec la liste de ce qui manque. Le debug
+// (assembleDebug, installDebug) et les tests (testDebugUnitTest) ne sont pas concernés.
+val releasePackagingTasks = listOf(
+    "bundleRelease", "assembleRelease", "installRelease",
+    "packageRelease", "packageReleaseBundle", "signReleaseBundle"
+).map { "${project.path}:$it" }.toSet()
+gradle.taskGraph.whenReady {
+    if (allTasks.none { it.path in releasePackagingTasks }) return@whenReady
+    val problems = releasePrerequisiteProblems()
+    if (problems.isNotEmpty()) throw GradleException(
+        "Release refusée : il manque ce qu'il faut pour la publier.\n\n" +
+            problems.joinToString("\n\n") +
+            "\n\nLe build debug (./gradlew :app:assembleDebug) n'en a pas besoin."
+    )
 }
 
 dependencies {

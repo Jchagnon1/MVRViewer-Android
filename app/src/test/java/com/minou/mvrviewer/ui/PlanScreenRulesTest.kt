@@ -260,8 +260,11 @@ class PlanScreenRulesTest {
 
     @Test fun refusLuAuDemarrageEtAuRetourDesReglages() {
         val loc = src("ui/UserLocation.kt")
+        val creation = block(loc, "UserLocationFeed().also")
         assertTrue("état système dès la création",
-            loc.contains("UserLocationFeed().also { it.denied = locationDeniedBySystem(context, granted) }"))
+            creation.contains("it.denied = locationDeniedBySystem(context, granted)"))
+        assertTrue("position approximative seule, dès la création (guide C8)",
+            creation.contains("it.approximate = locationAccess(context).isApproximate"))
         assertTrue(loc.contains("Lifecycle.Event.ON_RESUME"))
         assertTrue("demande retenue", loc.contains("LocationPermissionStore.markAsked(context)"))
         assertFalse("plus de refus « de cette visite » seulement", loc.contains("feed.denied = !ok"))

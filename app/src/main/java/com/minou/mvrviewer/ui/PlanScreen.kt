@@ -2690,13 +2690,20 @@ fun PlanScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
                     .onGloballyPositioned { bottomAidPx = it.boundsInRoot() }
             ) {
-                Text(
-                    if (gps == null) stringResource(R.string.calib_waiting_gps)
-                    else if (calibration.anchors.isEmpty() || calibration.survey != null) stringResource(R.string.calib_tap_first)
-                    else stringResource(R.string.calib_tap_second),
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                    Text(
+                        if (gps == null) stringResource(R.string.calib_waiting_gps)
+                        else if (calibration.anchors.isEmpty() || calibration.survey != null) stringResource(R.string.calib_tap_first)
+                        else stringResource(R.string.calib_tap_second),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    // Position approximative seule (guide C8) : « Je suis ici » marche,
+                    // mais le point posé hérite de son imprécision — le dire ici aussi.
+                    if (locFeed.approximate) Text(
+                        stringResource(R.string.location_approximate_short),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
         }
 
@@ -2811,7 +2818,8 @@ fun PlanScreen(
             GeoPositionPanel(
                 // `calibVersion` lu : la calibration (non observable) vient d'être posée ici.
                 content = GeoPanelContent.make(ProjectSurface.PLAN, calibVersion.let { calibration.isCalibrated },
-                    options.showSatellite, satelliteCovered, satelliteStatus),
+                    options.showSatellite, satelliteCovered, satelliteStatus,
+                    approximateLocation = locFeed.approximate),
                 showLocation = showLocation,
                 onShowLocation = { on -> showLocation = on; if (!on) calibrating = false },
                 onToggleSatellite = {

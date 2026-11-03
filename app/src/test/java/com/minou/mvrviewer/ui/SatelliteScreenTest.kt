@@ -380,8 +380,8 @@ class SatelliteScreenTest {
                 Regex("""SatelliteUi\.onToolTap\(\s*satelliteCovered\s*,\s*options::toggleSatelliteByUser\s*\)\s*\?\.let\s*\{\s*SatelliteUi\.toast\(""")
                     .containsMatchIn(c))
             // Le satellite a quitté le ⋯ pour le panneau Position GPS (tranche B des
-            // menus) : même couverture, même statut.
-            assertCalls(f, c, "options.showSatellite, satelliteCovered, satelliteStatus)")
+            // menus) : même couverture, même statut (suivis de la position approximative, C8).
+            assertCalls(f, c, "options.showSatellite, satelliteCovered, satelliteStatus,")
         }
         val panel = code("ui/GeoPositionPanel.kt")
         assertCalls("panneau Position GPS", panel, "checked = content.satelliteChecked, enabled = content.satelliteEnabled",

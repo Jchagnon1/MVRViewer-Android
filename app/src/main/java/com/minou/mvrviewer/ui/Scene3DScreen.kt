@@ -2520,7 +2520,8 @@ fun Scene3DScreen(
                 val calibrated3D = calibration?.isCalibrated == true
                 GeoPositionPanel(
                     content = GeoPanelContent.make(ProjectSurface.SCENE_3D, calibrated3D,
-                        options.showSatellite, satelliteCovered, satelliteStatus),
+                        options.showSatellite, satelliteCovered, satelliteStatus,
+                        approximateLocation = locFeed3D.approximate),
                     showLocation = showLocation,
                     onShowLocation = { showLocation = it },
                     onToggleSatellite = {

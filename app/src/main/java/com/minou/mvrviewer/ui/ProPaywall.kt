@@ -148,7 +148,9 @@ private val FEATURES = listOf(
     "Affecter le câblage électrique et les lignes DMX",
     "Retourner et orienter les projecteurs",
     "Importer et placer des plans DXF, PDF, images",
-    "Importer des objets 3D (glTF, OBJ, FBX, COLLADA…)",
+    // Formats RÉELLEMENT lus par l'app Android (moins qu'iOS, qui lit aussi le .dae) :
+    // la même liste que l'accueil et le choix d'import (guide C9).
+    "Importer des objets 3D (${com.minou.mvrviewer.mvr.SceneModelLoader.SUPPORTED_SUMMARY})",
     "Créer des types de projecteurs personnalisés",
     "Partager un projet et pousser vos modifications",
 )

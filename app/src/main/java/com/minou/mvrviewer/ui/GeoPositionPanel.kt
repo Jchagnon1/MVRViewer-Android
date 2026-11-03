@@ -33,6 +33,11 @@ import java.util.Locale
 enum class GeoPanelRow {
     // Section « Affichage » — gratuit
     SHOW_MY_LOCATION,
+    /**
+     * « Position approximative : précision limitée… » (en orange) sous « Afficher ma
+     * position », seulement si l'appareil n'a accordé que l'approximative (guide C8).
+     */
+    APPROXIMATE_LOCATION,
     SATELLITE,
     /** « Calibrez d'abord (ci-dessous)… » — seulement si non calibré. */
     CALIBRATE_FIRST_HINT,
@@ -85,9 +90,13 @@ data class GeoPanelContent(
 
         fun make(
             surface: ProjectSurface, calibrated: Boolean, showSatellite: Boolean,
-            satelliteCovered: Boolean, satelliteStatus: SatelliteStatus
+            satelliteCovered: Boolean, satelliteStatus: SatelliteStatus,
+            /** Seule la position approximative est accordée (`UserLocationFeed.approximate`). */
+            approximateLocation: Boolean = false
         ): GeoPanelContent {
-            val display = mutableListOf(GeoPanelRow.SHOW_MY_LOCATION, GeoPanelRow.SATELLITE)
+            val display = mutableListOf(GeoPanelRow.SHOW_MY_LOCATION)
+            if (approximateLocation) display += GeoPanelRow.APPROXIMATE_LOCATION
+            display += GeoPanelRow.SATELLITE
             var message: Pair<Int, List<Any>>? = null
             if (!calibrated) {
                 display += GeoPanelRow.CALIBRATE_FIRST_HINT
@@ -173,6 +182,11 @@ fun GeoPositionPanel(
                 stringResource(R.string.tool_satellite),
                 checked = content.satelliteChecked, enabled = content.satelliteEnabled,
                 onChange = { onToggleSatellite() }
+            )
+            GeoPanelRow.APPROXIMATE_LOCATION -> Text(
+                stringResource(R.string.location_approximate_panel),
+                style = MaterialTheme.typography.bodySmall, color = PANEL_WARNING,
+                modifier = Modifier.padding(vertical = 2.dp)
             )
             GeoPanelRow.CALIBRATE_FIRST_HINT -> PanelCaption(stringResource(R.string.geo_calibrate_first))
             GeoPanelRow.SATELLITE_LOADING -> Row(verticalAlignment = Alignment.CenterVertically,

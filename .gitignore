@@ -21,3 +21,9 @@ app/build/
 
 # Config Firebase (identifiants de projet) — locale, non versionnée.
 app/google-services.json
+
+# Signature de release (guide C7) : identifiants et clés JAMAIS versionnés
+# (modèle versionné : keystore.properties.example ; README « Signature de release »).
+keystore.properties
+*.jks
+*.keystore

@@ -58,3 +58,67 @@ $ANDROID_HOME/platform-tools/adb shell am start -n com.minou.mvrviewer/.MainActi
 > ~2 min. Si Android Studio affiche `Unknown command-line option '--jvm-vendor'`,
 > c'est un réglage IDE : Settings → Build Tools → Gradle → « Gradle JDK » = un JDK
 > concret (jbr-21), pas un mode « Daemon JVM ».
+
+## Signature de release
+
+Google Play n'accepte qu'un `.aab` **signé**. Deux clés entrent en jeu :
+
+- la **clé d'envoi** (*upload key*) : la tienne, elle signe chaque `.aab` envoyé sur
+  la Play Console ;
+- la **clé de distribution** : gardée par Google (**Play App Signing**, activé à la
+  création de l'app). C'est elle qui signe l'app installée chez les utilisateurs.
+  Si la clé d'envoi est perdue, le support Play peut la réinitialiser ; la clé de
+  distribution, elle, ne quitte jamais Google.
+
+### 1. Créer la clé d'envoi (une seule fois)
+
+Au choix :
+
+- **Android Studio** : *Build › Generate Signed App Bundle / APK…* › *Android App
+  Bundle* › *Create new…* ; type RSA 2048 bits, validité 25 ans ou plus, alias
+  `upload` (par exemple).
+- **Ligne de commande** (`keytool` est fourni avec Android Studio) :
+
+  ```bash
+  "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/keytool" \
+    -genkeypair -v -keystore ~/Documents/"Clés MVR Viewer"/mvrviewer-upload.jks \
+    -alias upload -keyalg RSA -keysize 2048 -validity 10000
+  ```
+
+  `keytool` demande les mots de passe et l'identité (nom, organisation, pays).
+
+Puis :
+
+- range le `.jks` **HORS du dépôt** (jamais dans `MVRViewerAndroid/`), et fais-en
+  **une copie de secours** ailleurs (clé USB, coffre chiffré) ;
+- garde les mots de passe dans ton **gestionnaire de mots de passe**.
+
+### 2. Brancher la clé sur le build
+
+```bash
+cp keystore.properties.example keystore.properties
+```
+
+puis renseigne dans `keystore.properties` (à la racine, **ignoré par git**, comme
+`*.jks` et `*.keystore`) : `storeFile` (chemin du `.jks`, absolu ou `~/…`),
+`storePassword`, `keyAlias`, `keyPassword`.
+
+### 3. Construire le `.aab`
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+./gradlew :app:bundleRelease
+# → app/build/outputs/bundle/release/app-release.aab
+"$JAVA_HOME/bin/jarsigner" -verify app/build/outputs/bundle/release/app-release.aab   # « jar verified. »
+```
+
+Garde-fous (dans `app/build.gradle.kts`) : `bundleRelease`, `assembleRelease` et
+`installRelease` (donc aussi `./gradlew build`) **échouent avant toute compilation**,
+avec la liste de ce qui manque, si `keystore.properties` est absent ou incomplet, si
+le `.jks` est introuvable, ou si `app/google-services.json` manque (sans lui l'app
+partirait sans synchro cloud). Le debug (`assembleDebug`) et les tests
+(`testDebugUnitTest`) n'en ont pas besoin.
+
+Pour lire un autre fichier que `keystore.properties` (intégration continue, essai
+avec une clé jetable) : `./gradlew :app:bundleRelease -PkeystoreProperties=/chemin/du/fichier`.

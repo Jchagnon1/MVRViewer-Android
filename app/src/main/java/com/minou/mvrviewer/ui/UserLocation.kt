@@ -8,6 +8,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Looper
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -24,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.minou.mvrviewer.R
 
 /**
  * Flux GPS de la vue plan : position courante (observable), refus de la
@@ -39,6 +41,14 @@ class UserLocationFeed {
      * autorisation retirée dans les Réglages, compte aussi ([LocationPermissionRule]).
      */
     var denied by mutableStateOf(false)
+        internal set
+    /**
+     * Seule la position APPROXIMATIVE est accordée (Android 12+ : « Approximative »
+     * choisie dans le dialogue, ou dans les Paramètres ; guide C8). La position marche
+     * quand même, en dégradé : le panneau Position GPS, l'aide de « Je suis ici » et un
+     * message au retour du dialogue disent que la précision est limitée.
+     */
+    var approximate by mutableStateOf(false)
         internal set
     /** Dernier fix brut connu (filet « appareil immobile » de l'assistant). Non observable. */
     @Volatile var lastRawFix: Location? = null
@@ -78,14 +88,29 @@ fun rememberUserLocationFeed(active: Boolean): UserLocationFeed {
     var granted by remember { mutableStateOf(hasLocationPermission(context)) }
     // État SYSTÈME dès la création : la ligne d'état du menu le dit sans attendre
     // que « Ma position » soit allumée.
-    val feed = remember { UserLocationFeed().also { it.denied = locationDeniedBySystem(context, granted) } }
+    val feed = remember {
+        UserLocationFeed().also {
+            it.denied = locationDeniedBySystem(context, granted)
+            // Position approximative seule : lue elle aussi dès la création (guide C8).
+            it.approximate = locationAccess(context).isApproximate
+        }
+    }
 
+    // FINE et COARSE demandées ENSEMBLE (guide C8) : Android 12+ ignore une demande
+    // de FINE seule et laisse l'utilisateur choisir « Approximative ».
     val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { ok ->
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
         LocationPermissionStore.markAsked(context)
-        granted = ok
-        feed.denied = locationDeniedBySystem(context, ok)
+        // État RÉEL après le dialogue, et non la réponse case par case : seule
+        // l'approximative a pu être accordée.
+        val access = locationAccess(context)
+        granted = access.granted
+        feed.denied = locationDeniedBySystem(context, access.granted)
+        feed.approximate = access.isApproximate
+        LocationAccess.grantMessage(access)?.let {
+            Toast.makeText(context, context.getString(it), Toast.LENGTH_LONG).show()
+        }
     }
 
     // Retour au premier plan (Réglages, autre appli) : l'autorisation a pu
@@ -94,9 +119,11 @@ fun rememberUserLocationFeed(active: Boolean): UserLocationFeed {
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                val g = hasLocationPermission(context)
+                val access = locationAccess(context)
+                val g = access.granted
                 granted = g
                 feed.denied = locationDeniedBySystem(context, g)
+                feed.approximate = access.isApproximate
             }
         }
         lifecycle.addObserver(observer)
@@ -104,7 +131,7 @@ fun rememberUserLocationFeed(active: Boolean): UserLocationFeed {
     }
 
     LaunchedEffect(active, granted) {
-        if (active && !granted) launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (active && !granted) launcher.launch(LocationAccess.REQUESTED)
     }
 
     DisposableEffect(active, granted) {
@@ -123,7 +150,10 @@ fun rememberUserLocationFeed(active: Boolean): UserLocationFeed {
         } catch (_: IllegalArgumentException) {
         }
         // Chaque fournisseur à part : un fournisseur absent de l'appareil
-        // (IllegalArgumentException) ne doit pas priver de l'autre.
+        // (IllegalArgumentException) ne doit pas priver de l'autre. Avec la position
+        // APPROXIMATIVE seule, Android 12+ sert les deux fournisseurs en positions
+        // floutées ; avant Android 12, le GPS refuse (SecurityException) et le réseau
+        // suffit.
         for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
             try {
                 lm?.requestLocationUpdates(provider, 1000L, 0f, listener, Looper.getMainLooper())
@@ -141,9 +171,50 @@ fun rememberUserLocationFeed(active: Boolean): UserLocationFeed {
 @Composable
 fun rememberUserLocation(active: Boolean): State<Location?> = rememberUserLocationFeed(active).location
 
-fun hasLocationPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+/** Localisation accordée, précise OU approximative (guide C8). */
+fun hasLocationPermission(context: Context): Boolean = locationAccess(context).granted
+
+/**
+ * Niveau de localisation accordé (guide C8) — règle PURE, testée en JVM
+ * (`LocationAccessTest`). Android 12+ propose « Précise » ou « Approximative » :
+ * l'app demande les deux permissions ENSEMBLE et marche, en dégradé, avec
+ * l'approximative seule ; un refus garde le message actuel (« Localisation refusée »).
+ */
+enum class LocationAccess {
+    PRECISE, APPROXIMATE, NONE;
+
+    val granted: Boolean get() = this != NONE
+    val isApproximate: Boolean get() = this == APPROXIMATE
+
+    companion object {
+        /** Les deux permissions, demandées ensemble (manifeste : les deux sont déclarées). */
+        val REQUESTED: Array<String> = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+
+        fun of(fine: Boolean, coarse: Boolean): LocationAccess = when {
+            fine -> PRECISE
+            coarse -> APPROXIMATE
+            else -> NONE
+        }
+
+        /**
+         * Message montré au retour du dialogue système : seulement si la position
+         * accordée n'est qu'APPROXIMATIVE (précise : rien à dire ; refus : la ligne
+         * d'état « Localisation refusée » existante le dit déjà).
+         */
+        fun grantMessage(access: LocationAccess): Int? =
+            if (access == APPROXIMATE) R.string.location_approximate_toast else null
+    }
+}
+
+/** [LocationAccess] de l'appareil, lue dans l'état système. */
+fun locationAccess(context: Context): LocationAccess = LocationAccess.of(
+    fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED,
+    coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
+)
 
 /**
  * Refus de la localisation déduit de l'ÉTAT SYSTÈME (règle pure, testée en JVM).
@@ -171,8 +242,8 @@ object LocationPermissionStore {
 /** [LocationPermissionRule] appliquée à l'appareil. */
 fun locationDeniedBySystem(context: Context, granted: Boolean): Boolean {
     if (granted) return false
-    val rationale = context.findActivity()?.let {
-        ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.ACCESS_FINE_LOCATION)
+    val rationale = context.findActivity()?.let { a ->
+        LocationAccess.REQUESTED.any { ActivityCompat.shouldShowRequestPermissionRationale(a, it) }
     } ?: false
     return LocationPermissionRule.denied(granted, LocationPermissionStore.asked(context), rationale)
 }

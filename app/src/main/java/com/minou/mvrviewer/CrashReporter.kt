@@ -25,15 +25,37 @@ import java.util.concurrent.atomic.AtomicLong
  *  - les ANR (« l'appli ne répond pas ») via un chien de garde : un thread poste
  *    un jeton au thread principal ; s'il n'est pas traité en 6 s, on écrit la PILE
  *    du thread principal (→ on voit EXACTEMENT où il est bloqué).
+ *
+ * Le journal note aussi chaque démarrage : il n'est donc jamais vide. Le bouton
+ * « Envoyer le rapport » de l'accueil ne se fie qu'aux deux en-têtes d'INCIDENT
+ * ([containsIncident], guide C9).
  */
 object CrashReporter {
     private const val MAX_BYTES = 512 * 1024L
+    /** En-tête d'un plantage (début de ligne, après la bannière de date). */
+    internal const val CRASH_HEADER = "PLANTAGE (exception non rattrapée)"
+    /** En-tête d'un gel (ANR). */
+    internal const val FREEZE_HEADER = "GEL / ANR"
     @Volatile private var file: File? = null
     private val lock = Any()
 
     /** Emplacement du journal (stable, réutilisé par l'écran d'accueil). */
     fun logFile(ctx: Context): File =
         File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "mvrviewer_diag.log")
+
+    /**
+     * Le journal contient-il un PLANTAGE ou un GEL ? (Pas seulement des démarrages ou
+     * des notes.) Règle pure, testée en JVM (`CrashReporterTest`).
+     */
+    fun containsIncident(log: String): Boolean = log.lineSequence().any {
+        it.startsWith(CRASH_HEADER) || it.startsWith(FREEZE_HEADER)
+    }
+
+    /** [containsIncident] appliquée au fichier (à lire hors du thread principal). */
+    fun hasIncident(f: File): Boolean =
+        runCatching { f.isFile && f.length() > 0L && containsIncident(f.readText()) }.getOrDefault(false)
+
+    fun hasIncident(ctx: Context): Boolean = hasIncident(logFile(ctx))
 
     fun install(ctx: Context) {
         val f = logFile(ctx.applicationContext)
@@ -42,7 +64,7 @@ object CrashReporter {
         runCatching { if (f.length() > MAX_BYTES) f.writeText("") }
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            runCatching { write("PLANTAGE (exception non rattrapée) — thread « ${t.name} »", stack(e)) }
+            runCatching { write(crashTag(t.name), stack(e)) }
             prev?.uncaughtException(t, e) // laisse le système afficher/terminer normalement
         }
         startAnrWatchdog()
@@ -59,12 +81,17 @@ object CrashReporter {
         return "\n===== $ts | ${Build.MANUFACTURER} ${Build.MODEL} | Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) ====="
     }
 
+    internal fun crashTag(threadName: String): String = "$CRASH_HEADER — thread « $threadName »"
+    internal const val FREEZE_TAG = "$FREEZE_HEADER : thread principal bloqué > 6 s"
+
+    /** Une entrée du journal, telle qu'écrite (bannière, en-tête, détail). */
+    internal fun entry(banner: String, tag: String, detail: String?): String =
+        banner + "\n" + tag + "\n" + (detail?.let { it + "\n" } ?: "")
+
     private fun write(tag: String, detail: String?) {
         val f = file ?: return
         synchronized(lock) {
-            runCatching {
-                f.appendText(banner() + "\n" + tag + "\n" + (detail?.let { it + "\n" } ?: ""))
-            }
+            runCatching { f.appendText(entry(banner(), tag, detail)) }
         }
     }
 
@@ -87,7 +114,7 @@ object CrashReporter {
                     val trace = runCatching {
                         mainThread.stackTrace.joinToString("\n") { "    at $it" }
                     }.getOrDefault("(pile indisponible)")
-                    write("GEL / ANR : thread principal bloqué > 6 s", "Pile du thread principal :\n$trace")
+                    write(FREEZE_TAG, "Pile du thread principal :\n$trace")
                     // Attend le dégel avant de ré-armer (évite d'inonder le journal).
                     while (confirmed.get() < n && !Thread.currentThread().isInterrupted) {
                         try { Thread.sleep(1000) } catch (_: InterruptedException) { return@Thread }

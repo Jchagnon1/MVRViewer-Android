@@ -113,11 +113,17 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 "$JAVA_HOME/bin/jarsigner" -verify app/build/outputs/bundle/release/app-release.aab   # « jar verified. »
 ```
 
+Sans `keystore.properties`, l'assistant d'Android Studio marche aussi : *Build ›
+Generate Signed App Bundle / APK…* › *Android App Bundle*, choisis le `.jks` (ou crée-le
+avec *Create new…*), puis *Create* : il passe la clé à Gradle lui-même
+(propriétés `android.injected.signing.*`) et range le `.aab` dans `app/release/`.
+
 Garde-fous (dans `app/build.gradle.kts`) : `bundleRelease`, `assembleRelease` et
 `installRelease` (donc aussi `./gradlew build`) **échouent avant toute compilation**,
-avec la liste de ce qui manque, si `keystore.properties` est absent ou incomplet, si
-le `.jks` est introuvable, ou si `app/google-services.json` manque (sans lui l'app
-partirait sans synchro cloud). Le debug (`assembleDebug`) et les tests
+avec la liste de ce qui manque, si aucune clé n'est fournie (ni par l'assistant
+d'Android Studio, ni par un `keystore.properties` complet), si le `.jks` indiqué dans
+`keystore.properties` est introuvable, ou si `app/google-services.json` manque (sans lui
+l'app partirait sans synchro cloud). Le debug (`assembleDebug`) et les tests
 (`testDebugUnitTest`) n'en ont pas besoin.
 
 Pour lire un autre fichier que `keystore.properties` (intégration continue, essai

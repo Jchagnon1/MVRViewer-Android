@@ -2498,7 +2498,8 @@ fun PlanScreen(
                 if (legendShown) legendBoundsPx?.toDp() else null
             )
             ThreePointCalibrationPanel(
-                session = cal3Open, liveState = locFeed.location, denied = locFeed.denied, compact = compact,
+                session = cal3Open, liveState = locFeed.location, denied = locFeed.denied,
+                approximate = locFeed.approximate, compact = compact,
                 onApply = { a, sv -> applyThreePoint(a, sv) },
                 onClose = { closeThreePoint() },
                 modifier = Modifier.align(Alignment.BottomCenter)

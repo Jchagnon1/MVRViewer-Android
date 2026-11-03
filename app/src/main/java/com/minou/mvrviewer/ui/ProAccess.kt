@@ -15,6 +15,7 @@ import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import com.minou.mvrviewer.R
 import com.minou.mvrviewer.sync.PlayPurchaseSnapshot
 import com.minou.mvrviewer.sync.PurchaseLink
 import com.minou.mvrviewer.sync.PurchaseProof
@@ -278,7 +279,7 @@ object ProAccess {
         c.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) then()
-                else lastError = result.debugMessage.ifEmpty { "Google Play indisponible." }
+                else lastError = result.debugMessage.ifEmpty { null } ?: messageResolver(R.string.pro_error_play_unavailable)
             }
             override fun onBillingServiceDisconnected() {}
         })
@@ -339,7 +340,7 @@ object ProAccess {
                 applyPurchases(purchases.orEmpty()) { purchaseLinker?.invoke(initiated) }
             BillingClient.BillingResponseCode.USER_CANCELED -> {}
             BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> refresh { purchaseLinker?.invoke(true) }
-            else -> lastError = result.debugMessage.ifEmpty { "L'achat n'a pas abouti." }
+            else -> lastError = result.debugMessage.ifEmpty { null } ?: messageResolver(R.string.pro_error_purchase_failed)
         }
     }
 
@@ -388,7 +389,7 @@ object ProAccess {
             val pd = productDetails
             if (pd == null) {
                 queryProduct()
-                lastError = "Le produit n'est pas disponible pour le moment. Vérifiez votre connexion et réessayez."
+                lastError = messageResolver(R.string.pro_error_product_unavailable)
                 return@ensureConnected
             }
             val builder = BillingFlowParams.newBuilder()
@@ -405,7 +406,7 @@ object ProAccess {
             val r = client?.launchBillingFlow(activity, params)
             if (r == null || r.responseCode != BillingClient.BillingResponseCode.OK) {
                 isBusy = false
-                lastError = r?.debugMessage?.ifEmpty { null } ?: "Google Play indisponible."
+                lastError = r?.debugMessage?.ifEmpty { null } ?: messageResolver(R.string.pro_error_play_unavailable)
             }
         }
     }

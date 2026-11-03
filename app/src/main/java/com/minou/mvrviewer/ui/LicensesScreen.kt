@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,7 +77,10 @@ internal const val GDTF_SHARE_HOME_URL = "https://gdtf-share.com"
  * l'éditeur n'est nommé que dans les pages légales du site.
  *
  * Navigation INTERNE : liste → composant → composant inclus ; ← et le retour
- * système remontent d'un cran, puis [onBack] ferme l'écran.
+ * système remontent d'un cran, puis [onBack] ferme l'écran. Chaque cran garde son
+ * propre défilement ([LicensesNavigation.stateKey]) : une fiche ouverte commence en
+ * HAUT (adresse du code source à l'écran), et le retour retrouve la liste ou la
+ * fiche parente là où on l'avait laissée.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,8 +96,15 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     // Pile des composants ouverts (ids séparés par « | ») : survit à une rotation.
     var stackRaw by rememberSaveable { mutableStateOf("") }
     val stack = stackRaw.split('|').filter { it.isNotEmpty() }
+    // État enregistré (défilement) PAR CRAN de la pile ; un cran refermé oublie le sien,
+    // pour qu'une fiche rouverte plus tard reparte du haut.
+    val crans = rememberSaveableStateHolder()
     fun push(c: Component) { stackRaw = (stack + c.id).joinToString("|") }
-    fun pop() { stackRaw = stack.dropLast(1).joinToString("|") }
+    fun pop() {
+        if (stack.isEmpty()) return
+        crans.removeState(LicensesNavigation.stateKey(stack))
+        stackRaw = stack.dropLast(1).joinToString("|")
+    }
     val catalog = (state as? LoadState.Ready)?.catalog
     val opened = stack.lastOrNull()?.let { catalog?.component(it) }
 
@@ -120,10 +131,27 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 stringResource(R.string.licenses_unreadable), color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(20.dp)
             )
-            opened != null -> ComponentDetail(catalog, opened, onOpen = { push(it) })
-            else -> ComponentList(catalog, query, onQuery = { query = it }, onOpen = { push(it) })
+            // Chaque cran dans SON état : sans cela, la fiche d'un composant inclus héritait
+            // du LazyListState de la fiche parente (même place dans la composition) et
+            // s'ouvrait défilée ; la liste, sortie de la composition, revenait en haut.
+            opened != null -> crans.SaveableStateProvider(LicensesNavigation.stateKey(stack)) {
+                ComponentDetail(catalog, opened, onOpen = { push(it) })
+            }
+            else -> crans.SaveableStateProvider(LicensesNavigation.stateKey(emptyList())) {
+                ComponentList(catalog, query, onQuery = { query = it }, onOpen = { push(it) })
+            }
         }
     }
+}
+
+/** Navigation interne de « Mentions et licences » — règle pure, testée (`LicensesNavigationTest`). */
+internal object LicensesNavigation {
+    /**
+     * Clé de l'état enregistré d'un cran : la PILE entière jusqu'à lui (et non le seul
+     * id), si bien qu'un même composant ouvert depuis deux parents — ou deux fois dans
+     * la pile — a deux états distincts. Pile vide = la liste.
+     */
+    fun stateKey(stack: List<String>): String = if (stack.isEmpty()) "list" else "detail:" + stack.joinToString("|")
 }
 
 private sealed interface LoadState {

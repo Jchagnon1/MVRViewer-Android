@@ -37,10 +37,22 @@ fun keystoreValue(key: String): String? = keystoreProperties.getProperty(key)?.t
 val releaseStoreFile: File? = keystoreValue("storeFile")?.let { rootProject.file(expandHome(it)) }
 val releaseSigningReady: Boolean = keystorePropertiesFile.isFile &&
     releaseSigningKeys.all { keystoreValue(it) != null } && releaseStoreFile?.isFile == true
+// L'assistant d'Android Studio (Build › Generate Signed App Bundle / APK…, celui qui crée
+// la clé d'envoi : README, option 1) passe la clé à Gradle par ces quatre propriétés ;
+// l'Android Gradle Plugin signe alors lui-même (et dit si le .jks est introuvable) :
+// keystore.properties n'est pas requis dans ce cas.
+val injectedSigningProperties = listOf(
+    "android.injected.signing.store.file", "android.injected.signing.store.password",
+    "android.injected.signing.key.alias", "android.injected.signing.key.password"
+)
+val injectedSigningReady: Boolean =
+    injectedSigningProperties.all { !providers.gradleProperty(it).orNull.isNullOrBlank() }
 
 /** Ce qui manque pour empaqueter une release (textes pour la personne qui la lance) ; vide = prêt. */
 fun releasePrerequisiteProblems(): List<String> = buildList {
-    if (!keystorePropertiesFile.isFile) {
+    if (injectedSigningReady) {
+        // Clé fournie par l'assistant d'Android Studio : rien à vérifier ici.
+    } else if (!keystorePropertiesFile.isFile) {
         add("""
             |Signature de release impossible : keystore.properties est introuvable
             |(${keystorePropertiesFile.path}).
@@ -49,6 +61,7 @@ fun releasePrerequisiteProblems(): List<String> = buildList {
             |  2. Renseignez storeFile (chemin du .jks de la clé d'envoi, rangé HORS du dépôt),
             |     storePassword, keyAlias et keyPassword.
             |  3. Pas encore de clé d'envoi : README.md, section « Signature de release ».
+            |Ou signez avec l'assistant d'Android Studio (Build › Generate Signed App Bundle / APK…).
             """.trimMargin())
     } else {
         val missing = releaseSigningKeys.filter { keystoreValue(it) == null }
@@ -132,7 +145,8 @@ if (project.file("google-services.json").exists()) {
 apply(from = rootProject.file("gradle/third-party-licenses.gradle.kts"))
 
 // GARDE DE RELEASE (guide C7 et C9) : empaqueter une release (bundleRelease,
-// assembleRelease…) sans clé d'envoi complète, ou sans app/google-services.json,
+// assembleRelease…) sans clé d'envoi complète (keystore.properties, ou la clé passée
+// par l'assistant d'Android Studio), ou sans app/google-services.json,
 // échoue AVANT toute compilation, avec la liste de ce qui manque. Le debug
 // (assembleDebug, installDebug) et les tests (testDebugUnitTest) ne sont pas concernés.
 val releasePackagingTasks = listOf(

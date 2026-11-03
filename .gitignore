@@ -27,3 +27,6 @@ app/google-services.json
 keystore.properties
 *.jks
 *.keystore
+
+# Sortie de l'assistant d'Android Studio (Generate Signed App Bundle / APK…) : .aab signés, jamais versionnés.
+app/release/

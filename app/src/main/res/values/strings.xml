@@ -77,6 +77,8 @@
     <string name="cal3_tap_again">Touchez à nouveau le plan pour corriger l\'endroit.</string>
     <string name="cal3_low_accuracy">Précision GPS insuffisante (± %1$d m) : restez à découvert, patientez…</string>
     <string name="cal3_use_anyway">Utiliser quand même</string>
+    <string name="cal3_approximate_location">Position approximative : la calibration en 3 points demande la position exacte (Paramètres › Applications › MVR Viewer › Autorisations › Position).</string>
+    <string name="cal3_open_settings">Ouvrir les paramètres</string>
     <string name="cal3_point_measured">Point %1$d mesuré · ± %2$d m</string>
     <string name="cal3_next_point">Point suivant</string>
     <string name="cal3_compute">Calculer</string>
@@ -177,7 +179,7 @@
     <string name="diag_mail_body_fmt">Bonjour,\n\nMVR Viewer s\'est fermé de façon inattendue ou a cessé de répondre. Le journal de diagnostic est joint à ce message.\n\nCe que je faisais à ce moment-là (facultatif) :\n\n\n—\nVersion : %1$s\nAppareil : %2$s\nAndroid : %3$s</string>
     <!-- Position approximative seule (guide C8). -->
     <string name="location_approximate_toast">Position approximative seulement : précision limitée.</string>
-    <string name="location_approximate_panel">Position approximative seulement : précision limitée (jusqu\'à 2 km environ). « Je suis ici » et votre position restent utilisables, mais imprécis. Position exacte : Paramètres › Applications › MVR Viewer › Autorisations › Position.</string>
+    <string name="location_approximate_panel">Position approximative seulement : précision limitée (jusqu\'à 2 km environ). « Je suis ici » et votre position restent utilisables, mais imprécis ; la calibration en 3 points, elle, demande la position exacte. Position exacte : Paramètres › Applications › MVR Viewer › Autorisations › Position.</string>
     <string name="location_approximate_short">Position approximative : précision limitée</string>
     <string name="dmx_already_here">déjà sur ce départ</string>
     <string name="dmx_analysing">Analyse des empreintes DMX…</string>
@@ -713,6 +715,39 @@
     <string name="pro_pitch">La lecture est gratuite ; l\'édition (patch, câblage, imports…) passe en Pro.</string>
     <string name="pro_unlock">Débloquer la version Pro</string>
     <string name="pro_restore">Restaurer un achat</string>
+    <!-- Écran d'achat Pro (ProPaywall.kt), textes d'iOS ProPaywallView. -->
+    <string name="pro_paywall_reason_fmt">Pour %1$s, il faut la version Pro.</string>
+    <string name="pro_paywall_pitch">Lire un show reste entièrement gratuit — 3D, plan, patch, univers, câblage, export PDF, projets partagés. La version Pro débloque tout ce qui MODIFIE le projet.</string>
+    <string name="pro_feature_patch">Modifier le patch : adresses, univers, modes, noms</string>
+    <string name="pro_feature_cabling">Affecter le câblage électrique et les lignes DMX</string>
+    <string name="pro_feature_orient">Retourner et orienter les projecteurs</string>
+    <string name="pro_feature_plans">Importer et placer des plans DXF, PDF, images</string>
+    <string name="pro_feature_models_fmt">Importer des objets 3D (%1$s)</string>
+    <string name="pro_feature_custom_types">Créer des types de projecteurs personnalisés</string>
+    <string name="pro_feature_share">Partager un projet et pousser vos modifications</string>
+    <string name="pro_unlock_price_fmt">Débloquer la version Pro — %1$s</string>
+    <string name="pro_one_time_purchase">Achat unique, sans abonnement. Valable sur tous vos appareils avec le même compte Google.</string>
+    <string name="pro_error_play_unavailable">Google Play indisponible.</string>
+    <string name="pro_error_purchase_failed">L\'achat n\'a pas abouti.</string>
+    <string name="pro_error_product_unavailable">Le produit n\'est pas disponible pour le moment. Vérifiez votre connexion et réessayez.</string>
+    <!-- Ce que l'utilisateur essayait de faire (ProAccess.gate) : « Pour …, il faut la version Pro. » -->
+    <string name="pro_reason_edit_patch">modifier le patch</string>
+    <string name="pro_reason_import_model">importer un objet 3D</string>
+    <string name="pro_reason_adjust_models">régler les objets 3D importés</string>
+    <string name="pro_reason_edit_cabling">modifier le câblage</string>
+    <string name="pro_reason_assign_cabling">affecter le câblage</string>
+    <string name="pro_reason_create_custom_type">créer un type personnalisé</string>
+    <string name="pro_reason_create_custom_fixture">créer un projecteur personnalisé</string>
+    <string name="pro_reason_edit_custom_fixture">modifier un projecteur personnalisé</string>
+    <string name="pro_reason_use_custom_fixture">utiliser un projecteur personnalisé</string>
+    <string name="pro_reason_enter_power">renseigner une consommation</string>
+    <string name="pro_reason_share_project">partager un projet</string>
+    <string name="pro_reason_unlock_editing">débloquer l\'édition</string>
+    <string name="pro_reason_calibrate_gps">calibrer la position GPS</string>
+    <string name="pro_reason_undo">annuler une modification</string>
+    <string name="pro_reason_import_plan">importer un plan</string>
+    <string name="pro_reason_adjust_plan">régler le plan importé</string>
+    <string name="pro_reason_plan_layers">modifier les calques du plan importé</string>
     <string name="home_account_prompt_title">Créez votre compte (gratuit)</string>
     <string name="home_account_prompt_body">C\'est par lui que vous recevez les projets partagés par votre chef de chantier, avec ses modifications en direct. Lire est gratuit ; seule l\'édition passe en Pro.</string>
     <string name="home_account_prompt_action">Créer un compte ou se connecter…</string>

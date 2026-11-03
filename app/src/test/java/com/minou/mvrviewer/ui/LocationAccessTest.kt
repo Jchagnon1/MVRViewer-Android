@@ -81,6 +81,54 @@ class LocationAccessTest {
         assertTrue(src("ui/Scene3DScreen.kt").contains("approximateLocation = locFeed3D.approximate"))
     }
 
+    /**
+     * Défaut relevé à l'émulateur : avec la seule position approximative, l'assistant
+     * 3 points restait sur « restez à découvert, patientez » pour toujours. Les fixes
+     * floutés (~2 km) ne sont JAMAIS retenus (≤ 20 m), ni « Utiliser quand même »
+     * (≤ 100 m) : le panneau doit le dire, et non promettre que l'attente aboutira.
+     */
+    @Test fun troisPointsEnPositionApproximative() {
+        var t = 1000.0
+        val s = ThreePointCalibrationSession(null, clock = { t })
+        s.tap(com.minou.mvrviewer.mvr.Vec2.ZERO)
+        var key = 0.0
+        repeat(120) { // 60 s de fixes approximatifs
+            key += 1
+            s.onRawFix(RawFix(45.69, 5.88, 2000.0, key, t)); t += 0.5; s.tick()
+        }
+        assertEquals(ThreePointStage.Measuring(0), s.stage)
+        assertTrue(s.lowAccuracy)
+        assertFalse("aucun repli possible", s.canForce)
+        assertEquals(0.0, s.progress, 0.0)
+        // Le panneau : la consigne propre remplace « Précision GPS insuffisante… patientez ».
+        assertEquals(CalText(R.string.cal3_approximate_location), ThreePointDisplay.approximateNotice(true))
+        assertNull(ThreePointDisplay.approximateNotice(false))
+        assertFalse(ThreePointDisplay.showsLowAccuracy(lowAccuracy = s.lowAccuracy, approximate = true))
+        assertTrue(ThreePointDisplay.showsLowAccuracy(lowAccuracy = s.lowAccuracy, approximate = false))
+        // Branché : la vue plan passe l'état, le panneau l'affiche et ouvre les paramètres de l'app.
+        assertTrue(src("ui/PlanScreen.kt").contains("approximate = locFeed.approximate, compact = compact,"))
+        val panel = src("ui/ThreePointCalibrationPanel.kt")
+        assertTrue(panel.contains("ThreePointDisplay.approximateNotice(approximate)?.let { notice ->"))
+        assertTrue(panel.contains("openAppSettings(ctx)"))
+        assertTrue(panel.contains("ThreePointDisplay.showsLowAccuracy(session.lowAccuracy, approximate)"))
+        assertFalse(panel.contains("session.lowAccuracy && acc != null"))
+        val loc = src("ui/UserLocation.kt")
+        assertTrue(loc.contains("Settings.ACTION_APPLICATION_DETAILS_SETTINGS"))
+        // Revenu des Paramètres avec la position exacte : on se réinscrit (la requête
+        // ouverte en approximative restait « COARSE », un fix toutes les 10 min).
+        assertTrue(loc.contains("DisposableEffect(active, granted, feed.approximate) {"))
+        // Textes : cause + chemin, en français et en anglais ; le panneau Position GPS le dit aussi.
+        assertEquals("Position approximative : la calibration en 3 points demande la position exacte " +
+            "(Paramètres › Applications › MVR Viewer › Autorisations › Position).",
+            TestRes.FR.get("cal3_approximate_location"))
+        assertEquals("Approximate location: 3-point calibration needs your precise location " +
+            "(Settings › Apps › MVR Viewer › Permissions › Location).", TestRes.EN.get("cal3_approximate_location"))
+        assertEquals("Ouvrir les paramètres", TestRes.FR.get("cal3_open_settings"))
+        assertEquals("Open settings", TestRes.EN.get("cal3_open_settings"))
+        assertTrue(TestRes.FR.get("location_approximate_panel").contains("la calibration en 3 points, elle, demande la position exacte"))
+        assertTrue(TestRes.EN.get("location_approximate_panel").contains("3-point calibration needs your precise location"))
+    }
+
     @Test fun textesFrEn() {
         assertEquals("Position approximative : précision limitée", TestRes.FR.get("location_approximate_short"))
         assertEquals("Approximate location: limited accuracy", TestRes.EN.get("location_approximate_short"))

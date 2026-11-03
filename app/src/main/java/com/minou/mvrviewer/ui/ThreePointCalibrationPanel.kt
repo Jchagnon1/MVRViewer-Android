@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -59,6 +60,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -129,13 +131,16 @@ fun ThreePointCalibrationTimer(session: ThreePointCalibrationSession) {
  * Panneau DÉPLAÇABLE et RÉDUCTIBLE en bas du plan : il dit quoi faire, montre la
  * précision GPS en direct et l'avancement de la mesure — le plan reste visible et
  * manipulable au-dessus. [live] = position GPS courante ; [denied] = permission
- * refusée ; [compact] = hauteur compacte (textes secondaires et pas masqués).
+ * refusée ; [approximate] = seule la position approximative est accordée (la mesure ne
+ * peut pas aboutir : le panneau le dit et ouvre les paramètres de l'app) ;
+ * [compact] = hauteur compacte (textes secondaires et pas masqués).
  */
 @Composable
 fun ThreePointCalibrationPanel(
     session: ThreePointCalibrationSession,
     liveState: State<Location?>,
     denied: Boolean,
+    approximate: Boolean,
     compact: Boolean,
     onApply: (List<GeoAnchor>, GeoSurvey) -> Unit,
     onClose: () -> Unit,
@@ -173,9 +178,19 @@ fun ThreePointCalibrationPanel(
                     }
                 }
                 StatusRow(session, live, denied)
+                // Position approximative : dit tout de suite pourquoi la mesure ne peut pas
+                // aboutir, avec le chemin vers « Position exacte » (retour : ON_RESUME relit
+                // l'autorisation et la consigne disparaît).
+                ThreePointDisplay.approximateNotice(approximate)?.let { notice ->
+                    val ctx = LocalContext.current
+                    WarningLine(notice)
+                    SecondaryAction(stringResource(R.string.cal3_open_settings), Icons.Filled.Settings) {
+                        openAppSettings(ctx)
+                    }
+                }
                 when (val st = session.stage) {
                     is ThreePointStage.Approach -> ApproachContent(session, st.i, live, compact)
-                    is ThreePointStage.Measuring -> MeasuringContent(session, compact)
+                    is ThreePointStage.Measuring -> MeasuringContent(session, compact, approximate)
                     is ThreePointStage.Measured -> MeasuredContent(session, st.i)
                     ThreePointStage.Result -> ResultContent(session, compact) {
                         session.calibration(System.currentTimeMillis() / 1000.0)?.let { (a, s) -> onApply(a, s) }
@@ -299,7 +314,7 @@ private fun StepLengthRow(session: ThreePointCalibrationSession) {
 }
 
 @Composable
-private fun MeasuringContent(session: ThreePointCalibrationSession, compact: Boolean) {
+private fun MeasuringContent(session: ThreePointCalibrationSession, compact: Boolean, approximate: Boolean) {
     Text(stringResource(R.string.cal3_hold_still), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     LinearProgressIndicator(
         progress = { session.progress.toFloat() }, color = AccentFill,
@@ -312,7 +327,7 @@ private fun MeasuringContent(session: ThreePointCalibrationSession, compact: Boo
             Text(stringResource(R.string.cal3_waiting_gps), style = MaterialTheme.typography.bodySmall,
                 color = Secondary, modifier = Modifier.padding(start = 6.dp))
         }
-    } else if (session.lowAccuracy && acc != null) {
+    } else if (ThreePointDisplay.showsLowAccuracy(session.lowAccuracy, approximate) && acc != null) {
         WarningLine(CalText(R.string.cal3_low_accuracy, listOf(GeoThreePoint.roundToInt(acc))))
     } else if (!compact) {
         Text(stringResource(R.string.cal3_tap_again), style = MaterialTheme.typography.bodySmall, color = Secondary)

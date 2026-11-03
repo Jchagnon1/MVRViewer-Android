@@ -32,11 +32,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,7 +76,9 @@ import kotlinx.coroutines.launch
  *
  * Sous-volets (← et retour système ramènent ICI) : connexion GDTF Share, « Mot
  * de passe oublié » (lien du formulaire de connexion, guide C6) et « Mentions
- * et licences ».
+ * et licences ». Ils retirent la colonne de la composition : son défilement et le
+ * formulaire de connexion ([AccountFormState]) sont donc tenus AU-DESSUS d'eux, et
+ * le retour retrouve l'écran tel qu'il était (adresse saisie, position).
  *
  * Ouvert depuis un projet (destination) ou depuis l'accueil (hébergé par `App`).
  * À l'ouverture, reconnexion silencieuse GDTF Share habituelle (aucune requête
@@ -99,6 +104,11 @@ fun AccountSettingsScreen(
     /** Adresse préremplie du sous-volet « Mot de passe oublié » ; null = fermé. */
     var passwordResetEmail by rememberSaveable { mutableStateOf<String?>(null) }
     var licensesOpen by rememberSaveable { mutableStateOf(false) }
+    // Déclarés AVANT les sous-volets (qui sortent par `return`) : sinon perdus à l'aller-retour.
+    val scroll = rememberScrollState()
+    val form = rememberSaveable(saver = AccountFormState.Saver) {
+        AccountFormState(email = sync?.auth?.value?.accountOrNull?.email ?: "")
+    }
     LaunchedEffect(Unit) {
         if (!GdtfShareClient.loggedIn && GdtfCredentialStore.username(ctx) != null) {
             runCatching { GdtfShareClient.ensureLoggedIn(ctx) }
@@ -135,7 +145,6 @@ fun AccountSettingsScreen(
                 }
             }
         )
-        val scroll = rememberScrollState()
         // Haut de la section « Services » dans la colonne défilante (px), mesuré.
         var servicesTop by remember { mutableStateOf<Int?>(null) }
         LaunchedEffect(focusServices, servicesTop) {
@@ -151,7 +160,7 @@ fun AccountSettingsScreen(
             AccountSettingsSections.of(sync != null).forEach { section ->
                 when (section) {
                     AccountSettingsSection.ACCOUNT -> sync?.let {
-                        AccountSection(it, onForgotPassword = { email -> passwordResetEmail = email })
+                        AccountSection(it, form, onForgotPassword = { email -> passwordResetEmail = email })
                     }
                     AccountSettingsSection.PRO -> ProSection()
                     AccountSettingsSection.SERVICES -> Column(
@@ -177,15 +186,37 @@ private fun SectionHeader(text: String) {
 
 // MARK: - Compte (connexion / inscription / déconnexion / suppression)
 
+/**
+ * Formulaire de connexion / création du compte. Tenu par [AccountSettingsScreen], et
+ * non par la section : un sous-volet retire la section de la composition, et l'adresse
+ * saisie était perdue au retour. Enregistré (rotation, retour d'arrière-plan) SANS le
+ * mot de passe, qui ne va jamais dans l'état enregistré de l'activité : il ne vit qu'en
+ * mémoire, le temps de l'écran (sous-volets compris).
+ */
+@Stable
+internal class AccountFormState(email: String = "", displayName: String = "", isSignUp: Boolean = false) {
+    var email by mutableStateOf(email)
+    var password by mutableStateOf("")
+    var displayName by mutableStateOf(displayName)
+    var isSignUp by mutableStateOf(isSignUp)
+
+    companion object {
+        val Saver: Saver<AccountFormState, Any> = listSaver(
+            save = { listOf(it.email, it.displayName, it.isSignUp) },
+            restore = { AccountFormState(it[0] as String, it[1] as String, it[2] as Boolean) }
+        )
+    }
+}
+
 @Composable
-private fun AccountSection(sync: SyncViewModel, onForgotPassword: (String) -> Unit) {
+private fun AccountSection(sync: SyncViewModel, form: AccountFormState, onForgotPassword: (String) -> Unit) {
     val auth by sync.auth.collectAsState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var email by remember { mutableStateOf(auth.accountOrNull?.email ?: "") }
-    var password by remember { mutableStateOf("") }
-    var displayName by remember { mutableStateOf("") }
-    var isSignUp by remember { mutableStateOf(false) }
+    var email by form::email
+    var password by form::password
+    var displayName by form::displayName
+    var isSignUp by form::isSignUp
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }

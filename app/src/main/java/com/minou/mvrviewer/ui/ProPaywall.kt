@@ -33,6 +33,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.minou.mvrviewer.R
+import com.minou.mvrviewer.mvr.SceneModelLoader
 import com.minou.mvrviewer.ui.theme.Accent
 import com.minou.mvrviewer.ui.theme.accentButtonColors
 
@@ -59,33 +61,34 @@ fun ProPaywallHost() {
                     Icon(Icons.Filled.Star, contentDescription = null,
                         tint = Accent.inkLight, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("MVR Viewer Pro", style = MaterialTheme.typography.titleMedium,
+                    Text(stringResource(R.string.pro_section_title), style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f))
                     IconButton(onClick = { ProAccess.showPaywall = false },
                                modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "Fermer",
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.common_close),
                             tint = Color(0xFF9E9E9E), modifier = Modifier.size(18.dp))
                     }
                 }
                 ProAccess.paywallReason?.let { reason ->
                     Spacer(Modifier.height(8.dp))
-                    Text("Pour $reason, il faut la version Pro.",
+                    val what = ProPaywallText.reasonRes(reason)?.let { stringResource(it) } ?: reason
+                    Text(stringResource(R.string.pro_paywall_reason_fmt, what),
                         style = MaterialTheme.typography.titleSmall)
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Lire un show reste entièrement gratuit — 3D, plan, patch, univers, câblage, export PDF, projets partagés. La version Pro débloque tout ce qui MODIFIE le projet.",
+                    stringResource(R.string.pro_paywall_pitch),
                     style = MaterialTheme.typography.bodyMedium, color = Color(0xFF555555)
                 )
                 Spacer(Modifier.height(10.dp))
                 Column(
                     modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())
                 ) {
-                    for (line in FEATURES) {
+                    for ((res, args) in ProPaywallText.FEATURES) {
                         Row(verticalAlignment = Alignment.Top,
                             modifier = Modifier.padding(vertical = 3.dp)) {
                             Text("•", color = Accent.inkLight, modifier = Modifier.width(16.dp))
-                            Text(line, style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(res, *args.toTypedArray()), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -101,17 +104,18 @@ fun ProPaywallHost() {
                     colors = accentButtonColors(),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (price != null) "Débloquer la version Pro — $price"
-                         else "Débloquer la version Pro")
+                    // Prix formaté par Google Play (devise et langue du compte), jamais codé en dur.
+                    Text(if (price != null) stringResource(R.string.pro_unlock_price_fmt, price)
+                         else stringResource(R.string.pro_unlock))
                 }
                 OutlinedButton(
                     onClick = { ProAccess.restore() },
                     enabled = !ProAccess.isBusy,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-                ) { Text("Restaurer un achat", color = Color(0xFF111111)) }
+                ) { Text(stringResource(R.string.pro_restore), color = Color(0xFF111111)) }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Achat unique, sans abonnement. Valable sur tous vos appareils avec le même compte Google.",
+                    stringResource(R.string.pro_one_time_purchase),
                     style = MaterialTheme.typography.bodySmall, color = Color(0xFF777777)
                 )
             }
@@ -133,7 +137,7 @@ fun ProLinkRefusalHost() {
     val message = ProAccess.linkRefusalAlert ?: return
     AlertDialog(
         onDismissRequest = { ProAccess.dismissLinkRefusalAlert() },
-        title = { Text("MVR Viewer Pro") },
+        title = { Text(stringResource(R.string.pro_section_title)) },
         text = { Text(message) },
         confirmButton = {
             TextButton(onClick = { ProAccess.dismissLinkRefusalAlert() }) {
@@ -143,14 +147,49 @@ fun ProLinkRefusalHost() {
     )
 }
 
-private val FEATURES = listOf(
-    "Modifier le patch : adresses, univers, modes, noms",
-    "Affecter le câblage électrique et les lignes DMX",
-    "Retourner et orienter les projecteurs",
-    "Importer et placer des plans DXF, PDF, images",
-    // Formats RÉELLEMENT lus par l'app Android (moins qu'iOS, qui lit aussi le .dae) :
-    // la même liste que l'accueil et le choix d'import (guide C9).
-    "Importer des objets 3D (${com.minou.mvrviewer.mvr.SceneModelLoader.SUPPORTED_SUMMARY})",
-    "Créer des types de projecteurs personnalisés",
-    "Partager un projet et pousser vos modifications",
-)
+/**
+ * Textes de l'écran d'achat, en ressources (values/ et values-en/) comme le reste de
+ * l'app — testés (`ProPaywallTextTest`).
+ */
+internal object ProPaywallText {
+    /** Lignes « • » : ressource et arguments. */
+    val FEATURES: List<Pair<Int, List<Any>>> = listOf(
+        R.string.pro_feature_patch to emptyList(),
+        R.string.pro_feature_cabling to emptyList(),
+        R.string.pro_feature_orient to emptyList(),
+        R.string.pro_feature_plans to emptyList(),
+        // Formats RÉELLEMENT lus par l'app Android (moins qu'iOS, qui lit aussi le .dae) :
+        // la même liste que l'accueil et le choix d'import (guide C9).
+        R.string.pro_feature_models_fmt to listOf(SceneModelLoader.SUPPORTED_SUMMARY),
+        R.string.pro_feature_custom_types to emptyList(),
+        R.string.pro_feature_share to emptyList(),
+    )
+
+    /**
+     * Raison passée à [ProAccess.gate] / [ProAccess.gatedSetter] (phrase française au
+     * nominatif, la clé, comme les `String(localized:)` d'iOS) → son texte dans la
+     * langue de l'app. Toute raison écrite dans le code doit être ici (test) ; une
+     * raison inconnue s'afficherait telle quelle.
+     */
+    private val REASONS: Map<String, Int> = mapOf(
+        "modifier le patch" to R.string.pro_reason_edit_patch,
+        "importer un objet 3D" to R.string.pro_reason_import_model,
+        "régler les objets 3D importés" to R.string.pro_reason_adjust_models,
+        "modifier le câblage" to R.string.pro_reason_edit_cabling,
+        "affecter le câblage" to R.string.pro_reason_assign_cabling,
+        "créer un type personnalisé" to R.string.pro_reason_create_custom_type,
+        "créer un projecteur personnalisé" to R.string.pro_reason_create_custom_fixture,
+        "modifier un projecteur personnalisé" to R.string.pro_reason_edit_custom_fixture,
+        "utiliser un projecteur personnalisé" to R.string.pro_reason_use_custom_fixture,
+        "renseigner une consommation" to R.string.pro_reason_enter_power,
+        "partager un projet" to R.string.pro_reason_share_project,
+        "débloquer l'édition" to R.string.pro_reason_unlock_editing,
+        GeoPanelContent.PRO_REASON to R.string.pro_reason_calibrate_gps,
+        "annuler une modification" to R.string.pro_reason_undo,
+        RefPlanPanelRules.IMPORT_PRO_REASON to R.string.pro_reason_import_plan,
+        RefPlanPanelRules.PRO_REASON to R.string.pro_reason_adjust_plan,
+        RefPlanPanelRules.LAYERS_PRO_REASON to R.string.pro_reason_plan_layers,
+    )
+
+    fun reasonRes(reason: String): Int? = REASONS[reason]
+}

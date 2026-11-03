@@ -52,11 +52,37 @@ class ReleaseReadinessTest {
         assertTrue(gradle.contains("if (!project.file(\"google-services.json\").isFile) add("))
     }
 
+    @Test fun signatureDeLAssistantAndroidStudioAcceptee() {
+        // L'assistant « Generate Signed App Bundle » (chemin du README et du guide C7)
+        // passe la clé par android.injected.signing.* : la garde ne réclame alors plus
+        // keystore.properties, mais toujours google-services.json. (Prouvé aussi en
+        // lançant `:app:bundleRelease --dry-run` avec ces quatre propriétés : rc = 0.)
+        for (p in listOf("store.file", "store.password", "key.alias", "key.password")) {
+            assertTrue(p, gradle.contains("\"android.injected.signing.$p\""))
+        }
+        assertTrue(gradle.contains(
+            "injectedSigningProperties.all { !providers.gradleProperty(it).orNull.isNullOrBlank() }"))
+        val guard = gradle.substringAfter("fun releasePrerequisiteProblems()").substringBefore("\nandroid {")
+        assertTrue(guard.contains("if (injectedSigningReady) {"))
+        assertTrue("keystore.properties seulement sans clé de l'assistant",
+            guard.indexOf("if (injectedSigningReady)") < guard.indexOf("} else if (!keystorePropertiesFile.isFile) {"))
+        // google-services.json reste exigé dans tous les cas (hors du if / else de la clé).
+        assertTrue(guard.substringAfterLast("    }\n").contains("if (!project.file(\"google-services.json\").isFile) add("))
+        // Le .aab rangé par l'assistant (app/release/) n'est jamais versionné.
+        val ignore = file("../.gitignore", ".gitignore").readLines().map { it.trim() }
+        assertTrue("app/release/" in ignore)
+    }
+
     @Test fun ecranProSansCollada() {
         val paywall = file("src/main/java/com/minou/mvrviewer/ui/ProPaywall.kt",
             "app/src/main/java/com/minou/mvrviewer/ui/ProPaywall.kt").readText()
         assertFalse("Android n'importe pas le COLLADA", paywall.contains("COLLADA"))
-        assertTrue(paywall.contains("Importer des objets 3D (\${com.minou.mvrviewer.mvr.SceneModelLoader.SUPPORTED_SUMMARY})"))
+        // Ligne traduite (values/ et values-en/), formats passés en argument.
+        assertTrue(paywall.contains("R.string.pro_feature_models_fmt to listOf(SceneModelLoader.SUPPORTED_SUMMARY)"))
+        assertEquals("Importer des objets 3D (glTF/GLB, OBJ, FBX, STL, PLY)",
+            com.minou.mvrviewer.ui.TestRes.FR.get("pro_feature_models_fmt", SceneModelLoader.SUPPORTED_SUMMARY))
+        assertEquals("Import 3D objects (glTF/GLB, OBJ, FBX, STL, PLY)",
+            com.minou.mvrviewer.ui.TestRes.EN.get("pro_feature_models_fmt", SceneModelLoader.SUPPORTED_SUMMARY))
         // La liste affichée = les formats que le décodeur sait lire.
         assertEquals("glTF/GLB, OBJ, FBX, STL, PLY", SceneModelLoader.SUPPORTED_SUMMARY)
         assertFalse(SceneModelLoader.SUPPORTED_SUMMARY.contains("COLLADA"))

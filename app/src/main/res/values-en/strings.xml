@@ -77,6 +77,8 @@
     <string name="cal3_tap_again">Tap the plan again to correct the spot.</string>
     <string name="cal3_low_accuracy">GPS accuracy too low (± %1$d m): stay in the open and wait…</string>
     <string name="cal3_use_anyway">Use anyway</string>
+    <string name="cal3_approximate_location">Approximate location: 3-point calibration needs your precise location (Settings › Apps › MVR Viewer › Permissions › Location).</string>
+    <string name="cal3_open_settings">Open settings</string>
     <string name="cal3_point_measured">Point %1$d measured · ± %2$d m</string>
     <string name="cal3_next_point">Next point</string>
     <string name="cal3_compute">Compute</string>
@@ -174,7 +176,7 @@
     <string name="diag_mail_subject_fmt">MVR Viewer %1$s (Android) — crash or freeze report</string>
     <string name="diag_mail_body_fmt">Hello,\n\nMVR Viewer closed unexpectedly or stopped responding. The diagnostic log is attached to this message.\n\nWhat I was doing at the time (optional):\n\n\n—\nVersion: %1$s\nDevice: %2$s\nAndroid: %3$s</string>
     <string name="location_approximate_toast">Approximate location only: limited accuracy.</string>
-    <string name="location_approximate_panel">Approximate location only: limited accuracy (up to about 2 km). “I am here” and your position still work, but imprecisely. Precise location: Settings › Apps › MVR Viewer › Permissions › Location.</string>
+    <string name="location_approximate_panel">Approximate location only: limited accuracy (up to about 2 km). “I am here” and your position still work, but imprecisely; 3-point calibration needs your precise location. Precise location: Settings › Apps › MVR Viewer › Permissions › Location.</string>
     <string name="location_approximate_short">Approximate location: limited accuracy</string>
     <string name="dmx_already_here">already on this line</string>
     <string name="dmx_analysing">Analysing DMX footprints…</string>
@@ -703,6 +705,39 @@
     <string name="pro_pitch">Reading is free; editing (patch, cabling, imports…) requires Pro.</string>
     <string name="pro_unlock">Unlock Pro</string>
     <string name="pro_restore">Restore a purchase</string>
+    <!-- Pro purchase screen (ProPaywall.kt), texts of iOS ProPaywallView. -->
+    <string name="pro_paywall_reason_fmt">To %1$s, you need the Pro version.</string>
+    <string name="pro_paywall_pitch">Reading a show stays completely free — 3D, plan, patch, universes, cabling, PDF export, shared projects. Pro unlocks everything that MODIFIES the project.</string>
+    <string name="pro_feature_patch">Edit the patch: addresses, universes, modes, names</string>
+    <string name="pro_feature_cabling">Assign power cabling and DMX lines</string>
+    <string name="pro_feature_orient">Flip and orient fixtures</string>
+    <string name="pro_feature_plans">Import and place DXF, PDF, image plans</string>
+    <string name="pro_feature_models_fmt">Import 3D objects (%1$s)</string>
+    <string name="pro_feature_custom_types">Create custom fixture types</string>
+    <string name="pro_feature_share">Share a project and push your changes</string>
+    <string name="pro_unlock_price_fmt">Unlock Pro — %1$s</string>
+    <string name="pro_one_time_purchase">One-time purchase, no subscription. Valid on all your devices with the same Google account.</string>
+    <string name="pro_error_play_unavailable">Google Play is unavailable.</string>
+    <string name="pro_error_purchase_failed">The purchase did not go through.</string>
+    <string name="pro_error_product_unavailable">The product is not available right now. Check your connection and try again.</string>
+    <!-- What the user was trying to do (ProAccess.gate): “To …, you need the Pro version.” -->
+    <string name="pro_reason_edit_patch">edit the patch</string>
+    <string name="pro_reason_import_model">import a 3D object</string>
+    <string name="pro_reason_adjust_models">adjust imported 3D objects</string>
+    <string name="pro_reason_edit_cabling">edit the cabling</string>
+    <string name="pro_reason_assign_cabling">assign cabling</string>
+    <string name="pro_reason_create_custom_type">create a custom type</string>
+    <string name="pro_reason_create_custom_fixture">create a custom fixture</string>
+    <string name="pro_reason_edit_custom_fixture">edit a custom fixture</string>
+    <string name="pro_reason_use_custom_fixture">use a custom fixture</string>
+    <string name="pro_reason_enter_power">enter a power consumption</string>
+    <string name="pro_reason_share_project">share a project</string>
+    <string name="pro_reason_unlock_editing">unlock editing</string>
+    <string name="pro_reason_calibrate_gps">calibrate the GPS position</string>
+    <string name="pro_reason_undo">undo a change</string>
+    <string name="pro_reason_import_plan">import a plan</string>
+    <string name="pro_reason_adjust_plan">adjust the imported plan</string>
+    <string name="pro_reason_plan_layers">edit the imported plan\'s layers</string>
     <string name="home_account_prompt_title">Create your account (free)</string>
     <string name="home_account_prompt_body">It\'s how you receive projects shared by your crew chief, with their changes live. Reading is free; only editing requires Pro.</string>
     <string name="home_account_prompt_action">Create an account or sign in…</string>

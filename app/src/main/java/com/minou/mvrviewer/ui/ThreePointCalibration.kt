@@ -642,6 +642,21 @@ object ThreePointDisplay {
         else -> GpsLevel.POOR
     }
 
+    /**
+     * Position APPROXIMATIVE seule (guide C8, `UserLocationFeed.approximate`) : Android
+     * la floute à ~2 km, donc aucun fix n'atteint les 20 m d'une mesure ni les 100 m de
+     * « Utiliser quand même » — la mesure attendrait pour toujours. Le panneau le dit
+     * dès l'ouverture (à toutes les étapes) et propose les paramètres de l'app.
+     */
+    fun approximateNotice(approximate: Boolean): CalText? =
+        if (approximate) CalText(R.string.cal3_approximate_location) else null
+
+    /**
+     * « Précision GPS insuffisante… restez à découvert, patientez » : seulement quand
+     * attendre peut aboutir — jamais en position approximative ([approximateNotice]).
+     */
+    fun showsLowAccuracy(lowAccuracy: Boolean, approximate: Boolean): Boolean = lowAccuracy && !approximate
+
     /** Précision affichée : pendant la mesure le dernier fix reçu, sinon la position live (> 0). */
     fun currentAccuracy(session: ThreePointCalibrationSession, liveAccuracy: Double?): Double? {
         if (session.stage is ThreePointStage.Measuring) session.lastAccuracy?.let { return it }

@@ -1,13 +1,17 @@
 package com.minou.mvrviewer.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -134,7 +138,11 @@ fun rememberUserLocationFeed(active: Boolean): UserLocationFeed {
         if (active && !granted) launcher.launch(LocationAccess.REQUESTED)
     }
 
-    DisposableEffect(active, granted) {
+    // `approximate` dans les clés : une inscription garde le niveau d'autorisation de
+    // son ouverture (approximative = fixes floutés, un toutes les 10 min). Passé à la
+    // position exacte dans les Paramètres, on se réinscrit — sinon l'assistant 3 points
+    // attendrait encore (vu à l'émulateur : requête restée « COARSE »).
+    DisposableEffect(active, granted, feed.approximate) {
         if (!active || !granted) return@DisposableEffect onDispose { }
         feed.denied = false
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
@@ -205,6 +213,21 @@ enum class LocationAccess {
          */
         fun grantMessage(access: LocationAccess): Int? =
             if (access == APPROXIMATE) R.string.location_approximate_toast else null
+    }
+}
+
+/**
+ * Fiche de l'app dans les Paramètres (Autorisations › Position › « Position exacte ») :
+ * le chemin qui marche toujours pour quitter la position approximative — Android ne
+ * repropose plus son dialogue après des refus répétés. Au retour, ON_RESUME de
+ * [rememberUserLocationFeed] relit l'autorisation.
+ */
+fun openAppSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+    if (context.findActivity() == null) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
     }
 }
 

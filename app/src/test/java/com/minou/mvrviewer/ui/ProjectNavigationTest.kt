@@ -238,13 +238,18 @@ class ProjectNavigationTest {
 
     @Test fun sectionsDeCompteEtReglages() {
         assertEquals(
-            listOf(AccountSettingsSection.ACCOUNT, AccountSettingsSection.PRO, AccountSettingsSection.SERVICES),
+            listOf(AccountSettingsSection.ACCOUNT, AccountSettingsSection.PRO, AccountSettingsSection.SERVICES,
+                AccountSettingsSection.ABOUT),
             AccountSettingsSections.of(hasSync = true)
         )
-        // Sans synchro : pas de « Compte », le reste demeure.
-        assertEquals(listOf(AccountSettingsSection.PRO, AccountSettingsSection.SERVICES), AccountSettingsSections.of(hasSync = false))
+        // Sans synchro : pas de « Compte », le reste demeure — « À propos » compris
+        // (pages légales, licences, version : guide de mise en vente C3).
+        assertEquals(
+            listOf(AccountSettingsSection.PRO, AccountSettingsSection.SERVICES, AccountSettingsSection.ABOUT),
+            AccountSettingsSections.of(hasSync = false)
+        )
         // Jamais de section « Débogage » sur Android (D5).
-        assertEquals(3, AccountSettingsSection.entries.size)
+        assertEquals(4, AccountSettingsSection.entries.size)
     }
 
     // ------------------------------------- sous-volets de Modèles de projecteurs

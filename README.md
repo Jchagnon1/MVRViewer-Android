@@ -122,3 +122,21 @@ partirait sans synchro cloud). Le debug (`assembleDebug`) et les tests
 
 Pour lire un autre fichier que `keystore.properties` (intégration continue, essai
 avec une clé jetable) : `./gradlew :app:bundleRelease -PkeystoreProperties=/chemin/du/fichier`.
+
+## Mentions et licences
+
+L'écran « Mentions et licences » (Compte & réglages › À propos) lit
+`app/src/main/assets/third_party_licenses.json`, **jamais écrit à la main** :
+après tout changement de dépendance, régénérez-le (Gradle est lancé par le script) :
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+python3 Tools/generate_licenses.py          # écrit le fichier
+python3 Tools/generate_licenses.py --check  # échoue s'il n'est plus à jour
+```
+
+Le script part des artefacts réellement empaquetés dans l'APK de release
+(`./gradlew :app:releaseLicenseInputs`, licences des POM) et échoue si un composant
+n'est pas classé ou si un texte de licence manque ; provenance des textes recopiés :
+`Tools/licenses/README.md`.

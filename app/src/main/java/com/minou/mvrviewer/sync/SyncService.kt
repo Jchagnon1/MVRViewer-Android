@@ -18,6 +18,19 @@ interface SyncService {
     suspend fun signOut()
 
     /**
+     * MOT DE PASSE OUBLIÉ (guide C6) — droit GRATUIT, jamais gardé Pro : sans lui,
+     * qui a oublié son mot de passe ne peut ni se reconnecter ni supprimer son
+     * compte. Demande l'envoi de l'e-mail de réinitialisation à [email] (adresse
+     * déjà nettoyée et de forme plausible : [SyncViewModel.sendPasswordReset] le
+     * vérifie), dans la langue où l'app S'AFFICHE. Réussit AUSSI quand aucun
+     * compte n'existe pour cette adresse : la réponse ne doit jamais dire si un
+     * compte existe. Erreurs : [SyncException.InvalidEmail],
+     * [SyncException.NetworkUnavailable] (hors ligne), [SyncException.TooManyRequests].
+     * Ne touche pas à l'état de connexion.
+     */
+    suspend fun sendPasswordReset(email: String)
+
+    /**
      * Suppression DÉFINITIVE du compte (politique Google Play « suppression de
      * compte », Apple 5.1.1 (v)). Le mot de passe est RE-VÉRIFIÉ avant toute
      * destruction et RIEN n'est écrit tant qu'une étape faillible précède : une

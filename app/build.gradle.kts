@@ -127,6 +127,10 @@ if (project.file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
+// « Mentions et licences » (guide C11) : tâche releaseLicenseInputs, lue par
+// Tools/generate_licenses.py (composants de l'APK de release et licences de leurs POM).
+apply(from = rootProject.file("gradle/third-party-licenses.gradle.kts"))
+
 // GARDE DE RELEASE (guide C7 et C9) : empaqueter une release (bundleRelease,
 // assembleRelease…) sans clé d'envoi complète, ou sans app/google-services.json,
 // échoue AVANT toute compilation, avec la liste de ce qui manque. Le debug

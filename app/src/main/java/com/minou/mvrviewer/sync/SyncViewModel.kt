@@ -189,6 +189,18 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * MOT DE PASSE OUBLIÉ (guide C6) — GRATUIT, aucune garde Pro, ne touche pas à
+     * l'état de connexion. L'adresse est nettoyée et sa forme vérifiée ICI, avant
+     * tout appel réseau ([SyncException.InvalidEmail]). Réussir ne dit pas qu'un
+     * compte existe (voir [SyncService.sendPasswordReset]).
+     */
+    suspend fun sendPasswordReset(email: String) {
+        val address = email.trim()
+        if (!EmailAddress.isPlausible(address)) throw SyncException.InvalidEmail
+        service.sendPasswordReset(address)
+    }
+
     fun signOut() {
         viewModelScope.launch {
             runCatching { service.signOut() }

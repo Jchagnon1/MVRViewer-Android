@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,7 +66,14 @@ import kotlinx.coroutines.launch
  * 2. « MVR Viewer Pro » : état, déblocage, restauration, refus de rattachement ;
  * 3. « Services » : ligne « GDTF Share » (Connecté / Non connecté). Non connecté :
  *    toucher la ligne ouvre la connexion (sous-volet) ; connecté : bouton « Se
- *    déconnecter » au bout de la ligne — toucher la ligne ne déconnecte JAMAIS.
+ *    déconnecter » au bout de la ligne — toucher la ligne ne déconnecte JAMAIS ;
+ * 4. « À propos » (TOUJOURS présente, guide de mise en vente C3 et C11) : pages
+ *    légales du site (navigateur), « Mentions et licences » (sous-volet, hors
+ *    ligne), version.
+ *
+ * Sous-volets (← et retour système ramènent ICI) : connexion GDTF Share, « Mot
+ * de passe oublié » (lien du formulaire de connexion, guide C6) et « Mentions
+ * et licences ».
  *
  * Ouvert depuis un projet (destination) ou depuis l'accueil (hébergé par `App`).
  * À l'ouverture, reconnexion silencieuse GDTF Share habituelle (aucune requête
@@ -85,6 +96,9 @@ fun AccountSettingsScreen(
 ) {
     val ctx = LocalContext.current
     var gdtfLogin by remember { mutableStateOf(false) }
+    /** Adresse préremplie du sous-volet « Mot de passe oublié » ; null = fermé. */
+    var passwordResetEmail by rememberSaveable { mutableStateOf<String?>(null) }
+    var licensesOpen by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!GdtfShareClient.loggedIn && GdtfCredentialStore.username(ctx) != null) {
             runCatching { GdtfShareClient.ensureLoggedIn(ctx) }
@@ -98,6 +112,18 @@ fun AccountSettingsScreen(
             onBack = { gdtfLogin = false },
             onLoggedIn = { gdtfLogin = false }
         )
+        return
+    }
+    if (licensesOpen) {
+        BackHandler { licensesOpen = false }
+        LicensesScreen(onBack = { licensesOpen = false }, modifier = modifier)
+        return
+    }
+    val resetEmail = passwordResetEmail
+    if (resetEmail != null && sync != null) {
+        BackHandler { passwordResetEmail = null }
+        PasswordResetPane(sync = sync, initialEmail = resetEmail, onBack = { passwordResetEmail = null },
+            modifier = modifier)
         return
     }
     Column(modifier = modifier.fillMaxSize().testTag("accountSettings")) {
@@ -124,13 +150,18 @@ fun AccountSettingsScreen(
         ) {
             AccountSettingsSections.of(sync != null).forEach { section ->
                 when (section) {
-                    AccountSettingsSection.ACCOUNT -> sync?.let { AccountSection(it) }
+                    AccountSettingsSection.ACCOUNT -> sync?.let {
+                        AccountSection(it, onForgotPassword = { email -> passwordResetEmail = email })
+                    }
                     AccountSettingsSection.PRO -> ProSection()
                     AccountSettingsSection.SERVICES -> Column(
                         Modifier.onGloballyPositioned { servicesTop = it.positionInParent().y.toInt() }
                     ) { ServicesSection(onSignIn = { gdtfLogin = true }) }
+                    AccountSettingsSection.ABOUT -> AboutSection(onOpenLicenses = { licensesOpen = true })
                 }
             }
+            // Dernière ligne (« À propos ») hors de la barre de gestes.
+            Spacer(Modifier.navigationBarsPadding().height(16.dp))
         }
     }
 }
@@ -147,7 +178,7 @@ private fun SectionHeader(text: String) {
 // MARK: - Compte (connexion / inscription / déconnexion / suppression)
 
 @Composable
-private fun AccountSection(sync: SyncViewModel) {
+private fun AccountSection(sync: SyncViewModel, onForgotPassword: (String) -> Unit) {
     val auth by sync.auth.collectAsState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -204,6 +235,17 @@ private fun AccountSection(sync: SyncViewModel) {
             TextButton(onClick = { isSignUp = !isSignUp; error = null }) {
                 Text(stringResource(if (isSignUp) R.string.sync_have_account else R.string.sync_create_account))
             }
+        }
+        if (isSignUp) {
+            // Information au moment de la collecte (RGPD) : conditions et
+            // politique de confidentialité, liens dans la phrase (guide C3).
+            SignUpConsentText(Modifier.widthIn(max = 520.dp))
+        } else {
+            // Mot de passe oublié (guide C6) : gratuit, à la connexion seulement.
+            TextButton(
+                onClick = { onForgotPassword(email.trim()) },
+                modifier = Modifier.testTag("account.forgotPassword")
+            ) { Text(stringResource(R.string.password_forgot), style = MaterialTheme.typography.bodySmall) }
         }
         Text(stringResource(R.string.sync_backend_fmt, sync.backendLabel), style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -453,11 +453,8 @@
     <string name="sync_publishing">Publication…</string>
     <string name="sync_reopen">Rouvrir</string>
     <string name="sync_share_code">Code de partage</string>
-    <string name="sync_share_code_chooser">Partager le code</string>
     <string name="sync_share_code_hint">Les autres rejoignent avec ce code (Rejoindre un projet). Toute modification se synchronise.</string>
     <string name="sync_share_code_label">Code de partage :</string>
-    <string name="sync_share_link">Partager le lien</string>
-    <string name="sync_share_message_fmt">Rejoins mon projet MVRViewer avec le code : %1$s  (mvrviewer://join/%2$s)</string>
     <string name="sync_share_project_title">Partager le projet</string>
     <string name="sync_shared">Partagé</string>
     <string name="sync_sign_in_to_join">Connectez-vous d\'abord pour rejoindre un projet.</string>
@@ -901,5 +898,56 @@
     <plurals name="universe_conflicts">
         <item quantity="one">%1$d canal en conflit</item>
         <item quantity="other">%1$d canaux en conflit</item>
+    </plurals>
+
+    <!-- Mise en vente (guide C3, C4, C6, C11) : À propos, liens légaux, mot de passe oublié, partage par code, mentions et licences. -->
+    <!-- Langue dans laquelle l'app S'AFFICHE (« fr » ici, « en » dans values-en) : chemins des pages légales et langue des e-mails de compte (LegalLinks.kt). -->
+    <string name="app_language">fr</string>
+    <string name="account_section_about">À propos</string>
+    <string name="legal_privacy">Confidentialité</string>
+    <string name="legal_terms">Conditions d\'utilisation</string>
+    <string name="legal_notice">Mentions légales</string>
+    <string name="legal_support">Assistance</string>
+    <string name="legal_opens_in_browser">S\'ouvre dans le navigateur</string>
+    <string name="about_licenses">Mentions et licences</string>
+    <string name="about_version">Version</string>
+    <string name="about_version_a11y_fmt">Version %1$s</string>
+    <string name="legal_no_browser">Aucun navigateur pour ouvrir %1$s</string>
+    <string name="signup_consent_fmt">En créant un compte, vous acceptez les %1$s et la %2$s.</string>
+    <string name="signup_consent_terms">conditions d\'utilisation</string>
+    <string name="signup_consent_privacy">politique de confidentialité</string>
+    <string name="password_forgot">Mot de passe oublié ?</string>
+    <string name="password_reset_title">Mot de passe oublié</string>
+    <string name="password_reset_hint">Saisissez l\'adresse e-mail de votre compte : vous recevrez un lien pour choisir un nouveau mot de passe.</string>
+    <string name="password_reset_send">Envoyer le lien</string>
+    <string name="password_reset_sent">Si un compte existe pour cette adresse, vous allez recevoir un e-mail avec un lien pour choisir un nouveau mot de passe. Pensez à regarder dans les courriers indésirables.</string>
+    <string name="sync_err_invalid_email">Adresse e-mail invalide.</string>
+    <string name="sync_err_too_many_requests">Trop de tentatives. Patientez quelques minutes puis réessayez.</string>
+    <string name="sync_copy_code">Copier le code</string>
+    <string name="sync_code_copied">Code copié</string>
+    <string name="licenses_title">Mentions et licences</string>
+    <string name="licenses_search">Rechercher un composant</string>
+    <string name="licenses_clear_search">Effacer la recherche</string>
+    <string name="licenses_version_fmt">Version %1$s</string>
+    <string name="licenses_section_data">Données et services</string>
+    <string name="licenses_ign_title">Photographies aériennes en France</string>
+    <string name="licenses_ign_detail">Source : IGN – BD ORTHO® · Licence Ouverte 2.0 (Etalab)</string>
+    <string name="licenses_gdtf_title">Profils de projecteurs</string>
+    <string name="licenses_gdtf_detail">GDTF Share, service de VPLT e.V. Les profils GDTF appartiennent à leurs auteurs.</string>
+    <string name="licenses_section_components">Composants logiciels</string>
+    <string name="licenses_components_footer">Ces composants sont intégrés à l\'app. Touchez-en un pour lire sa licence complète.</string>
+    <string name="licenses_none_title">Aucun composant trouvé</string>
+    <string name="licenses_none_hint">Essayez un autre nom ou un type de licence (MIT, Apache…).</string>
+    <string name="licenses_unreadable">La liste des licences est illisible.</string>
+    <string name="licenses_included_in_fmt">Inclus dans %1$s</string>
+    <string name="licenses_source_code">Code source</string>
+    <string name="licenses_project_page">Page du projet (code source non publié)</string>
+    <string name="licenses_packaged">Bibliothèques empaquetées</string>
+    <string name="licenses_included">Composants inclus</string>
+    <string name="licenses_text_from_fmt">Texte fourni avec %1$s</string>
+    <string name="licenses_google_notice">Avis fourni par Google avec ce composant.</string>
+    <plurals name="licenses_children">
+        <item quantity="one">%1$d composant inclus</item>
+        <item quantity="other">%1$d composants inclus</item>
     </plurals>
 </resources>

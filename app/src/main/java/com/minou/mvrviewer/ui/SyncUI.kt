@@ -1,6 +1,7 @@
 package com.minou.mvrviewer.ui
 
-import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -35,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -121,7 +126,12 @@ internal fun DeleteAccountDialog(sync: SyncViewModel, onDismiss: () -> Unit, onD
     )
 }
 
-// MARK: - Partager le projet (publier + code + lien)
+// MARK: - Partager le projet (publier + code)
+//
+// Partage PAR CODE seulement (guide de mise en vente C4, comme iOS) : l'ancien
+// « Partager le lien » envoyait mvrviewer://join/CODE, que rien n'ouvre (aucun
+// filtre d'intention pour ce schéma). Le code reste grand, sélectionnable, et
+// « Copier le code » le met dans le presse-papiers (« Code copié »).
 
 @Composable
 fun ShareProjectDialog(
@@ -136,6 +146,8 @@ fun ShareProjectDialog(
     var code by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    /** « Code copié » : confirmation après « Copier le code ». */
+    var didCopy by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -149,9 +161,12 @@ fun ShareProjectDialog(
                     Surface(shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         modifier = Modifier.fillMaxWidth()) {
-                        Text(code!!, style = MaterialTheme.typography.headlineMedium
-                            .copy(fontFamily = FontFamily.Monospace),
-                            textAlign = TextAlign.Center, modifier = Modifier.padding(16.dp).fillMaxWidth())
+                        SelectionContainer {
+                            Text(code!!, style = MaterialTheme.typography.headlineMedium
+                                .copy(fontFamily = FontFamily.Monospace),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(16.dp).fillMaxWidth().testTag("share.code"))
+                        }
                     }
                     Text(stringResource(R.string.sync_share_code_hint),
                         style = MaterialTheme.typography.bodySmall,
@@ -171,14 +186,20 @@ fun ShareProjectDialog(
         confirmButton = {
             when {
                 !auth.isSignedIn -> TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
-                code != null -> TextButton(onClick = {
-                    val share = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT,
-                            ctx.getString(R.string.sync_share_message_fmt, code, code))
+                code != null -> TextButton(
+                    modifier = Modifier.testTag("share.copyCode"),
+                    onClick = {
+                        val clipboard = ctx.getSystemService(ClipboardManager::class.java)
+                        clipboard?.setPrimaryClip(
+                            ClipData.newPlainText(ctx.getString(R.string.sync_share_code), code)
+                        )
+                        didCopy = true
                     }
-                    ctx.startActivity(Intent.createChooser(share, ctx.getString(R.string.sync_share_code_chooser)))
-                }) { Text(stringResource(R.string.sync_share_link)) }
+                ) {
+                    Icon(if (didCopy) Icons.Filled.Check else Icons.Filled.ContentCopy, contentDescription = null,
+                        modifier = Modifier.padding(end = 6.dp))
+                    Text(stringResource(if (didCopy) R.string.sync_code_copied else R.string.sync_copy_code))
+                }
                 else -> TextButton(enabled = !busy, onClick = {
                     busy = true; error = null
                     scope.launch {

@@ -263,14 +263,19 @@ class PlanStartRequest(initial: PlanStartAction = PlanStartAction.NONE) {
 }
 
 /** Sections de « Compte & réglages », dans l'ordre (iOS §10 ; pas de « Débogage » sur Android). */
-enum class AccountSettingsSection { ACCOUNT, PRO, SERVICES }
+enum class AccountSettingsSection { ACCOUNT, PRO, SERVICES, ABOUT }
 
 object AccountSettingsSections {
-    /** « Compte » n'existe que si la synchro est branchée (toujours vrai dans l'app). */
+    /**
+     * « Compte » n'existe que si la synchro est branchée (toujours vrai dans l'app).
+     * « À propos » (pages légales, licences, version — guide de mise en vente C3)
+     * est TOUJOURS là, en dernier.
+     */
     fun of(hasSync: Boolean): List<AccountSettingsSection> = buildList {
         if (hasSync) add(AccountSettingsSection.ACCOUNT)
         add(AccountSettingsSection.PRO)
         add(AccountSettingsSection.SERVICES)
+        add(AccountSettingsSection.ABOUT)
     }
 }
 

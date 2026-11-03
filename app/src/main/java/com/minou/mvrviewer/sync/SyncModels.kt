@@ -38,10 +38,16 @@ data class CloudProject(
     val updatedAtEpoch: Double
 )
 
-/** Code d'invitation (partage par code court + lien). */
+/** Code d'invitation (partage par code court). */
 data class InviteCode(
     val code: String,
     val projectId: String,
+    /**
+     * `mvrviewer://join/CODE` : n'est plus affiché ni partagé (guide de mise en
+     * vente C4 — aucun filtre d'intention ne l'ouvre). Toujours écrit dans le
+     * document `invites` (champ `url`) tant que la spec du partage n'a pas
+     * changé : ne pas le retirer d'un seul côté (iOS, site, règles).
+     */
     val url: String,
     val expiresAtEpoch: Double? = null
 )
@@ -356,7 +362,27 @@ sealed class SyncException(
      * « connectée sans profil » ; l'utilisateur se reconnecte puis recommence.
      */
     object DeletionIncomplete : SyncException("Suppression incomplète : reconnectez-vous puis réessayez.", com.minou.mvrviewer.R.string.sync_err_delete_incomplete)
+    /** Adresse e-mail mal formée (mot de passe oublié, guide C6). */
+    object InvalidEmail : SyncException("Adresse e-mail invalide.", com.minou.mvrviewer.R.string.sync_err_invalid_email)
+    /** Trop de demandes rapprochées (Firebase les limite) : patienter. */
+    object TooManyRequests : SyncException("Trop de tentatives. Patientez quelques minutes puis réessayez.", com.minou.mvrviewer.R.string.sync_err_too_many_requests)
     class Message(msg: String) : SyncException(msg)
+}
+
+/**
+ * Forme PLAUSIBLE d'une adresse e-mail (« a@b.c ») — vérifiée AVANT tout appel
+ * réseau (mot de passe oublié) ; le serveur reste juge. Même règle qu'iOS
+ * (`EmailAddress.isPlausible`) : aucun blanc, une seule « @ », une partie
+ * locale non vide, un domaine d'au moins deux étiquettes non vides.
+ */
+object EmailAddress {
+    fun isPlausible(address: String): Boolean {
+        if (address.any { it.isWhitespace() }) return false
+        val parts = address.split('@')
+        if (parts.size != 2 || parts[0].isEmpty()) return false
+        val labels = parts[1].split('.')
+        return labels.size >= 2 && labels.all { it.isNotEmpty() }
+    }
 }
 
 /** Message AFFICHABLE d'une erreur de synchro, dans la langue du téléphone. */

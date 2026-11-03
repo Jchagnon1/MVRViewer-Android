@@ -450,11 +450,8 @@
     <string name="sync_publishing">Publishing…</string>
     <string name="sync_reopen">Reopen</string>
     <string name="sync_share_code">Share code</string>
-    <string name="sync_share_code_chooser">Share the code</string>
     <string name="sync_share_code_hint">Others join with this code (Join a project). Every change is synced.</string>
     <string name="sync_share_code_label">Share code:</string>
-    <string name="sync_share_link">Share the link</string>
-    <string name="sync_share_message_fmt">Join my MVRViewer project with the code: %1$s  (mvrviewer://join/%2$s)</string>
     <string name="sync_share_project_title">Share the project</string>
     <string name="sync_shared">Shared</string>
     <string name="sync_sign_in_to_join">Sign in first to join a project.</string>
@@ -891,5 +888,56 @@
     <plurals name="universe_conflicts">
         <item quantity="one">%1$d channel in conflict</item>
         <item quantity="other">%1$d channels in conflict</item>
+    </plurals>
+
+    <!-- Store release (guide C3, C4, C6, C11): About, legal links, forgot password, share by code, notices and licences. -->
+    <!-- Language the app is SHOWN in ("en" here, "fr" in values): legal page paths and account e-mail language (LegalLinks.kt). -->
+    <string name="app_language">en</string>
+    <string name="account_section_about">About</string>
+    <string name="legal_privacy">Privacy</string>
+    <string name="legal_terms">Terms of Use</string>
+    <string name="legal_notice">Legal</string>
+    <string name="legal_support">Support</string>
+    <string name="legal_opens_in_browser">Opens in the browser</string>
+    <string name="about_licenses">Notices &amp; licences</string>
+    <string name="about_version">Version</string>
+    <string name="about_version_a11y_fmt">Version %1$s</string>
+    <string name="legal_no_browser">No browser to open %1$s</string>
+    <string name="signup_consent_fmt">By creating an account, you agree to the %1$s and the %2$s.</string>
+    <string name="signup_consent_terms">Terms of Use</string>
+    <string name="signup_consent_privacy">Privacy Policy</string>
+    <string name="password_forgot">Forgot your password?</string>
+    <string name="password_reset_title">Forgot password</string>
+    <string name="password_reset_hint">Enter your account\'s email address: you\'ll receive a link to choose a new password.</string>
+    <string name="password_reset_send">Send the link</string>
+    <string name="password_reset_sent">If an account exists for this address, you\'ll receive an email with a link to choose a new password. Remember to check your spam folder.</string>
+    <string name="sync_err_invalid_email">Invalid email address.</string>
+    <string name="sync_err_too_many_requests">Too many attempts. Wait a few minutes, then try again.</string>
+    <string name="sync_copy_code">Copy the code</string>
+    <string name="sync_code_copied">Code copied</string>
+    <string name="licenses_title">Notices &amp; licences</string>
+    <string name="licenses_search">Search for a component</string>
+    <string name="licenses_clear_search">Clear the search</string>
+    <string name="licenses_version_fmt">Version %1$s</string>
+    <string name="licenses_section_data">Data and services</string>
+    <string name="licenses_ign_title">Aerial photographs in France</string>
+    <string name="licenses_ign_detail">Source: IGN – BD ORTHO® · Open Licence 2.0 (Etalab)</string>
+    <string name="licenses_gdtf_title">Fixture profiles</string>
+    <string name="licenses_gdtf_detail">GDTF Share, a service of VPLT e.V. GDTF profiles belong to their authors.</string>
+    <string name="licenses_section_components">Software components</string>
+    <string name="licenses_components_footer">These components are built into the app. Tap one to read its full licence.</string>
+    <string name="licenses_none_title">No component found</string>
+    <string name="licenses_none_hint">Try another name or a licence type (MIT, Apache…).</string>
+    <string name="licenses_unreadable">The list of licences can\'t be read.</string>
+    <string name="licenses_included_in_fmt">Included in %1$s</string>
+    <string name="licenses_source_code">Source code</string>
+    <string name="licenses_project_page">Project page (source code not published)</string>
+    <string name="licenses_packaged">Packaged libraries</string>
+    <string name="licenses_included">Included components</string>
+    <string name="licenses_text_from_fmt">Text supplied with %1$s</string>
+    <string name="licenses_google_notice">Notice supplied by Google with this component.</string>
+    <plurals name="licenses_children">
+        <item quantity="one">%1$d included component</item>
+        <item quantity="other">%1$d included components</item>
     </plurals>
 </resources>

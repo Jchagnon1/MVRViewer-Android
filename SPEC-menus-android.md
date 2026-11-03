@@ -857,8 +857,21 @@ Sections, dans l'ordre :
    gardés). Fermée depuis un projet : si GDTF Share est passé à « connecté »,
    la résolution des modèles repart (comme à la fermeture de l'écran GDTF
    Share aujourd'hui).
-4. Pas de section « Débogage » (aucune bascule de serveur à l'écran sur
-   Android, §8 D5).
+4. **« À propos »** (guide de mise en vente C3 et C11, comme iOS), TOUJOURS
+   présente : « Confidentialité », « Conditions d'utilisation », « Mentions
+   légales », « Assistance » (navigateur, flèche externe ; base unique
+   `LegalLinks.BASE_URL` = https://mvrviewer.com, chemins selon la langue de
+   l'app), « Mentions et licences » (sous-volet `LicensesScreen`, hors ligne,
+   avec recherche) et « Version » lue d'un seul tenant par TalkBack
+   (« Version 1.10.0 (21) »). Aucune signature d'éditeur dans l'app.
+5. Pas de section « Débogage » (aucune bascule de serveur à l'écran sur
+   Android, §8 D5 ; le crochet `MVR_FORCE_LOCAL_SYNC` force le serveur local
+   en debug).
+
+Formulaire de connexion : lien « Mot de passe oublié ? » (sous-volet
+`PasswordResetPane`, gratuit, guide C6) ; en mode « Créer un compte », la
+phrase « En créant un compte, vous acceptez les conditions d'utilisation et la
+politique de confidentialité. » avec ses deux liens.
 
 ### 3.12 Accueil, lecture, erreur
 

@@ -2,8 +2,10 @@ package com.minou.mvrviewer.sync
 
 import android.content.Context
 import com.google.firebase.FirebaseNetworkException
+import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthRecentLoginRequiredException
@@ -18,6 +20,7 @@ import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.WriteBatch
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageMetadata
+import com.minou.mvrviewer.AuthEmailLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
@@ -39,11 +42,15 @@ import java.util.Date
  */
 class FirebaseSyncService(context: Context) : SyncService {
 
-    @Suppress("unused")
     private val appContext = context.applicationContext
-    // E-mails Firebase Auth (mot de passe oublié…) en FRANÇAIS, comme iOS :
-    // le gabarit anglais par défaut est illisible et plus souvent classé spam.
-    private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance().apply { setLanguageCode("fr") } }
+    // E-mails Firebase Auth (mot de passe oublié…) dans la langue où l'app
+    // S'AFFICHE (français ou anglais, [AuthEmailLanguage]) — jamais la première
+    // langue du téléphone ; reposée avant chaque envoi ([applyEmailLanguage]).
+    private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance().also { applyEmailLanguage(it) } }
+
+    private fun applyEmailLanguage(auth: FirebaseAuth) {
+        auth.setLanguageCode(AuthEmailLanguage.current(appContext))
+    }
     private val db get() = FirebaseFirestore.getInstance()
     private val storage get() = FirebaseStorage.getInstance()
 
@@ -83,6 +90,39 @@ class FirebaseSyncService(context: Context) : SyncService {
 
     override suspend fun signOut() {
         auth.signOut()
+    }
+
+    /**
+     * Mot de passe oublié (guide C6) : e-mail de réinitialisation Firebase, dans
+     * la langue AFFICHÉE par l'app (reposée ici : la langue du téléphone a pu
+     * changer depuis le lancement). « Aucun compte pour cette adresse » (et
+     * compte désactivé) est traité comme une RÉUSSITE : la réponse ne dit jamais
+     * si un compte existe (avec la protection contre l'énumération d'e-mails de
+     * Firebase, le serveur ne renvoie de toute façon pas cette erreur).
+     */
+    override suspend fun sendPasswordReset(email: String) {
+        val auth = auth
+        applyEmailLanguage(auth)
+        try {
+            auth.sendPasswordResetEmail(email).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: FirebaseAuthInvalidUserException) {
+            return
+        } catch (e: FirebaseAuthInvalidCredentialsException) {
+            throw SyncException.InvalidEmail
+        } catch (e: FirebaseTooManyRequestsException) {
+            throw SyncException.TooManyRequests
+        } catch (e: FirebaseAuthException) {
+            throw when (e.errorCode) {
+                "ERROR_INVALID_EMAIL", "ERROR_MISSING_EMAIL", "ERROR_INVALID_RECIPIENT_EMAIL" -> SyncException.InvalidEmail
+                "ERROR_TOO_MANY_REQUESTS" -> SyncException.TooManyRequests
+                "ERROR_USER_NOT_FOUND", "ERROR_USER_DISABLED" -> return
+                else -> mapAuthError(e)
+            }
+        } catch (e: Exception) {
+            throw mapAuthError(e)
+        }
     }
 
     /**
@@ -501,6 +541,7 @@ class FirebaseSyncService(context: Context) : SyncService {
         is FirebaseAuthInvalidCredentialsException -> SyncException.InvalidCredentials
         is FirebaseAuthInvalidUserException -> SyncException.InvalidCredentials
         is FirebaseAuthRecentLoginRequiredException -> SyncException.RecentLoginRequired
+        is FirebaseTooManyRequestsException -> SyncException.TooManyRequests
         is FirebaseNetworkException, is TimeoutCancellationException -> SyncException.NetworkUnavailable
         // Lectures forcées serveur (suppression de compte) : hors ligne, Firestore
         // lève UNAVAILABLE ; on le montre comme un problème réseau, pas un texte brut.

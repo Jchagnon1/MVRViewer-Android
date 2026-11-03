@@ -64,6 +64,13 @@ class MainActivity : ComponentActivity() {
         // Crochets d'essai du rangement des menus (MVR_AUTO_PLAN, MVR_AUTO_DEST,
         // MVR_AUTO_PLAN_START, MVR_AUTO_HOME_DEST) — débogable seulement.
         com.minou.mvrviewer.ui.DebugHooks.read(intent, isDebuggable)
+        // Synchro sur le backend LOCAL (démo) au lieu de Firebase — débogable
+        // seulement, avant toute création du SyncViewModel : essais du compte
+        // (« Mot de passe oublié »…) sans appeler le vrai projet Firebase.
+        //   adb shell am start -n com.minou.mvrviewer/.MainActivity --ez MVR_FORCE_LOCAL_SYNC true
+        if (isDebuggable && intent.getBooleanExtra("MVR_FORCE_LOCAL_SYNC", false)) {
+            com.minou.mvrviewer.sync.BackendSelector.forceLocal = true
+        }
         // MVR_RESET_TOOLBARS : avant toute vue (les dispositions sont lues à l'ouverture d'un projet).
         if (com.minou.mvrviewer.ui.DebugHooks.takeResetToolbars()) com.minou.mvrviewer.ui.ToolbarLayoutStore.reset(this)
         enableEdgeToEdge()

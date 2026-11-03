@@ -58,6 +58,14 @@ class LocalSyncService private constructor(
     private val bus = MutableSharedFlow<Pair<String, RemoteEvent>>(extraBufferCapacity = 128)
 
     companion object {
+        /**
+         * « Mot de passe oublié » : demandes acceptées par adresse dans
+         * [PASSWORD_RESET_WINDOW_MS] (Firebase limite aussi les envois ; ses
+         * seuils ne sont pas publiés). Mêmes valeurs qu'iOS.
+         */
+        const val PASSWORD_RESET_LIMIT = 3
+        const val PASSWORD_RESET_WINDOW_MS = 600_000L
+
         @Volatile private var instance: LocalSyncService? = null
         fun shared(context: Context): LocalSyncService =
             instance ?: synchronized(this) {
@@ -143,6 +151,43 @@ class LocalSyncService private constructor(
     override suspend fun signOut() = lock.withLock {
         currentUser = null
         session.clear()
+    }
+
+    // MARK: Mot de passe oublié (stub)
+
+    /**
+     * Adresses (en minuscules) pour lesquelles un e-mail serait PARTI — les
+     * comptes existants seulement (crochet de test ; rien n'est envoyé).
+     */
+    val sentPasswordResets: MutableList<String> = mutableListOf()
+    private val passwordResetRequests = mutableMapOf<String, List<Long>>()
+
+    /** Crochet de test : simule l'absence de réseau. */
+    @Volatile var simulatesOffline: Boolean = false
+
+    /** Horloge (ms) — remplaçable en test pour franchir la fenêtre de limitation. */
+    internal var clock: () -> Long = System::currentTimeMillis
+
+    /**
+     * Même contrat que Firebase ([SyncService.sendPasswordReset]) : adresse mal
+     * formée → [SyncException.InvalidEmail] ; hors ligne →
+     * [SyncException.NetworkUnavailable] ; au-delà de [PASSWORD_RESET_LIMIT]
+     * demandes en [PASSWORD_RESET_WINDOW_MS] pour une même adresse →
+     * [SyncException.TooManyRequests] (que le compte existe ou non) ; sinon
+     * RÉUSSITE, compte existant ou pas.
+     */
+    override suspend fun sendPasswordReset(email: String) = lock.withLock {
+        if (!EmailAddress.isPlausible(email)) throw SyncException.InvalidEmail
+        if (simulatesOffline) throw SyncException.NetworkUnavailable
+        val key = email.lowercase()
+        val now = clock()
+        val recent = passwordResetRequests[key].orEmpty().filter { now - it < PASSWORD_RESET_WINDOW_MS }
+        if (recent.size >= PASSWORD_RESET_LIMIT) {
+            passwordResetRequests[key] = recent
+            throw SyncException.TooManyRequests
+        }
+        passwordResetRequests[key] = recent + now
+        if (accounts().has(key)) sentPasswordResets.add(key)
     }
 
     override suspend fun fetchProGrant(): Boolean = lock.withLock {

@@ -78,6 +78,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     private var currentMvrBytes: ByteArray? = null
     /** SHA-256 de [currentMvrBytes], calculé au plus une fois par document ([openedMvrSha]). */
     private var currentMvrSha: String? = null
+    /** Lien « .mvr téléchargé → projet » ([projectForOpenedDocument]). */
+    private val downloadedProjects = DownloadedProjects(PrefsDownloadedProjectsStore(ctx))
 
     // Anti-écho : opId qu'on vient d'émettre (TTL 60 s) → on ignore leur retour.
     private val ourRecentOpIds = HashMap<String, Long>()
@@ -267,7 +269,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _currentProject.value = null
             loadAndMergeAudit() // journal local dispo même sans compte
             if (_auth.value.isSignedIn) {
-                runCatching { service.projectMatchingContentKey(contentKey) }.getOrNull()?.let {
+                runCatching { projectForOpenedDocument(contentKey) }.getOrNull()?.let {
                     setCurrentProject(it)
                     loadAndMergeAudit()
                 }
@@ -278,8 +280,12 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun reattachAfterAuth() {
         val key = currentContentKey ?: return
-        runCatching { service.projectMatchingContentKey(key) }.getOrNull()?.let { setCurrentProject(it) }
+        runCatching { projectForOpenedDocument(key) }.getOrNull()?.let { setCurrentProject(it) }
     }
+
+    /** Projet cloud du document ouvert : voir [DownloadedProjects]. */
+    private suspend fun projectForOpenedDocument(contentKey: String): CloudProject? =
+        downloadedProjects.projectFor(service, contentKey, _auth.value.accountOrNull?.uid)
 
     fun detach() {
         stopObserving()
@@ -311,7 +317,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         if (key == null || data == null || sha == null) throw SyncException.Message(ctx.getString(com.minou.mvrviewer.R.string.sync_err_no_open_project))
         _status.value = SyncStatus.Syncing
         try {
-            val project = runCatching { service.projectMatchingContentKey(key) }.getOrNull()
+            val project = runCatching { projectForOpenedDocument(key) }.getOrNull()
                 ?: service.createProject(key, name)
             setCurrentProject(project)
             if (!service.blobExists(project.id, sha)) {
@@ -350,7 +356,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         val pid = projectId ?: _currentProject.value?.id ?: throw SyncException.ProjectNotFound
         return service.downloadBlob(pid, BlobRef(sha256, BlobKind.MVR, 0, "")) { p ->
             _status.value = SyncStatus.Downloading(p)
-        }.also { _status.value = SyncStatus.Idle }
+        }.also {
+            downloadedProjects.remember(it, pid)
+            _status.value = SyncStatus.Idle
+        }
     }
 
     /** Téléverse le plan DXF (`refplan.bin`, format d'échange DXP1) ; renvoie le SHA. */

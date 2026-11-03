@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -75,6 +76,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private var currentContentKey: String? = null
     private var currentMvrBytes: ByteArray? = null
+    /** SHA-256 de [currentMvrBytes], calculé au plus une fois par document ([openedMvrSha]). */
+    private var currentMvrSha: String? = null
+    /** Lien « .mvr téléchargé → projet » ([projectForOpenedDocument]). */
+    private val downloadedProjects = DownloadedProjects(PrefsDownloadedProjectsStore(ctx))
 
     // Anti-écho : opId qu'on vient d'émettre (TTL 60 s) → on ignore leur retour.
     private val ourRecentOpIds = HashMap<String, Long>()
@@ -84,14 +89,78 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private var observeJob: Job? = null
 
+    // Licence Pro PAR COMPTE (posée par l'admin, cf. SyncService.fetchProGrant) :
+    // relue après CHAQUE connexion réussie et par « Restaurer un achat »
+    // (crochet ProAccess.grantRefresher), retirée à la déconnexion.
+    private val grantRefresher: () -> Unit = { refreshProGrant() }
+
+    // ACHAT PRO RECONNU PARTOUT (SPEC-purchase.md §6.1/§6.3) : la preuve de
+    // l'achat Play part vers la fonction `verifyPurchase`, qui rattache l'achat
+    // au compte et écrit `entitlements/{uid}` (lu par fetchProGrant, inchangé)
+    // → le Pro acheté ici vaut aussi sur iPhone et sur le web. Déclencheurs :
+    // ProAccess (achat, « Restaurer un achat », relecture Play au lancement)
+    // via [purchaseLinker], chaque relecture de licence, retour au premier plan
+    // après un échec réessayable ([onForeground]).
+    private val purchaseLinks = PurchaseLinker(
+        service = service,
+        transport = HttpPurchaseLinkTransport(),
+        store = PrefsPurchaseLinkStore(ctx),
+        proof = { com.minou.mvrviewer.ui.ProAccess.currentProof() },
+        currentUid = { _auth.value.accountOrNull?.uid },
+        applyGrant = { com.minou.mvrviewer.ui.ProAccess.setAccountGrant(it) },
+        showRefusal = { com.minou.mvrviewer.ui.ProAccess.setAccountLinkRefusal(it) }
+    )
+    private val purchaseLinker: (Boolean) -> Unit = { explicit -> linkPurchase(explicit) }
+
+    init {
+        com.minou.mvrviewer.ui.ProAccess.grantRefresher = grantRefresher
+        com.minou.mvrviewer.ui.ProAccess.purchaseLinker = purchaseLinker
+    }
+
     // MARK: - Auth
 
     fun restoreSessionIfPossible() {
         viewModelScope.launch {
             val acc = runCatching { service.restoreSession() }.getOrNull() ?: return@launch
             _auth.value = AuthState.SignedIn(acc)
+            bindProAccount(acc)
+            refreshProGrant()
             refreshProjects()
         }
+    }
+
+    /** Compte connecté → ProAccess : uid pour l'`obfuscatedAccountId` du flux
+     *  d'achat, crochet d'envoi de la preuve (re)branché. */
+    private fun bindProAccount(acc: AccountInfo) {
+        com.minou.mvrviewer.ui.ProAccess.accountUid = acc.uid
+        com.minou.mvrviewer.ui.ProAccess.purchaseLinker = purchaseLinker
+    }
+
+    /**
+     * Relit la licence par compte pour la session courante et l'applique à
+     * [com.minou.mvrviewer.ui.ProAccess]. No-op si déconnecté. Dans
+     * [viewModelScope] (ne retarde pas la connexion). ORDRE (SPEC-purchase
+     * §6.1) : envoi automatique de la preuve d'achat si nécessaire →
+     * `fetchProGrant` → réparation (licence fausse alors que l'achat est
+     * mémorisé rattaché : un envoi forcé par session). Garde de course : si la
+     * session a changé pendant l'envoi ou la lecture (déconnexion, autre
+     * compte), le résultat n'est pas appliqué. Rien ici ne lève.
+     */
+    private fun refreshProGrant() {
+        if (_auth.value.accountOrNull == null) return
+        viewModelScope.launch { purchaseLinks.refreshProGrant() }
+    }
+
+    /** Envoie la preuve d'achat (déclencheurs ProAccess) ; `explicit` = geste
+     *  de l'utilisateur. Rattaché → licence relue. No-op si déconnecté. */
+    fun linkPurchase(explicit: Boolean) {
+        viewModelScope.launch { purchaseLinks.linkPurchase(explicit) }
+    }
+
+    /** Retour au premier plan (MainActivity.onResume) : renvoi automatique,
+     *  SEULEMENT si la dernière tentative a échoué de façon réessayable. */
+    fun onForeground() {
+        if (purchaseLinks.lastOutcomeIsRetry()) linkPurchase(explicit = false)
     }
 
     suspend fun signIn(email: String, password: String) {
@@ -99,6 +168,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val acc = service.signIn(email, password)
             _auth.value = AuthState.SignedIn(acc)
+            bindProAccount(acc)
+            refreshProGrant()
             refreshProjects()
             reattachAfterAuth()
         } catch (e: Exception) {
@@ -112,6 +183,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val acc = service.signUp(email, password, displayName)
             _auth.value = AuthState.SignedIn(acc)
+            bindProAccount(acc)
+            refreshProGrant()
             refreshProjects()
             reattachAfterAuth()
         } catch (e: Exception) {
@@ -127,7 +200,56 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _auth.value = AuthState.SignedOut
             _currentProject.value = null
             _cloudProjects.value = emptyList()
+            com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
+            com.minou.mvrviewer.ui.ProAccess.clearAccount()
         }
+    }
+
+    /**
+     * Suppression DÉFINITIVE du compte (politique Google Play « suppression de
+     * compte »). JAMAIS de garde Pro : c'est un droit, gratuit. Le service
+     * re-vérifie le mot de passe et n'ÉCRIT qu'après une sonde réseau ; en cas
+     * d'échec AVANT le commit (mot de passe faux, réseau, reconnexion exigée…)
+     * l'exception remonte à l'UI et le compte reste INTACT — l'observation du
+     * projet courant, coupée avant l'appel pour que plus aucun écouteur
+     * Firestore ne survive à la suppression, est rétablie.
+     * [SyncException.DeletionIncomplete] (données effacées, compte Auth encore
+     * vivant, service déjà déconnecté) : on passe à l'état déconnecté SANS rien
+     * rétablir ; l'utilisateur se reconnecte puis recommence.
+     * À la réussite : même nettoyage que [signOut] (identifiants chiffrés de
+     * reconnexion silencieuse effacés, état, projets cloud).
+     *
+     * Exécutée dans [viewModelScope] : la portée du dialogue peut être annulée
+     * (rotation, fermeture) sans interrompre une suppression IRRÉVERSIBLE déjà
+     * engagée ni laisser l'état du ViewModel incohérent ; l'appelant n'attend
+     * que le résultat.
+     */
+    suspend fun deleteAccount(password: String) {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        viewModelScope.async {
+            val project = _currentProject.value
+            stopObserving()
+            try {
+                service.deleteAccount(password)
+            } catch (e: SyncException.DeletionIncomplete) {
+                clearSignedInState()
+                throw e
+            } catch (e: Exception) {
+                project?.let { startObserving(it.id) }
+                throw e
+            }
+            clearSignedInState()
+        }.await()
+    }
+
+    /** État local « déconnecté » : identifiants de reconnexion silencieuse effacés, projets cloud oubliés. */
+    private fun clearSignedInState() {
+        runCatching { SyncCredentialStore.clear(ctx) }
+        _auth.value = AuthState.SignedOut
+        _currentProject.value = null
+        _cloudProjects.value = emptyList()
+        com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
+        com.minou.mvrviewer.ui.ProAccess.clearAccount()
     }
 
     private suspend fun refreshProjects() {
@@ -142,11 +264,12 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             currentContentKey = contentKey
             currentMvrBytes = mvrBytes
+            currentMvrSha = null
             stopObserving()
             _currentProject.value = null
             loadAndMergeAudit() // journal local dispo même sans compte
             if (_auth.value.isSignedIn) {
-                runCatching { service.projectMatchingContentKey(contentKey) }.getOrNull()?.let {
+                runCatching { projectForOpenedDocument(contentKey) }.getOrNull()?.let {
                     setCurrentProject(it)
                     loadAndMergeAudit()
                 }
@@ -157,35 +280,58 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun reattachAfterAuth() {
         val key = currentContentKey ?: return
-        runCatching { service.projectMatchingContentKey(key) }.getOrNull()?.let { setCurrentProject(it) }
+        runCatching { projectForOpenedDocument(key) }.getOrNull()?.let { setCurrentProject(it) }
     }
+
+    /** Projet cloud du document ouvert : voir [DownloadedProjects]. */
+    private suspend fun projectForOpenedDocument(contentKey: String): CloudProject? =
+        downloadedProjects.projectFor(service, contentKey, _auth.value.accountOrNull?.uid)
 
     fun detach() {
         stopObserving()
         _currentProject.value = null
         currentContentKey = null
         currentMvrBytes = null
+        currentMvrSha = null
+    }
+
+    /**
+     * Empreinte du .mvr ouvert, mise en cache : elle ne se calcule qu'à la publication ou à
+     * l'annonce d'une version plus récente (pas à chaque ouverture d'un gros show).
+     */
+    private fun openedMvrSha(): String? {
+        currentMvrSha?.let { return it }
+        val data = currentMvrBytes ?: return null
+        return ContentHash.sha256Hex(data).also { currentMvrSha = it }
     }
 
     // MARK: - Publier / rejoindre
 
     suspend fun publishCurrentProject(name: String): InviteCode {
+        // Partager = ouvrir SON projet à l'équipe : édition. Rejoindre reste gratuit.
+        if (!com.minou.mvrviewer.ui.ProAccess.gate("partager un projet") {}) throw SyncException.Message("Version Pro requise")
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
-        val key = currentContentKey; val data = currentMvrBytes
-        if (key == null || data == null) throw SyncException.Message("Aucun projet ouvert à partager.")
+        // L'empreinte est prise AVANT toute suspension : c'est elle qui reconnaît l'écho de
+        // notre propre publication (handleInbound → MvrVersionRule).
+        val key = currentContentKey; val data = currentMvrBytes; val sha = openedMvrSha()
+        if (key == null || data == null || sha == null) throw SyncException.Message(ctx.getString(com.minou.mvrviewer.R.string.sync_err_no_open_project))
         _status.value = SyncStatus.Syncing
         try {
-            val project = runCatching { service.projectMatchingContentKey(key) }.getOrNull()
+            val project = runCatching { projectForOpenedDocument(key) }.getOrNull()
                 ?: service.createProject(key, name)
             setCurrentProject(project)
-            val sha = ContentHash.sha256Hex(data)
             if (!service.blobExists(project.id, sha)) {
                 _status.value = SyncStatus.Uploading(0.0)
                 service.uploadBlob(project.id, sha, BlobKind.MVR, data) { p ->
                     _status.value = SyncStatus.Uploading(p)
                 }
             }
-            service.publishMVRVersion(project.id, sha)
+            val version = service.publishMVRVersion(project.id, sha)
+            // Notre version devient celle du projet courant (sinon il resterait à la version
+            // d'avant), si son événement ne l'a pas déjà fait.
+            if (_currentProject.value?.id == project.id) {
+                advanceMvrVersion(version, sha, _auth.value.accountOrNull?.uid ?: "")
+            }
             val invite = service.createInvite(project.id)
             refreshProjects()
             return invite
@@ -210,11 +356,15 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         val pid = projectId ?: _currentProject.value?.id ?: throw SyncException.ProjectNotFound
         return service.downloadBlob(pid, BlobRef(sha256, BlobKind.MVR, 0, "")) { p ->
             _status.value = SyncStatus.Downloading(p)
-        }.also { _status.value = SyncStatus.Idle }
+        }.also {
+            downloadedProjects.remember(it, pid)
+            _status.value = SyncStatus.Idle
+        }
     }
 
     /** Téléverse le plan DXF (`refplan.bin`, format d'échange DXP1) ; renvoie le SHA. */
     suspend fun uploadRefPlan(interopBytes: ByteArray): String? {
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return null
         val project = _currentProject.value ?: return null
         if (!_auth.value.isSignedIn) return null
         val sha = ContentHash.sha256Hex(interopBytes)
@@ -224,6 +374,80 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             }
             sha
         }.getOrNull()
+    }
+
+    /**
+     * Envois de la 3D des types MA : dans [viewModelScope] (survivent à l'écran qui les a
+     * demandés), dédoublonnés, bornés — cf. [FixtureBlobUploader].
+     */
+    private val fixtureUploader = FixtureBlobUploader(
+        scope = viewModelScope,
+        exists = { pid, sha -> service.blobExists(pid, sha) },
+        upload = { pid, sha, data -> service.uploadBlob(pid, sha, BlobKind.FIXTURE_3D, data, null) }
+    )
+
+    /**
+     * S'assure que le blob `sha256` (déjà en cache local) est dans le Storage du projet :
+     * `blobExists`, sinon lecture paresseuse des octets puis envoi (SPEC-ma.md §4.3 règles
+     * (1) et (2)). L'envoi continue EN FOND au-delà de [waitMs] : l'appelant n'est jamais
+     * bloqué plus longtemps (« un échec ne bloque NI l'enregistrement NI le push »).
+     * Renvoie null si rien n'a été tenté (filet silencieux : gratuit, non connecté, projet
+     * non partagé, blob absent du cache), true si le blob est en ligne, false si l'envoi a
+     * échoué OU n'a pas fini dans le délai (nouvel essai au push suivant).
+     */
+    suspend fun ensureFixtureBlobUploaded(
+        sha256: String,
+        waitMs: Long = FixtureBlobUploader.WAIT_MS,
+        bytes: suspend () -> ByteArray?
+    ): Boolean? {
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return null
+        val project = _currentProject.value ?: return null
+        if (!_auth.value.isSignedIn) return null
+        return fixtureUploader.ensure(project.id, sha256, bytes, waitMs)
+    }
+
+    /** Issue d'un téléchargement de 3D de type MA (la vérification du SHA est faite par l'appelant). */
+    sealed class FixtureBlobDownload {
+        class Ok(val bytes: ByteArray) : FixtureBlobDownload()
+        /** Absent du Storage du projet (ou pas de projet partagé ouvert). */
+        object Missing : FixtureBlobDownload()
+        /** Objet Storage > 64 Mo : refusé AVANT téléchargement. */
+        object TooLarge : FixtureBlobDownload()
+        /** Hors ligne / erreur réseau : nouvel essai plus tard. */
+        object Failed : FixtureBlobDownload()
+    }
+
+    /**
+     * Télécharge une 3D de type MA (SPEC-ma.md §4.3). JAMAIS gardé Pro (réception) ;
+     * taille lue AVANT `getBytes` (plafond 64 Mo).
+     */
+    suspend fun downloadFixtureBlob(sha256: String): FixtureBlobDownload {
+        val project = _currentProject.value ?: return FixtureBlobDownload.Missing
+        // Délais BORNÉS : hors ligne, Firebase Storage relance `getMetadata` / `getBytes`
+        // jusqu'à 10 min ; « Téléchargement impossible » doit apparaître bien avant.
+        val size = try {
+            kotlinx.coroutines.withTimeout(BLOB_METADATA_TIMEOUT_MS) { service.blobSize(project.id, sha256) }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            return FixtureBlobDownload.Failed
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return FixtureBlobDownload.Failed
+        } ?: return FixtureBlobDownload.Missing
+        if (size > com.minou.mvrviewer.mvr.Fixture3DModel.MAX_BYTES) return FixtureBlobDownload.TooLarge
+        return try {
+            kotlinx.coroutines.withTimeout(BLOB_DOWNLOAD_TIMEOUT_MS) {
+                FixtureBlobDownload.Ok(service.downloadBlob(project.id, BlobRef(sha256, BlobKind.FIXTURE_3D, 0, ""), null))
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            FixtureBlobDownload.Failed
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: SyncException.BlobMissing) {
+            FixtureBlobDownload.Missing
+        } catch (e: Exception) {
+            FixtureBlobDownload.Failed
+        }
     }
 
     suspend fun downloadRefPlan(sha256: String): ByteArray? {
@@ -243,6 +467,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     // MARK: - Push (appelé par les écrans après édition locale)
 
     private fun push(payload: SectionPayload) {
+        // FILET PRO, SILENCIEUX (jamais de paywall depuis un effet de fond) :
+        // un gratuit n'écrit jamais dans le projet partagé, quel que soit le
+        // chemin — ses aides de lecture restent locales.
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return
         if (!_auth.value.isSignedIn) return
         val project = _currentProject.value ?: return
         val opId = UUID.randomUUID().toString()
@@ -260,14 +488,53 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     ) = push(SectionPayload.Manifest(
         LocalMapper.manifestDTO(mvrName, dxfName, transform, hiddenLayers, showSatellite, refPlanBlobSHA)))
 
-    fun pushCalibration(anchors: List<GeoAnchor>) =
-        push(SectionPayload.Calibration(LocalMapper.calibrationDTO(anchors)))
+    /** Ancres + relevé 3 points (gardé seulement avec 2 ancres, renvoyé tel quel). */
+    fun pushCalibration(anchors: List<GeoAnchor>, survey: com.minou.mvrviewer.mvr.GeoSurvey? = null) =
+        push(SectionPayload.Calibration(LocalMapper.calibrationDTO(anchors, survey)))
+
+    /** Câblage électrique (distributeurs + affectations + réglages). */
+    fun pushPowerCabling(dto: PowerCablingDTO) =
+        push(SectionPayload.PowerCabling(dto))
+
+    /** Câblage DMX (lignes simples/multipaires + affectations). */
+    fun pushDmxCabling(dto: DmxCablingDTO) =
+        push(SectionPayload.DmxCabling(dto))
+
+    /** Projecteurs custom (liste des DÉFINITIONS de types utilisés dans le projet). */
+    fun pushCustomFixtures(dto: CustomFixturesDTO) =
+        push(SectionPayload.CustomFixtures(dto))
+
+    // MARK: - Bibliothèque de puissances (base communautaire GLOBALE)
+
+    /**
+     * Lit TOUS les votes cloud pour une spec (vide si aucun / non connecté / hors
+     * ligne). Ne LÈVE jamais : la résolution locale prend le relais. Migre au
+     * passage un ancien doc mono-valeur en un vote unique (côté service).
+     */
+    suspend fun fetchPowerVotes(spec: String): List<PowerVote> =
+        runCatching { service.fetchPowerVotes(spec) }.getOrDefault(emptyList())
+
+    /**
+     * Dépose (ou actualise) MON vote dans la biblio partagée puis renvoie le
+     * CONSENSUS fraîchement recalculé sur l'ENSEMBLE des votes (mon vote inclus).
+     * Renvoie `null` si non connecté / hors ligne — l'appelant retombe alors sur
+     * un consensus local de son seul vote. Personne n'écrase le vote d'un autre.
+     */
+    suspend fun submitPowerVote(spec: String, watts: Int): PowerConsensus? {
+        if (!com.minou.mvrviewer.ui.ProAccess.isPro) return null
+        if (spec.isBlank()) return null
+        val by = _auth.value.accountOrNull?.uid ?: ""
+        return runCatching {
+            service.putPowerVote(spec, watts, by)
+            powerConsensus(service.fetchPowerVotes(spec).map { it.watts })
+        }.getOrNull()
+    }
 
     // MARK: - Journal de modifications (audit)
 
     /** Auteur courant (compte connecté, sinon local hors-ligne). */
     val currentAuthor: Pair<String, String>
-        get() = _auth.value.accountOrNull?.let { it.uid to it.displayName } ?: ("" to "Moi (hors ligne)")
+        get() = _auth.value.accountOrNull?.let { it.uid to it.displayName } ?: ("" to ctx.getString(com.minou.mvrviewer.R.string.sync_me_offline))
 
     fun newAuditId(): String = UUID.randomUUID().toString()
     fun nowEpoch(): Double = System.currentTimeMillis() / 1000.0
@@ -342,13 +609,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _events.tryEmit(event)
             }
-            is RemoteEvent.MvrVersion -> {
-                val cp = _currentProject.value
-                if (cp != null && event.version > cp.mvrVersion) {
-                    _pendingMvrVersion.value =
-                        MvrVersionNotice(cp.id, event.version, event.sha256, event.updatedBy)
-                }
-            }
+            is RemoteEvent.MvrVersion -> advanceMvrVersion(event.version, event.sha256, event.updatedBy)
             is RemoteEvent.MembershipChanged -> viewModelScope.launch { refreshProjects() }
             is RemoteEvent.Audit -> {
                 val key = currentContentKey
@@ -357,6 +618,15 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
                     else mergeAuditInMemory(event.entries)
             }
         }
+    }
+
+    /** Version du .mvr publiée ici ou reçue : voir [MvrVersionRule]. */
+    private fun advanceMvrVersion(version: Int, sha256: String, updatedBy: String) {
+        val r = MvrVersionRule.advance(
+            _currentProject.value, _pendingMvrVersion.value, version, sha256, updatedBy, ::openedMvrSha
+        ) ?: return
+        _currentProject.value = r.project
+        _pendingMvrVersion.value = r.notice
     }
 
     private fun pruneOpIds() {
@@ -375,5 +645,17 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         super.onCleared()
         stopObserving()
+        // Ne pas laisser le singleton ProAccess retenir ce ViewModel.
+        if (com.minou.mvrviewer.ui.ProAccess.grantRefresher === grantRefresher) {
+            com.minou.mvrviewer.ui.ProAccess.grantRefresher = null
+        }
+        if (com.minou.mvrviewer.ui.ProAccess.purchaseLinker === purchaseLinker) {
+            com.minou.mvrviewer.ui.ProAccess.purchaseLinker = null
+        }
     }
 }
+
+/** Lecture de la taille d'un blob 3D de type MA (hors ligne : échec rapide, pas 10 min). */
+private const val BLOB_METADATA_TIMEOUT_MS = 20_000L
+/** Téléchargement d'un blob 3D de type MA (≤ 64 Mo). */
+private const val BLOB_DOWNLOAD_TIMEOUT_MS = 180_000L

@@ -1,0 +1,1469 @@
+<?xml version="1.0"?>
+<MA xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schemas.malighting.de/grandma2/xml/MA http://schemas.malighting.de/grandma2/xml/2.8.123/MA.xsd" xmlns="http://schemas.malighting.de/grandma2/xml/MA" major_vers="3" minor_vers="7" stream_vers="0">
+    <FixtureType name="COLORado PXL Curve 12" mode="Single Control: Standard 101Ch">
+        <InfoItems>
+            <Info type="Revision" date="2026-03-23T10:46:58">Converted GDTF to grandMA2 fixture type with Share Converter version 1.4.1</Info>
+            <Info type="Revision" date="2025-03-25T17:01:39">Rev 1.1.4</Info>
+            <Info type="Revision" date="2025-03-25T18:02:19">Rev 1.1.4, Uploaded to GDTF Share.</Info>
+            <Info type="Revision" date="2026-03-23T10:06:34">shiitos</Info>
+            <Info type="Revision" date="2026-03-23T10:36:21">shiitos</Info>
+            <Info type="Revision" date="2026-03-23T10:46:07">shiitos</Info>
+            <Info>COLORado PXL Curve 12 is a fully pixel-mappable motorized IP65-rated RGBW LED batten with individual control of zoom, tilt and color across twelve independent heads. Basic and advanced operating modes and an extensive library of pre-built effects that includes virtual gobos, movement macros, and foreground/background color control make creating complex and volumetric looks easy. Seamless edge-to-edge mounting maintains pixel pitch between fixtures helping to make runway effects consistent. COLORado PXL Curve 12 speaks DMX, sACN, Art-Net, Kling-Net and RDM.</Info>
+            <Info type="Revision" date="2026-03-23T10:47:03.418">12345, Uploaded to Fixture Share.</Info>
+        </InfoItems>
+        <short_name>COLORado PXL Curve 12</short_name>
+        <manufacturer>Chauvet Professional</manufacturer>
+        <short_manufacturer>Chauvet Professional</short_manufacturer>
+        <Modules>
+            <Module name="Body" class="None" beamtype="None" beam_intensity="" index="0" beam_angle="">
+                <Model name="Body" sunshadeType="ExcludeOwnBeam" vertices_have_pos="true" vertices_have_tex0="true" model_type="Model" axis_to_parent="None">
+                    <Offset>
+                        <Location x="0.000000" y="0.000000" z="0.000000"/>
+                        <Rotation x="0.000000" y="-0.000000" z="0.000000"/>
+                        <Scaling x="1" y="1" z="1"/>
+                    </Offset>
+                </Model>
+                <ChannelType coarse="25" default="0" attribute="POSITIONMSPEED" feature="Control" preset="Control" highlight_value="100">
+                    <ChannelFunction subattribute="POSITIONMSPEED" attribute="POSITIONMSPEED" feature="Control" preset="Control" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="26" default="0" snap="true" attribute="PositionEffect" feature="Position" preset="Position">
+                    <ChannelFunction subattribute="PositionEffect" attribute="PositionEffect" feature="Position" preset="Position" from="0" to="1.57" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="263172">
+                        <ChannelSet name="Off" from_dmx="0" to_dmx="4"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="PositionEffect" attribute="PositionEffect" feature="Position" preset="Position" from="1.57" to="100" physfrom="0" physto="1" min_dmx_24="328965" max_dmx_24="16777215">
+                        <ChannelSet name="Tilt Macro 1" from_dmx="5" to_dmx="9"/>
+                        <ChannelSet name="Tilt Macro 2" from_dmx="10" to_dmx="14"/>
+                        <ChannelSet name="Tilt Macro 3" from_dmx="15" to_dmx="19"/>
+                        <ChannelSet name="Tilt Macro 4" from_dmx="20" to_dmx="24"/>
+                        <ChannelSet name="Tilt Macro 5" from_dmx="25" to_dmx="29"/>
+                        <ChannelSet name="Tilt Macro 6" from_dmx="30" to_dmx="34"/>
+                        <ChannelSet name="Tilt Macro 7" from_dmx="35" to_dmx="39"/>
+                        <ChannelSet name="Tilt Macro 8" from_dmx="40" to_dmx="44"/>
+                        <ChannelSet name="Tilt Macro 9" from_dmx="45" to_dmx="49"/>
+                        <ChannelSet name="Tilt Macro 10" from_dmx="50" to_dmx="54"/>
+                        <ChannelSet name="Tilt Macro 11" from_dmx="55" to_dmx="59"/>
+                        <ChannelSet name="Tilt Macro 12" from_dmx="60" to_dmx="64"/>
+                        <ChannelSet name="Tilt Macro 13" from_dmx="65" to_dmx="69"/>
+                        <ChannelSet name="Tilt Macro 14" from_dmx="70" to_dmx="74"/>
+                        <ChannelSet name="Tilt Macro 15" from_dmx="75" to_dmx="79"/>
+                        <ChannelSet name="Tilt Macro 16" from_dmx="80" to_dmx="84"/>
+                        <ChannelSet name="Tilt Macro 17" from_dmx="85" to_dmx="89"/>
+                        <ChannelSet name="Tilt Macro 18" from_dmx="90" to_dmx="94"/>
+                        <ChannelSet name="Tilt Macro 19" from_dmx="95" to_dmx="99"/>
+                        <ChannelSet name="Tilt Macro 20" from_dmx="100" to_dmx="104"/>
+                        <ChannelSet name="Tilt Macro 21" from_dmx="105" to_dmx="109"/>
+                        <ChannelSet name="Tilt Macro 22" from_dmx="110" to_dmx="114"/>
+                        <ChannelSet name="Tilt Macro 23" from_dmx="115" to_dmx="119"/>
+                        <ChannelSet name="Tilt Macro 24" from_dmx="120" to_dmx="124"/>
+                        <ChannelSet name="Tilt Macro 25" from_dmx="125" to_dmx="129"/>
+                        <ChannelSet name="Tilt Macro 26" from_dmx="130" to_dmx="134"/>
+                        <ChannelSet name="Tilt Macro 27" from_dmx="135" to_dmx="139"/>
+                        <ChannelSet name="Tilt Macro 28" from_dmx="140" to_dmx="144"/>
+                        <ChannelSet name="Tilt Macro 29" from_dmx="145" to_dmx="149"/>
+                        <ChannelSet name="Tilt Macro 30" from_dmx="150" to_dmx="154"/>
+                        <ChannelSet name="Tilt Macro 31" from_dmx="155" to_dmx="159"/>
+                        <ChannelSet name="Tilt Macro 32" from_dmx="160" to_dmx="164"/>
+                        <ChannelSet name="Tilt Macro 33" from_dmx="165" to_dmx="169"/>
+                        <ChannelSet name="Tilt Macro 34" from_dmx="170" to_dmx="174"/>
+                        <ChannelSet name="Tilt Macro 35" from_dmx="175" to_dmx="179"/>
+                        <ChannelSet name="Tilt Macro 36" from_dmx="180" to_dmx="184"/>
+                        <ChannelSet name="Tilt Macro 37" from_dmx="185" to_dmx="189"/>
+                        <ChannelSet name="Tilt Macro 38" from_dmx="190" to_dmx="194"/>
+                        <ChannelSet name="Tilt Macro 39" from_dmx="195" to_dmx="199"/>
+                        <ChannelSet name="Tilt Macro 40" from_dmx="200" to_dmx="204"/>
+                        <ChannelSet name="Tilt Macro 41" from_dmx="205" to_dmx="209"/>
+                        <ChannelSet name="Tilt Macro 42" from_dmx="210" to_dmx="214"/>
+                        <ChannelSet name="Tilt Macro 43" from_dmx="215" to_dmx="219"/>
+                        <ChannelSet name="Tilt Macro 44" from_dmx="220" to_dmx="224"/>
+                        <ChannelSet name="Tilt Macro 45" from_dmx="225" to_dmx="229"/>
+                        <ChannelSet name="Tilt Macro 46" from_dmx="230" to_dmx="234"/>
+                        <ChannelSet name="Tilt Macro 47" from_dmx="235" to_dmx="239"/>
+                        <ChannelSet name="Tilt Macro 48" from_dmx="240" to_dmx="244"/>
+                        <ChannelSet name="Tilt Macro 49" from_dmx="245" to_dmx="249"/>
+                        <ChannelSet name="Tilt Macro 50" from_dmx="250" to_dmx="254"/>
+                        <ChannelSet name="Tilt Macro 51" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="27" default="0" attribute="CTC" feature="CTC" preset="COLOR" highlight_value="0">
+                    <ChannelFunction subattribute="CTC" attribute="CTC" feature="CTC" preset="COLOR" from="0" to="0" physfrom="0" physto="0" min_dmx_24="0" max_dmx_24="0">
+                        <ChannelSet name="Off" from_dmx="0" to_dmx="0" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="CTC" attribute="CTC" feature="CTC" preset="COLOR" from="0" to="100" physfrom="19000" physto="2700" min_dmx_24="65793" max_dmx_24="16777215">
+                        <ChannelSet name="19000K-2700K - CTC" from_dmx="1" to_dmx="255" slot_from="19000" slot_to="2700"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="28" default="0" attribute="COLORMACROS" feature="Color" preset="Color" highlight_value="0">
+                    <ChannelFunction subattribute="COLORMACROS" attribute="COLORMACROS" feature="Color" preset="Color" from="0" to="0" physfrom="0" physto="0" min_dmx_24="0" max_dmx_24="0" wheel="1">
+                        <ChannelSet name="Open" from_dmx="0" to_dmx="0" slot_from="0" slot_to="0" slot_index="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="CTC" attribute="COLORMACROS" feature="Color" preset="Color" from="0" to="3.92" physfrom="8000" physto="0" min_dmx_24="65793" max_dmx_24="657930" wheel="1">
+                        <ChannelSet name="White 2700K - CTC" from_dmx="1" to_dmx="2" slot_from="2700" slot_to="2700" slot_index="1"/>
+                        <ChannelSet name="White 3200K - CTC" from_dmx="3" to_dmx="4" slot_from="3200" slot_to="3200" slot_index="2"/>
+                        <ChannelSet name="White 4200K - CTC" from_dmx="5" to_dmx="6" slot_from="4200" slot_to="4200" slot_index="3"/>
+                        <ChannelSet name="White 5600K - CTC" from_dmx="7" to_dmx="8" slot_from="5600" slot_to="5600" slot_index="4"/>
+                        <ChannelSet name="White 8000K - CTC" from_dmx="9" to_dmx="10" slot_from="8000" slot_to="8000" slot_index="5"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="COLORMACROS" attribute="COLORMACROS" feature="Color" preset="Color" from="3.92" to="93.73" physfrom="0" physto="0" min_dmx_24="723723" max_dmx_24="15724527" wheel="1">
+                        <ChannelSet name="Blue" from_dmx="11" to_dmx="11" slot_from="0" slot_to="0" slot_index="6"/>
+                        <ChannelSet name="+Green" from_dmx="12" to_dmx="48" slot_index="7"/>
+                        <ChannelSet name="Cyan" from_dmx="49" to_dmx="49" slot_from="0" slot_to="0" slot_index="8"/>
+                        <ChannelSet name="-Blue" from_dmx="50" to_dmx="86" slot_index="9"/>
+                        <ChannelSet name="Green" from_dmx="87" to_dmx="87" slot_from="0" slot_to="0" slot_index="10"/>
+                        <ChannelSet name="+Red" from_dmx="88" to_dmx="124" slot_index="11"/>
+                        <ChannelSet name="Yellow" from_dmx="125" to_dmx="125" slot_from="0" slot_to="0" slot_index="12"/>
+                        <ChannelSet name="-Green" from_dmx="126" to_dmx="162" slot_index="13"/>
+                        <ChannelSet name="Red" from_dmx="163" to_dmx="163" slot_from="0" slot_to="0" slot_index="14"/>
+                        <ChannelSet name="+Blue" from_dmx="164" to_dmx="200" slot_index="15"/>
+                        <ChannelSet name="Magenta" from_dmx="201" to_dmx="201" slot_from="0" slot_to="0" slot_index="16"/>
+                        <ChannelSet name="-Red" from_dmx="202" to_dmx="238" slot_index="17"/>
+                        <ChannelSet name="Blue" from_dmx="239" to_dmx="239" slot_from="0" slot_to="0" slot_index="6"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="ColorControl" attribute="COLORMACROS" feature="Color" preset="Color" from="93.73" to="100" physfrom="10" physto="0.1" min_dmx_24="15790320" max_dmx_24="16777215" wheel="1">
+                        <ChannelSet name="Color Fade F > S" from_dmx="240" to_dmx="247" slot_from="10" slot_to="0.1"/>
+                        <ChannelSet name="Color Snap F > S" from_dmx="248" to_dmx="255" slot_from="10" slot_to="0.1"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="29" default="0" snap="true" attribute="EFFECT" feature="EFFECT" preset="BEAM" highlight_value="0">
+                    <ChannelFunction subattribute="EFFECTSELECT" attribute="EFFECT" feature="EFFECT" preset="BEAM" from="0" to="0" physfrom="0" physto="0" min_dmx_24="0" max_dmx_24="0">
+                        <ChannelSet name="Off" from_dmx="0" to_dmx="0" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="EFFECTSELECT" attribute="EFFECT" feature="EFFECT" preset="BEAM" from="0" to="57.65" physfrom="0" physto="0" min_dmx_24="65793" max_dmx_24="9671571">
+                        <ChannelSet name="Pattern 1 - Macro" from_dmx="1" to_dmx="1" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 2 - Macro" from_dmx="2" to_dmx="2" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 3 - Macro" from_dmx="3" to_dmx="3" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 4 - Macro" from_dmx="4" to_dmx="4" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 5 - Macro" from_dmx="5" to_dmx="5" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 6 - Macro" from_dmx="6" to_dmx="6" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 7 - Macro" from_dmx="7" to_dmx="7" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 8 - Macro" from_dmx="8" to_dmx="8" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 9 - Macro" from_dmx="9" to_dmx="9" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 10 - Macro" from_dmx="10" to_dmx="10" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 11 - Macro" from_dmx="11" to_dmx="11" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 12 - Macro" from_dmx="12" to_dmx="12" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 13 - Macro" from_dmx="13" to_dmx="13" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 14 - Macro" from_dmx="14" to_dmx="14" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 15 - Macro" from_dmx="15" to_dmx="15" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 16 - Macro" from_dmx="16" to_dmx="16" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 17 - Macro" from_dmx="17" to_dmx="17" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 18 - Macro" from_dmx="18" to_dmx="18" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 19 - Macro" from_dmx="19" to_dmx="19" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 20 - Macro" from_dmx="20" to_dmx="20" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 21 - Macro" from_dmx="21" to_dmx="21" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 22 - Macro" from_dmx="22" to_dmx="22" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 23 - Macro" from_dmx="23" to_dmx="23" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 24 - Macro" from_dmx="24" to_dmx="24" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 25 - Macro" from_dmx="25" to_dmx="25" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 26 - Macro" from_dmx="26" to_dmx="26" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 27 - Macro" from_dmx="27" to_dmx="27" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 28 - Macro" from_dmx="28" to_dmx="28" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 29 - Macro" from_dmx="29" to_dmx="29" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 30 - Macro" from_dmx="30" to_dmx="30" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 31 - Macro" from_dmx="31" to_dmx="31" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 32 - Macro" from_dmx="32" to_dmx="32" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 33 - Macro" from_dmx="33" to_dmx="33" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 34 - Macro" from_dmx="34" to_dmx="34" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 35 - Macro" from_dmx="35" to_dmx="35" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 36 - Macro" from_dmx="36" to_dmx="36" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 37 - Macro" from_dmx="37" to_dmx="37" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 38 - Macro" from_dmx="38" to_dmx="38" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 39 - Macro" from_dmx="39" to_dmx="39" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 40 - Macro" from_dmx="40" to_dmx="40" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 41 - Macro" from_dmx="41" to_dmx="41" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 42 - Macro" from_dmx="42" to_dmx="42" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 43 - Macro" from_dmx="43" to_dmx="43" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 44 - Macro" from_dmx="44" to_dmx="44" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 45 - Macro" from_dmx="45" to_dmx="45" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 46 - Macro" from_dmx="46" to_dmx="46" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 47 - Macro" from_dmx="47" to_dmx="47" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 48 - Macro" from_dmx="48" to_dmx="48" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 49 - Macro" from_dmx="49" to_dmx="49" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 50 - Macro" from_dmx="50" to_dmx="50" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 51 - Macro" from_dmx="51" to_dmx="51" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 52 - Macro" from_dmx="52" to_dmx="52" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 53 - Macro" from_dmx="53" to_dmx="53" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 54 - Macro" from_dmx="54" to_dmx="54" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 55 - Macro" from_dmx="55" to_dmx="55" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 56 - Macro" from_dmx="56" to_dmx="56" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 57 - Macro" from_dmx="57" to_dmx="57" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 58 - Macro" from_dmx="58" to_dmx="58" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 59 - Macro" from_dmx="59" to_dmx="59" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 60 - Macro" from_dmx="60" to_dmx="60" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 61 - Macro" from_dmx="61" to_dmx="61" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 62 - Macro" from_dmx="62" to_dmx="62" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 63 - Macro" from_dmx="63" to_dmx="63" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 64 - Macro" from_dmx="64" to_dmx="64" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 65 - Macro" from_dmx="65" to_dmx="65" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 66 - Macro" from_dmx="66" to_dmx="66" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 67 - Macro" from_dmx="67" to_dmx="67" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 68 - Macro" from_dmx="68" to_dmx="68" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 69 - Macro" from_dmx="69" to_dmx="69" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 70 - Macro" from_dmx="70" to_dmx="70" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 71 - Macro" from_dmx="71" to_dmx="71" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 72 - Macro" from_dmx="72" to_dmx="72" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 73 - Macro" from_dmx="73" to_dmx="73" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 74 - Macro" from_dmx="74" to_dmx="74" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 75 - Macro" from_dmx="75" to_dmx="75" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 76 - Macro" from_dmx="76" to_dmx="76" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 77 - Macro" from_dmx="77" to_dmx="77" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 78 - Macro" from_dmx="78" to_dmx="78" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 79 - Macro" from_dmx="79" to_dmx="79" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 80 - Macro" from_dmx="80" to_dmx="80" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 81 - Macro" from_dmx="81" to_dmx="81" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 82 - Macro" from_dmx="82" to_dmx="82" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 83 - Macro" from_dmx="83" to_dmx="83" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 84 - Macro" from_dmx="84" to_dmx="84" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 85 - Macro" from_dmx="85" to_dmx="85" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 86 - Macro" from_dmx="86" to_dmx="86" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 87 - Macro" from_dmx="87" to_dmx="87" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 88 - Macro" from_dmx="88" to_dmx="88" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 89 - Macro" from_dmx="89" to_dmx="89" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 90 - Macro" from_dmx="90" to_dmx="90" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 91 - Macro" from_dmx="91" to_dmx="91" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 92 - Macro" from_dmx="92" to_dmx="92" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 93 - Macro" from_dmx="93" to_dmx="93" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 94 - Macro" from_dmx="94" to_dmx="94" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 95 - Macro" from_dmx="95" to_dmx="95" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 96 - Macro" from_dmx="96" to_dmx="96" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 97 - Macro" from_dmx="97" to_dmx="97" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 98 - Macro" from_dmx="98" to_dmx="98" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 99 - Macro" from_dmx="99" to_dmx="99" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 100 - Macro" from_dmx="100" to_dmx="100" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 101 - Macro" from_dmx="101" to_dmx="101" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 102 - Macro" from_dmx="102" to_dmx="102" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 103 - Macro" from_dmx="103" to_dmx="103" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 104 - Macro" from_dmx="104" to_dmx="104" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 105 - Macro" from_dmx="105" to_dmx="105" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 106 - Macro" from_dmx="106" to_dmx="106" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 107 - Macro" from_dmx="107" to_dmx="107" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 108 - Macro" from_dmx="108" to_dmx="108" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 109 - Macro" from_dmx="109" to_dmx="109" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 110 - Macro" from_dmx="110" to_dmx="110" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 111 - Macro" from_dmx="111" to_dmx="111" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 112 - Macro" from_dmx="112" to_dmx="112" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 113 - Macro" from_dmx="113" to_dmx="113" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 114 - Macro" from_dmx="114" to_dmx="114" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 115 - Macro" from_dmx="115" to_dmx="115" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 116 - Macro" from_dmx="116" to_dmx="116" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 117 - Macro" from_dmx="117" to_dmx="117" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 118 - Macro" from_dmx="118" to_dmx="118" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 119 - Macro" from_dmx="119" to_dmx="119" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 120 - Macro" from_dmx="120" to_dmx="120" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 121 - Macro" from_dmx="121" to_dmx="121" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 122 - Macro" from_dmx="122" to_dmx="122" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 123 - Macro" from_dmx="123" to_dmx="123" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 124 - Macro" from_dmx="124" to_dmx="124" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 125 - Macro" from_dmx="125" to_dmx="125" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 126 - Macro" from_dmx="126" to_dmx="126" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 127 - Macro" from_dmx="127" to_dmx="127" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 128 - Macro" from_dmx="128" to_dmx="128" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 129 - Macro" from_dmx="129" to_dmx="129" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 130 - Macro" from_dmx="130" to_dmx="130" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 131 - Macro" from_dmx="131" to_dmx="131" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 132 - Macro" from_dmx="132" to_dmx="132" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 133 - Macro" from_dmx="133" to_dmx="133" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 134 - Macro" from_dmx="134" to_dmx="134" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 135 - Macro" from_dmx="135" to_dmx="135" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 136 - Macro" from_dmx="136" to_dmx="136" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 137 - Macro" from_dmx="137" to_dmx="137" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 138 - Macro" from_dmx="138" to_dmx="138" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 139 - Macro" from_dmx="139" to_dmx="139" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 140 - Macro" from_dmx="140" to_dmx="140" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 141 - Macro" from_dmx="141" to_dmx="141" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 142 - Macro" from_dmx="142" to_dmx="142" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 143 - Macro" from_dmx="143" to_dmx="143" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 144 - Macro" from_dmx="144" to_dmx="144" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 145 - Macro" from_dmx="145" to_dmx="145" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 146 - Macro" from_dmx="146" to_dmx="146" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 147 - Macro" from_dmx="147" to_dmx="147" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="DMXSOURCESELECT" attribute="EFFECT" feature="EFFECT" preset="BEAM" from="57.65" to="58.04" physfrom="0" physto="0" min_dmx_24="9737364" max_dmx_24="9737364">
+                        <ChannelSet name="Pattern 148 - Macro" from_dmx="148" to_dmx="148" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="EFFECTSELECT" attribute="EFFECT" feature="EFFECT" preset="BEAM" from="58.04" to="63.53" physfrom="0" physto="0" min_dmx_24="9803157" max_dmx_24="10658466">
+                        <ChannelSet name="Pattern 149 - Macro" from_dmx="149" to_dmx="149" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 150 - Macro" from_dmx="150" to_dmx="150" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 151 - Macro" from_dmx="151" to_dmx="151" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 152 - Macro" from_dmx="152" to_dmx="152" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 153 - Macro" from_dmx="153" to_dmx="153" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 154 - Macro" from_dmx="154" to_dmx="154" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 155 - Macro" from_dmx="155" to_dmx="155" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 156 - Macro" from_dmx="156" to_dmx="156" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 157 - Macro" from_dmx="157" to_dmx="157" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 158 - Macro" from_dmx="158" to_dmx="158" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 159 - Macro" from_dmx="159" to_dmx="159" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 160 - Macro" from_dmx="160" to_dmx="160" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 161 - Macro" from_dmx="161" to_dmx="161" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 162 - Macro" from_dmx="162" to_dmx="162" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="Effects1Fade" attribute="EFFECT" feature="EFFECT" preset="BEAM" from="63.53" to="63.92" physfrom="0" physto="0" min_dmx_24="10724259" max_dmx_24="10724259">
+                        <ChannelSet name="Pattern 163 - Macro" from_dmx="163" to_dmx="163" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="EFFECTSELECT" attribute="EFFECT" feature="EFFECT" preset="BEAM" from="63.92" to="100" physfrom="0" physto="0" min_dmx_24="10790052" max_dmx_24="16777215">
+                        <ChannelSet name="Pattern 164 - Macro" from_dmx="164" to_dmx="164" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 165 - Macro" from_dmx="165" to_dmx="165" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 166 - Macro" from_dmx="166" to_dmx="166" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 167 - Macro" from_dmx="167" to_dmx="167" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 168 - Macro" from_dmx="168" to_dmx="168" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 169 - Macro" from_dmx="169" to_dmx="169" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 170 - Macro" from_dmx="170" to_dmx="170" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 171 - Macro" from_dmx="171" to_dmx="171" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 172 - Macro" from_dmx="172" to_dmx="172" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 173 - Macro" from_dmx="173" to_dmx="173" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 174 - Macro" from_dmx="174" to_dmx="174" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 175 - Macro" from_dmx="175" to_dmx="175" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 176 - Macro" from_dmx="176" to_dmx="176" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 177 - Macro" from_dmx="177" to_dmx="177" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 178 - Macro" from_dmx="178" to_dmx="178" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 179 - Macro" from_dmx="179" to_dmx="179" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 180 - Macro" from_dmx="180" to_dmx="180" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 181 - Macro" from_dmx="181" to_dmx="181" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 182 - Macro" from_dmx="182" to_dmx="182" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 183 - Macro" from_dmx="183" to_dmx="183" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 184 - Macro" from_dmx="184" to_dmx="184" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 185 - Macro" from_dmx="185" to_dmx="185" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 186 - Macro" from_dmx="186" to_dmx="186" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 187 - Macro" from_dmx="187" to_dmx="187" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 188 - Macro" from_dmx="188" to_dmx="188" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 189 - Macro" from_dmx="189" to_dmx="189" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 190 - Macro" from_dmx="190" to_dmx="190" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 191 - Macro" from_dmx="191" to_dmx="191" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 192 - Macro" from_dmx="192" to_dmx="192" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 193 - Macro" from_dmx="193" to_dmx="193" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 194 - Macro" from_dmx="194" to_dmx="194" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 195 - Macro" from_dmx="195" to_dmx="195" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 196 - Macro" from_dmx="196" to_dmx="196" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 197 - Macro" from_dmx="197" to_dmx="197" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 198 - Macro" from_dmx="198" to_dmx="198" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 199 - Macro" from_dmx="199" to_dmx="199" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 200 - Macro" from_dmx="200" to_dmx="200" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 201 - Macro" from_dmx="201" to_dmx="201" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 202 - Macro" from_dmx="202" to_dmx="202" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 203 - Macro" from_dmx="203" to_dmx="203" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 204 - Macro" from_dmx="204" to_dmx="204" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 205 - Macro" from_dmx="205" to_dmx="205" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 206 - Macro" from_dmx="206" to_dmx="206" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 207 - Macro" from_dmx="207" to_dmx="207" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 208 - Macro" from_dmx="208" to_dmx="208" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 209 - Macro" from_dmx="209" to_dmx="209" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 210 - Macro" from_dmx="210" to_dmx="210" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 211 - Macro" from_dmx="211" to_dmx="211" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 212 - Macro" from_dmx="212" to_dmx="212" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 213 - Macro" from_dmx="213" to_dmx="213" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 214 - Macro" from_dmx="214" to_dmx="214" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 215 - Macro" from_dmx="215" to_dmx="215" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 216 - Macro" from_dmx="216" to_dmx="216" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 217 - Macro" from_dmx="217" to_dmx="217" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 218 - Macro" from_dmx="218" to_dmx="218" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 219 - Macro" from_dmx="219" to_dmx="219" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 220 - Macro" from_dmx="220" to_dmx="220" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 221 - Macro" from_dmx="221" to_dmx="221" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 222 - Macro" from_dmx="222" to_dmx="222" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 223 - Macro" from_dmx="223" to_dmx="223" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 224 - Macro" from_dmx="224" to_dmx="224" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 225 - Macro" from_dmx="225" to_dmx="225" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 226 - Macro" from_dmx="226" to_dmx="226" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 227 - Macro" from_dmx="227" to_dmx="227" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 228 - Macro" from_dmx="228" to_dmx="228" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 229 - Macro" from_dmx="229" to_dmx="229" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 230 - Macro" from_dmx="230" to_dmx="230" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 231 - Macro" from_dmx="231" to_dmx="231" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 232 - Macro" from_dmx="232" to_dmx="232" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 233 - Macro" from_dmx="233" to_dmx="233" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 234 - Macro" from_dmx="234" to_dmx="234" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 235 - Macro" from_dmx="235" to_dmx="235" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 236 - Macro" from_dmx="236" to_dmx="236" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 237 - Macro" from_dmx="237" to_dmx="237" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 238 - Macro" from_dmx="238" to_dmx="238" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 239 - Macro" from_dmx="239" to_dmx="239" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 240 - Macro" from_dmx="240" to_dmx="240" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 241 - Macro" from_dmx="241" to_dmx="241" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 242 - Macro" from_dmx="242" to_dmx="242" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 243 - Macro" from_dmx="243" to_dmx="243" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 244 - Macro" from_dmx="244" to_dmx="244" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 245 - Macro" from_dmx="245" to_dmx="245" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 246 - Macro" from_dmx="246" to_dmx="246" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 247 - Macro" from_dmx="247" to_dmx="248" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 249 - Macro" from_dmx="249" to_dmx="249" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 250 - Macro" from_dmx="250" to_dmx="250" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 251 - Macro" from_dmx="251" to_dmx="251" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 252 - Macro" from_dmx="252" to_dmx="252" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 253 - Macro" from_dmx="253" to_dmx="253" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 254 - Macro" from_dmx="254" to_dmx="254" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Pattern 255 - Macro" from_dmx="255" to_dmx="255" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="30" default="0" snap="true" attribute="EFFECT2" feature="Beam" preset="Beam" highlight_value="0">
+                    <ChannelFunction subattribute="EFFECTSELECT2" attribute="EFFECT2" feature="Beam" preset="Beam" from="0" to="5.88" physfrom="0" physto="0" min_dmx_24="0" max_dmx_24="986895">
+                        <ChannelSet name="Off" from_dmx="0" to_dmx="15" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="EFFECTSELECT2" attribute="EFFECT2" feature="Beam" preset="Beam" from="5.88" to="14.51" physfrom="0" physto="0" min_dmx_24="1052688" max_dmx_24="2434341">
+                        <ChannelSet name="LED Built-In 1 - Macro" from_dmx="16" to_dmx="17" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 2 - Macro" from_dmx="18" to_dmx="19" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 3 - Macro" from_dmx="20" to_dmx="21" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 4 - Macro" from_dmx="22" to_dmx="23" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 5 - Macro" from_dmx="24" to_dmx="25" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 6 - Macro" from_dmx="26" to_dmx="27" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 7 - Macro" from_dmx="28" to_dmx="29" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 8 - Macro" from_dmx="30" to_dmx="31" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 9 - Macro" from_dmx="32" to_dmx="33" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 10 - Macro" from_dmx="34" to_dmx="35" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 11 - Macro" from_dmx="36" to_dmx="37" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="DMXSOURCESELECT" attribute="EFFECT2" feature="Beam" preset="Beam" from="14.51" to="15.29" physfrom="0" physto="0" min_dmx_24="2500134" max_dmx_24="2565927">
+                        <ChannelSet name="LED Built-In 12 - Macro" from_dmx="38" to_dmx="39" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="EFFECTSELECT2" attribute="EFFECT2" feature="Beam" preset="Beam" from="15.29" to="100" physfrom="0" physto="1" min_dmx_24="2631720" max_dmx_24="16777215">
+                        <ChannelSet name="LED Built-In 13 - Macro" from_dmx="40" to_dmx="41" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 14 - Macro" from_dmx="42" to_dmx="43" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 15 - Macro" from_dmx="44" to_dmx="45" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 16 - Macro" from_dmx="46" to_dmx="47" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 17 - Macro" from_dmx="48" to_dmx="49" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 18 - Macro" from_dmx="50" to_dmx="51" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 19 - Macro" from_dmx="52" to_dmx="53" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 20 - Macro" from_dmx="54" to_dmx="55" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 21 - Macro" from_dmx="56" to_dmx="57" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 22 - Macro" from_dmx="58" to_dmx="59" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 23 - Macro" from_dmx="60" to_dmx="61" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 24 - Macro" from_dmx="62" to_dmx="63" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 25 - Macro" from_dmx="64" to_dmx="65" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 26 - Macro" from_dmx="66" to_dmx="67" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 27 - Macro" from_dmx="68" to_dmx="69" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 28 - Macro" from_dmx="70" to_dmx="71" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 29 - Macro" from_dmx="72" to_dmx="73" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 30 - Macro" from_dmx="74" to_dmx="75" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 31 - Macro" from_dmx="76" to_dmx="77" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 32 - Macro" from_dmx="78" to_dmx="79" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 33 - Macro" from_dmx="80" to_dmx="81" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 34 - Macro" from_dmx="82" to_dmx="83" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 35 - Macro" from_dmx="84" to_dmx="85" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 36 - Macro" from_dmx="86" to_dmx="87" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 37 - Macro" from_dmx="88" to_dmx="89" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 38 - Macro" from_dmx="90" to_dmx="91" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 39 - Macro" from_dmx="92" to_dmx="93" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 40 - Macro" from_dmx="94" to_dmx="95" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 41 - Macro" from_dmx="96" to_dmx="97" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 42 - Macro" from_dmx="98" to_dmx="99" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 43 - Macro" from_dmx="100" to_dmx="101" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 44 - Macro" from_dmx="102" to_dmx="103" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 45 - Macro" from_dmx="104" to_dmx="105" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 46 - Macro" from_dmx="106" to_dmx="107" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 47 - Macro" from_dmx="108" to_dmx="109" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 48 - Macro" from_dmx="110" to_dmx="111" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 49 - Macro" from_dmx="112" to_dmx="113" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 50 - Macro" from_dmx="114" to_dmx="115" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 51 - Macro" from_dmx="116" to_dmx="117"/>
+                        <ChannelSet name="LED Built-In 52 - Macro" from_dmx="118" to_dmx="119" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 53 - Macro" from_dmx="120" to_dmx="121" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 54 - Macro" from_dmx="122" to_dmx="123" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 55 - Macro" from_dmx="124" to_dmx="125" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 56 - Macro" from_dmx="126" to_dmx="127" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 57 - Macro" from_dmx="128" to_dmx="129" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 58 - Macro" from_dmx="130" to_dmx="131" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 59 - Macro" from_dmx="132" to_dmx="133" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 60 - Macro" from_dmx="134" to_dmx="135" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 61 - Macro" from_dmx="136" to_dmx="137" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 62 - Macro" from_dmx="138" to_dmx="139" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 63 - Macro" from_dmx="140" to_dmx="141"/>
+                        <ChannelSet name="LED Built-In 64 - Macro" from_dmx="142" to_dmx="143" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 65 - Macro" from_dmx="144" to_dmx="145" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 66 - Macro" from_dmx="146" to_dmx="147" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 67 - Macro" from_dmx="148" to_dmx="149" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 68 - Macro" from_dmx="150" to_dmx="151" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 69 - Macro" from_dmx="152" to_dmx="153" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 70 - Macro" from_dmx="154" to_dmx="155" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 71 - Macro" from_dmx="156" to_dmx="157" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 72 - Macro" from_dmx="158" to_dmx="159" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 73 - Macro" from_dmx="160" to_dmx="161" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 74 - Macro" from_dmx="162" to_dmx="163" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="LED Built-In 75 - Macro" from_dmx="164" to_dmx="165"/>
+                        <ChannelSet name="LED Built-In 76 - Macro" from_dmx="166" to_dmx="167"/>
+                        <ChannelSet name="LED Built-In 77 - Macro" from_dmx="168" to_dmx="169"/>
+                        <ChannelSet name="LED Built-In 78 - Macro" from_dmx="170" to_dmx="171"/>
+                        <ChannelSet name="LED Built-In 79 - Macro" from_dmx="172" to_dmx="173"/>
+                        <ChannelSet name="LED Built-In 80 - Macro" from_dmx="174" to_dmx="175"/>
+                        <ChannelSet name="LED Built-In 81 - Macro" from_dmx="176" to_dmx="177"/>
+                        <ChannelSet name="LED Built-In 82 - Macro" from_dmx="178" to_dmx="179"/>
+                        <ChannelSet name="LED Built-In 83 - Macro" from_dmx="180" to_dmx="181"/>
+                        <ChannelSet name="LED Built-In 84 - Macro" from_dmx="182" to_dmx="183"/>
+                        <ChannelSet name="LED Built-In 85 - Macro" from_dmx="184" to_dmx="185"/>
+                        <ChannelSet name="LED Built-In 86 - Macro" from_dmx="186" to_dmx="187"/>
+                        <ChannelSet name="LED Built-In 87 - Macro" from_dmx="188" to_dmx="189"/>
+                        <ChannelSet name="LED Built-In 88 - Macro" from_dmx="190" to_dmx="191"/>
+                        <ChannelSet name="LED Built-In 89 - Macro" from_dmx="192" to_dmx="193"/>
+                        <ChannelSet name="LED Built-In 90 - Macro" from_dmx="194" to_dmx="195"/>
+                        <ChannelSet name="LED Built-In 91 - Macro" from_dmx="196" to_dmx="197"/>
+                        <ChannelSet name="LED Built-In 92 - Macro" from_dmx="198" to_dmx="199"/>
+                        <ChannelSet name="LED Built-In 93 - Macro" from_dmx="200" to_dmx="201"/>
+                        <ChannelSet name="LED Built-In 94 - Macro" from_dmx="202" to_dmx="203"/>
+                        <ChannelSet name="LED Built-In 95 - Macro" from_dmx="204" to_dmx="205"/>
+                        <ChannelSet name="LED Built-In 96 - Macro" from_dmx="206" to_dmx="207"/>
+                        <ChannelSet name="LED Built-In 97 - Macro" from_dmx="208" to_dmx="209"/>
+                        <ChannelSet name="LED Built-In 98 - Macro" from_dmx="210" to_dmx="211"/>
+                        <ChannelSet name="LED Built-In 99 - Macro" from_dmx="212" to_dmx="213"/>
+                        <ChannelSet name="LED Built-In 100 - Macro" from_dmx="214" to_dmx="215"/>
+                        <ChannelSet name="LED Built-In 101 - Macro" from_dmx="216" to_dmx="217"/>
+                        <ChannelSet name="LED Built-In 102 - Macro" from_dmx="218" to_dmx="219"/>
+                        <ChannelSet name="LED Built-In 103 - Macro" from_dmx="220" to_dmx="221"/>
+                        <ChannelSet name="LED Built-In 104 - Macro" from_dmx="222" to_dmx="223"/>
+                        <ChannelSet name="LED Built-In 105 - Macro" from_dmx="224" to_dmx="225"/>
+                        <ChannelSet name="LED Built-In 106 - Macro" from_dmx="226" to_dmx="227"/>
+                        <ChannelSet name="LED Built-In 107 - Macro" from_dmx="228" to_dmx="229"/>
+                        <ChannelSet name="LED Built-In 108 - Macro" from_dmx="230" to_dmx="231"/>
+                        <ChannelSet name="LED Built-In 109 - Macro" from_dmx="232" to_dmx="233"/>
+                        <ChannelSet name="LED Built-In 110 - Macro" from_dmx="234" to_dmx="235"/>
+                        <ChannelSet name="LED Built-In 111 - Macro" from_dmx="236" to_dmx="237"/>
+                        <ChannelSet name="LED Built-In 112 - Macro" from_dmx="238" to_dmx="239"/>
+                        <ChannelSet name="LED Built-In 113 - Macro" from_dmx="240" to_dmx="241"/>
+                        <ChannelSet name="LED Built-In 114 - Macro" from_dmx="242" to_dmx="243"/>
+                        <ChannelSet name="LED Built-In 115 - Macro" from_dmx="244" to_dmx="245"/>
+                        <ChannelSet name="LED Built-In 116 - Macro" from_dmx="246" to_dmx="247"/>
+                        <ChannelSet name="LED Built-In 117 - Macro" from_dmx="248" to_dmx="249"/>
+                        <ChannelSet name="LED Built-In 118 - Macro" from_dmx="250" to_dmx="251"/>
+                        <ChannelSet name="LED Built-In 119 - Macro" from_dmx="252" to_dmx="253"/>
+                        <ChannelSet name="LED Built-In 120 - Macro" from_dmx="254" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="31" default="0" attribute="EFFECTRATE2" feature="Beam" preset="Beam" highlight_value="0">
+                    <ChannelFunction subattribute="EFFECTRATE2" attribute="EFFECTRATE2" feature="Beam" preset="Beam" from="0" to="100" physfrom="0" physto="0" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="F > S - Speed" from_dmx="0" to_dmx="127" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Stop Loop" from_dmx="128" to_dmx="128" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="S > F - Speed" from_dmx="129" to_dmx="255" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="32" default="0" attribute="Effects2Adjust1" feature="Beam" preset="Beam" highlight_value="0">
+                    <ChannelFunction subattribute="Effects2Adjust1" attribute="Effects2Adjust1" feature="Beam" preset="Beam" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="33" default="0" attribute="COLORMACROS2" feature="Color" preset="Color" highlight_value="0">
+                    <ChannelFunction subattribute="COLORMACROS2" attribute="COLORMACROS2" feature="Color" preset="Color" from="0" to="0" physfrom="0" physto="0" min_dmx_24="0" max_dmx_24="0" wheel="1">
+                        <ChannelSet name="Off" from_dmx="0" to_dmx="0" slot_from="0" slot_to="0" slot_index="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="CTC" attribute="COLORMACROS2" feature="Color" preset="Color" from="0" to="3.92" physfrom="8000" physto="0" min_dmx_24="65793" max_dmx_24="657930" wheel="1">
+                        <ChannelSet name="White 2700K - CTC" from_dmx="1" to_dmx="2" slot_from="2700" slot_to="2700" slot_index="1"/>
+                        <ChannelSet name="White 3200K - CTC" from_dmx="3" to_dmx="4" slot_from="3200" slot_to="3200" slot_index="2"/>
+                        <ChannelSet name="White 4200K - CTC" from_dmx="5" to_dmx="6" slot_from="4200" slot_to="4200" slot_index="3"/>
+                        <ChannelSet name="White 5600K - CTC" from_dmx="7" to_dmx="8" slot_from="5600" slot_to="5600" slot_index="4"/>
+                        <ChannelSet name="White 8000K - CTC" from_dmx="9" to_dmx="10" slot_from="8000" slot_to="8000" slot_index="5"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="COLORMACROS2" attribute="COLORMACROS2" feature="Color" preset="Color" from="3.92" to="93.73" physfrom="0" physto="0" min_dmx_24="723723" max_dmx_24="15724527" wheel="1">
+                        <ChannelSet name="Blue" from_dmx="11" to_dmx="11" slot_from="0" slot_to="0" slot_index="6"/>
+                        <ChannelSet name="+Green" from_dmx="12" to_dmx="48" slot_index="7"/>
+                        <ChannelSet name="Cyan" from_dmx="49" to_dmx="49" slot_from="0" slot_to="0" slot_index="8"/>
+                        <ChannelSet name="-Blue" from_dmx="50" to_dmx="86" slot_index="9"/>
+                        <ChannelSet name="Green" from_dmx="87" to_dmx="87" slot_from="0" slot_to="0" slot_index="10"/>
+                        <ChannelSet name="+Red" from_dmx="88" to_dmx="124" slot_index="11"/>
+                        <ChannelSet name="Yellow" from_dmx="125" to_dmx="125" slot_from="0" slot_to="0" slot_index="12"/>
+                        <ChannelSet name="-Green" from_dmx="126" to_dmx="162" slot_index="13"/>
+                        <ChannelSet name="Red" from_dmx="163" to_dmx="163" slot_from="0" slot_to="0" slot_index="14"/>
+                        <ChannelSet name="+Blue" from_dmx="164" to_dmx="200" slot_index="15"/>
+                        <ChannelSet name="Magenta" from_dmx="201" to_dmx="201" slot_from="0" slot_to="0" slot_index="16"/>
+                        <ChannelSet name="-Red" from_dmx="202" to_dmx="238" slot_index="17"/>
+                        <ChannelSet name="Blue" from_dmx="239" to_dmx="239" slot_from="0" slot_to="0" slot_index="6"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="ColorControl" attribute="COLORMACROS2" feature="Color" preset="Color" from="93.73" to="100" physfrom="0" physto="0" min_dmx_24="15790320" max_dmx_24="16777215" wheel="1">
+                        <ChannelSet name="Color Fade F > S" from_dmx="240" to_dmx="247" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Color Snap F > S" from_dmx="248" to_dmx="255" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="34" default="0" react_to_master="1" attribute="Background Dimmer" feature="Dimmer" preset="Dimmer" highlight_value="0">
+                    <ChannelFunction subattribute="Background Dimmer" attribute="Background Dimmer" feature="Dimmer" preset="Dimmer" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="35" default="0" react_to_master="1" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="36" default="22" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" highlight_value="8.627450980392156">
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="0" to="9.41" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="1579032">
+                        <ChannelSet name="Shutter Closed" from_dmx="0" to_dmx="19" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Shutter Open" from_dmx="20" to_dmx="24" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="9.41" to="25.1" physfrom="20" physto="0.1" min_dmx_24="1644825" max_dmx_24="4210752">
+                        <ChannelSet name="Fast" from_dmx="25" to_dmx="25"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="26" to_dmx="63"/>
+                        <ChannelSet name="Slow" from_dmx="64" to_dmx="64"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="25.1" to="27.06" physfrom="1" physto="1" min_dmx_24="4276545" max_dmx_24="4539717">
+                        <ChannelSet name="Shutter Open" from_dmx="65" to_dmx="69" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_PULSE_CLOSE" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="27.06" to="32.94" physfrom="20" physto="0.1" min_dmx_24="4605510" max_dmx_24="5526612">
+                        <ChannelSet name="Fast" from_dmx="70" to_dmx="70"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="71" to_dmx="83"/>
+                        <ChannelSet name="Slow" from_dmx="84" to_dmx="84"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="32.94" to="34.9" physfrom="1" physto="1" min_dmx_24="5592405" max_dmx_24="5855577">
+                        <ChannelSet name="Shutter Open" from_dmx="85" to_dmx="89" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_PULSE_OPEN" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="34.9" to="40.78" physfrom="20" physto="0.1" min_dmx_24="5921370" max_dmx_24="6842472">
+                        <ChannelSet name="Fast" from_dmx="90" to_dmx="90"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="91" to_dmx="103"/>
+                        <ChannelSet name="Slow" from_dmx="104" to_dmx="104"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="40.78" to="42.75" physfrom="1" physto="1" min_dmx_24="6908265" max_dmx_24="7171437">
+                        <ChannelSet name="Shutter Open" from_dmx="105" to_dmx="109" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_RANDOM" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="42.75" to="48.63" physfrom="20" physto="0.1" min_dmx_24="7237230" max_dmx_24="8158332">
+                        <ChannelSet name="Fast" from_dmx="110" to_dmx="110"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="111" to_dmx="123"/>
+                        <ChannelSet name="Slow" from_dmx="124" to_dmx="124"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="48.63" to="50.59" physfrom="1" physto="1" min_dmx_24="8224125" max_dmx_24="8487297">
+                        <ChannelSet name="Shutter Open" from_dmx="125" to_dmx="129" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_RANDOM_PULSE_CLOSE" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="50.59" to="56.47" physfrom="20" physto="0.1" min_dmx_24="8553090" max_dmx_24="9474192">
+                        <ChannelSet name="Fast" from_dmx="130" to_dmx="130"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="131" to_dmx="143"/>
+                        <ChannelSet name="Slow" from_dmx="144" to_dmx="144"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="56.47" to="58.43" physfrom="1" physto="1" min_dmx_24="9539985" max_dmx_24="9803157">
+                        <ChannelSet name="Shutter Open" from_dmx="145" to_dmx="149" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_RANDOM_PULSE_OPEN" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="58.43" to="64.31" physfrom="20" physto="0.1" min_dmx_24="9868950" max_dmx_24="10790052">
+                        <ChannelSet name="Fast" from_dmx="150" to_dmx="150"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="151" to_dmx="163"/>
+                        <ChannelSet name="Slow" from_dmx="164" to_dmx="164"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="64.31" to="66.27" physfrom="1" physto="1" min_dmx_24="10855845" max_dmx_24="11119017">
+                        <ChannelSet name="Shutter Open" from_dmx="165" to_dmx="169" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_PULSE" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="66.27" to="72.16" physfrom="20" physto="0.1" min_dmx_24="11184810" max_dmx_24="12105912">
+                        <ChannelSet name="Fast" from_dmx="170" to_dmx="170"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="171" to_dmx="183"/>
+                        <ChannelSet name="Slow" from_dmx="184" to_dmx="184"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="72.16" to="74.12" physfrom="1" physto="1" min_dmx_24="12171705" max_dmx_24="12434877">
+                        <ChannelSet name="Shutter Open" from_dmx="185" to_dmx="189" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_RANDOM_PULSE" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="74.12" to="80" physfrom="20" physto="0.1" min_dmx_24="12500670" max_dmx_24="13421772">
+                        <ChannelSet name="Fast" from_dmx="190" to_dmx="190"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="191" to_dmx="203"/>
+                        <ChannelSet name="Slow" from_dmx="204" to_dmx="204"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="80" to="81.96" physfrom="1" physto="1" min_dmx_24="13487565" max_dmx_24="13750737">
+                        <ChannelSet name="Shutter Open" from_dmx="205" to_dmx="209" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="81.96" to="87.84" physfrom="20" physto="0.1" min_dmx_24="13816530" max_dmx_24="14737632">
+                        <ChannelSet name="Fast" from_dmx="210" to_dmx="210"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="211" to_dmx="223"/>
+                        <ChannelSet name="Slow" from_dmx="224" to_dmx="224"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="87.84" to="89.8" physfrom="1" physto="1" min_dmx_24="14803425" max_dmx_24="15066597">
+                        <ChannelSet name="Shutter Open" from_dmx="225" to_dmx="229" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="STROBE_PULSE" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="89.8" to="95.69" physfrom="20" physto="0.1" min_dmx_24="15132390" max_dmx_24="16053492">
+                        <ChannelSet name="Fast" from_dmx="230" to_dmx="230"/>
+                        <ChannelSet name="Fast > Slow" from_dmx="231" to_dmx="243"/>
+                        <ChannelSet name="Slow" from_dmx="244" to_dmx="244"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="SHUTTER" attribute="SHUTTER" feature="SHUTTER" preset="BEAM" from="95.69" to="100" physfrom="1" physto="1" min_dmx_24="16119285" max_dmx_24="16777215">
+                        <ChannelSet name="Shutter Open" from_dmx="245" to_dmx="255" slot_from="1" slot_to="1"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="49" default="0" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER">
+                    <ChannelFunction subattribute="NOFEATURE" attribute="DUMMY" feature="CONTROL" preset="CONTROL" from="0" to="3.53" physfrom="0" physto="0" min_dmx_24="0" max_dmx_24="592137">
+                        <ChannelSet name="No Function" from_dmx="0" to_dmx="9" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="BLACKOUT" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="3.53" to="5.49" physfrom="0" physto="0" min_dmx_24="657930" max_dmx_24="921102">
+                        <ChannelSet name="Blackout On Tilt" from_dmx="10" to_dmx="14" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="NOFEATURE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="5.49" to="7.45" physfrom="0" physto="0" min_dmx_24="986895" max_dmx_24="1250067">
+                        <ChannelSet name="Reserved" from_dmx="15" to_dmx="19" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="ColorControl" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="7.45" to="11.37" physfrom="0" physto="0" min_dmx_24="1315860" max_dmx_24="1907997">
+                        <ChannelSet name="RGBW Color Mixing Mode" from_dmx="20" to_dmx="24" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="CMY Color Mixing Mode" from_dmx="25" to_dmx="29" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="MACROSELECT" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="11.37" to="15.29" physfrom="0" physto="1" min_dmx_24="1973790" max_dmx_24="2565927">
+                        <ChannelSet name="Combine Heads" from_dmx="30" to_dmx="34" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Disable Combine Heads" from_dmx="35" to_dmx="39"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="ColorControl" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="15.29" to="19.22" physfrom="0" physto="0" min_dmx_24="2631720" max_dmx_24="3223857">
+                        <ChannelSet name="Color Presets HTP On" from_dmx="40" to_dmx="44" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Color Presets HTP Off" from_dmx="45" to_dmx="49" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="NOFEATURE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="19.22" to="21.18" physfrom="0" physto="0" min_dmx_24="3289650" max_dmx_24="3552822">
+                        <ChannelSet name="Reserved" from_dmx="50" to_dmx="54" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="TILTRESET" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="21.18" to="23.14" physfrom="0" physto="0" min_dmx_24="3618615" max_dmx_24="3881787">
+                        <ChannelSet name="Tilt Reset" from_dmx="55" to_dmx="59" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="ZOOMRESET" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="23.14" to="27.06" physfrom="0" physto="0" min_dmx_24="3947580" max_dmx_24="4539717">
+                        <ChannelSet name="Zoom Reset - Normal" from_dmx="60" to_dmx="64" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Zoom Reset - Quiet" from_dmx="65" to_dmx="69" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="FIXTUREGLOBALRESET" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="27.06" to="29.02" physfrom="0" physto="0" min_dmx_24="4605510" max_dmx_24="4868682">
+                        <ChannelSet name="Reset All" from_dmx="70" to_dmx="74" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="NOFEATURE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="29.02" to="32.94" physfrom="0" physto="1" min_dmx_24="4934475" max_dmx_24="5526612">
+                        <ChannelSet name="Cell Order 1-12" from_dmx="75" to_dmx="79"/>
+                        <ChannelSet name="Cell Order 12-1" from_dmx="80" to_dmx="84"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="NOFEATURE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="32.94" to="34.9" physfrom="0" physto="1" min_dmx_24="5592405" max_dmx_24="5855577">
+                        <ChannelSet name="Reserved" from_dmx="85" to_dmx="89"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="MACROSELECT" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="34.9" to="36.86" physfrom="0" physto="0" min_dmx_24="5921370" max_dmx_24="6184542">
+                        <ChannelSet name="Tilt Reverse" from_dmx="90" to_dmx="94" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="NOFEATURE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="36.86" to="38.82" physfrom="0" physto="0" min_dmx_24="6250335" max_dmx_24="6513507">
+                        <ChannelSet name="Reserved" from_dmx="95" to_dmx="99" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="MACROSELECT" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="38.82" to="40.78" physfrom="0" physto="0" min_dmx_24="6579300" max_dmx_24="6842472">
+                        <ChannelSet name="Tilt Reverse Disable" from_dmx="100" to_dmx="104" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="NOFEATURE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="40.78" to="42.75" physfrom="0" physto="0" min_dmx_24="6908265" max_dmx_24="7171437">
+                        <ChannelSet name="Reserved" from_dmx="105" to_dmx="109" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="ColorControl" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="42.75" to="46.67" physfrom="0" physto="1" min_dmx_24="7237230" max_dmx_24="7829367">
+                        <ChannelSet name="Red Shift On" from_dmx="110" to_dmx="114"/>
+                        <ChannelSet name="Red Shift Off" from_dmx="115" to_dmx="119"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="Fan1" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="46.67" to="52.55" physfrom="0" physto="0" min_dmx_24="7895160" max_dmx_24="8816262">
+                        <ChannelSet name="Fan ECO" from_dmx="120" to_dmx="124" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Fan Full" from_dmx="125" to_dmx="129" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Fan Auto" from_dmx="130" to_dmx="134" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="INTENSITYMSPEED" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="52.55" to="56.47" physfrom="0" physto="0" min_dmx_24="8882055" max_dmx_24="9474192">
+                        <ChannelSet name="Dimmer Fast" from_dmx="135" to_dmx="139" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Dimmer Smooth" from_dmx="140" to_dmx="144" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="DIMMERCURVE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="56.47" to="64.31" physfrom="0" physto="0" min_dmx_24="9539985" max_dmx_24="10790052">
+                        <ChannelSet name="Linear" from_dmx="145" to_dmx="149" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Square" from_dmx="150" to_dmx="154" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Inverse Square" from_dmx="155" to_dmx="159" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="S Square" from_dmx="160" to_dmx="164" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="ColorControl" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="64.31" to="68.24" physfrom="0" physto="0" min_dmx_24="10855845" max_dmx_24="11447982">
+                        <ChannelSet name="White Mode" from_dmx="165" to_dmx="169" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="Full Mode" from_dmx="170" to_dmx="174" slot_from="0" slot_to="0"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="LEDFrequency" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="68.24" to="80" physfrom="0" physto="1" min_dmx_24="11513775" max_dmx_24="13421772">
+                        <ChannelSet name="PWM 600Hz" from_dmx="175" to_dmx="179" slot_from="0" slot_to="0"/>
+                        <ChannelSet name="PWM 1200Hz" from_dmx="180" to_dmx="184"/>
+                        <ChannelSet name="PWM 2000Hz" from_dmx="185" to_dmx="189"/>
+                        <ChannelSet name="PWM 4000Hz" from_dmx="190" to_dmx="194"/>
+                        <ChannelSet name="PWM 6000Hz" from_dmx="195" to_dmx="199"/>
+                        <ChannelSet name="PWM 15000Hz" from_dmx="200" to_dmx="204"/>
+                    </ChannelFunction>
+                    <ChannelFunction subattribute="NOFEATURE" attribute="BLACKOUT" feature="DIMMER" preset="DIMMER" from="80" to="100" physfrom="0" physto="1" min_dmx_24="13487565" max_dmx_24="16777215">
+                        <ChannelSet name="Reserved" from_dmx="205" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="50" default="0" attribute="R_Overwrite" feature="Color" preset="Color">
+                    <ChannelFunction subattribute="R_Overwrite" attribute="R_Overwrite" feature="Color" preset="Color" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="51" default="0" attribute="G_Overwrite" feature="Color" preset="Color">
+                    <ChannelFunction subattribute="G_Overwrite" attribute="G_Overwrite" feature="Color" preset="Color" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="52" default="0" attribute="B_Overwrite" feature="Color" preset="Color">
+                    <ChannelFunction subattribute="B_Overwrite" attribute="B_Overwrite" feature="Color" preset="Color" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="53" default="0" attribute="W_Overwrite" feature="Color" preset="Color">
+                    <ChannelFunction subattribute="W_Overwrite" attribute="W_Overwrite" feature="Color" preset="Color" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="102" default="0" attribute="SHUTTER2" feature="Beam" preset="Beam">
+                    <ChannelFunction subattribute="SHUTTER2" attribute="SHUTTER2" feature="Beam" preset="Beam" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215"/>
+                </ChannelType>
+                <ChannelType coarse="103" default="0" attribute="COLOR5" feature="COLOR5" preset="COLOR">
+                    <ChannelFunction subattribute="COLOR5" attribute="COLOR5" feature="COLOR5" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215" wheel="2"/>
+                </ChannelType>
+                <ChannelType coarse="104" default="0" attribute="COLOR6" feature="COLOR6" preset="COLOR">
+                    <ChannelFunction subattribute="COLOR6" attribute="COLOR6" feature="COLOR6" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215" wheel="2"/>
+                </ChannelType>
+            </Module>
+            <Module name="Head_1" class="None" beamtype="None" beam_intensity="" index="1" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="1" fine="2" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="37" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="54" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="55" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="56" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="57" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_2" class="None" beamtype="None" beam_intensity="" index="2" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="3" fine="4" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="38" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="58" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="59" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="60" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="61" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_3" class="None" beamtype="None" beam_intensity="" index="3" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="5" fine="6" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="39" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="62" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="63" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="64" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="65" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_4" class="None" beamtype="None" beam_intensity="" index="4" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="7" fine="8" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="40" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="66" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="67" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="68" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="69" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_5" class="None" beamtype="None" beam_intensity="" index="5" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="9" fine="10" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="41" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="70" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="71" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="72" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="73" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_6" class="None" beamtype="None" beam_intensity="" index="6" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="11" fine="12" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="42" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="74" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="75" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="76" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="77" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_7" class="None" beamtype="None" beam_intensity="" index="7" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="13" fine="14" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="43" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="78" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="79" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="80" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="81" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_8" class="None" beamtype="None" beam_intensity="" index="8" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="15" fine="16" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="44" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="82" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="83" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="84" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="85" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_9" class="None" beamtype="None" beam_intensity="" index="9" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="17" fine="18" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="45" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="86" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="87" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="88" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="89" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_10" class="None" beamtype="None" beam_intensity="" index="10" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="19" fine="20" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="46" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="90" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="91" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="92" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="93" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_11" class="None" beamtype="None" beam_intensity="" index="11" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="21" fine="22" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="47" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="94" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="95" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="96" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="97" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+            <Module name="Head_12" class="None" beamtype="None" beam_intensity="" index="12" beam_angle="1">
+                <Model/>
+                <ChannelType coarse="23" fine="24" default="32767" attribute="TILT" feature="POSITION" preset="POSITION">
+                    <ChannelFunction subattribute="TILT" attribute="TILT" feature="POSITION" preset="POSITION" from="-100" to="100" physfrom="-100" physto="100" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Home" from_dmx="32767" to_dmx="32767"/>
+                        <ChannelSet name="Max" from_dmx="65535" to_dmx="65535"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="48" default="127" attribute="ZOOM" feature="FOCUS" preset="FOCUS">
+                    <ChannelFunction subattribute="ZOOM" attribute="ZOOM" feature="FOCUS" preset="FOCUS" from="0" to="100" physfrom="33.9" physto="9" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Wide" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Wide > Narrow" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Narrow" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER" highlight_value="100">
+                    <ChannelFunction subattribute="DIM" attribute="DIM" feature="DIMMER" preset="DIMMER" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777216">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="256"/>
+                        <ChannelSet name="Min>Max" from_dmx="167682" to_dmx="16609533"/>
+                        <ChannelSet name="Max" from_dmx="16777216" to_dmx="16777216"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="98" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB1" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="99" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB2" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="100" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB3" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+                <ChannelType coarse="101" default="255" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" highlight_value="100">
+                    <ChannelFunction subattribute="COLORRGB5" attribute="COLORRGB5" feature="COLORRGB" preset="COLOR" from="0" to="100" physfrom="0" physto="1" min_dmx_24="0" max_dmx_24="16777215">
+                        <ChannelSet name="Min" from_dmx="0" to_dmx="0"/>
+                        <ChannelSet name="Min > Max" from_dmx="1" to_dmx="254"/>
+                        <ChannelSet name="Max" from_dmx="255" to_dmx="255"/>
+                    </ChannelFunction>
+                </ChannelType>
+            </Module>
+        </Modules>
+        <Instances>
+            <Instance module_index="0" patch="1" locked="true"/>
+            <Instance module_index="1" patch="1" locked="true"/>
+            <Instance module_index="2" patch="1" locked="true"/>
+            <Instance module_index="3" patch="1" locked="true"/>
+            <Instance module_index="4" patch="1" locked="true"/>
+            <Instance module_index="5" patch="1" locked="true"/>
+            <Instance module_index="6" patch="1" locked="true"/>
+            <Instance module_index="7" patch="1" locked="true"/>
+            <Instance module_index="8" patch="1" locked="true"/>
+            <Instance module_index="9" patch="1" locked="true"/>
+            <Instance module_index="10" patch="1" locked="true"/>
+            <Instance module_index="11" patch="1" locked="true"/>
+            <Instance module_index="12" patch="1" locked="true"/>
+        </Instances>
+        <Wheels>
+            <Wheel index="0" preset="Color" feature="Color" attribute="COLORMACROS" subattribute="COLORMACROS">
+                <Slot index="0" media_name="Open" r="254" g="255" b="255"/>
+                <Slot index="1" media_name="White 2700K" r="255" g="138" b="39"/>
+                <Slot index="2" media_name="White 3200K" r="255" g="217" b="122"/>
+                <Slot index="3" media_name="White 4200K" r="255" g="217" b="122"/>
+                <Slot index="4" media_name="White 5600K" r="247" g="255" b="182"/>
+                <Slot index="5" media_name="White 8000K" r="226" g="235" b="235"/>
+                <Slot index="6" media_name="Blue" r="0" g="0" b="254"/>
+                <Slot index="7" media_name="+Green" r="0" g="126" b="255"/>
+                <Slot index="8" media_name="Cyan" r="0" g="254" b="254"/>
+                <Slot index="9" media_name="-Blue" r="0" g="255" b="127"/>
+                <Slot index="10" media_name="Green" r="0" g="254" b="0"/>
+                <Slot index="11" media_name="+Red" r="127" g="254" b="0"/>
+                <Slot index="12" media_name="Yellow" r="255" g="254" b="0"/>
+                <Slot index="13" media_name="-Green" r="255" g="126" b="0"/>
+                <Slot index="14" media_name="Red" r="255" g="0" b="0"/>
+                <Slot index="15" media_name="+Blue" r="255" g="0" b="126"/>
+                <Slot index="16" media_name="Magenta" r="254" g="0" b="254"/>
+                <Slot index="17" media_name="-Red" r="126" g="0" b="254"/>
+            </Wheel>
+            <Wheel index="1" preset="COLOR" feature="COLOR5" attribute="COLOR5" subattribute="COLOR5">
+                <Slot index="0" media_name="WHITE" r="254" g="255" b="255"/>
+                <Slot index="1" media_name="GOLD" r="255" g="184" b="84"/>
+            </Wheel>
+        </Wheels>
+    </FixtureType>
+</MA>

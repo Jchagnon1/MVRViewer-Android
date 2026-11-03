@@ -14,6 +14,21 @@ class DxfPolyline(
     /** Sommets à plat [x0,y0, x1,y1, …] en mm (repère local DXF). */
     val points: FloatArray,
     val closed: Boolean,
+    val layer: String,
+    /** Couleur RÉSOLUE de l'entité (0xRRGGBB) : true color (420) sinon ACI (62),
+     *  BYLAYER/BYBLOCK résolus. Défaut 0xFFFFFF (blanc → géré par le contraste). */
+    val color: Int = 0xFFFFFF
+)
+
+/**
+ * Zone REMPLIE (HATCH / SOLID) : anneaux de contour (le 1er = extérieur, les
+ * suivants = trous), règle even-odd. Points à plat [x0,y0, …] en mm.
+ */
+class DxfFill(
+    val rings: List<FloatArray>,
+    val color: Int,
+    /** true = aplat (SOLID) ; false = motif hachuré (rendu en aplat translucide). */
+    val solid: Boolean,
     val layer: String
 )
 
@@ -25,7 +40,13 @@ class DxfPlan(
     val segmentCount: Int,
     val layerCounts: Map<String, Int>,
     /** Segments écartés (plafond mémoire atteint) ; 0 = import complet. */
-    val truncatedSegments: Int
+    val truncatedSegments: Int,
+    /** Couleur par calque (0xRRGGBB) — résolution BYLAYER. */
+    val layerColors: Map<String, Int> = emptyMap(),
+    /** Calques éteints/gelés à l'import → masqués par défaut. */
+    val defaultHiddenLayers: Set<String> = emptySet(),
+    /** Zones remplies (HATCH/SOLID), dessinées SOUS les traits. */
+    val fills: List<DxfFill> = emptyList()
 ) {
     val isEmpty: Boolean get() = polylines.isEmpty()
     val width: Float get() = maxX - minX
@@ -45,19 +66,67 @@ class ReferencePlanTransform(
     var rotationDeg: Double = 0.0,
     var scale: Double = 1.0,
     var heightZ: Double = 0.0,
-    var visible: Boolean = true
+    var visible: Boolean = true,
+    /**
+     * Bascule autour de l'axe HORIZONTAL (X), en degrés [-90, 90] — permet de
+     * caler le plan sur une surface en pente. LOCAL À CHAQUE PLATEFORME, comme
+     * iOS : absent de `RefPlanTransformDTO`/`AuditCoding` (format fixé à 6
+     * champs, cf. mémoire), donc jamais synchronisé entre iOS et Android.
+     */
+    var tiltDeg: Double = 0.0,
+    /**
+     * HOMOTHÉTIE — facteur de mise à l'échelle PROPORTIONNELLE réglé par
+     * l'utilisateur (curseur + valeur éditable), distinct de `scale` qui, lui,
+     * rattrape l'unité du fichier / le cadrage initial. Les deux se MULTIPLIENT
+     * (cf. `effScale`) : garder deux champs permet de « Réinitialiser »
+     * l'homothétie sans perdre l'échelle d'origine du plan importé.
+     *
+     * Défaut 1.0 → `effScale == scale` au bit près : un projet existant (et tout
+     * le chemin DXF) se comporte exactement comme avant.
+     */
+    var homothety: Double = 1.0
 ) {
-    /** Point DXF (mm local) → point monde MVR (mm, X/Y au sol). */
+    /**
+     * Échelle RÉELLEMENT appliquée au dessin (2D, 3D, mesure, export) : produit
+     * de l'échelle de placement et de l'homothétie. C'est la SEULE valeur que
+     * doivent lire les rendus — jamais `scale` seul.
+     */
+    val effScale: Double get() = scale * homothety
+
+    /**
+     * Point DXF (mm local) → point monde MVR (mm, X/Y au sol). La bascule
+     * (tilt) raccourcit l'empreinte au sol le long de Y AVANT la rotation à
+     * plat — même ordre que [worldZ] et que `referencePlanMatrix` (iOS).
+     */
     fun worldXY(x: Float, y: Float): Pair<Float, Float> {
-        val s = scale
+        val s = effScale
         val r = Math.toRadians(rotationDeg)
         val c = cos(r); val sn = sin(r)
-        val sx = x * s; val sy = y * s
+        val ty = cos(Math.toRadians(tiltDeg))
+        val sx = x * s; val sy = y * s * ty
         return (offsetX + (sx * c - sy * sn)).toFloat() to (offsetY + (sx * sn + sy * c)).toFloat()
     }
 
-    fun copy() = ReferencePlanTransform(offsetX, offsetY, rotationDeg, scale, heightZ, visible)
+    /** Hauteur (mm monde) d'un point DXF une fois la bascule appliquée. */
+    fun worldZ(y: Float): Float {
+        val s = effScale
+        return (heightZ + y * s * sin(Math.toRadians(tiltDeg))).toFloat()
+    }
+
+    fun copy() = ReferencePlanTransform(offsetX, offsetY, rotationDeg, scale, heightZ, visible, tiltDeg, homothety)
 }
 
-/** Un plan importé + son placement. */
-class ReferencePlan(val plan: DxfPlan, val transform: ReferencePlanTransform)
+/**
+ * Un plan importé + son placement.
+ *
+ * Le plan est SOIT vectoriel (DXF → `plan` non vide), SOIT matriciel (JPEG / PNG
+ * / page 1 d'un PDF → `raster` non nul). Dans le second cas `plan` est un
+ * `DxfPlan` VIDE dont seules les bornes portent le rectangle de l'image (en mm) :
+ * tout le code existant qui teste `plan.isEmpty` (passe 3D, tracés 2D) sort donc
+ * proprement, sans trait fantôme, et le centrage/les bornes restent partagés.
+ */
+class ReferencePlan(
+    val plan: DxfPlan,
+    val transform: ReferencePlanTransform,
+    val raster: RasterPlan? = null
+)

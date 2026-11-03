@@ -10,10 +10,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
+import com.minou.mvrviewer.mvr.SceneModelLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Charge un .mvr choisi par l'utilisateur : lit les octets et parse HORS du
@@ -34,6 +38,34 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = mutableStateOf<UiState>(UiState.Home)
     val state: State<UiState> = _state
 
+    /**
+     * OBJET 3D ouvert SEUL depuis l'accueil : l'URI du modèle à importer dans
+     * la scène (vide) qui vient d'être ouverte. Consommé une fois par la vue 3D.
+     *
+     * Miroir du chemin iOS (RootView.openModel) : aucun .mvr n'est fabriqué —
+     * une scène VIDE suffit, et tout le visualiseur (navigation, vue plan,
+     * plan de repère, panneau de placement) est réutilisé tel quel.
+     */
+    private val _pendingModelUri = mutableStateOf<Uri?>(null)
+    val pendingModelUri: State<Uri?> = _pendingModelUri
+
+    fun consumePendingModelUri() { _pendingModelUri.value = null }
+
+    /**
+     * Avancement NOMMÉ du chargement (lot A #4), partagé par l'accueil (lecture
+     * + parse) et la vue 3D (construction de la scène). Porté par le ViewModel :
+     * il survit aux recréations d'activité comme le reste du chargement.
+     */
+    val progress = LoadProgress()
+
+    /**
+     * Bibliothèque MA PARTAGÉE par l'accueil et le show (un seul chargement de la liste), et
+     * FILE D'ATTENTE des profils reçus du système (« Ouvrir avec », partage) : portées par le
+     * ViewModel, elles survivent aux allers-retours accueil ↔ show (SPEC-ma-gdtfshare.md §5.1).
+     */
+    val maLibrary = MaLibraryState()
+    val maInbox = MaInbox()
+
     // Fichier en cours (chargé ou en chargement) : rend `open` IDEMPOTENT.
     // Le ViewModel survit aux recréations d'activité (rotation, mode sombre,
     // retour depuis le multitâche) → si la même URI est re-livrée, on NE
@@ -42,9 +74,17 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
     private var currentUri: Uri? = null
     private var loadJob: Job? = null
 
+    /**
+     * Retour à l'accueil — aussi « Fermer le projet » PENDANT la lecture (SPEC-menus
+     * §11) : le chargement est annulé, et son résultat, s'il arrive quand même (le
+     * parse en cours n'est pas interruptible), est IGNORÉ ([isActive] testé avant
+     * toute écriture d'état) — ni état d'erreur, ni retrait des récents.
+     */
     fun reset() {
         loadJob?.cancel()
+        loadJob = null
         currentUri = null
+        progress.finish()
         _state.value = UiState.Home
     }
 
@@ -62,28 +102,96 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         _state.value = UiState.Loading(name)
+        progress.restart()
+        progress.report(LoadStep.READ_MVR, 0f)
+        // AIGUILLAGE PAR FORMAT (même geste pour l'utilisateur, comme iOS) : un
+        // OBJET 3D choisi ici n'est pas un show — le passer à MvrParser échouait
+        // en « fichier illisible ». On ouvre alors une scène VIDE et on importe
+        // le modèle dedans.
+        val modelFormat = runCatching {
+            SceneModelLoader.sniff(getApplication<Application>().contentResolver, uri, name)
+        }.getOrNull()
+        if (modelFormat != null && modelFormat != SceneModelLoader.Format.UNKNOWN
+            && modelFormat != SceneModelLoader.Format.SKP) {
+            openModelAlone(uri, name)
+            return
+        }
         loadJob = viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val bytes = getApplication<Application>().contentResolver
                         .openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("Lecture du fichier impossible.")
+                        ?: throw IllegalStateException(getApplication<Application>().getString(R.string.err_unreadable_file))
+                    // Octets lus : la moitié de l'étape « Lecture du fichier MVR… »
+                    // est faite, le parse du XML de scène est l'autre moitié.
+                    progress.report(LoadStep.READ_MVR, 0.5f)
                     bytes to MvrParser.parse(bytes)
                 }
             }
+            // Fermé pendant la lecture : `runCatching` a aussi attrapé l'annulation
+            // — on n'écrit RIEN (pas d'erreur affichée, récent gardé).
+            if (!isActive) return@launch
             _state.value = result.fold(
                 onSuccess = { (bytes, scene) ->
                     // Projet ouvert avec succès → mémorisé dans les récents.
                     runCatching { RecentProjects.record(getApplication(), uri.toString(), name, System.currentTimeMillis()) }
+                    progress.report(LoadStep.READ_MVR, 1f)
                     UiState.Loaded(scene, name, bytes)
                 },
                 onFailure = {
                     // URI périmée (permission perdue, fichier déplacé) → retirée des récents.
                     runCatching { RecentProjects.remove(getApplication(), uri.toString()) }
-                    UiState.Error(it.message ?: "Erreur inconnue.")
+                    progress.finish()   // plus de chargement en cours
+                    UiState.Error(errorText(it))
                 }
             )
         }
+    }
+
+    /**
+     * Ouvre un OBJET 3D SEUL : scène VIDE + import du modèle par la vue 3D.
+     *
+     * Volontairement PAS inscrit dans les projets récents : la réouverture
+     * depuis les récents repasse par le funnel .mvr, qui ne saurait pas relire
+     * un objet 3D. Mieux vaut ne rien promettre que promettre à faux (même
+     * décision qu'iOS).
+     */
+    private fun openModelAlone(uri: Uri, name: String) {
+        loadJob = viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver
+                        .openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException(
+                            getApplication<Application>().getString(R.string.err_unreadable_file))
+                }
+            }
+            if (!isActive) return@launch
+            _state.value = result.fold(
+                onSuccess = { bytes ->
+                    progress.report(LoadStep.READ_MVR, 1f)
+                    // Les OCTETS DU MODÈLE donnent la clé de projet : rouvrir le
+                    // même objet retrouve son placement.
+                    _pendingModelUri.value = uri
+                    UiState.Loaded(MvrScene(emptyList(), emptyMap()), name, bytes)
+                },
+                onFailure = {
+                    progress.finish()
+                    UiState.Error(errorText(it))
+                }
+            )
+        }
+    }
+
+    /**
+     * Texte AFFICHABLE d'un échec d'ouverture. Un `MvrParseException` porte une
+     * clé de ressource (son `message` reste technique, pour le journal) : c'est
+     * ici, à l'affichage, que l'on choisit la langue.
+     */
+    private fun errorText(t: Throwable): String {
+        val ctx = getApplication<Application>()
+        (t as? com.minou.mvrviewer.mvr.MvrParseException)?.messageRes?.let { return ctx.getString(it) }
+        return t.message ?: ctx.getString(R.string.err_unknown)
     }
 
     /**
@@ -95,11 +203,26 @@ class SceneViewModel(app: Application) : AndroidViewModel(app) {
         loadJob?.cancel()
         currentUri = null
         _state.value = UiState.Loading(name)
+        progress.restart()
+        progress.report(LoadStep.READ_MVR, 0f)
         loadJob = viewModelScope.launch {
-            val result = runCatching { withContext(Dispatchers.IO) { bytes to MvrParser.parse(bytes) } }
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    // Octets déjà en main (projet cloud) : il ne reste que le parse.
+                    progress.report(LoadStep.READ_MVR, 0.5f)
+                    bytes to MvrParser.parse(bytes)
+                }
+            }
+            if (!isActive) return@launch
             _state.value = result.fold(
-                onSuccess = { (b, scene) -> UiState.Loaded(scene, name, b) },
-                onFailure = { UiState.Error(it.message ?: "Erreur inconnue.") }
+                onSuccess = { (b, scene) ->
+                    progress.report(LoadStep.READ_MVR, 1f)
+                    UiState.Loaded(scene, name, b)
+                },
+                onFailure = {
+                    progress.finish()
+                    UiState.Error(errorText(it))
+                }
             )
         }
     }

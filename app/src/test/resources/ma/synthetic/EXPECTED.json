@@ -1,0 +1,189 @@
+{
+ "MVR_Viewer_Tests@LED_Bar_3_RGB_PT@Testeur_MVR.xml": {
+  "format": "ma2",
+  "manufacturer": "MVR Viewer Tests",
+  "fixture": "LED Bar 3 RGB PT",
+  "shortName": "LB3",
+  "author": "Testeur MVR",
+  "modes": [
+   {
+    "name": "Extended 16Ch",
+    "channels": [
+     "PAN",
+     "PAN fine",
+     "TILT",
+     "TILT fine",
+     "DIM",
+     "DUMMY",
+     "",
+     "Pixel #1 COLORRGB1",
+     "Pixel #1 COLORRGB2",
+     "Pixel #1 COLORRGB3",
+     "Pixel #2 COLORRGB1",
+     "Pixel #2 COLORRGB2",
+     "Pixel #2 COLORRGB3",
+     "Pixel #3 COLORRGB1",
+     "Pixel #3 COLORRGB2",
+     "Pixel #3 COLORRGB3"
+    ],
+    "footprint": 16
+   }
+  ]
+ },
+ "MVR_Viewer_Tests@LED_Bar_3_RGB_PT@Testeur_MVR.xmlp": {
+  "format": "ma2",
+  "manufacturer": "MVR Viewer Tests",
+  "fixture": "LED Bar 3 RGB PT",
+  "shortName": "LB3",
+  "author": "Testeur MVR",
+  "modes": [
+   {
+    "name": "Extended 16Ch",
+    "channels": [
+     "PAN",
+     "PAN fine",
+     "TILT",
+     "TILT fine",
+     "DIM",
+     "DUMMY",
+     "",
+     "Pixel #1 COLORRGB1",
+     "Pixel #1 COLORRGB2",
+     "Pixel #1 COLORRGB3",
+     "Pixel #2 COLORRGB1",
+     "Pixel #2 COLORRGB2",
+     "Pixel #2 COLORRGB3",
+     "Pixel #3 COLORRGB1",
+     "Pixel #3 COLORRGB2",
+     "Pixel #3 COLORRGB3"
+    ],
+    "footprint": 16
+   }
+  ]
+ },
+ "MVR_Viewer_Tests@Test_Spot_4_Pixels@Testeur_MVR.xml": {
+  "format": "ma3",
+  "manufacturer": "MVR Viewer Tests",
+  "fixture": "Test Spot 4 Pixels",
+  "shortName": "TS4P",
+  "author": "Testeur MVR",
+  "modes": [
+   {
+    "name": "Standard 16 bit",
+    "channels": [
+     "Pan",
+     "Pan fine",
+     "Tilt",
+     "Tilt fine",
+     "Dimmer",
+     "Dimmer fine",
+     "Head Shutter1",
+     "MainBeam Shutter1",
+     "Pixel 1 ColorRGB_R",
+     "Pixel 1 ColorRGB_G",
+     "Pixel 1 ColorRGB_B",
+     "Pixel 2 ColorRGB_R",
+     "Pixel 2 ColorRGB_G",
+     "Pixel 2 ColorRGB_B",
+     "Pixel 3 ColorRGB_R",
+     "Pixel 3 ColorRGB_G",
+     "Pixel 3 ColorRGB_B",
+     "Pixel 4 ColorRGB_R",
+     "Pixel 4 ColorRGB_G",
+     "Pixel 4 ColorRGB_B"
+    ],
+    "footprint": 20
+   },
+   {
+    "name": "Basic 8 bit",
+    "channels": [
+     "Pan",
+     "Tilt",
+     "Dimmer",
+     "ColorRGB_R",
+     "ColorRGB_G",
+     "ColorRGB_B"
+    ],
+    "footprint": 6
+   }
+  ]
+ },
+ "corrupt.xml": {
+  "error": "unreadable"
+ },
+ "corrupt.xmlp": {
+  "error": "unreadable"
+ },
+ "gdtf_no_description.gdtf": {
+  "error": "unknown"
+ },
+ "gdtf_test_wash.gdtf": {
+  "format": "gdtf",
+  "manufacturer": "MVR Viewer Tests",
+  "fixture": "Test Wash GDTF",
+  "shortName": "TWG",
+  "author": "",
+  "modes": [
+   {
+    "name": "Mode 1 16 bit",
+    "channels": [
+     "Pan",
+     "Pan fine",
+     "Tilt",
+     "Tilt fine",
+     "Dimmer",
+     "",
+     "Color1"
+    ],
+    "footprint": 7
+   }
+  ]
+ },
+ "gma3_macro.xml": {
+  "error": "unknown"
+ },
+ "ma2_break2.xml": {
+  "format": "ma2",
+  "manufacturer": "MVR Viewer Tests",
+  "fixture": "Hazer Test",
+  "shortName": "Haze",
+  "author": "",
+  "modes": [
+   {
+    "name": "2 breaks",
+    "channels": [
+     "DIM",
+     "COLORRGB1",
+     "COLORRGB2",
+     "COLORRGB3"
+    ],
+    "footprint": 4
+   }
+  ]
+ },
+ "ma2_dimmer.xml": {
+  "format": "ma2",
+  "manufacturer": "Éclairages Test",
+  "fixture": "Dimmer Test",
+  "shortName": "Dim",
+  "author": "",
+  "modes": [
+   {
+    "name": "8 bit",
+    "channels": [
+     "DIM"
+    ],
+    "footprint": 1
+   }
+  ]
+ },
+ "ma2_only_virtual.xml": {
+  "error": "empty"
+ },
+ "other_root.xml": {
+  "error": "unknown"
+ },
+ "protected.pxml": {
+  "error": "protected"
+ }
+}

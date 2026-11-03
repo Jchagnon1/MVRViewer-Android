@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" major_vers="3" minor_vers="9" stream_vers="60">
+    <FixtureType name="Tronqué" mode="Standard">
+        <manufacturer>MVR Viewer Tests</manufacturer>
+        <Modules>
+            <Module name="Main" index="0">
+                <ChannelType coarse="1" attribute="DIM" feat

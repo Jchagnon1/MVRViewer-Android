@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fichier d'essai SYNTHÉTIQUE (SPEC-ma.md §7) : grandMA2, 2 modules, 4 instances.
+     Module 0 « Main » : PAN 16 bits, TILT 16 bits, DIM, DUMMY (canal réservé), patch 1.
+     Module 1 « Pixel » : RGB + DIM VIRTUEL (sans coarse), instancié 3 fois (patch 8, 11, 14).
+     Adresse 7 libre (trou ""), empreinte 16. -->
+<MA xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://schemas.malighting.de/grandma2/xml/MA" xsi:schemaLocation="http://schemas.malighting.de/grandma2/xml/MA http://schemas.malighting.de/grandma2/xml/3.9.60/MA.xsd" major_vers="3" minor_vers="9" stream_vers="60">
+    <FixtureType name="LED Bar 3 RGB PT" mode="Extended 16Ch">
+        <InfoItems>
+            <Info type="Revision" date="2026-10-02T10:00:00">Fichier synthétique pour les tests MVR Viewer</Info>
+        </InfoItems>
+        <short_name>LB3</short_name>
+        <manufacturer>MVR Viewer Tests</manufacturer>
+        <short_manufacturer>MVRT</short_manufacturer>
+        <Modules>
+            <Module name="Main" class="None" beamtype="None" beam_intensity="" index="0" beam_angle="">
+                <ChannelType coarse="1" fine="2" default="32767" attribute="PAN" feature="POSITION" preset="POSITION"/>
+                <ChannelType coarse="3" fine="4" default="32767" attribute="TILT" feature="POSITION" preset="POSITION"/>
+                <ChannelType coarse="5" default="0" react_to_master="1" attribute="DIM" feature="DIMMER" preset="DIMMER"/>
+                <ChannelType coarse="6" default="0" attribute="DUMMY" feature="CONTROL" preset="CONTROL"/>
+            </Module>
+            <Module name="Pixel" class="None" beamtype="Wash" beam_intensity="" index="1" beam_angle="15">
+                <ChannelType coarse="1" default="255" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR"/>
+                <ChannelType coarse="2" default="255" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR"/>
+                <ChannelType coarse="3" default="255" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR"/>
+                <ChannelType default="4294967295" attribute="DIM" feature="DIMMER" preset="DIMMER"/>
+            </Module>
+        </Modules>
+        <Instances>
+            <Instance module_index="0" patch="1" locked="true"/>
+            <Instance module_index="1" patch="8" locked="true"/>
+            <Instance module_index="1" patch="11" locked="true"/>
+            <Instance module_index="1" patch="14" locked="true"/>
+        </Instances>
+    </FixtureType>
+</MA>

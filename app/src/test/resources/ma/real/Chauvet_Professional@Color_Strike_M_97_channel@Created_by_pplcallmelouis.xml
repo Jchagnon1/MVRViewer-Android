@@ -1,0 +1,542 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="1.9.2.2">
+    <FixtureType Name="Color Strike M 97 channel" Guid="5D 1B 9E 7E 03 CA 10 02 7F A3 58 26 4B 79 3D 28" Note="97 Channel" Color="1.000000,1.000000,1.000000,1.000000" CreatedBy="Unknown" ShortName="Col Strike M" Description="grandMA3" Manufacturer="Chauvet Professional" Universal="No">
+        <AttributeDefinitions>
+            <DeactivationGroups/>
+            <ActivationGroups>
+                <ActivationGroup Name="ColorRGB"/>
+                <ActivationGroup Name="PanTilt"/>
+            </ActivationGroups>
+            <FeatureGroups>
+                <FeatureGroup Name="Color">
+                    <Feature Name="RGB"/>
+                    <Feature Name="ground Color Macro"/>
+                </FeatureGroup>
+                <FeatureGroup Name="Dimmer">
+                    <Feature Name="Dimmer"/>
+                    <Feature Name="ground Dimmer"/>
+                    <Feature Name="Plate 1 FX"/>
+                    <Feature Name="Plate 2 FX"/>
+                    <Feature Name="Beam 1 FX"/>
+                    <Feature Name="Beam 2 FX"/>
+                </FeatureGroup>
+                <FeatureGroup Name="Position">
+                    <Feature Name="PanTilt"/>
+                </FeatureGroup>
+                <FeatureGroup Name="Beam">
+                    <Feature Name="Strobe"/>
+                    <Feature Name="FX"/>
+                </FeatureGroup>
+                <FeatureGroup Name="Control">
+                    <Feature Name="Control"/>
+                </FeatureGroup>
+            </FeatureGroups>
+            <Attributes>
+                <Attribute Name="ColorRGB_R" Pretty="R" ActivationGroup="ColorRGB" Feature="Color.RGB" Special="ColorRGB" SpecialIndex="0" PhysicalUnit="ColorComponent" Color="1.000000,0.000000,0.000000,1.000000" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="ColorRGB_G" Pretty="G" ActivationGroup="ColorRGB" Feature="Color.RGB" Special="ColorRGB" SpecialIndex="1" PhysicalUnit="ColorComponent" Color="0.000000,1.000000,0.000000,1.000000" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="ColorRGB_B" Pretty="B" ActivationGroup="ColorRGB" Feature="Color.RGB" Special="ColorRGB" SpecialIndex="2" PhysicalUnit="ColorComponent" Color="0.000000,0.000000,1.000000,1.000000" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Dimmer" Pretty="Dim" Feature="Dimmer.Dimmer" Special="Dimmer" SpecialIndex="0" PhysicalUnit="LuminousIntensity" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Tilt" Pretty="T" ActivationGroup="PanTilt" Feature="Position.PanTilt" Special="PanTilt" SpecialIndex="1" PhysicalUnit="Angle" NaturalReadout="Physical" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate Dimmer" Pretty="Plate Dimmer" Feature="Dimmer.Dimmer" SpecialIndex="0" PhysicalUnit="Percent" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam Dimmer" Pretty="Beam Dimmer" Feature="Dimmer.Dimmer" SpecialIndex="0" PhysicalUnit="Percent" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate Flash Duration" Pretty="Plate Flash Duration" Feature="Beam.Strobe" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate Flash Rate" Pretty="Plate Flash Rate" Feature="Beam.Strobe" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam Flash Duration" Pretty="Beam Flash Duration" Feature="Beam.Strobe" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam Flash Rate" Pretty="Beam Flash Rate" Feature="Beam.Strobe" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam FX" Pretty="Beam FX" Feature="Beam.FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plates foreground Col Macro" Pretty="Plates foreground Color Macro" Feature="Color.ground Color Macro" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plates foreground Dimmer" Pretty="Plates foreground Dimmer" Feature="Dimmer.ground Dimmer" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plates background Col Macro" Pretty="Plates background Color Macro" Feature="Color.ground Color Macro" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plates background Dimmer" Pretty="Plates background Dimmer'" Feature="Dimmer.ground Dimmer" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate 1 FX Select" Pretty="Plate 1 FX select" Feature="Dimmer.Plate 1 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate 1 FX movement speed n direction" Pretty="Plate 1 FX movement speed n direction" Feature="Dimmer.Plate 1 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate 1 FX crossfade" Pretty="Plate 1 FX crossfade" Feature="Dimmer.Plate 1 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate 2 FX Select" Pretty="Plate 2 FX select" Feature="Dimmer.Plate 2 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate 2 FX movement speed n direction" Pretty="Plate 2 FX movement speed n direction" Feature="Dimmer.Plate 2 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Plate 2 FX crossfade" Pretty="Plate 2 FX crossfade" Feature="Dimmer.Plate 2 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam 1 FX Select" Pretty="Beam 1 FX select" Feature="Dimmer.Beam 1 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam 1 FX movement speed n direction" Pretty="Beam 1 FX movement speed n direction" Feature="Dimmer.Beam 1 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam 1 FX crossfade" Pretty="Beam 1 FX crossfade" Feature="Dimmer.Beam 1 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam 2 FX Select" Pretty="Beam 2 FX select" Feature="Dimmer.Beam 2 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam 2 FX movement n direction" Pretty="Beam 2 FX movement n direction" Feature="Dimmer.Beam 2 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Beam 2 FX crossfade" Pretty="Beam 2 FX crossfade" Feature="Dimmer.Beam 2 FX" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+                <Attribute Name="Control1" Pretty="Ctrl1" Feature="Control.Control" SpecialIndex="0" NaturalReadout="Percent" EncoderResolution="Coarse"/>
+            </Attributes>
+        </AttributeDefinitions>
+        <Wheels/>
+        <PhysicalDescriptions>
+            <Emitters>
+                <Emitter Name="Red" Color="1.000000,0.000000,0.000000,1.000000"/>
+                <Emitter Name="Green" Color="0.000000,1.000000,0.000000,1.000000"/>
+                <Emitter Name="Blue" Color="0.000000,0.000000,1.000000,1.000000"/>
+            </Emitters>
+            <CRIs/>
+            <FTFilters/>
+            <Connectors/>
+            <PhysicalProperties>
+                <PhysicalPropertiesData/>
+            </PhysicalProperties>
+            <ColorSpace>
+                <ColorSpaceData ColorRed="1.000000,0.000000,0.000000,1.000000" ColorGreen="0.000000,1.000000,0.000000,1.000000" ColorBlue="0.000000,0.000000,1.000000,1.000000" ColorWhitePoint="1.000000,1.000000,1.000000,1.000000"/>
+            </ColorSpace>
+        </PhysicalDescriptions>
+        <Models/>
+        <Geometries>
+            <Geometry Name="Plate"/>
+            <Geometry Name="Beam"/>
+            <Geometry Name="Main">
+                <Geometry Name="Plate Instances">
+                    <GeometryReference Name="Plate 1" Geometry="Plate">
+                        <Break DMXOffset="10"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 2" Geometry="Plate">
+                        <Break DMXOffset="13"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 3" Geometry="Plate">
+                        <Break DMXOffset="16"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 4" Geometry="Plate">
+                        <Break DMXOffset="19"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 5" Geometry="Plate">
+                        <Break DMXOffset="22"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 6" Geometry="Plate">
+                        <Break DMXOffset="25"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 7" Geometry="Plate">
+                        <Break DMXOffset="28"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 8" Geometry="Plate">
+                        <Break DMXOffset="31"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 9" Geometry="Plate">
+                        <Break DMXOffset="34"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 10" Geometry="Plate">
+                        <Break DMXOffset="37"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 11" Geometry="Plate">
+                        <Break DMXOffset="40"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 12" Geometry="Plate">
+                        <Break DMXOffset="43"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 13" Geometry="Plate">
+                        <Break DMXOffset="46"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Plate 14" Geometry="Plate">
+                        <Break DMXOffset="49"/>
+                    </GeometryReference>
+                </Geometry>
+                <Geometry Name="Beam Instances">
+                    <GeometryReference Name="Beam 1" Geometry="Beam">
+                        <Break DMXOffset="52"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 2" Geometry="Beam">
+                        <Break DMXOffset="53"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 3" Geometry="Beam">
+                        <Break DMXOffset="54"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 4" Geometry="Beam">
+                        <Break DMXOffset="55"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 5" Geometry="Beam">
+                        <Break DMXOffset="56"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 6" Geometry="Beam">
+                        <Break DMXOffset="57"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 7" Geometry="Beam">
+                        <Break DMXOffset="58"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 8" Geometry="Beam">
+                        <Break DMXOffset="59"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 9" Geometry="Beam">
+                        <Break DMXOffset="60"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 10" Geometry="Beam">
+                        <Break DMXOffset="61"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 11" Geometry="Beam">
+                        <Break DMXOffset="62"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 12" Geometry="Beam">
+                        <Break DMXOffset="63"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 13" Geometry="Beam">
+                        <Break DMXOffset="64"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 14" Geometry="Beam">
+                        <Break DMXOffset="65"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 15" Geometry="Beam">
+                        <Break DMXOffset="66"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 16" Geometry="Beam">
+                        <Break DMXOffset="67"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 17" Geometry="Beam">
+                        <Break DMXOffset="68"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 18" Geometry="Beam">
+                        <Break DMXOffset="69"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 19" Geometry="Beam">
+                        <Break DMXOffset="70"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 20" Geometry="Beam">
+                        <Break DMXOffset="71"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 21" Geometry="Beam">
+                        <Break DMXOffset="72"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 22" Geometry="Beam">
+                        <Break DMXOffset="73"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 23" Geometry="Beam">
+                        <Break DMXOffset="74"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 24" Geometry="Beam">
+                        <Break DMXOffset="75"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 25" Geometry="Beam">
+                        <Break DMXOffset="76"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 26" Geometry="Beam">
+                        <Break DMXOffset="77"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 27" Geometry="Beam">
+                        <Break DMXOffset="78"/>
+                    </GeometryReference>
+                    <GeometryReference Name="Beam 28" Geometry="Beam">
+                        <Break DMXOffset="79"/>
+                    </GeometryReference>
+                </Geometry>
+            </Geometry>
+        </Geometries>
+        <DMXModes>
+            <DMXMode Name="97 ch" Geometry="Main" XYZ="No">
+                <DMXChannels>
+                    <DMXChannel Coarse="1" Default="FFFFFF" Geometry="Plate">
+                        <LogicalChannel Attribute="ColorRGB_R">
+                            <ChannelFunction Attribute="ColorRGB_R" Emitter="Red"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="2" Default="FFFFFF" Geometry="Plate">
+                        <LogicalChannel Attribute="ColorRGB_G">
+                            <ChannelFunction Attribute="ColorRGB_G" Emitter="Green"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="3" Default="FFFFFF" Geometry="Plate">
+                        <LogicalChannel Attribute="ColorRGB_B">
+                            <ChannelFunction Attribute="ColorRGB_B" Emitter="Blue"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Default="FFFFFF" Geometry="Plate">
+                        <LogicalChannel Attribute="Dimmer">
+                            <ChannelFunction Attribute="Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="1" Default="FFFFFF" Geometry="Beam">
+                        <LogicalChannel Attribute="Dimmer">
+                            <ChannelFunction Attribute="Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="1" Fine="2" Default="808080" Geometry="Main">
+                        <LogicalChannel Attribute="Tilt">
+                            <ChannelFunction Attribute="Tilt"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="3" Geometry="Main">
+                        <LogicalChannel Attribute="Dimmer">
+                            <ChannelFunction Attribute="Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="4" Default="FFFFFF" Geometry="Main">
+                        <LogicalChannel Attribute="Plate Dimmer">
+                            <ChannelFunction Attribute="Plate Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="5" Default="FFFFFF" Geometry="Main">
+                        <LogicalChannel Attribute="Beam Dimmer">
+                            <ChannelFunction Attribute="Beam Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="6" Geometry="Main">
+                        <LogicalChannel Attribute="Plate Flash Duration">
+                            <ChannelFunction Attribute="Plate Flash Duration">
+                                <ChannelSet Name="disables duration control"/>
+                                <ChannelSet Name="Slow to Fast" DMXFrom="0A0A0A"/>
+                                <ChannelSet Name="100% On no flash/strobe" DMXFrom="FBFBFB"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="7" Geometry="Main">
+                        <LogicalChannel Attribute="Plate Flash Rate">
+                            <ChannelFunction Attribute="Plate Flash Rate">
+                                <ChannelSet Name="100%"/>
+                                <ChannelSet Name="Slow to Fast" DMXFrom="0A0A0A"/>
+                                <ChannelSet Name="100%" DMXFrom="FBFBFB"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="8" Geometry="Main">
+                        <LogicalChannel Attribute="Beam Flash Duration">
+                            <ChannelFunction Attribute="Beam Flash Duration">
+                                <ChannelSet Name="disables duration control"/>
+                                <ChannelSet Name="Slow to Fast" DMXFrom="0A0A0A"/>
+                                <ChannelSet Name="100% On no flash/strobe" DMXFrom="FBFBFB"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="9" Geometry="Main">
+                        <LogicalChannel Attribute="Beam Flash Rate">
+                            <ChannelFunction Attribute="Beam Flash Rate">
+                                <ChannelSet Name="100%"/>
+                                <ChannelSet Name="Slow to Fast" DMXFrom="0A0A0A"/>
+                                <ChannelSet Name="100%" DMXFrom="FBFBFB"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="80" Geometry="Main">
+                        <LogicalChannel Attribute="Beam FX">
+                            <ChannelFunction Attribute="Beam FX">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="Ramp up" DMXFrom="060606"/>
+                                <ChannelSet Name="Ramp down" DMXFrom="2B2B2B"/>
+                                <ChannelSet Name="Ramp up-down" DMXFrom="565656"/>
+                                <ChannelSet Name="Random" DMXFrom="818181"/>
+                                <ChannelSet Name="Lightning" DMXFrom="ACACAC"/>
+                                <ChannelSet Name="Spikes" DMXFrom="D7D7D7"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="81" Geometry="Main">
+                        <LogicalChannel Attribute="Plates foreground Col Macro">
+                            <ChannelFunction Attribute="Plates foreground Col Macro">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="2700K" DMXFrom="010101"/>
+                                <ChannelSet Name="3200K" DMXFrom="030303"/>
+                                <ChannelSet Name="4200K" DMXFrom="050505"/>
+                                <ChannelSet Name="5600K" DMXFrom="070707"/>
+                                <ChannelSet Name="8000K" DMXFrom="090909"/>
+                                <ChannelSet Name="Blue" DMXFrom="0B0B0B"/>
+                                <ChannelSet Name="Green+/Blue" DMXFrom="0C0C0C"/>
+                                <ChannelSet Name="Cyan" DMXFrom="313131"/>
+                                <ChannelSet Name="Green/Blue-" DMXFrom="323232"/>
+                                <ChannelSet Name="Green" DMXFrom="575757"/>
+                                <ChannelSet Name="Red+/Green" DMXFrom="585858"/>
+                                <ChannelSet Name="Yellow" DMXFrom="7D7D7D"/>
+                                <ChannelSet Name="Red/Green-" DMXFrom="7E7E7E"/>
+                                <ChannelSet Name="Red" DMXFrom="A3A3A3"/>
+                                <ChannelSet Name="Red/Blue+" DMXFrom="A4A4A4"/>
+                                <ChannelSet Name="Magenta" DMXFrom="C9C9C9"/>
+                                <ChannelSet Name="Red-/Blue" DMXFrom="CACACA"/>
+                                <ChannelSet Name="Blue" DMXFrom="EFEFEF"/>
+                                <ChannelSet Name="Color index Fast to Slow" DMXFrom="F0F0F0"/>
+                                <ChannelSet Name="Color snap Fast to Slow" DMXFrom="F8F8F8"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="82" Geometry="Main">
+                        <LogicalChannel Attribute="Plates foreground Dimmer">
+                            <ChannelFunction Attribute="Plates foreground Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="83" Geometry="Main">
+                        <LogicalChannel Attribute="Plates background Col Macro">
+                            <ChannelFunction Attribute="Plates background Col Macro">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="2700K" DMXFrom="010101"/>
+                                <ChannelSet Name="3200K" DMXFrom="030303"/>
+                                <ChannelSet Name="4200K" DMXFrom="050505"/>
+                                <ChannelSet Name="5600K" DMXFrom="070707"/>
+                                <ChannelSet Name="8000K" DMXFrom="090909"/>
+                                <ChannelSet Name="Blue" DMXFrom="0B0B0B"/>
+                                <ChannelSet Name="Green+/Blue" DMXFrom="0C0C0C"/>
+                                <ChannelSet Name="Cyan" DMXFrom="313131"/>
+                                <ChannelSet Name="Green/Blue-" DMXFrom="323232"/>
+                                <ChannelSet Name="Green" DMXFrom="575757"/>
+                                <ChannelSet Name="Red+/Green" DMXFrom="585858"/>
+                                <ChannelSet Name="Yellow" DMXFrom="7D7D7D"/>
+                                <ChannelSet Name="Red/Green-" DMXFrom="7E7E7E"/>
+                                <ChannelSet Name="Red" DMXFrom="A3A3A3"/>
+                                <ChannelSet Name="Red/Blue+" DMXFrom="A4A4A4"/>
+                                <ChannelSet Name="Magenta" DMXFrom="C9C9C9"/>
+                                <ChannelSet Name="Red-/Blue" DMXFrom="CACACA"/>
+                                <ChannelSet Name="Blue" DMXFrom="EFEFEF"/>
+                                <ChannelSet Name="Color index Fast to Slow" DMXFrom="F0F0F0"/>
+                                <ChannelSet Name="Color snap Fast to Slow" DMXFrom="F8F8F8"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="84" Geometry="Main">
+                        <LogicalChannel Attribute="Plates background Dimmer">
+                            <ChannelFunction Attribute="Plates background Dimmer"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="85" Geometry="Main">
+                        <LogicalChannel Attribute="Plate 1 FX Select">
+                            <ChannelFunction Attribute="Plate 1 FX Select"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="86" Geometry="Main">
+                        <LogicalChannel Attribute="Plate 1 FX movement speed n direction">
+                            <ChannelFunction Attribute="Plate 1 FX movement speed n direction">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="Left to RIght Fast to Slow" DMXFrom="060606"/>
+                                <ChannelSet Name="No function" DMXFrom="7D7D7D"/>
+                                <ChannelSet Name="Right to Left Slow to Fast" DMXFrom="838383"/>
+                                <ChannelSet Name="No function" DMXFrom="FAFAFA"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="87" Geometry="Main">
+                        <LogicalChannel Attribute="Plate 1 FX crossfade">
+                            <ChannelFunction Attribute="Plate 1 FX crossfade">
+                                <ChannelSet Name="Snap from cell to cell"/>
+                                <ChannelSet Name="Fade duration short to long" DMXFrom="030303"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="88" Geometry="Main">
+                        <LogicalChannel Attribute="Plate 2 FX Select">
+                            <ChannelFunction Attribute="Plate 2 FX Select"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="89" Geometry="Main">
+                        <LogicalChannel Attribute="Plate 2 FX movement speed n direction">
+                            <ChannelFunction Attribute="Plate 2 FX movement speed n direction">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="Left to RIght Fast to Slow" DMXFrom="060606"/>
+                                <ChannelSet Name="No function" DMXFrom="7D7D7D"/>
+                                <ChannelSet Name="Right to Left Slow to Fast" DMXFrom="838383"/>
+                                <ChannelSet Name="No function" DMXFrom="FAFAFA"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="90" Geometry="Main">
+                        <LogicalChannel Attribute="Plate 2 FX crossfade">
+                            <ChannelFunction Attribute="Plate 2 FX crossfade">
+                                <ChannelSet Name="Snap from cell to cell"/>
+                                <ChannelSet Name="Fade duration short to long" DMXFrom="030303"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="91" Geometry="Main">
+                        <LogicalChannel Attribute="Beam 1 FX Select">
+                            <ChannelFunction Attribute="Beam 1 FX Select"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="92" Geometry="Main">
+                        <LogicalChannel Attribute="Beam 1 FX movement speed n direction">
+                            <ChannelFunction Attribute="Beam 1 FX movement speed n direction">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="Left to RIght Fast to Slow" DMXFrom="060606"/>
+                                <ChannelSet Name="No function" DMXFrom="7D7D7D"/>
+                                <ChannelSet Name="Right to Left Slow to Fast" DMXFrom="838383"/>
+                                <ChannelSet Name="No function" DMXFrom="FAFAFA"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="93" Geometry="Main">
+                        <LogicalChannel Attribute="Beam 1 FX crossfade">
+                            <ChannelFunction Attribute="Beam 1 FX crossfade">
+                                <ChannelSet Name="Snap from cell to cell"/>
+                                <ChannelSet Name="Fade duration short to long" DMXFrom="030303"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="94" Geometry="Main">
+                        <LogicalChannel Attribute="Beam 2 FX Select">
+                            <ChannelFunction Attribute="Beam 2 FX Select"/>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="95" Geometry="Main">
+                        <LogicalChannel Attribute="Beam 2 FX movement n direction">
+                            <ChannelFunction Attribute="Beam 2 FX movement n direction">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="Left to RIght Fast to Slow" DMXFrom="060606"/>
+                                <ChannelSet Name="No function" DMXFrom="7D7D7D"/>
+                                <ChannelSet Name="Right to Left Slow to Fast" DMXFrom="838383"/>
+                                <ChannelSet Name="No function" DMXFrom="FAFAFA"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="96" Geometry="Main">
+                        <LogicalChannel Attribute="Beam 2 FX crossfade">
+                            <ChannelFunction Attribute="Beam 2 FX crossfade">
+                                <ChannelSet Name="Snap from cell to cell"/>
+                                <ChannelSet Name="Fade duration short to long" DMXFrom="030303"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                    <DMXChannel Coarse="97" Geometry="Main">
+                        <LogicalChannel Attribute="Control1">
+                            <ChannelFunction Attribute="Control1">
+                                <ChannelSet Name="No function"/>
+                                <ChannelSet Name="Off (dimmer mode)" DMXFrom="060606"/>
+                                <ChannelSet Name="Dimmer 1" DMXFrom="0B0B0B"/>
+                                <ChannelSet Name="Dimmer 2" DMXFrom="101010"/>
+                                <ChannelSet Name="Dimmer 3" DMXFrom="151515"/>
+                                <ChannelSet Name="600Hz" DMXFrom="1A1A1A"/>
+                                <ChannelSet Name="1200Hz" DMXFrom="1F1F1F"/>
+                                <ChannelSet Name="2000Hz" DMXFrom="242424"/>
+                                <ChannelSet Name="4000Hz" DMXFrom="292929"/>
+                                <ChannelSet Name="6000Hz" DMXFrom="2E2E2E"/>
+                                <ChannelSet Name="25KHz" DMXFrom="333333"/>
+                                <ChannelSet Name="Auto (fan mode)" DMXFrom="383838"/>
+                                <ChannelSet Name="On (fan mode)" DMXFrom="3D3D3D"/>
+                                <ChannelSet Name="Tilt reset" DMXFrom="424242"/>
+                                <ChannelSet Name="Plate1 invert off" DMXFrom="474747"/>
+                                <ChannelSet Name="Plate1 invert on" DMXFrom="4C4C4C"/>
+                                <ChannelSet Name="Plate2 invert off" DMXFrom="515151"/>
+                                <ChannelSet Name="Plate2 invert on" DMXFrom="565656"/>
+                                <ChannelSet Name="Beam1 invert off" DMXFrom="5B5B5B"/>
+                                <ChannelSet Name="Beam1 invert on" DMXFrom="606060"/>
+                                <ChannelSet Name="Beam2 invert off" DMXFrom="656565"/>
+                                <ChannelSet Name="Beam2 invert on" DMXFrom="6A6A6A"/>
+                                <ChannelSet Name="Plate swap on" DMXFrom="6F6F6F"/>
+                                <ChannelSet Name="Plate swap off" DMXFrom="747474"/>
+                                <ChannelSet Name="Beam swap on" DMXFrom="797979"/>
+                                <ChannelSet Name="Beam swap off" DMXFrom="7E7E7E"/>
+                                <ChannelSet Name="No function" DMXFrom="838383"/>
+                                <ChannelSet Name="FX pattern priority" DMXFrom="8D8D8D"/>
+                                <ChannelSet Name="Color mix HTP on" DMXFrom="979797"/>
+                                <ChannelSet Name="Color mix HTP off" DMXFrom="9C9C9C"/>
+                                <ChannelSet Name="Color priority" DMXFrom="A1A1A1"/>
+                                <ChannelSet Name="No function" DMXFrom="ABABAB"/>
+                            </ChannelFunction>
+                        </LogicalChannel>
+                    </DMXChannel>
+                </DMXChannels>
+                <Relations>
+                    <Relation Name="VirtualDimmer" Master="Plate_Dimmer" Follower="Plate_ColorRGB_R.ColorRGB_R.ColorRGB_R 1" Type="Multiply"/>
+                    <Relation Name="VirtualDimmer" Master="Plate_Dimmer" Follower="Plate_ColorRGB_G.ColorRGB_G.ColorRGB_G 1" Type="Multiply"/>
+                    <Relation Name="VirtualDimmer" Master="Plate_Dimmer" Follower="Plate_ColorRGB_B.ColorRGB_B.ColorRGB_B 1" Type="Multiply"/>
+                </Relations>
+                <FTMacros>
+                    <FTDMXMacros/>
+                    <FTVisualMacros/>
+                </FTMacros>
+                <SoftwareVersions/>
+            </DMXMode>
+        </DMXModes>
+        <Revisions>
+            <Revision Text="Created by Admin " Date="26.04.2023 05:08:47"/>
+        <Revision Text="Created by pplcallmelouis, Uploaded to grandMA3 Share." Date="27.04.2023 05:22:17"/></Revisions>
+        <FTPresets/>
+        <Protocols>
+            <RDMFixtureType>
+                <Parameters/>
+                <Notifications>
+                    <RDMAbsentNotification/>
+                </Notifications>
+                <FTRDMPersonalityCollect/>
+            </RDMFixtureType>
+        </Protocols>
+    </FixtureType>
+</GMA3>

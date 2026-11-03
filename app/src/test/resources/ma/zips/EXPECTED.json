@@ -1,0 +1,86 @@
+{
+ "ma_profiles.zip": {
+  "added": 9,
+  "duplicates": 1,
+  "ignored": 3,
+  "errors": 7,
+  "protected": 1,
+  "progressTotal": 17,
+  "duplicate": "ma_profiles.zip › nested/inner.zip › ma2_dimmer.xml",
+  "errorNames": {
+   "unreadable": [
+    "ma_profiles.zip › synthetic/corrupt.xml",
+    "ma_profiles.zip › synthetic/corrupt.xmlp"
+   ],
+   "unknown": [
+    "ma_profiles.zip › synthetic/gdtf_no_description.gdtf",
+    "ma_profiles.zip › synthetic/gma3_macro.xml",
+    "ma_profiles.zip › synthetic/other_root.xml"
+   ],
+   "empty": [
+    "ma_profiles.zip › synthetic/ma2_only_virtual.xml"
+   ],
+   "protected": [
+    "ma_profiles.zip › synthetic/protected.pxml"
+   ]
+  }
+ },
+ "ma_profiles.zip#2": {
+  "added": 0,
+  "duplicates": 10,
+  "ignored": 3,
+  "errors": 7,
+  "protected": 1
+ },
+ "accented_names.zip": {
+  "added": 3,
+  "duplicates": 0,
+  "ignored": 0,
+  "errors": 0,
+  "protected": 0,
+  "entries": [
+   {
+    "fileName": "Éclairage@Dimmer@Rémi.xml",
+    "author": "Rémi"
+   },
+   {
+    "fileName": "Café@Break@Noël.xml",
+    "author": "Noël"
+   },
+   {
+    "fileName": "Zoé@LED Bar@Hélène.xml",
+    "author": "Hélène"
+   }
+  ]
+ },
+ "no_profiles.zip": {
+  "added": 0,
+  "duplicates": 0,
+  "ignored": 2,
+  "errors": 1,
+  "protected": 0,
+  "lines": [
+   "no_profiles.zip — Aucun profil MA ni GDTF dans cette archive."
+  ]
+ },
+ "corrupt.zip": {
+  "added": 0,
+  "duplicates": 0,
+  "ignored": 0,
+  "errors": 1,
+  "protected": 0,
+  "lines": [
+   "corrupt.zip — Archive .zip illisible ou corrompue."
+  ]
+ },
+ "huge_entry.zip": {
+  "added": 0,
+  "duplicates": 0,
+  "ignored": 0,
+  "errors": 1,
+  "protected": 0,
+  "lines": [
+   "huge_entry.zip › huge.xml — Fichier trop volumineux (65 Mo, maximum 64 Mo)."
+  ]
+ }
+}

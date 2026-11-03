@@ -1,0 +1,156 @@
+package com.minou.mvrviewer.mvr
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Plan de repère MATRICIEL (JPEG / PNG / page 1 d'un PDF).
+ *
+ * Ce qui est testable en JVM (sans `Bitmap`, non mocké par le runner) : la règle
+ * de SOUS-ÉCHANTILLONNAGE — la seule barrière entre un scan A0 à 600 dpi et un
+ * OOM, précédent documenté du projet — et la géométrie du placement (bornes
+ * locales, coins monde). Le décodage lui-même est un appel direct à
+ * `BitmapFactory`, sans logique propre.
+ */
+class RasterPlanTest {
+
+    private fun sample(w: Int, h: Int, maxSide: Int = 4096, maxPx: Long = 12_000_000L) =
+        RasterPlanLoader.sampleSizeFor(w, h, maxSide, maxPx)
+
+    @Test fun petiteImageNonSousEchantillonnee() {
+        assertEquals(1, sample(1920, 1080))
+        assertEquals(1, sample(4096, 2000))
+    }
+
+    @Test fun cotesTropGrandsSontDivises() {
+        // 8192 → 4096 en une division ; puissance de 2 exigée par BitmapFactory.
+        assertEquals(2, sample(8192, 1000))
+        assertEquals(4, sample(16384, 1000))
+    }
+
+    @Test fun budgetPixelsRespecteMemeSansCoteExcessif() {
+        // 4000 × 4000 = 16 Mpx : sous la borne de côté, AU-DESSUS du budget.
+        val s = sample(4000, 4000)
+        assertTrue("attendu un sous-échantillonnage, obtenu $s", s >= 2)
+        assertTrue((4000L / s) * (4000L / s) <= 12_000_000L)
+    }
+
+    @Test fun scanEnormeResteBorne() {
+        // ~500 Mpx (A0 à 600 dpi) : les DEUX bornes doivent tenir après division.
+        val w = 28080; val h = 19860
+        val s = sample(w, h)
+        assertTrue(w / s <= 4096 && h / s <= 4096)
+        assertTrue((w / s).toLong() * (h / s).toLong() <= 12_000_000L)
+        assertEquals(0, s and (s - 1))   // puissance de 2
+    }
+
+    @Test fun dimensionsInvalidesRenvoientUn() {
+        assertEquals(1, sample(0, 0))
+        assertEquals(1, sample(-5, 100))
+    }
+
+    // ---- TAILLE D'ARRIVÉE (convention commune aux deux plateformes) ----------
+
+    @Test fun imageArriveEn96DpiNeutre() {
+        // 96 px à 96 dpi = 1 pouce = 25,4 mm. La taille ne dépend NI du dpi
+        // déclaré dans le fichier, NI de l'emprise de la scène ouverte.
+        val (w, h) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.JPEG, 96f, 192f)
+        assertEquals(25.4f, w, 1e-3f)
+        assertEquals(50.8f, h, 1e-3f)
+        val (w2, _) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.PNG, 6000f, 3000f)
+        assertEquals((6000.0 / 96.0 * 25.4).toFloat(), w2, 1e-2f)
+    }
+
+    @Test fun pdfArriveASaTaillePhysique() {
+        // MediaBox A4 = 595 × 842 points → ~210 × 297 mm.
+        val (w, h) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.PDF, 595f, 842f)
+        assertEquals(210f, w, 0.5f)
+        assertEquals(297f, h, 0.5f)
+    }
+
+    @Test fun dimensionsSourceInvalidesNeCassentPas() {
+        val (w, h) = RasterPlanLoader.worldSizeMm(RasterPlan.Kind.PNG, 0f, Float.NaN)
+        assertTrue(w > 0f && h > 0f)
+    }
+
+    @Test fun bornesLocalesCentreesSurLOrigine() {
+        // Le DxfPlan porteur est VIDE (aucune polyligne) mais garde les bornes de
+        // l'image : c'est ce qui fait sortir proprement la passe DXF 3D et les
+        // tracés 2D, tout en gardant le centrage à l'import commun aux deux plans.
+        val p = emptyDxfPlanFor(4000f, 2000f)
+        assertTrue(p.isEmpty)
+        assertEquals(4000f, p.width, 0f)
+        assertEquals(2000f, p.height, 0f)
+        assertEquals(0f, p.centerX, 0f)
+        assertEquals(0f, p.centerY, 0f)
+        assertEquals(-2000f, p.minX, 0f); assertEquals(1000f, p.maxY, 0f)
+    }
+
+    @Test fun coinsMondeSuiventPlacementEtHomothetie() {
+        val tf = ReferencePlanTransform(offsetX = 1000.0, offsetY = 500.0, homothety = 2.0)
+        val c = rasterWorldCorners(2000f, 1000f, tf)
+        // NO, NE, SE, SO — image doublée (homothétie ×2), puis décalée.
+        assertEquals(-3000f, c[0], 1e-2f); assertEquals(2500f, c[1], 1e-2f)   // NO
+        assertEquals(5000f, c[2], 1e-2f); assertEquals(2500f, c[3], 1e-2f)    // NE
+        assertEquals(5000f, c[4], 1e-2f); assertEquals(-1500f, c[5], 1e-2f)   // SE
+        assertEquals(-3000f, c[6], 1e-2f); assertEquals(-1500f, c[7], 1e-2f)  // SO
+    }
+
+    // ---- ROUTAGE DU FORMAT (R5) ----------------------------------------------
+
+    private val dxfHead = "  0\r\nSECTION".toByteArray()
+    private fun fmt(head: ByteArray = ByteArray(0), mime: String? = null, name: String? = null) =
+        RasterPlanLoader.formatFor(head, mime, name)
+
+    @Test fun dxfNestJamaisDetourneVersLeDecodeurDImage() {
+        // `image/vnd.dxf` est le type MIME ENREGISTRÉ du DXF : il commence par
+        // « image/ » et les fournisseurs de documents le renvoient tel quel. Sans
+        // exclusion, la règle générique l'enverrait à BitmapFactory → « illisible ».
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "image/vnd.dxf", "plan.dxf"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "image/vnd.dxf", null))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "IMAGE/VND.DXF; charset=utf-8", null))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "application/dxf", null))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "drawing/x-dxf", null))
+        // Extension .dxf sous un MIME générique « image/* » ou « tout type ».
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "image/jpeg", "plan.dxf"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, "application/octet-stream", "plan.dxf"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(dxfHead, null, "plan.DXF"))
+    }
+
+    @Test fun imagesEtPdfRestentRoutesCommeAvant() {
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        val jpg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte())
+        val pdf = "%PDF-1.7".toByteArray()
+        assertEquals(RasterPlanLoader.Format.PNG, fmt(png, null, null))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(jpg, null, null))
+        assertEquals(RasterPlanLoader.Format.PDF, fmt(pdf, null, null))
+        // Sans octets de tête exploitables : MIME puis extension.
+        assertEquals(RasterPlanLoader.Format.PNG, fmt(mime = "image/png"))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(mime = "image/heic"))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(mime = "image/webp"))
+        assertEquals(RasterPlanLoader.Format.PDF, fmt(mime = "application/pdf"))
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(name = "plan.JPG"))
+        assertEquals(RasterPlanLoader.Format.PDF, fmt(name = "plan.pdf"))
+        // Inconnu → parseur DXF (comportement historique).
+        assertEquals(RasterPlanLoader.Format.DXF, fmt(name = "plan.bin"))
+        assertEquals(RasterPlanLoader.Format.DXF, fmt())
+    }
+
+    @Test fun lesOctetsDeTetePrimentSurLeNom() {
+        // Une vraie image mal nommée reste une image : la signature gagne, comme
+        // avant — l'exclusion DXF ne s'applique qu'à défaut de signature connue.
+        val jpg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte())
+        assertEquals(RasterPlanLoader.Format.JPEG, fmt(jpg, "image/vnd.dxf", "photo.dxf"))
+    }
+
+    @Test fun rotationDeQuatreVingtDixDegres() {
+        // Rotation pure : le coin NO part sur la droite, sans déformation
+        // (les 4 côtés gardent leurs longueurs 4000 × 2000).
+        val c = rasterWorldCorners(2000f, 1000f, ReferencePlanTransform(rotationDeg = 90.0))
+        fun dist(i: Int, j: Int) = kotlin.math.hypot(c[i] - c[j], c[i + 1] - c[j + 1])
+        assertEquals(4000f, dist(0, 2), 1e-2f)   // NO→NE
+        assertEquals(2000f, dist(2, 4), 1e-2f)   // NE→SE
+        assertEquals(-1000f, c[0], 1e-2f); assertEquals(-2000f, c[1], 1e-2f)
+    }
+}

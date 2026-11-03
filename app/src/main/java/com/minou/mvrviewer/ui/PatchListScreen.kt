@@ -1,5 +1,6 @@
 package com.minou.mvrviewer.ui
 
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -15,6 +16,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +44,9 @@ import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.DmxAddress
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
+import com.minou.mvrviewer.sync.PowerSource
+import androidx.compose.ui.res.stringResource
+import com.minou.mvrviewer.R
 
 /**
  * Liste de patch — projecteurs du .mvr avec recherche/filtre (ID, nom, GDTF,
@@ -50,6 +59,11 @@ fun PatchListScreen(
     scene: MvrScene,
     mvrBytes: ByteArray,
     overrides: PatchOverrides,
+    power: PowerLibraryState,
+    // Projecteurs custom V1 : biblio + résolveur (assignation depuis la fiche).
+    gdtfOverrides: GdtfOverrides = remember { GdtfOverrides() },
+    customLibrary: CustomFixtureLibrary = remember { CustomFixtureLibrary() },
+    customResolver: CustomFixtureResolver = remember { CustomFixtureResolver() },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -70,11 +84,11 @@ fun PatchListScreen(
         fixtures.flatMap { it.addresses }.mapNotNull { universeOf(it) }.distinct().sortedBy { it.toIntOrNull() ?: 0 }
     }
 
-    val filtered = remember(scene, query, selLayers, selTypes, selModes, selUniverses) {
+    val filtered = remember(scene, query, selLayers, selTypes, selModes, selUniverses, overrides.version) {
         val q = query.trim()
         fixtures.filter { f ->
             (q.isEmpty() ||
-                f.fixtureId?.contains(q, true) == true || f.name.contains(q, true) ||
+                f.fixtureId?.contains(q, true) == true || overrides.effectiveName(f).contains(q, true) ||
                 f.gdtfSpec?.contains(q, true) == true || f.layerName.contains(q, true) ||
                 f.addresses.any { it.contains(q, true) }) &&
             (selLayers.isEmpty() || f.layerName in selLayers) &&
@@ -86,10 +100,10 @@ fun PatchListScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Patch", style = MaterialTheme.typography.titleMedium) },
+            title = { Text(stringResource(R.string.patch_title), style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour 3D")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                 }
             }
         )
@@ -98,7 +112,7 @@ fun PatchListScreen(
             onValueChange = { query = it },
             singleLine = true,
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            placeholder = { Text("Filtrer (ID, GDTF, calque, DMX…)") },
+            placeholder = { Text(stringResource(R.string.patch_filter_hint)) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
         )
         Row(
@@ -106,13 +120,13 @@ fun PatchListScreen(
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FacetChip("Calque", layers, selLayers) { selLayers = it }
-            FacetChip("Type", types, selTypes) { selTypes = it }
-            FacetChip("Mode", modes, selModes) { selModes = it }
-            FacetChip("Univers", universes, selUniverses) { selUniverses = it }
+            FacetChip(stringResource(R.string.facet_layer), layers, selLayers) { selLayers = it }
+            FacetChip(stringResource(R.string.facet_type), types, selTypes) { selTypes = it }
+            FacetChip(stringResource(R.string.facet_mode), modes, selModes) { selModes = it }
+            FacetChip(stringResource(R.string.facet_universe), universes, selUniverses) { selUniverses = it }
             val active = selLayers.size + selTypes.size + selModes.size + selUniverses.size
             if (active > 0) {
-                Text("Réinit.", color = MaterialTheme.colorScheme.primary,
+                Text(stringResource(R.string.common_reset_short), color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.clickable {
                         selLayers = emptySet(); selTypes = emptySet()
@@ -121,19 +135,50 @@ fun PatchListScreen(
             }
         }
         Text(
-            "${filtered.size} / ${fixtures.size} projecteur(s) · touchez pour éditer",
+            pluralStringResource(R.plurals.patch_count, fixtures.size, filtered.size, fixtures.size),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
+        // Deux projecteurs ne peuvent pas porter le même N° : sur un vrai
+        // plateau c'est une erreur de patch (le pupitre en piloterait deux, ou
+        // aucun). On la signale ici plutôt que de la découvrir en montage.
+        val dupIds = remember(fixtures, overrides.version) {
+            fixtures.mapNotNull { overrides.effectiveId(it)?.trim()?.ifBlank { null } }
+                .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        }
+        if (dupIds.isNotEmpty()) {
+            Surface(color = MaterialTheme.colorScheme.errorContainer) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Filled.Warning, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(R.string.patch_duplicate_ids) + dupIds.sorted().joinToString(", ") { "#" + it },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(filtered) { f -> FixtureRow(f, overrides) { detail = f } }
+            items(filtered) { f ->
+                FixtureRow(f, overrides, power, customResolver, overrides.effectiveId(f)?.trim() in dupIds) { detail = f }
+            }
         }
     }
 
     detail?.let { f ->
-        FixtureDetailSheet(fixture = f, mvrBytes = mvrBytes, overrides = overrides, onDismiss = { detail = null })
+        FixtureDetailSheet(
+            fixture = f, mvrBytes = mvrBytes, overrides = overrides, power = power,
+            scene = scene, gdtfOverrides = gdtfOverrides,
+            customLibrary = customLibrary, customResolver = customResolver,
+            onDismiss = { detail = null }
+        )
     }
 }
 
@@ -169,18 +214,39 @@ private fun FacetChip(label: String, options: List<String>, selected: Set<String
 }
 
 @Composable
-private fun FixtureRow(f: MvrSceneObject, overrides: PatchOverrides, onClick: () -> Unit) {
+private fun FixtureRow(
+    f: MvrSceneObject, overrides: PatchOverrides, power: PowerLibraryState,
+    customResolver: CustomFixtureResolver,
+    duplicateId: Boolean = false, onClick: () -> Unit
+) {
     val edited = overrides.isEdited(f)
     Column(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         val id = overrides.effectiveId(f)?.let { "#$it  " } ?: ""
-        Text("$id${f.name}" + if (edited) "  ✎" else "", style = MaterialTheme.typography.bodyLarge)
-        val spec = f.gdtfSpec ?: "—"
-        val mode = overrides.effectiveMode(f) ?: "—"
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (duplicateId) {
+                Icon(Icons.Filled.Warning, contentDescription = stringResource(R.string.patch_duplicate_id_cd),
+                    tint = MaterialTheme.colorScheme.error, modifier = Modifier.padding(end = 6.dp))
+            }
+            Text(
+                "$id${overrides.effectiveName(f)}" + if (edited) "  ✎" else "",
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (duplicateId) MaterialTheme.colorScheme.error else Color.Unspecified
+            )
+        }
+        // Type custom résolu → affiche le NOM du type + « N canaux » à la place du
+        // GDTF/mode (parité iOS). Non-custom : inchangé.
+        val custom = customTypeOf(f, overrides, customResolver)
+        val spec = custom?.name ?: f.gdtfSpec ?: "—"
+        val mode = custom?.let { maxOf(1, it.footprint).let { n -> pluralStringResource(R.plurals.fx_channels, n, n) } } ?: overrides.effectiveMode(f) ?: "—"
         val addr = overrides.effectiveAddress(f)?.let { com.minou.mvrviewer.mvr.DmxAddress.format(it) } ?: "—"
+        // Puissance effective à côté du patch (outil de câblage). « ? » = à saisir ;
+        // « * » = valeur saisie (bibliothèque) plutôt que GDTF.
+        val res = power.effective(f.gdtfSpec)
+        val watt = res.watts?.let { "$it W" + if (res.source == PowerSource.LIBRARY) "*" else "" } ?: "? W"
         Text(
-            "$spec · $mode · DMX $addr",
+            "$spec · $mode · DMX $addr · $watt",
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

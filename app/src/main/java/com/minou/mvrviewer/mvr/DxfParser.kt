@@ -189,6 +189,9 @@ object DxfParser {
         var kept = 0
         var skipped = 0
         val layerCounts = HashMap<String, Int>()
+        val layerColors = HashMap<String, Int>()   // calque → 0xRRGGBB (BYLAYER)
+        val hiddenLayers = HashSet<String>()        // calques éteints/gelés
+        val fills = ArrayList<DxfFill>()            // zones remplies (HATCH/SOLID)
     }
 
     // ---- Machine à états (streaming) ----
@@ -212,6 +215,15 @@ object DxfParser {
         private var curBlockBaseY = 0.0
         private var curBlockPairs = ArrayList<Pair>()
         private var inBlockBody = false
+
+        // Table LAYER (section TABLES) : couleurs BYLAYER + calques éteints/gelés.
+        private var awaitingTableName = false
+        private var inLayerTable = false
+        private var inLayerEntry = false
+        private var curLayerName = ""
+        private var curLayerAci: Int? = null
+        private var curLayerTrue: Int? = null
+        private var curLayerFlags = 0
 
         private val chunk = ArrayList<Pair>()
         private val out = Out()
@@ -252,9 +264,43 @@ object DxfParser {
                         awaitingInsunits = false
                     }
                 }
+                2 -> consumeInTables(p)
                 3 -> consumeInBlocks(p)
                 4 -> consumeInEntities(p)
             }
+        }
+
+        // Table LAYER : accumule nom (2) + ACI (62) + true color (420) + flags (70).
+        private fun consumeInTables(p: Pair) {
+            if (p.code == 0) {
+                when (p.str) {
+                    "TABLE" -> { flushLayer(); awaitingTableName = true; inLayerTable = false }
+                    "LAYER" -> if (inLayerTable) {
+                        flushLayer()
+                        inLayerEntry = true; curLayerName = ""
+                        curLayerAci = null; curLayerTrue = null; curLayerFlags = 0
+                    }
+                    "ENDTAB" -> { flushLayer(); inLayerTable = false }
+                }
+                return
+            }
+            if (awaitingTableName && p.code == 2) { inLayerTable = (p.str == "LAYER"); awaitingTableName = false; return }
+            if (inLayerEntry) when (p.code) {
+                2 -> if (curLayerName.isEmpty()) curLayerName = p.str
+                62 -> curLayerAci = p.int
+                420 -> curLayerTrue = p.int
+                70 -> curLayerFlags = p.int ?: 0
+            }
+        }
+
+        private fun flushLayer() {
+            if (inLayerEntry && curLayerName.isNotEmpty()) {
+                out.layerColors[curLayerName] = layerColorFrom(curLayerAci, curLayerTrue)
+                // ACI négatif = calque éteint ; bit 1 des flags = gelé → masqué par défaut.
+                if ((curLayerAci ?: 7) < 0 || (curLayerFlags and 1) != 0) out.hiddenLayers.add(curLayerName)
+            }
+            inLayerEntry = false
+            curLayerName = ""; curLayerAci = null; curLayerTrue = null; curLayerFlags = 0
         }
 
         private fun consumeInBlocks(p: Pair) {
@@ -302,8 +348,8 @@ object DxfParser {
         }
 
         fun finish(): DxfPlan? {
-            flushChunk(); finalizeBlock()
-            if (out.polylines.isEmpty()) return null
+            flushChunk(); finalizeBlock(); flushLayer()
+            if (out.polylines.isEmpty() && out.fills.isEmpty()) return null
             var mnX = Float.MAX_VALUE; var mnY = Float.MAX_VALUE
             var mxX = -Float.MAX_VALUE; var mxY = -Float.MAX_VALUE
             for (pl in out.polylines) {
@@ -314,14 +360,25 @@ object DxfParser {
                     if (y < mnY) mnY = y; if (y > mxY) mxY = y
                 }
             }
+            for (f in out.fills) for (ring in f.rings) {
+                var i = 0
+                while (i < ring.size) {
+                    val x = ring[i]; val y = ring[i + 1]; i += 2
+                    if (x < mnX) mnX = x; if (x > mxX) mxX = x
+                    if (y < mnY) mnY = y; if (y > mxY) mxY = y
+                }
+            }
             if (!mnX.isFinite() || !mxX.isFinite()) return null
             return DxfPlan(out.polylines, mnX, mnY, mxX, mxY, unitLabel,
-                out.kept, out.layerCounts, out.skipped)
+                out.kept, out.layerCounts, out.skipped,
+                layerColors = out.layerColors, defaultHiddenLayers = out.hiddenLayers,
+                fills = out.fills)
         }
 
         // ---- Émission des entités ----
 
-        private fun emit(pairs: List<Pair>, t: Affine, depth: Int) {
+        private fun emit(pairs: List<Pair>, t: Affine, depth: Int,
+                         blockColor: Int? = null, inheritedLayer: String? = null) {
             if (depth >= 8) return
             var i = 0
             while (i < pairs.size) {
@@ -332,11 +389,13 @@ object DxfParser {
                 while (j < pairs.size && pairs[j].code != 0) { g.add(pairs[j]); j++ }
                 val layer = str(g, 8) ?: ""
                 if (int(g, 67) == 1 || int(g, 60) == 1) { i = j; continue }
+                val color = resolveColor(g, layer, blockColor, inheritedLayer, out.layerColors)
+                if (color == null) { i = j; continue } // entité éteinte (ACI négatif)
                 when (type) {
                     "LINE" -> {
                         val x1 = dbl(g, 10); val y1 = dbl(g, 20); val x2 = dbl(g, 11); val y2 = dbl(g, 21)
                         if (x1 != null && y1 != null && x2 != null && y2 != null)
-                            addPolyline(doubleArrayOf(x1, y1, x2, y2), false, layer, t)
+                            addPolyline(doubleArrayOf(x1, y1, x2, y2), false, layer, t, color)
                     }
                     "LWPOLYLINE" -> {
                         val closed = (int(g, 70) ?: 0) and 1 == 1
@@ -347,7 +406,7 @@ object DxfParser {
                             20 -> { val x = pendingX; val y = pair.double; if (x != null && y != null) { xs.add(x); ys.add(y); bulges.add(0.0); pendingX = null } }
                             42 -> if (bulges.isNotEmpty()) pair.double?.let { bulges[bulges.size - 1] = it }
                         }
-                        addPolyline(tessellateBulges(xs, ys, bulges, closed), closed, layer, t)
+                        addPolyline(tessellateBulges(xs, ys, bulges, closed), closed, layer, t, color)
                     }
                     "POLYLINE" -> {
                         // Le code 70 du POLYLINE change RADICALEMENT la sémantique :
@@ -399,7 +458,7 @@ object DxfParser {
                                     val key = (minOf(i1, i2).toLong() shl 32) or maxOf(i1, i2).toLong()
                                     if (!seen.add(key)) continue
                                     val a = geo[i1]; val b = geo[i2]
-                                    addPolyline(doubleArrayOf(a.x!!, a.y!!, b.x!!, b.y!!), false, layer, t)
+                                    addPolyline(doubleArrayOf(a.x!!, a.y!!, b.x!!, b.y!!), false, layer, t, color)
                                 }
                             }
                         } else if (plFlags and 16 != 0) {
@@ -410,12 +469,12 @@ object DxfParser {
                                 for (row in 0 until mCount) {
                                     val flat = DoubleArray(nCount * 2)
                                     for (cIdx in 0 until nCount) { val p = geo[row * nCount + cIdx]; flat[cIdx * 2] = p[0]; flat[cIdx * 2 + 1] = p[1] }
-                                    addPolyline(flat, plFlags and 32 != 0, layer, t)
+                                    addPolyline(flat, plFlags and 32 != 0, layer, t, color)
                                 }
                                 for (col in 0 until nCount) {
                                     val flat = DoubleArray(mCount * 2)
                                     for (rIdx in 0 until mCount) { val p = geo[rIdx * nCount + col]; flat[rIdx * 2] = p[0]; flat[rIdx * 2 + 1] = p[1] }
-                                    addPolyline(flat, plFlags and 1 != 0, layer, t)
+                                    addPolyline(flat, plFlags and 1 != 0, layer, t, color)
                                 }
                             }
                         } else {
@@ -428,18 +487,18 @@ object DxfParser {
                                 if (v.flags and 128 != 0 && v.flags and 64 == 0) continue
                                 if (v.x != null && v.y != null) { xs.add(v.x); ys.add(v.y); bulges.add(v.bulge) }
                             }
-                            addPolyline(tessellateBulges(xs, ys, bulges, closed), closed, layer, t)
+                            addPolyline(tessellateBulges(xs, ys, bulges, closed), closed, layer, t, color)
                         }
                         j = k
                     }
                     "CIRCLE" -> {
                         val cx = dbl(g, 10); val cy = dbl(g, 20); val r = dbl(g, 40)
-                        if (cx != null && cy != null && r != null && r > 0) addPolyline(circlePoints(cx, cy, r), true, layer, t)
+                        if (cx != null && cy != null && r != null && r > 0) addPolyline(circlePoints(cx, cy, r), true, layer, t, color)
                     }
                     "ARC" -> {
                         val cx = dbl(g, 10); val cy = dbl(g, 20); val r = dbl(g, 40)
                         if (cx != null && cy != null && r != null && r > 0)
-                            addPolyline(arcPoints(cx, cy, r, dbl(g, 50) ?: 0.0, dbl(g, 51) ?: 360.0), false, layer, t)
+                            addPolyline(arcPoints(cx, cy, r, dbl(g, 50) ?: 0.0, dbl(g, 51) ?: 360.0), false, layer, t, color)
                     }
                     "ELLIPSE" -> {
                         val cx = dbl(g, 10); val cy = dbl(g, 20)
@@ -447,7 +506,7 @@ object DxfParser {
                         if (cx != null && cy != null && mx != null && my != null && ratio != null) {
                             val a0 = dbl(g, 41) ?: 0.0; val a1 = dbl(g, 42) ?: (2 * Math.PI)
                             addPolyline(ellipsePoints(cx, cy, mx, my, ratio, a0, a1),
-                                abs((a1 - a0) - 2 * Math.PI) < 1e-6, layer, t)
+                                abs((a1 - a0) - 2 * Math.PI) < 1e-6, layer, t, color)
                         }
                     }
                     "SPLINE" -> {
@@ -477,7 +536,23 @@ object DxfParser {
                             sampleBSpline(ctrlX.toDoubleArray(), ctrlY.toDoubleArray(), knots.toDoubleArray(),
                                 degree, if (weights.size == ctrlX.size) weights.toDoubleArray() else null)
                         }
-                        addPolyline(pts, closed, layer, t)
+                        addPolyline(pts, closed, layer, t, color)
+                    }
+                    "HATCH" -> emitHatch(g, layer, t, color)
+                    "3DFACE", "SOLID", "TRACE" -> {
+                        val xs = ArrayList<Double>(); val ys = ArrayList<Double>()
+                        for (k in 0 until 4) {
+                            val x = dbl(g, 10 + k); val y = dbl(g, 20 + k)
+                            if (x != null && y != null) { xs.add(x); ys.add(y) }
+                        }
+                        if (xs.size >= 3) {
+                            // SOLID/TRACE : l'ordre DXF des sommets est 1,2,4,3.
+                            val order = if (type != "3DFACE" && xs.size == 4) intArrayOf(0, 1, 3, 2)
+                                        else IntArray(xs.size) { it }
+                            val flat = DoubleArray(order.size * 2)
+                            order.forEachIndexed { k, oi -> flat[k * 2] = xs[oi]; flat[k * 2 + 1] = ys[oi] }
+                            addPolyline(flat, true, layer, t, color)
+                        }
                     }
                     "INSERT" -> {
                         val name = str(g, 2); val block = if (name != null) blocks[name] else null
@@ -492,7 +567,7 @@ object DxfParser {
                                 l = l.then(Affine.scale(sx, sy))
                                 l = l.then(Affine.rotation(rot))
                                 l = l.then(Affine.translation(ix + cc * colSp, iy + rr * rowSp))
-                                emit(block.pairs, l.then(t), depth + 1)
+                                emit(block.pairs, l.then(t), depth + 1, color, layer)
                             }
                         }
                     }
@@ -501,7 +576,7 @@ object DxfParser {
             }
         }
 
-        private fun addPolyline(pts: DoubleArray, closed: Boolean, layer: String, t: Affine) {
+        private fun addPolyline(pts: DoubleArray, closed: Boolean, layer: String, t: Affine, color: Int = 0xFFFFFF) {
             val n = pts.size / 2
             if (n < 2) return
             val segments = n - 1 + if (closed && n > 2) 1 else 0
@@ -515,8 +590,146 @@ object DxfParser {
                 if (!fx.isFinite() || !fy.isFinite()) return
                 flat[i * 2] = fx; flat[i * 2 + 1] = fy; i++
             }
-            out.polylines.add(DxfPolyline(flat, closed, layer))
+            out.polylines.add(DxfPolyline(flat, closed, layer, color))
             out.kept += segments
+        }
+
+        /** Zone remplie : anneaux transformés + plafond partagé avec les segments. */
+        private fun addFill(rings: List<DoubleArray>, solid: Boolean, layer: String, t: Affine, color: Int) {
+            val mapped = ArrayList<FloatArray>()
+            var segs = 0
+            for (ring in rings) {
+                val n = ring.size / 2
+                if (n < 3) continue
+                val flat = FloatArray(n * 2)
+                var ok = true
+                for (k in 0 until n) {
+                    val w = t.apply(ring[k * 2], ring[k * 2 + 1])
+                    val fx = w[0].toFloat(); val fy = w[1].toFloat()
+                    if (!fx.isFinite() || !fy.isFinite()) { ok = false; break }
+                    flat[k * 2] = fx; flat[k * 2 + 1] = fy
+                }
+                if (!ok) continue
+                mapped.add(flat); segs += n
+            }
+            if (mapped.isEmpty()) return
+            out.layerCounts[layer] = (out.layerCounts[layer] ?: 0) + segs
+            if (out.kept + segs > MAX_KEPT_SEGMENTS) { out.skipped += segs; return }
+            out.kept += segs
+            out.fills.add(DxfFill(mapped, color, solid, layer))
+        }
+
+        /**
+         * HATCH : zone remplie délimitée par des « boucles » de contour. Structure
+         * SÉQUENTIELLE (le sens des codes dépend de la position) : 70 = aplat (1) /
+         * motif (0), 91 = nb de boucles ; chaque boucle = 92 (type ; bit 2 =
+         * polyligne), puis SOIT une polyligne (72 bulge, 73 fermée, 93 nb de
+         * sommets, 10/20 + 42) SOIT une liste d'arêtes (93 = nb, chacune 72 = type :
+         * 1 ligne, 2 arc, 3 ellipse, 4 spline).
+         */
+        private fun emitHatch(g: List<Pair>, layer: String, t: Affine, color: Int) {
+            val solid = ((int(g, 70) ?: 0) and 1) == 1
+            val rings = ArrayList<DoubleArray>()
+            var i = 0
+            while (i < g.size && g[i].code != 91) i++
+            if (i >= g.size) return
+            val loopCount = g[i].int ?: return
+            if (loopCount <= 0) return
+            i++
+
+            fun take(code: Int): Double? {
+                if (i < g.size && g[i].code == code) { val v = g[i].double; i++; return v }
+                return null
+            }
+
+            repeat(loopCount) {
+                while (i < g.size && g[i].code != 92) i++
+                if (i >= g.size) return@repeat
+                val loopType = g[i].int ?: 0
+                i++
+                val ring = ArrayList<Double>()   // à plat x,y
+                if ((loopType and 2) != 0) {
+                    // Boucle POLYLIGNE : en-tête (72/73/93) puis sommets 10/20 (+42).
+                    while (i < g.size && (g[i].code == 72 || g[i].code == 73 || g[i].code == 93)) i++
+                    val xs = ArrayList<Double>(); val ys = ArrayList<Double>(); val bulges = ArrayList<Double>()
+                    var px: Double? = null
+                    var done = false
+                    while (!done && i < g.size) {
+                        when (g[i].code) {
+                            10 -> { px = g[i].double; i++ }
+                            20 -> {
+                                val x = px
+                                if (x != null) { xs.add(x); ys.add(g[i].double ?: 0.0); bulges.add(0.0); px = null }
+                                i++
+                            }
+                            42 -> { if (bulges.isNotEmpty()) bulges[bulges.size - 1] = g[i].double ?: 0.0; i++ }
+                            else -> done = true
+                        }
+                    }
+                    for (v in tessellateBulges(xs, ys, bulges, true)) ring.add(v)
+                } else {
+                    // Boucle par ARÊTES.
+                    while (i < g.size && g[i].code != 93 && g[i].code != 92) i++
+                    if (i >= g.size || g[i].code != 93) return@repeat
+                    val ecount = g[i].int ?: 0
+                    i++
+                    var edges = 0
+                    while (edges < ecount && i < g.size) {
+                        while (i < g.size && g[i].code != 72 && g[i].code != 92) i++
+                        if (i >= g.size || g[i].code != 72) break
+                        val et = g[i].int ?: 0
+                        i++
+                        when (et) {
+                            1 -> {
+                                val x1 = take(10); val y1 = take(20); val x2 = take(11); val y2 = take(21)
+                                if (x1 != null && y1 != null && x2 != null && y2 != null) {
+                                    if (ring.isEmpty()) { ring.add(x1); ring.add(y1) }
+                                    ring.add(x2); ring.add(y2)
+                                }
+                            }
+                            2 -> {
+                                val cx = take(10); val cy = take(20); val r = take(40)
+                                val a0 = take(50); val a1 = take(51)
+                                if (cx != null && cy != null && r != null && a0 != null && a1 != null) {
+                                    var ccw = true
+                                    if (i < g.size && g[i].code == 73) { ccw = (g[i].int ?: 1) != 0; i++ }
+                                    val pts = if (ccw) arcPoints(cx, cy, r, a0, a1)
+                                              else reverseFlat(arcPoints(cx, cy, r, a1, a0))
+                                    appendRing(ring, pts)
+                                }
+                            }
+                            3 -> {
+                                val cx = take(10); val cy = take(20); val mx = take(11); val my = take(21)
+                                val ratio = take(40); val a0 = take(50); val a1 = take(51)
+                                if (cx != null && cy != null && mx != null && my != null &&
+                                    ratio != null && a0 != null && a1 != null) {
+                                    var ccw = true
+                                    if (i < g.size && g[i].code == 73) { ccw = (g[i].int ?: 1) != 0; i++ }
+                                    // Angles en DEGRÉS ici (contrairement à l'entité ELLIPSE).
+                                    var pts = ellipsePoints(cx, cy, mx, my, ratio,
+                                        Math.toRadians(a0), Math.toRadians(a1))
+                                    if (!ccw) pts = reverseFlat(pts)
+                                    appendRing(ring, pts)
+                                }
+                            }
+                            4 -> {
+                                var px2: Double? = null
+                                while (i < g.size && g[i].code != 72 && g[i].code != 92 && g[i].code != 97) {
+                                    if (g[i].code == 10) px2 = g[i].double
+                                    else if (g[i].code == 20) {
+                                        val x = px2
+                                        if (x != null) { ring.add(x); ring.add(g[i].double ?: 0.0); px2 = null }
+                                    }
+                                    i++
+                                }
+                            }
+                        }
+                        edges++
+                    }
+                }
+                if (ring.size >= 6) rings.add(ring.toDoubleArray())
+            }
+            if (rings.isNotEmpty()) addFill(rings, solid, layer, t, color)
         }
     }
 
@@ -619,6 +832,20 @@ object DxfParser {
         return if (out.size >= 4) out.toDoubleArray() else ctrlFlat()
     }
 
+    /** Ajoute `pts` à un anneau, en sautant le 1er point si l'anneau n'est pas vide. */
+    private fun appendRing(ring: ArrayList<Double>, pts: DoubleArray) {
+        var k = if (ring.isEmpty()) 0 else 2
+        while (k < pts.size) { ring.add(pts[k]); k++ }
+    }
+
+    /** Inverse l'ordre des POINTS (paires x,y) d'un tableau à plat. */
+    private fun reverseFlat(p: DoubleArray): DoubleArray {
+        val n = p.size / 2
+        val o = DoubleArray(p.size)
+        for (k in 0 until n) { o[k * 2] = p[(n - 1 - k) * 2]; o[k * 2 + 1] = p[(n - 1 - k) * 2 + 1] }
+        return o
+    }
+
     private fun circlePoints(cx: Double, cy: Double, r: Double): DoubleArray = arcPoints(cx, cy, r, 0.0, 360.0)
 
     private fun arcPoints(cx: Double, cy: Double, r: Double, startDeg: Double, endDeg: Double): DoubleArray {
@@ -632,6 +859,69 @@ object DxfParser {
         }
         return out
     }
+
+    // ---- Couleurs DXF (ACI + résolution BYLAYER/BYBLOCK) ----
+
+    private fun aciRGB(idx: Int): Int = if (idx in ACI_PALETTE.indices) ACI_PALETTE[idx] else 0x808080
+
+    /** Couleur d'un calque depuis son ACI/true-color (BYLAYER). */
+    private fun layerColorFrom(aci: Int?, trueColor: Int?): Int {
+        if (trueColor != null) return trueColor and 0xFFFFFF
+        return aciRGB(kotlin.math.abs(aci ?: 7))
+    }
+
+    /** Couleur RÉSOLUE d'une entité : true color (420) > ACI (62) > BYLAYER.
+     *  0 = BYBLOCK (couleur de l'INSERT), 256 = BYLAYER, négatif = éteint (null). */
+    private fun resolveColor(g: List<Pair>, layer: String, blockColor: Int?,
+                             inheritedLayer: String?, layerColors: Map<String, Int>): Int? {
+        fun layerColor(): Int =
+            layerColors[layer] ?: inheritedLayer?.let { layerColors[it] } ?: aciRGB(7)
+        val tc = int(g, 420)
+        if (tc != null) return tc and 0xFFFFFF
+        val aci = int(g, 62) ?: return layerColor()
+        return when {
+            aci == 0 -> blockColor ?: layerColor()
+            aci == 256 -> layerColor()
+            aci in 1..255 -> aciRGB(aci)
+            else -> null // négatif : entité éteinte
+        }
+    }
+
+    /** Palette ACI AutoCAD standard (index 0-255), extraite d'ezdxf (fidèle à AutoCAD). */
+    private val ACI_PALETTE = intArrayOf(
+        0x000000, 0xFF0000, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0xFF00FF, 0xFFFFFF,
+        0x808080, 0xC0C0C0, 0xFF0000, 0xFF7F7F, 0xA50000, 0xA55252, 0x7F0000, 0x7F3F3F,
+        0x4C0000, 0x4C2626, 0x260000, 0x261313, 0xFF3F00, 0xFF9F7F, 0xA52900, 0xA56752,
+        0x7F1F00, 0x7F4F3F, 0x4C1300, 0x4C2F26, 0x260900, 0x261713, 0xFF7F00, 0xFFBF7F,
+        0xA55200, 0xA57C52, 0x7F3F00, 0x7F5F3F, 0x4C2600, 0x4C3926, 0x261300, 0x261C13,
+        0xFFBF00, 0xFFDF7F, 0xA57C00, 0xA59152, 0x7F5F00, 0x7F6F3F, 0x4C3900, 0x4C4226,
+        0x261C00, 0x262113, 0xFFFF00, 0xFFFF7F, 0xA5A500, 0xA5A552, 0x7F7F00, 0x7F7F3F,
+        0x4C4C00, 0x4C4C26, 0x262600, 0x262613, 0xBFFF00, 0xDFFF7F, 0x7CA500, 0x91A552,
+        0x5F7F00, 0x6F7F3F, 0x394C00, 0x424C26, 0x1C2600, 0x212613, 0x7FFF00, 0xBFFF7F,
+        0x52A500, 0x7CA552, 0x3F7F00, 0x5F7F3F, 0x264C00, 0x394C26, 0x132600, 0x1C2613,
+        0x3FFF00, 0x9FFF7F, 0x29A500, 0x67A552, 0x1F7F00, 0x4F7F3F, 0x134C00, 0x2F4C26,
+        0x092600, 0x172613, 0x00FF00, 0x7FFF7F, 0x00A500, 0x52A552, 0x007F00, 0x3F7F3F,
+        0x004C00, 0x264C26, 0x002600, 0x132613, 0x00FF3F, 0x7FFF9F, 0x00A529, 0x52A567,
+        0x007F1F, 0x3F7F4F, 0x004C13, 0x264C2F, 0x002609, 0x135817, 0x00FF7F, 0x7FFFBF,
+        0x00A552, 0x52A57C, 0x007F3F, 0x3F7F5F, 0x004C26, 0x264C39, 0x002613, 0x13581C,
+        0x00FFBF, 0x7FFFDF, 0x00A57C, 0x52A591, 0x007F5F, 0x3F7F6F, 0x004C39, 0x264C42,
+        0x00261C, 0x135858, 0x00FFFF, 0x7FFFFF, 0x00A5A5, 0x52A5A5, 0x007F7F, 0x3F7F7F,
+        0x004C4C, 0x264C4C, 0x002626, 0x135858, 0x00BFFF, 0x7FDFFF, 0x007CA5, 0x5291A5,
+        0x005F7F, 0x3F6F7F, 0x00394C, 0x26427E, 0x001C26, 0x135858, 0x007FFF, 0x7FBFFF,
+        0x0052A5, 0x527CA5, 0x003F7F, 0x3F5F7F, 0x00264C, 0x26397E, 0x001326, 0x131C58,
+        0x003FFF, 0x7F9FFF, 0x0029A5, 0x5267A5, 0x001F7F, 0x3F4F7F, 0x00134C, 0x262F7E,
+        0x000926, 0x131758, 0x0000FF, 0x7F7FFF, 0x0000A5, 0x5252A5, 0x00007F, 0x3F3F7F,
+        0x00004C, 0x26267E, 0x000026, 0x131358, 0x3F00FF, 0x9F7FFF, 0x2900A5, 0x6752A5,
+        0x1F007F, 0x4F3F7F, 0x13004C, 0x2F267E, 0x090026, 0x171358, 0x7F00FF, 0xBF7FFF,
+        0x5200A5, 0x7C52A5, 0x3F007F, 0x5F3F7F, 0x26004C, 0x39267E, 0x130026, 0x1C1358,
+        0xBF00FF, 0xDF7FFF, 0x7C00A5, 0x9152A5, 0x5F007F, 0x6F3F7F, 0x39004C, 0x42264C,
+        0x1C0026, 0x581358, 0xFF00FF, 0xFF7FFF, 0xA500A5, 0xA552A5, 0x7F007F, 0x7F3F7F,
+        0x4C004C, 0x4C264C, 0x260026, 0x581358, 0xFF00BF, 0xFF7FDF, 0xA5007C, 0xA55291,
+        0x7F005F, 0x7F3F6F, 0x4C0039, 0x4C2642, 0x26001C, 0x581358, 0xFF007F, 0xFF7FBF,
+        0xA50052, 0xA5527C, 0x7F003F, 0x7F3F5F, 0x4C0026, 0x4C2639, 0x260013, 0x58131C,
+        0xFF003F, 0xFF7F9F, 0xA50029, 0xA55267, 0x7F001F, 0x7F3F4F, 0x4C0013, 0x4C262F,
+        0x260009, 0x581317, 0x000000, 0x656565, 0x666666, 0x999999, 0xCCCCCC, 0xFFFFFF
+    )
 
     // ---- Accès groupe ----
     private fun dbl(g: List<Pair>, code: Int): Double? = g.firstOrNull { it.code == code }?.double

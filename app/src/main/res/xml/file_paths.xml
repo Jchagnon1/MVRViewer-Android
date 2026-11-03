@@ -2,4 +2,6 @@
 <paths>
     <!-- Journal de diagnostic dans le dossier privé externe de l'appli. -->
     <external-files-path name="diag" path="." />
+    <!-- PDF d'export du plan (cache interne) : partage + impression système. -->
+    <cache-path name="pdf" path="pdf/" />
 </paths>

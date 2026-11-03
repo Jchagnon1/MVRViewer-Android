@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fichier d'essai SYNTHÉTIQUE (SPEC-ma.md §1.5) : XML valide d'un autre format (racine inconnue) → "unknown". -->
+<GeneralSceneDescription verMajor="1" verMinor="6">
+    <Scene/>
+</GeneralSceneDescription>

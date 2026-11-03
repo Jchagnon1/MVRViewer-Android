@@ -1,6 +1,7 @@
 package com.minou.mvrviewer.ui
 
 import com.minou.mvrviewer.mvr.GdtfLoader
+import com.minou.mvrviewer.mvr.GlbMeshParser
 import com.minou.mvrviewer.mvr.MvrGeometryRef
 import com.minou.mvrviewer.mvr.MvrParser
 import com.minou.mvrviewer.mvr.MvrScene
@@ -24,16 +25,33 @@ import kotlin.math.sqrt
  * de chaque instance est appliqué au dessin. Un pont répété 50× n'est extrait
  * qu'une fois.
  */
+/**
+ * Identité d'un objet MVR (projecteur OU décor), stable d'une ouverture à
+ * l'autre. UNE SEULE définition : le patch, le masquage et tout futur réglage
+ * par objet doivent viser exactement le même objet — iOS a déjà eu un bug réel
+ * de clés divergentes entre écrans.
+ */
+internal fun mvrInstanceKey(o: MvrSceneObject): String = o.uuid ?: "${o.name}|${o.layerName}"
+
 object PlanWireframe {
 
     private const val MAX_TYPES = 400          // comme iOS maxStructureEdges
     private const val MAX_VERTS_PER_MESH = 120_000
     private const val MAX_SYMDEF_ITEMS = 500
+    /** Budget du cache de maillages décodés : 6 M de floats ≈ 24 Mo. */
+    private const val MAX_CACHED_MESH_FLOATS = 6_000_000L
     private val CREASE_COS = cos(0.26f)        // pli ~15°
 
     /** Instance de structure à dessiner : type + placement monde. */
     class Inst(
         val key: String,
+        /**
+         * Identité de CETTE instance (≠ `key`, qui est la clé de TYPE partagée
+         * par tous les clones). Indispensable au masquage : masquer par `key`
+         * ferait disparaître tous les ponts d'un même modèle, où qu'ils soient
+         * — c'était le bug constaté sur Vega côté iOS.
+         */
+        val id: String,
         val world: RMat4,        // object.transform (repère monde)
         val layer: String,
         val cx: Float,           // translation projetée (top) pour le cull
@@ -75,15 +93,31 @@ object PlanWireframe {
             countByKey[k] = (countByKey[k] ?: 0) + 1
             repByKey.putIfAbsent(k, o)
         }
-        // 2. Types les plus fréquents d'abord (budget), comme iOS.
-        val keptKeys = countByKey.entries.sortedByDescending { it.value }
+        // 2. Élection des types détaillés — EFFECTIF D'ABORD, clé en départage
+        //    STABLE. Même décision qu'iOS, après avoir ESSAYÉ « rigging
+        //    d'abord » : sur Golden Coast, l'heuristique matchait 2 257 types
+        //    sur 2 791 (les classes contiennent presque toutes « structure »/
+        //    « grill »/« tower »), donc elle ne discriminait plus rien et
+        //    prenait leurs places aux types les plus nombreux — beaucoup plus
+        //    de carrés de repli à l'écran (retour testeur). Le plafond est un
+        //    jeu à somme nulle : privilégier les types nombreux couvre le plus
+        //    d'objets.
+        //    Le départage par clé, lui, est INDISPENSABLE : ~99 % des types
+        //    n'ont qu'une instance, donc tous à égalité, et l'ordre d'itération
+        //    d'un HashMap n'est pas spécifié — les élus changeaient d'une
+        //    ouverture à l'autre SUR LE MÊME FICHIER.
+        val keptKeys = countByKey.entries
+            .sortedWith(
+                compareByDescending<Map.Entry<String, Int>> { it.value }
+                    .thenBy { it.key }
+            )
             .take(MAX_TYPES).map { it.key }.toHashSet()
 
-        // 3. Extraire tous les .3ds référencés par les types retenus.
+        // 3. Extraire tous les fichiers de géométrie référencés par les types retenus.
         val neededFiles = HashSet<String>()
         for (k in keptKeys) collectFileNames(repByKey[k]!!, scene, neededFiles, 0)
-        if (neededFiles.isEmpty()) return EMPTY
-        val bytesByName = MvrParser.extractEntries(mvrBytes, neededFiles)
+        val bytesByName =
+            if (neededFiles.isEmpty()) emptyMap() else MvrParser.extractEntries(mvrBytes, neededFiles)
         val meshCache = HashMap<String, List<ThreeDSParser.Mesh>>()
 
         // 4. Arêtes caractéristiques (repère objet) par type retenu.
@@ -91,22 +125,37 @@ object PlanWireframe {
         val radiusByKey = HashMap<String, Float>()
         for (k in keptKeys) {
             val buf = FloatBuf()
-            walkEdges(repByKey[k]!!.geometryRefs, scene, RMat4(), 0, bytesByName, meshCache, buf)
+            val bounds = Bounds()
+            walkEdges(repByKey[k]!!.geometryRefs, scene, RMat4(), 0, bytesByName, meshCache, buf, bounds)
+            // FILET DE SÉCURITÉ : un type qui A de la géométrie mais dont aucune
+            // arête n'a pu être extraite (maillage au-delà du plafond de sommets,
+            // primitives non triangulaires, fichier exotique) ne doit PAS se
+            // réduire à un point muet — on trace au moins le contour de sa boîte
+            // englobante RÉELLE, mesurée sur les sommets décodés.
+            if (buf.n == 0) bounds.emitBoxEdges(buf)
             if (buf.n > 0) {
                 val arr = buf.toArray()
                 edgesByKey[k] = arr
                 radiusByKey[k] = halfDiagonal(arr)
             }
+            // Le cache de maillages n'existe que pour éviter de re-décoder un
+            // fichier partagé par plusieurs types ; il ne doit pas retenir toute
+            // la géométrie du show (un .glb est bien plus lourd qu'un .3ds, et
+            // l'app a un historique d'OOM). Au-delà du budget, on repart à vide.
+            if (meshCache.isNotEmpty() &&
+                meshCache.values.sumOf { ms -> ms.sumOf { it.vertices.size.toLong() } } > MAX_CACHED_MESH_FLOATS
+            ) meshCache.clear()
         }
-        if (edgesByKey.isEmpty()) return EMPTY
 
         // 5. Instances (toutes les structures ; celles sans arêtes → point).
+        //    ON LES CONSTRUIT MÊME SANS AUCUNE ARÊTE : sortir en `EMPTY` ici
+        //    privait la vue plan de toute trace des structures.
         val instances = ArrayList<Inst>(structs.size)
         for (o in structs) {
             val k = structureKey(o)
             val t = o.transform.translation
             if (!t[0].isFinite() || !t[1].isFinite()) continue
-            instances.add(Inst(k, dr(o.transform), o.layerName, t[0], -t[1]))
+            instances.add(Inst(k, mvrInstanceKey(o), dr(o.transform), o.layerName, t[0], -t[1]))
         }
         return Built(edgesByKey, radiusByKey, instances)
     }
@@ -119,6 +168,17 @@ object PlanWireframe {
     private val MM = RMat4(
         Float4(1000f, 0f, 0f, 0f), Float4(0f, 1000f, 0f, 0f),
         Float4(0f, 0f, 1000f, 0f), Float4(0f, 0f, 0f, 1f)
+    )
+
+    /**
+     * Rotation +90° autour de X : glTF est Y-HAUT (le format l'impose), le monde
+     * MVR est Z-haut. MÊME correction que la vue 3D (`RX90`) — sans elle un
+     * praticable de 2 × 1 m se dessinerait comme un trait de 2 m × 22 mm, et le
+     * plan contredirait la 3D.
+     */
+    private val RX90 = RMat4(
+        Float4(1f, 0f, 0f, 0f), Float4(0f, 0f, 1f, 0f),
+        Float4(0f, -1f, 0f, 0f), Float4(0f, 0f, 0f, 1f)
     )
 
     private fun scaleR(s: Float) = RMat4(
@@ -154,15 +214,20 @@ object PlanWireframe {
             for (gd in sources) {
                 val asm = GdtfLoader.parseAssembly(gd) ?: continue
                 val buf = FloatBuf()
-                val byFile = HashMap<String, Pair<List<ThreeDSParser.Mesh>, Float>>()
+                val byFile = HashMap<String, Triple<List<ThreeDSParser.Mesh>, Float, Boolean>>()
                 for (p in asm.placements) {
                     val info = asm.models[p.modelName] ?: continue
-                    val (meshes, rawMax) = byFile.getOrPut(info.file) {
-                        // prefer3ds : un glb présent ne doit pas masquer un 3ds lisible.
+                    val (meshes, rawMax, isGltf) = byFile.getOrPut(info.file) {
+                        // prefer3ds : à géométrie égale on garde le .3ds (moins de
+                        // sommets, arêtes plus propres) — mais un GDTF qui n'a QUE
+                        // des modèles glTF n'est plus perdu pour autant.
                         val fb = GdtfLoader.extractModelBytes(gd, info.file, prefer3ds = true)
-                        if (fb == null || fb.second != "3ds") emptyList<ThreeDSParser.Mesh>() to 0f
-                        else runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
-                            .let { it to meshesMaxDim(it) }
+                        val parsed = when {
+                            fb == null -> emptyList()
+                            fb.second == "3ds" -> runCatching { ThreeDSParser.parse(fb.first) }.getOrDefault(emptyList())
+                            else -> GlbMeshParser.parse(fb.first)
+                        }
+                        Triple(parsed, meshesMaxDim(parsed), fb != null && fb.second != "3ds")
                     }
                     if (meshes.isEmpty()) continue
                     val s = when {
@@ -170,8 +235,9 @@ object PlanWireframe {
                         rawMax > 10f -> 0.001f // pas de dimensions déclarées : mm supposés
                         else -> 1f
                     }
-                    // mesh-local → objet-local mm : S(1000, m→mm) · placement · S(échelle)
-                    val mat = MM * p.transform * scaleR(s)
+                    // mesh-local → objet-local mm : S(1000, m→mm) · placement ·
+                    // [Rx(+90°) si le modèle est un glTF, Y-haut] · S(échelle).
+                    val mat = MM * p.transform * (if (isGltf) RX90 else RMat4()) * scaleR(s)
                     // Cellule de soudure = 1 mm RÉEL : 1000·s mm par unité brute
                     // → quantum brut = 1/(1000·s). Sans ça, un mesh en mètres
                     // (s≈1) serait soudé par cellules d'un MÈTRE et s'effondrerait.
@@ -213,12 +279,17 @@ object PlanWireframe {
         return maxOf(maxX - minX, maxY - minY, maxZ - minZ)
     }
 
-    /** Noms de fichiers .3ds référencés (récursif via symdefs). */
+    /**
+     * Noms de fichiers de géométrie référencés (récursif via symdefs) : `.3ds`
+     * ET `.glb`/`.gltf`. Les exports Vectorworks récents sont 100 % glTF — les
+     * ignorer ici réduisait tout le décor de ces shows à un point sur le plan.
+     */
     private fun collectFileNames(o: MvrSceneObject, scene: MvrScene, out: HashSet<String>, depth: Int) {
         fun walk(refs: List<MvrGeometryRef>, d: Int) {
             if (d > 8) return
             for (g in refs) when (g) {
-                is MvrGeometryRef.File -> if (g.fileName.endsWith(".3ds", true)) out.add(g.fileName)
+                is MvrGeometryRef.File ->
+                    if (g.fileName.endsWith(".3ds", true) || GlbMeshParser.isGltfName(g.fileName)) out.add(g.fileName)
                 is MvrGeometryRef.Symbol -> scene.symdefs[g.symdefUuid]?.let { walk(it.items.take(MAX_SYMDEF_ITEMS), d + 1) }
             }
         }
@@ -229,22 +300,34 @@ object PlanWireframe {
     private fun walkEdges(
         refs: List<MvrGeometryRef>, scene: MvrScene, parent: RMat4, depth: Int,
         bytesByName: Map<String, ByteArray>, meshCache: HashMap<String, List<ThreeDSParser.Mesh>>,
-        out: FloatBuf
+        out: FloatBuf, bounds: Bounds
     ) {
         if (depth > 8) return
         for (g in refs) when (g) {
             is MvrGeometryRef.File -> {
-                if (!g.fileName.endsWith(".3ds", true)) continue
+                val isGltf = GlbMeshParser.isGltfName(g.fileName)
+                if (!isGltf && !g.fileName.endsWith(".3ds", true)) continue
                 val meshes = meshCache.getOrPut(g.fileName) {
                     val b = bytesByName[g.fileName] ?: return@getOrPut emptyList()
-                    runCatching { ThreeDSParser.parse(b) }.getOrDefault(emptyList())
+                    if (isGltf) GlbMeshParser.parse(b)
+                    else runCatching { ThreeDSParser.parse(b) }.getOrDefault(emptyList())
                 }
-                val mat = parent * dr(g.transform)
-                for (m in meshes) featureEdges(m, mat, out)
+                // Un .glb MVR est en MÈTRES et Y-HAUT : ×1000 puis Rx(+90°),
+                // exactement comme la vue 3D (GLB_SCALE puis RX90). Sans le
+                // ×1000 un pont de 3 m ferait 3 mm ; sans la rotation il serait
+                // couché. La cellule de soudure suit (1 mm réel = 0,001 unité
+                // brute) — sinon tout le maillage s'effondre dans une cellule
+                // d'un mètre.
+                val mat = if (isGltf) parent * dr(g.transform) * MM * RX90 else parent * dr(g.transform)
+                val q = if (isGltf) 0.001f else 1f
+                for (m in meshes) {
+                    bounds.accumulate(m, mat)
+                    featureEdges(m, mat, out, q)
+                }
             }
             is MvrGeometryRef.Symbol -> {
                 val sd = scene.symdefs[g.symdefUuid] ?: continue
-                walkEdges(sd.items.take(MAX_SYMDEF_ITEMS), scene, parent * dr(g.transform), depth + 1, bytesByName, meshCache, out)
+                walkEdges(sd.items.take(MAX_SYMDEF_ITEMS), scene, parent * dr(g.transform), depth + 1, bytesByName, meshCache, out, bounds)
             }
         }
     }
@@ -357,6 +440,58 @@ object PlanWireframe {
     }
 
     private class EdgeInfo(val nx: Float, val ny: Float, val nz: Float, var count: Int, var crease: Boolean)
+
+    /**
+     * Boîte englobante RÉELLE d'un type, accumulée sur les sommets DÉCODÉS
+     * (repère objet). Elle ne sert que de FILET : quand aucune arête n'a pu être
+     * extraite, on trace ce contour plutôt que de laisser l'objet se réduire à un
+     * point. Elle est mesurée sur la géométrie, PAS sur les translations — une
+     * boîte tirée des seules origines de symboles est plate par construction et
+     * c'est exactement ce qui faisait disparaître des ponts côté iOS.
+     */
+    private class Bounds {
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+        var seen = false
+
+        fun accumulate(mesh: ThreeDSParser.Mesh, mat: RMat4) {
+            val v = mesh.vertices
+            val cx = mat.x; val cy = mat.y; val cz = mat.z; val cw = mat.w
+            var i = 0
+            while (i + 2 < v.size) {
+                val x = v[i]; val y = v[i + 1]; val z = v[i + 2]
+                i += 3
+                if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
+                val tx = cx.x * x + cy.x * y + cz.x * z + cw.x
+                val ty = cx.y * x + cy.y * y + cz.y * z + cw.y
+                val tz = cx.z * x + cy.z * y + cz.z * z + cw.z
+                seen = true
+                if (tx < minX) minX = tx; if (tx > maxX) maxX = tx
+                if (ty < minY) minY = ty; if (ty > maxY) maxY = ty
+                if (tz < minZ) minZ = tz; if (tz > maxZ) maxZ = tz
+            }
+        }
+
+        /** Contour de la boîte (12 arêtes), avec un plancher de 200 mm. */
+        fun emitBoxEdges(out: FloatBuf) {
+            if (!seen) return
+            val fx = ((200f - (maxX - minX)) * 0.5f).coerceAtLeast(0f)
+            val fy = ((200f - (maxY - minY)) * 0.5f).coerceAtLeast(0f)
+            val fz = ((200f - (maxZ - minZ)) * 0.5f).coerceAtLeast(0f)
+            val x0 = minX - fx; val x1 = maxX + fx
+            val y0 = minY - fy; val y1 = maxY + fy
+            val z0 = minZ - fz; val z1 = maxZ + fz
+            fun seg(ax: Float, ay: Float, az: Float, bx: Float, by: Float, bz: Float) {
+                out.add(ax); out.add(ay); out.add(az); out.add(bx); out.add(by); out.add(bz)
+            }
+            for (z in floatArrayOf(z0, z1)) {
+                seg(x0, y0, z, x1, y0, z); seg(x1, y0, z, x1, y1, z)
+                seg(x1, y1, z, x0, y1, z); seg(x0, y1, z, x0, y0, z)
+            }
+            seg(x0, y0, z0, x0, y0, z1); seg(x1, y0, z0, x1, y0, z1)
+            seg(x1, y1, z0, x1, y1, z1); seg(x0, y1, z0, x0, y1, z1)
+        }
+    }
 
     /** Tampon float croissant sans boxing. */
     private class FloatBuf {

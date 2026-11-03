@@ -3,6 +3,9 @@
 
     <!-- GDTF Share : téléchargement des modèles fabricants. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Retour du réseau : retente les téléchargements de 3D des types MA (permission
+         normale, déjà apportée par Firebase ; déclarée ici car l'app s'en sert). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Position de l'utilisateur en direct sur le plan (après calibrage). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
@@ -39,6 +42,27 @@
                 <data android:pathPattern=".*\\.mvr" />
             </intent-filter>
 
+            <!-- « Ouvrir avec… » un profil de projecteur (.gdtf, .xmlp grandMA2) ou une
+                 archive .zip de profils, par extension — calqué sur le filtre .mvr. Le
+                 routeur (IncomingFileRouter) décide d'après le nom et le contenu : show,
+                 objet 3D ou bibliothèque MA. Pas de .xml générique (l'app serait proposée
+                 pour TOUT fichier XML ; SPEC-ma-gdtfshare.md §5.7). -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathSuffix=".gdtf" />
+                <data android:pathSuffix=".xmlp" />
+                <data android:pathSuffix=".zip" />
+                <data android:pathPattern=".*\\.gdtf" />
+                <data android:pathPattern=".*\\.xmlp" />
+                <data android:pathPattern=".*\\.zip" />
+            </intent-filter>
+
             <!-- Repli par type MIME : beaucoup de gestionnaires annoncent un .mvr
                  comme zip/octet-stream (content:// sans nom dans le chemin). -->
             <intent-filter android:label="@string/app_name">
@@ -50,9 +74,18 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
-            <!-- Partage (« Envoyer vers »). -->
+            <!-- Partage (« Envoyer vers ») : aiguillé par le routeur. -->
             <intent-filter android:label="@string/app_name">
                 <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+
+            <!-- Partage de PLUSIEURS fichiers : importés en UN lot dans la bibliothèque MA. -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/x-zip-compressed" />

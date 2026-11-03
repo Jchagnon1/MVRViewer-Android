@@ -14,7 +14,10 @@ object MvrParser {
 
     fun parse(mvrBytes: ByteArray): MvrScene {
         val xml = extractEntry(mvrBytes, "GeneralSceneDescription.xml")
-            ?: throw MvrParseException("GeneralSceneDescription.xml introuvable dans le .mvr.")
+            ?: throw MvrParseException(
+                "GeneralSceneDescription.xml not found in the .mvr archive",
+                com.minou.mvrviewer.R.string.mvr_err_no_scene_xml
+            )
         return parseSceneXml(xml)
     }
 
@@ -36,7 +39,41 @@ object MvrParser {
                     entry = zip.nextEntry
                 }
             }
-        } catch (_: Exception) { /* ZIP illisible → traité comme entrée absente */ }
+        } catch (_: Exception) {
+            // Lecture séquentielle impossible (ZIP corrompu, OU zip valide que
+            // ZipInputStream refuse : entrée STORED écrite en flux) → repli par le
+            // répertoire central ; toujours null si l'archive est vraiment illisible.
+            return centralEntry(mvrBytes) { it == name || it.substringAfterLast('/') == name }
+        }
+        return null
+    }
+
+    /** Repli par le répertoire central ([ZipCentralReader]) : première entrée vérifiant [match]. */
+    private fun centralEntry(bytes: ByteArray, match: (String) -> Boolean): ByteArray? =
+        (ZipCentralReader.find(bytes, match) as? ZipCentralReader.Lookup.Found)?.bytes
+
+    /**
+     * Comme extractEntry mais INSENSIBLE À LA CASSE sur le nom simple. Certaines
+     * archives .gdtf nomment leur descripteur « Description.xml », voire
+     * « DESCRIPTION.XML » : iOS lit déjà l'entrée sans tenir compte de la casse,
+     * donc on s'aligne pour extraire la même puissance GDTF des deux côtés.
+     */
+    fun extractEntryIgnoringCase(mvrBytes: ByteArray, name: String): ByteArray? {
+        val target = name.lowercase()
+        try {
+            ZipInputStream(ByteArrayInputStream(mvrBytes)).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (entry.name.substringAfterLast('/').lowercase() == target) {
+                        return zip.readBytes()
+                    }
+                    entry = zip.nextEntry
+                }
+            }
+        } catch (_: Exception) {
+            // Repli par le répertoire central (cf. extractEntry) ; null si illisible.
+            return centralEntry(mvrBytes) { it.substringAfterLast('/').lowercase() == target }
+        }
         return null
     }
 
@@ -70,7 +107,21 @@ object MvrParser {
                     entry = zip.nextEntry
                 }
             }
-        } catch (_: Exception) { /* ZIP illisible → on renvoie l'extrait partiel */ }
+        } catch (_: Exception) {
+            // ZIP illisible en séquence → on complète l'extrait partiel par le répertoire
+            // central (entrée STORED écrite en flux…) ; sinon on renvoie l'extrait partiel.
+            val listing = ZipCentralReader.list(mvrBytes) as? ZipCentralReader.Listing.Ok ?: return out
+            for (e in listing.entries) {
+                val key = when {
+                    names.contains(e.name) -> e.name
+                    names.contains(e.name.substringAfterLast('/')) -> e.name.substringAfterLast('/')
+                    else -> null
+                } ?: continue
+                if (out.containsKey(key)) continue
+                ZipCentralReader.read(mvrBytes, listing, e)?.let { out[key] = it }
+                if (out.size == names.size) break
+            }
+        }
         return out
     }
 
@@ -84,7 +135,10 @@ object MvrParser {
                 var entry = zip.nextEntry
                 while (entry != null) { out.add(entry.name); entry = zip.nextEntry }
             }
-        } catch (_: Exception) { /* ZIP illisible → liste partielle */ }
+        } catch (_: Exception) {
+            // Répertoire central lisible → liste complète ; sinon liste partielle.
+            ZipCentralReader.names(mvrBytes)?.let { return it }
+        }
         return out
     }
 
@@ -110,6 +164,13 @@ object MvrParser {
         var gdtfMode: String? = null
         var fixtureId: String? = null
         var addresses = mutableListOf<String>()
+        var objClassingUuid: String? = null
+
+        // <Class name uuid/> vit dans <AUXData>, qui vient APRÈS <Layers> :
+        // au moment où un <Classing> est lu, la <Class> visée n'a pas forcément
+        // encore été rencontrée. On mémorise donc l'UUID par objet et on résout
+        // en SECONDE PASSE, une fois tout le document parcouru.
+        val classNames = HashMap<String, String>()
 
         var symdefUuid: String? = null
         var symdefItems = mutableListOf<MvrGeometryRef>()
@@ -151,12 +212,18 @@ object MvrParser {
                         geometryRefs = mutableListOf()
                         gdtfSpec = null; gdtfMode = null; fixtureId = null
                         addresses = mutableListOf()
+                        objClassingUuid = null
+                    }
+                    "Class" -> {
+                        val cn = parser.getAttributeValue(null, "name")
+                        val cu = parser.getAttributeValue(null, "uuid")
+                        if (cn != null && cu != null) classNames[cu] = cn
                     }
                     "Matrix" -> {
                         collecting = true; text.setLength(0)
                         matrixTargetItem = pendingGeomFile != null || pendingSymbolUuid != null
                     }
-                    "GDTFSpec", "GDTFMode", "FixtureID", "Address" -> {
+                    "GDTFSpec", "GDTFMode", "FixtureID", "Address", "Classing" -> {
                         collecting = true; text.setLength(0)
                     }
                     "Geometry3D" -> {
@@ -185,6 +252,10 @@ object MvrParser {
                         collecting = false
                         val a = text.toString().trim(); if (a.isNotEmpty()) addresses.add(a)
                     }
+                    "Classing" -> {
+                        collecting = false
+                        val c = text.toString().trim(); if (c.isNotEmpty()) objClassingUuid = c
+                    }
                     "Geometry3D" -> {
                         pendingGeomFile?.let { appendRef(MvrGeometryRef.File(it, pendingItemMatrix ?: Mat4.IDENTITY)) }
                         pendingGeomFile = null; pendingItemMatrix = null
@@ -207,12 +278,17 @@ object MvrParser {
                                     geometryRefs = geometryRefs.toList(),
                                     gdtfSpec = gdtfSpec, gdtfMode = gdtfMode,
                                     fixtureId = fixtureId, addresses = addresses.toList(),
-                                    layerName = layerName ?: "Layer"
+                                    layerName = layerName ?: "Layer",
+                                    // TRANSITOIREMENT l'UUID de la classe, pas son nom :
+                                    // il est remplacé par le nom en seconde passe, plus
+                                    // bas. Rien de ce champ ne sort d'ici sans résolution.
+                                    className = objClassingUuid
                                 )
                             )
                         }
                         objName = null; objUuid = null; objKind = null; objTransform = null
                         geometryRefs = mutableListOf(); gdtfSpec = null; gdtfMode = null
+                        objClassingUuid = null
                     }
                     "Layer" -> {
                         layers.add(MvrLayer(layerName ?: "Layer", layerObjects.toList()))
@@ -222,7 +298,17 @@ object MvrParser {
             }
             event = parser.next()
         }
-        return MvrScene(layers.toList(), symdefs)
+        // SECONDE PASSE : UUID de classe → nom de classe. Obligatoire, cf. la
+        // déclaration de `classNames`. Un UUID inconnu retombe à `null` — on ne
+        // laisse JAMAIS filtrer un UUID brut là où l'UI attend un nom lisible.
+        if (classNames.isEmpty()) return MvrScene(layers.toList(), symdefs)
+        val resolved = layers.map { layer ->
+            MvrLayer(layer.name, layer.objects.map { o ->
+                val uuid = o.className
+                if (uuid == null) o else o.copy(className = classNames[uuid])
+            })
+        }
+        return MvrScene(resolved, symdefs)
     }
 
     /**

@@ -1,0 +1,94 @@
+{
+  "customFixtures": {
+    "_0": {
+      "types": [
+        {
+          "id": "C1",
+          "name": "kind inconnu",
+          "channels": [
+            "Dimmer"
+          ],
+          "model3D": {
+            "kind": "hologram",
+            "uri": "x"
+          }
+        },
+        {
+          "id": "C2",
+          "name": "rid invalide",
+          "channels": [
+            "Dimmer"
+          ],
+          "model3D": {
+            "kind": "gdtfShare",
+            "rid": "abc"
+          }
+        },
+        {
+          "id": "C3",
+          "name": "profile non objet",
+          "channels": [
+            "Dimmer"
+          ],
+          "profile": "ma3"
+        },
+        {
+          "id": "C4",
+          "name": "sha invalide",
+          "channels": [
+            "Dimmer"
+          ],
+          "model3D": {
+            "kind": "gdtfBlob",
+            "sha256": "1234",
+            "fileName": "x.gdtf"
+          }
+        },
+        {
+          "id": "C5",
+          "name": "modelBlob minimal",
+          "channels": [
+            "Dimmer",
+            "",
+            "Strobe"
+          ],
+          "footprint": 0,
+          "model3D": {
+            "kind": "modelBlob",
+            "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "format": "STL"
+          }
+        },
+        {
+          "name": "sans id : ignoré",
+          "channels": [
+            "X"
+          ]
+        },
+        {
+          "id": "C6",
+          "name": "profil incomplet + gdtfBlob",
+          "baseGdtfSpec": "Robe@Robin 600.gdtf",
+          "profile": {
+            "format": "gdtf",
+            "fixture": "Robin 600 LEDWash"
+          },
+          "model3D": {
+            "kind": "gdtfBlob",
+            "sha256": "abababababababababababababababababababababababababababababababab"
+          },
+          "footprint": 3
+        },
+        {
+          "id": "C7",
+          "name": "rid numérique",
+          "model3D": {
+            "kind": "gdtfShare",
+            "rid": 77.0
+          },
+          "footprint": 2
+        }
+      ]
+    }
+  }
+}

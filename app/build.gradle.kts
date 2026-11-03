@@ -2,22 +2,21 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    // SYNCHRO CLOUD — décommenter APRÈS avoir déposé app/google-services.json
-    // (app Android `com.minou.mvrviewer` ajoutée au projet Firebase mvrviewermulti).
-    // Sans le plist, l'app tourne sur le backend LOCAL de démo (rien ne casse).
-    // alias(libs.plugins.google.services)
+    // Le plugin google-services N'est PAS appliqué ici : il l'est plus bas, mais
+    // SEULEMENT si app/google-services.json est présent (voir en bas du fichier) →
+    // un clone sans ce fichier compile quand même (backend LOCAL de démo).
 }
 
 android {
     namespace = "com.minou.mvrviewer"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.minou.mvrviewer"
         minSdk = 28  // requis par SceneView/Filament (vue 3D)
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        targetSdk = 36  // exigence Google Play (niveau d'API cible) pour les nouvelles soumissions
+        versionCode = 20
+        versionName = "1.9.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -44,6 +43,15 @@ kotlin {
     }
 }
 
+// SYNCHRO CLOUD : on applique le plugin google-services UNIQUEMENT si le fichier
+// de config Firebase est présent (déposé par l'utilisateur, cf. ANDROID_FIREBASE_SETUP.md).
+// Ainsi l'app bascule AUTOMATIQUEMENT sur Firebase quand le json est là, et
+// reste buildable (backend LOCAL) sinon — sans édition manuelle. Le json est
+// dans .gitignore (config projet, non versionnée).
+if (project.file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -65,5 +73,12 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.storage)
+    implementation(libs.billing.ktx)
     debugImplementation(libs.androidx.ui.tooling)
+    // Tests unitaires JVM (calcul du zoom caméra, cf. DistanceZoomTest).
+    testImplementation("junit:junit:4.13.2")
+    // org.json RÉEL sur le classpath de test : l'android.jar des tests unitaires
+    // ne fournit que des stubs qui lèvent « not mocked ». Sans cette vraie impl,
+    // les round-trips JSON (SectionCodec, PowerCablingCodec) ne peuvent pas tourner.
+    testImplementation("org.json:json:20240303")
 }

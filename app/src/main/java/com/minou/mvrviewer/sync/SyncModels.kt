@@ -47,7 +47,10 @@ data class InviteCode(
 )
 
 enum class BlobKind(val raw: String) {
-    MVR("mvr"), REF_PLAN("refPlan");
+    MVR("mvr"), REF_PLAN("refPlan"),
+    /** 3D importée d'un type de projecteur MA (SPEC-ma.md §4.3) — usage LOCAL seulement,
+     *  jamais sérialisé dans Firestore (le chemin Storage ne dépend que du SHA). */
+    FIXTURE_3D("fixture3D");
 
     companion object {
         fun from(raw: String): BlobKind = entries.firstOrNull { it.raw == raw } ?: MVR
@@ -72,12 +75,42 @@ data class AuditEntry(
     val epoch: Double,
     val authorUid: String,
     val authorName: String,
-    val kind: String,     // "patch" | "plan" | "calibration" | …
+    val kind: String,     // "patch" | "plan" | "calibration" | "layers" | …
     val target: String,   // ex. « Projecteur N° 213 »
     val field: String,    // ex. « Adresse »
     val oldValue: String, // ex. « 1.147 » (— si vide)
-    val newValue: String  // ex. « 1.189 »
-)
+    val newValue: String, // ex. « 1.189 »
+    // ---- Coordonnées MACHINE de la modification (annulation) ----------------
+    // Les 5 champs ci-dessus ne sont que de l'AFFICHAGE : « Projecteur N° 213 »
+    // redevient ambigu dès qu'on repatche, et « 1.147 » est déjà formaté. Sans
+    // ces coordonnées, on ne peut pas rejouer la valeur d'origine. Optionnels :
+    // les entrées écrites avant cette version (et par une version plus ancienne
+    // de l'autre plateforme) restent lisibles — simplement non annulables.
+    // NOMS PARTAGÉS iOS/Android : ne pas renommer d'un seul côté.
+    val objectKey: String? = null, // identité de la cible (clé d'instance MVR / uuid) ; "" = le projet
+    val fieldKey: String? = null,  // champ visé : "fixtureId" | "address" | "mode" | AuditFieldKey.*
+    val oldRaw: String? = null,    // valeur AVANT, brute (non formatée) — c'est elle qu'on réapplique
+    val newRaw: String? = null     // valeur APRÈS, brute
+) {
+    /**
+     * Annulable seulement si l'entrée porte ses coordonnées machine. `oldRaw`
+     * peut valoir "" (champ vidé), d'où le test sur la nullité, pas le vide.
+     */
+    val isUndoable: Boolean get() = fieldKey != null && oldRaw != null
+}
+
+/** Clés machine de champ (partagées iOS/Android — valeurs sérialisées telles quelles). */
+object AuditFieldKey {
+    const val FIXTURE_ID = "fixtureId"
+    const val ADDRESS = "address"
+    const val MODE = "mode"
+    const val NAME = "name"
+    const val GEO_ANCHORS = "geoAnchors"
+    const val REF_PLAN_TRANSFORM = "refPlanTransform"
+    const val REF_PLAN_HIDDEN_LAYERS = "refPlanHiddenLayers"
+    // Type de rendu custom assigné à un projecteur (« custom:<id> » ou vide).
+    const val SPEC = "spec"
+}
 
 /** Sections d'état synchronisées indépendamment (LWW par section). */
 enum class ProjectSectionKind(val raw: String) {
@@ -87,7 +120,13 @@ enum class ProjectSectionKind(val raw: String) {
     LAYER_COLORS("layerColors"),
     LABEL_SIDES("labelSides"),
     FIXTURE_ORIENTATIONS("fixtureOrientations"),
-    GDTF_MAPPINGS("gdtfMappings");
+    GDTF_MAPPINGS("gdtfMappings"),
+    POWER_CABLING("powerCabling"),
+    DMX_CABLING("dmxCabling"),
+    // Projecteurs custom V1 : la LISTE des DÉFINITIONS de types custom utilisés
+    // dans le projet (raw IDENTIQUE iOS/Android). L'assignation fixture→custom,
+    // elle, voyage via la section PATCH (cf. PatchEntryDTO.spec).
+    CUSTOM_FIXTURES("customFixtures");
 
     companion object {
         fun from(raw: String): ProjectSectionKind? = entries.firstOrNull { it.raw == raw }
@@ -126,7 +165,17 @@ data class PatchEntryDTO(
     val mvrUUID: String,
     val fixtureId: String? = null,
     val addresses: List<String> = emptyList(),
-    val gdtfModeName: String? = null
+    val gdtfModeName: String? = null,
+    // Override de NOM d'affichage par instance (clé `name` PARTAGÉE iOS/Android).
+    // Optionnel : encodé seulement si non nul (encodeIfPresent côté Swift), donc
+    // un projecteur non renommé ne porte pas cette clé.
+    val name: String? = null,
+    // Override de SPEC de rendu par instance (projecteurs custom V1) : « custom:<id> »
+    // quand un type custom est assigné à CE projecteur, sinon absent. Clé `spec`
+    // PARTAGÉE iOS/Android, optionnelle (encodeIfPresent) → un projecteur non
+    // custom ne porte pas cette clé. C'est le CANAL de l'assignation fixture→custom
+    // (la section per-projecteur déjà synchronisée), pas la section gdtfMappings.
+    val spec: String? = null
 )
 
 data class PatchDTO(val entries: List<PatchEntryDTO> = emptyList())
@@ -139,7 +188,38 @@ data class GeoAnchorDTO(
     val longitude: Double
 )
 
-data class GeoCalibrationDTO(val anchors: List<GeoAnchorDTO> = emptyList())
+/** Point du relevé « 3 points » — miroir de `GeoSurveyPointDTO` (tous les champs requis). */
+data class GeoSurveyPointDTO(
+    val worldX: Float,
+    val worldY: Float,
+    val latitude: Double,
+    val longitude: Double,
+    val accuracy: Double,
+    val residual: Double
+)
+
+/**
+ * Relevé de la calibration guidée (SPEC-calibration-3-points §5) — miroir de
+ * `GeoSurveyDTO`. `edgePrecision` est OMIS quand il est nul (jamais `null`).
+ */
+data class GeoSurveyDTO(
+    val method: String,
+    val points: List<GeoSurveyPointDTO>,
+    val precision: Double,
+    val freeScale: Double,
+    val epoch: Double,
+    val edgePrecision: Double? = null
+)
+
+/**
+ * Section `calibration`. `survey` est OMIS quand il est nul : une calibration
+ * ordinaire garde exactement sa forme historique. Il n'est lu ET réécrit
+ * qu'avec EXACTEMENT 2 ancres (les deux ancres synthétiques qu'il a produites).
+ */
+data class GeoCalibrationDTO(
+    val anchors: List<GeoAnchorDTO> = emptyList(),
+    val survey: GeoSurveyDTO? = null
+)
 
 /** Overrides de couleur de calque `[layerName: "#RRGGBB"]` — miroir de `LayerColorsDTO`. */
 data class LayerColorsDTO(val overrides: Map<String, String> = emptyMap())
@@ -182,6 +262,15 @@ sealed class SectionPayload {
     data class GdtfMappings(val dto: GDTFMappingsDTO) : SectionPayload() {
         override val kind get() = ProjectSectionKind.GDTF_MAPPINGS
     }
+    data class PowerCabling(val dto: PowerCablingDTO) : SectionPayload() {
+        override val kind get() = ProjectSectionKind.POWER_CABLING
+    }
+    data class DmxCabling(val dto: DmxCablingDTO) : SectionPayload() {
+        override val kind get() = ProjectSectionKind.DMX_CABLING
+    }
+    data class CustomFixtures(val dto: CustomFixturesDTO) : SectionPayload() {
+        override val kind get() = ProjectSectionKind.CUSTOM_FIXTURES
+    }
 }
 
 /**
@@ -196,7 +285,10 @@ data class ProjectSnapshot(
     var layerColors: LayerColorsDTO? = null,
     var labelSides: LabelSidesDTO? = null,
     var fixtureOrientations: FixtureOrientationsDTO? = null,
-    var gdtfMappings: GDTFMappingsDTO? = null
+    var gdtfMappings: GDTFMappingsDTO? = null,
+    var powerCabling: PowerCablingDTO? = null,
+    var dmxCabling: DmxCablingDTO? = null,
+    var customFixtures: CustomFixturesDTO? = null
 ) {
     /** Applique un payload dans l'instantané (reconstruction section-par-section). */
     fun apply(p: SectionPayload) {
@@ -208,6 +300,9 @@ data class ProjectSnapshot(
             is SectionPayload.LabelSides -> labelSides = p.dto
             is SectionPayload.FixtureOrientations -> fixtureOrientations = p.dto
             is SectionPayload.GdtfMappings -> gdtfMappings = p.dto
+            is SectionPayload.PowerCabling -> powerCabling = p.dto
+            is SectionPayload.DmxCabling -> dmxCabling = p.dto
+            is SectionPayload.CustomFixtures -> customFixtures = p.dto
         }
     }
 }
@@ -230,16 +325,42 @@ sealed class RemoteEvent {
     data class Audit(val entries: List<AuditEntry>) : RemoteEvent()
 }
 
-/** Erreurs de synchronisation (miroir de `SyncError`), avec message FR. */
-sealed class SyncException(message: String) : Exception(message) {
-    object NotSignedIn : SyncException("Vous n'êtes pas connecté.")
-    object InvalidCredentials : SyncException("E-mail ou mot de passe incorrect.")
-    object EmailInUse : SyncException("Cet e-mail est déjà utilisé.")
-    object WeakPassword : SyncException("Mot de passe trop court (6 caractères minimum).")
-    object ProjectNotFound : SyncException("Projet introuvable.")
-    object InviteInvalidOrExpired : SyncException("Code de partage invalide ou expiré.")
-    object NotAMember : SyncException("Vous n'avez pas accès à ce projet.")
-    object BlobMissing : SyncException("Fichier absent du cloud.")
-    object BackendUnavailable : SyncException("Service de synchronisation indisponible.")
+/**
+ * Erreurs de synchronisation (miroir de `SyncError`).
+ *
+ * Chaque cas porte une CLÉ DE RESSOURCE ([messageRes]) : c'est elle qui est
+ * affichée à l'utilisateur (via [syncMessage]), dans la langue du téléphone. Le
+ * `message` de l'exception reste en français — il ne sert qu'aux journaux.
+ */
+sealed class SyncException(
+    message: String,
+    @androidx.annotation.StringRes val messageRes: Int? = null
+) : Exception(message) {
+    object NotSignedIn : SyncException("Vous n'êtes pas connecté.", com.minou.mvrviewer.R.string.sync_err_not_signed_in)
+    object InvalidCredentials : SyncException("E-mail ou mot de passe incorrect.", com.minou.mvrviewer.R.string.sync_err_invalid_credentials)
+    object EmailInUse : SyncException("Cet e-mail est déjà utilisé.", com.minou.mvrviewer.R.string.sync_err_email_in_use)
+    object WeakPassword : SyncException("Mot de passe trop court (6 caractères minimum).", com.minou.mvrviewer.R.string.sync_err_weak_password)
+    object ProjectNotFound : SyncException("Projet introuvable.", com.minou.mvrviewer.R.string.sync_err_project_not_found)
+    object InviteInvalidOrExpired : SyncException("Code de partage invalide ou expiré.", com.minou.mvrviewer.R.string.sync_err_invite_invalid)
+    object NotAMember : SyncException("Vous n'avez pas accès à ce projet.", com.minou.mvrviewer.R.string.sync_err_not_a_member)
+    object BlobMissing : SyncException("Fichier absent du cloud.", com.minou.mvrviewer.R.string.sync_err_blob_missing)
+    object BackendUnavailable : SyncException("Service de synchronisation indisponible.", com.minou.mvrviewer.R.string.sync_err_backend_unavailable)
+    object SignUpFailed : SyncException("Création de compte impossible.", com.minou.mvrviewer.R.string.sync_err_signup_failed)
+    object AuthFailed : SyncException("Erreur d'authentification.", com.minou.mvrviewer.R.string.sync_err_auth_failed)
+    object NetworkUnavailable : SyncException("Connexion réseau indisponible. Réessayez.", com.minou.mvrviewer.R.string.sync_err_network)
+    object RecentLoginRequired : SyncException("Par sécurité, reconnectez-vous puis réessayez.", com.minou.mvrviewer.R.string.sync_err_recent_login)
+    /**
+     * Suppression de compte INCOMPLÈTE : les données Firestore (profil,
+     * adhésions, invitations) sont déjà effacées mais le compte Auth n'a pas pu
+     * l'être. Le service a DÉCONNECTÉ l'appareil pour ne jamais laisser l'app
+     * « connectée sans profil » ; l'utilisateur se reconnecte puis recommence.
+     */
+    object DeletionIncomplete : SyncException("Suppression incomplète : reconnectez-vous puis réessayez.", com.minou.mvrviewer.R.string.sync_err_delete_incomplete)
     class Message(msg: String) : SyncException(msg)
+}
+
+/** Message AFFICHABLE d'une erreur de synchro, dans la langue du téléphone. */
+fun Throwable.syncMessage(ctx: android.content.Context): String {
+    val res = (this as? SyncException)?.messageRes
+    return if (res != null) ctx.getString(res) else message ?: ctx.getString(com.minou.mvrviewer.R.string.err_unknown)
 }

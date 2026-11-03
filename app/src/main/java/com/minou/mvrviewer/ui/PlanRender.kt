@@ -1,0 +1,627 @@
+package com.minou.mvrviewer.ui
+
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
+
+/**
+ * Tout ce dont le DESSIN du plan a besoin, et rien d'autre.
+ *
+ * POURQUOI cet objet : le rendu à l'écran et le rendu PDF doivent produire
+ * exactement la même image, sinon l'export « en construction » ment à
+ * l'utilisateur (il compose une page à partir de ce qu'il voit). Une seule
+ * fonction de dessin les sert donc tous les deux, et ce paramètre porte l'état
+ * qu'elle lisait auparavant dans les fermetures de `PlanScreen`.
+ *
+ * La projection est exprimée de façon NEUTRE — « pixels par mm » plus le point
+ * d'ancrage du centre du modèle — au lieu de (baseScale, scale, offset, taille
+ * de fenêtre) : la page PDF n'a ni la taille ni la densité de l'écran, mais elle
+ * peut reproduire le même cadrage.
+ */
+internal class PlanRenderSpec(
+    val data: PlanData,
+    val layerIndex: Map<String, Int>,
+    /** Échelle de projection : pixels (ou points PDF) par millimètre monde. */
+    val pxPerMm: Float,
+    /**
+     * Échelle servant aux DÉCISIONS DE DÉTAIL (étiquettes assez lisibles ?
+     * silhouette assez grande ?), quand elle diffère de l'échelle de projection.
+     *
+     * POURQUOI : une page A4 en points (≈ 780 × 500) est bien plus petite que
+     * l'écran en pixels (≈ 1080 × 2100), donc `pxPerMm` y est plusieurs fois
+     * plus faible à cadrage égal. Les seuils appliqués à `pxPerMm` répondaient
+     * donc « non » sur la page alors qu'ils répondaient « oui » à l'écran : le
+     * PDF sortait SANS étiquettes ni silhouettes, alors que l'utilisateur les
+     * voyait au moment où il a ajouté la vue. On décide donc avec l'échelle de
+     * l'ÉCRAN au moment de la capture, et on dessine avec celle de la page.
+     * null (écran) = les deux sont confondues.
+     */
+    val detailPxPerMm: Float? = null,
+    /** Où atterrit le centre du modèle (data.cx, data.cy) dans le repère de dessin. */
+    val centerPx: Offset,
+    val planBg: Color,
+    val bgDark: Boolean,
+    val inkColor: Color,
+    val layerColors: Boolean,
+    /**
+     * MODE DE COLORATION des projecteurs (phase 4 câblage). LAYER = comportement
+     * historique (couleur par calque si `layerColors`, sinon gris neutre). SOCAPEX /
+     * DMX_LINE colorent par distributeur câblage via [cablingColor].
+     */
+    val colorMode: PlanColorMode = PlanColorMode.LAYER,
+    /**
+     * Une AFFECTATION est en cours sur le plan (cible armée depuis l'écran
+     * Câblage). Seule elle fait dessiner la PASTILLE pleine sous le symbole
+     * (SPEC-cablage-plan §3, iOS `assignFillFor`). Toujours false pour le PDF.
+     */
+    val assigning: Boolean = false,
+    /**
+     * fixtureKey (mvrUUID) → couleur de son distributeur, en mode câblage. Un
+     * projecteur ABSENT de la table est NON AFFECTÉ → gris neutre. null = pas de
+     * table (mode LAYER). Ne colore QUE la pastille (passe 2) : la silhouette
+     * (passe 1) est indexée par TYPE, non colorable par instance → gris neutre.
+     */
+    val cablingColor: Map<String, Color>? = null,
+    /**
+     * ANNEAU de la 2e DIMENSION de câblage (E3). En mode SOCAPEX, la pastille
+     * (remplissage) porte la couleur Socapex et cet anneau porte la couleur de la
+     * LIGNE DMX ; en mode DMX_LINE, c'est l'inverse. Projecteur ABSENT de la table
+     * (non affecté dans l'AUTRE dimension) → PAS d'anneau. null / mode LAYER = aucun
+     * anneau. Vit en passe 2 (par INSTANCE) comme la pastille.
+     */
+    val cablingRingColor: Map<String, Color>? = null,
+    /**
+     * Résout le texte des champs d'étiquette SOCAPEX / DMX_LINE (état câblage
+     * runtime). null hors câblage → ces champs ne produisent aucun bloc.
+     */
+    val cablingText: ((PlanFixture, LabelContent) -> String?)? = null,
+    val showStructure: Boolean,
+    val showLabels: Boolean,
+    /** Champs affichés (une ligne chacun dans la pastille commune). */
+    val labelFields: Set<LabelContent>,
+    /** Champs sortis de la pastille commune : un bloc autonome chacun. */
+    val labelDetached: Set<LabelContent>,
+    val labelSize: Float,
+    val labelOffset: Float,
+    /**
+     * Réglage explicite « masquer les étiquettes quand c'est trop dézoomé » —
+     * DÉSACTIVÉ par défaut. Par défaut, une étiquette dont l'affichage est activé
+     * reste visible quel que soit le zoom : le seuil de lisibilité (det > 0.02)
+     * ne la masque PLUS silencieusement. On ne le rebranche que si l'utilisateur
+     * le demande, pour un très gros show où des centaines de pastilles dézoomées
+     * feraient une bouillie. (L'allègement pendant les GESTES, lui, reste actif :
+     * cf. lowDetail — transitoire, ce n'est pas « disparaître au dézoom ».)
+     */
+    val hideLabelsWhenZoomedOut: Boolean = false,
+    val hiddenElements: Set<String>,
+    val hiddenLayers: Set<String>,
+    val structPaths: StructPaths?,
+    val structDots: androidx.compose.ui.graphics.Path,
+    val fallbackDots: androidx.compose.ui.graphics.Path,
+    val fixWire: PlanWireframe.FixtureWire?,
+    val fixPaths: FixturePaths?,
+    /**
+     * PLACEMENT du plan de repère au moment du dessin. C'est une COPIE côté PDF
+     * (et non l'objet vivant de `ReferencePlan`) : sa transformée est mutable et
+     * réglée aux curseurs, si bien qu'un placement modifié après coup — ou un
+     * simple « Visible » décoché — réécrivait toutes les pages déjà composées.
+     */
+    val refTransform: com.minou.mvrviewer.mvr.ReferencePlanTransform?,
+    val dxfPaths: DxfPaths?,
+    /**
+     * Plan de repère MATRICIEL (JPEG / PNG / page 1 d'un PDF) — alternative à
+     * `dxfPaths`, placée par la MÊME `refTransform`. Null = plan vectoriel ou pas
+     * de plan (défaut : aucun site d'appel existant à toucher).
+     */
+    val rasterPlan: com.minou.mvrviewer.mvr.RasterPlan? = null,
+    val satellite: com.minou.mvrviewer.mvr.SatelliteOverlay?,
+    val showSatellite: Boolean,
+    val satelliteOpacity: Float,
+    val selected: Set<Int>,
+    /**
+     * Décalages manuels d'étiquettes, en pixels ÉCRAN (cf. labelShiftScale),
+     * indexés par CLÉ DE BLOC (cf. labelBlockKey) — un champ détaché a le sien.
+     */
+    val labelShift: Map<String, Offset>,
+    /**
+     * Conversion des décalages d'étiquettes vers le repère de dessin courant :
+     * ils ont été posés au doigt en pixels d'écran, la page PDF n'a pas la même
+     * densité. 1 à l'écran.
+     */
+    val labelShiftScale: Float,
+    /**
+     * Blocs ARMÉS (clés de bloc). Plusieurs à la fois : la sélection groupée
+     * arme toute une famille d'étiquettes, qu'un seul glissé déplace ensemble.
+     */
+    val activeLabelKeys: Set<String>,
+    val measurer: TextMeasurer,
+    val labelCache: MutableMap<String, TextLayoutResult>,
+    /** Geste en cours : décor allégé, étiquettes éteintes (jamais vrai en PDF). */
+    val lowDetail: Boolean,
+    /** Tampons de zones sensibles remplis par le dessin — null en PDF. */
+    val labelHits: MutableList<LabelHit>? = null,
+    val symbolHits: MutableList<SymbolHit>? = null,
+    /** Coin bas-gauche de la barre d'échelle ; null = pas de barre. */
+    val scaleBarAnchor: Offset? = null
+) {
+    /** Projection monde → repère de dessin (identique à l'ancien `toScreen`). */
+    fun toDraw(px: Float, py: Float): Offset =
+        Offset(centerPx.x + pxPerMm * (px - data.cx), centerPx.y + pxPerMm * (py - data.cy))
+}
+
+/**
+ * Budget de segments VISIBLES au-delà duquel, PENDANT UN GESTE seulement, on
+ * saute le contenu détaillé (DXF / décor / silhouettes) pour rester fluide — cas
+ * du dézoom sur un très gros plan où tout est à l'écran et le culling n'aide plus.
+ * Hors geste, on dessine toujours les tuiles visibles (le culling suffit).
+ */
+private const val GESTURE_SEG_BUDGET = 120_000
+
+/**
+ * Somme des segments des tuiles qui coupent le rectangle de viewport donné.
+ * Sert à décider, pendant un geste, si le contenu détaillé tient dans le budget.
+ */
+internal fun visibleSegs(
+    tilesByKey: Map<*, List<PathTile>>, vx0: Float, vy0: Float, vx1: Float, vy1: Float
+): Int {
+    var s = 0
+    for ((_, tiles) in tilesByKey) for (t in tiles) if (t.visible(vx0, vy0, vx1, vy1)) s += t.segs
+    return s
+}
+
+/**
+ * Rectangle englobant, en coordonnées LOCALES du DXF, de ce qui est visible à
+ * l'écran : on projette les 4 coins de l'écran DANS le repère du DXF (inverse
+ * exact de la matrice de dessin — centre/échelle plan, puis placement
+ * décalage/rotation/échelle du DXF). Renvoie [minX, minY, maxX, maxY].
+ */
+internal fun dxfLocalViewport(
+    w: Float, h: Float, bs: Float, centerPx: Offset,
+    dataCx: Float, dataCy: Float, tf: com.minou.mvrviewer.mvr.ReferencePlanTransform
+): FloatArray {
+    val sfac = tf.effScale.toFloat()
+    if (!sfac.isFinite() || sfac == 0f || bs <= 0f) {
+        // Placement dégénéré : pas de cull (on dessinera tout).
+        return floatArrayOf(-Float.MAX_VALUE, -Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE)
+    }
+    // Le dessin applique rotate(-rotationDeg) : φ est l'angle RÉELLEMENT appliqué.
+    val phi = -tf.rotationDeg.toFloat() * (Math.PI.toFloat() / 180f)
+    val cs = cos(phi); val sn = sin(phi)
+    val offX = tf.offsetX.toFloat(); val offY = tf.offsetY.toFloat()
+    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+    val xs = floatArrayOf(0f, w, 0f, w); val ys = floatArrayOf(0f, 0f, h, h)
+    for (i in 0 until 4) {
+        // écran → repère plan (échelle bs, centre) :
+        val cX = (xs[i] - centerPx.x) / bs + dataCx
+        val cY = (ys[i] - centerPx.y) / bs + dataCy
+        // retirer la translation du placement (offsetX, -offsetY) :
+        val bX = cX - offX
+        val bY = cY + offY
+        // rotation inverse R(-φ) :
+        val aX = bX * cs + bY * sn
+        val aY = -bX * sn + bY * cs
+        // retirer l'échelle du placement :
+        val lx = aX / sfac
+        val ly = aY / sfac
+        if (lx < minX) minX = lx; if (lx > maxX) maxX = lx
+        if (ly < minY) minY = ly; if (ly > maxY) maxY = ly
+    }
+    return floatArrayOf(minX, minY, maxX, maxY)
+}
+
+/**
+ * FONCTION DE DESSIN UNIQUE du plan (fond satellite, plan DXF, décor, silhouettes
+ * de projecteurs, pastilles, étiquettes, barre d'échelle).
+ *
+ * Appelée par le Canvas de `PlanScreen` ET par le rendu PDF : c'est la garantie
+ * que la page imprimée reflète l'écran. Tout ce qui est purement TRANSITOIRE
+ * (cadre de sélection en cours, position GPS, cote de mesure) reste en dehors —
+ * ça n'a pas de sens sur un document.
+ */
+internal fun DrawScope.drawPlanContent(s: PlanRenderSpec) {
+    val w = size.width
+    val h = size.height
+    val bs = s.pxPerMm
+    if (bs <= 0f) return
+    // Échelle de DÉCISION (cf. detailPxPerMm) : identique à `bs` à l'écran.
+    val det = s.detailPxPerMm?.takeIf { it > 0f } ?: bs
+
+    // Viewport courant en coordonnées PLAN (décor + silhouettes partagent cette
+    // projection, sans rotation) : inverse direct de `translate(centerPx) ;
+    // scale(bs) ; translate(-dataC)`. Sert au CULLING des tuiles → seul ce qui
+    // touche l'écran est dessiné (parité avec le tuilage iOS ; vaut aussi pour le
+    // PDF, où `size` est la page). Bornes triées (bs > 0).
+    val planVX0 = (0f - s.centerPx.x) / bs + s.data.cx
+    val planVX1 = (w - s.centerPx.x) / bs + s.data.cx
+    val planVY0 = (0f - s.centerPx.y) / bs + s.data.cy
+    val planVY1 = (h - s.centerPx.y) / bs + s.data.cy
+
+    // ---- Fond satellite géo-référencé, SOUS tout le reste ----
+    // L'image porte ses 4 coins en monde MVR ; on la dessine comme un quad via la
+    // même projection que le plan → alignée sur les projecteurs.
+    val sat = s.satellite
+    if (s.showSatellite && sat != null && !s.lowDetail && sat.bitmap.width > 0) {
+        val nw = s.toDraw(sat.nwX, -sat.nwY)
+        val ne = s.toDraw(sat.neX, -sat.neY)
+        val sw = s.toDraw(sat.swX, -sat.swY)
+        val iw = sat.bitmap.width.toFloat(); val ih = sat.bitmap.height.toFloat()
+        val a = (ne.x - nw.x) / iw; val b = (ne.y - nw.y) / iw
+        val c = (sw.x - nw.x) / ih; val d = (sw.y - nw.y) / ih
+        val m = android.graphics.Matrix().apply {
+            setValues(floatArrayOf(a, c, nw.x, b, d, nw.y, 0f, 0f, 1f))
+        }
+        val paint = android.graphics.Paint().apply {
+            isAntiAlias = true; isFilterBitmap = true
+            alpha = (s.satelliteOpacity.coerceIn(0f, 1f) * 255f).toInt()
+        }
+        drawIntoCanvas { it.nativeCanvas.drawBitmap(sat.bitmap, m, paint) }
+    }
+
+    // ---- Plan de repère MATRICIEL (image / PDF), au-dessus du satellite et
+    // SOUS le DXF, le décor et les projecteurs ----
+    // L'image est posée par ses 4 coins monde (donc décalage + rotation + échelle
+    // + homothétie sont déjà appliqués) : un seul drawBitmap, aucun enjeu de
+    // fluidité (contrairement aux dizaines de milliers de traits d'un DXF).
+    val rast = s.rasterPlan
+    if (rast != null && s.refTransform?.visible == true && rast.bitmap.width > 0 && rast.bitmap.height > 0) {
+        val c4 = rast.worldCorners(s.refTransform)
+        // Repère de dessin = (x, −y), comme partout ailleurs dans le plan.
+        val nw = s.toDraw(c4[0], -c4[1])
+        val ne = s.toDraw(c4[2], -c4[3])
+        val sw = s.toDraw(c4[6], -c4[7])
+        val iw = rast.bitmap.width.toFloat(); val ih = rast.bitmap.height.toFloat()
+        val a = (ne.x - nw.x) / iw; val b = (ne.y - nw.y) / iw
+        val c = (sw.x - nw.x) / ih; val d = (sw.y - nw.y) / ih
+        if (a.isFinite() && b.isFinite() && c.isFinite() && d.isFinite()) {
+            val m = android.graphics.Matrix().apply {
+                setValues(floatArrayOf(a, c, nw.x, b, d, nw.y, 0f, 0f, 1f))
+            }
+            val paint = android.graphics.Paint().apply { isAntiAlias = true; isFilterBitmap = true }
+            drawIntoCanvas { it.nativeCanvas.drawBitmap(rast.bitmap, m, paint) }
+        }
+    }
+
+    // ---- Plan de repère DXF importé (sous tout le reste) ----
+    // Les tracés sont déjà construits (coordonnées locales du DXF) : ici on ne
+    // fait qu'empiler placement du DXF + projection dans la matrice du Canvas.
+    val tfRef = s.refTransform
+    val dxf = s.dxfPaths
+    if (tfRef != null && dxf != null && tfRef.visible) {
+        val tf = tfRef
+        val sfac = tf.effScale.toFloat()
+        val ppu = bs * sfac              // pixels par unité locale du DXF
+        // Viewport en coordonnées LOCALES DXF (inverse de la matrice de dessin) :
+        // on ne tracera que les tuiles qui l'intersectent.
+        val vp = dxfLocalViewport(w, h, bs, s.centerPx, s.data.cx, s.data.cy, tf)
+        val mg = dxf.tileSize            // marge = une tuile (traits en bordure)
+        val vx0 = vp[0] - mg; val vy0 = vp[1] - mg; val vx1 = vp[2] + mg; val vy1 = vp[3] + mg
+        // Pendant un GESTE, si trop de traits restent visibles (dézoom sur très
+        // gros plan), on saute le DXF pour rester fluide ; sinon il reste affiché
+        // même en cours de geste — il ne « clignote » plus (cf. GESTURE_SEG_BUDGET).
+        val segsVis = if (s.lowDetail) visibleSegs(dxf.strokeTiles, vx0, vy0, vx1, vy1) else 0
+        if (!s.lowDetail || segsVis <= GESTURE_SEG_BUDGET) {
+            withTransform({
+                translate(s.centerPx.x, s.centerPx.y)
+                scale(bs, bs, Offset.Zero)
+                translate(-s.data.cx, -s.data.cy)
+                // Repère plan = (x, −y) : la rotation du placement s'y lit donc à
+                // l'envers, et le décalage Y aussi.
+                translate(tf.offsetX.toFloat(), -tf.offsetY.toFloat())
+                rotate(-tf.rotationDeg.toFloat(), Offset.Zero)
+                scale(sfac, sfac, Offset.Zero)
+            }) {
+                // Zones remplies (HATCH/SOLID) SOUS les traits, en semi-transparent
+                // pour ne pas masquer projecteurs et décor.
+                for ((key, fp) in dxf.fills) {
+                    val (layer, rgb, solid) = key
+                    if (layer in s.hiddenLayers) continue
+                    drawPath(fp, dxfDisplayColor(rgb, s.bgDark).copy(alpha = if (solid) 0.40f else 0.20f))
+                }
+                if (ppu > 0f) {
+                    val sw = 0.7f / ppu   // épaisseur constante à l'écran / sur la page
+                    for ((key, tiles) in dxf.strokeTiles) {
+                        val (layer, rgb) = key
+                        if (layer in s.hiddenLayers) continue
+                        val col = dxfDisplayColor(rgb, s.bgDark)
+                        for (t in tiles) {
+                            if (!t.visible(vx0, vy0, vx1, vy1)) continue
+                            drawPath(t.path, col, style = Stroke(sw))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Décor / structure : fil de fer vectoriel (tuilé + culé) ----
+    if (s.showStructure) {
+        val sp = s.structPaths
+        val mg = sp?.tileSize ?: 0f
+        val vx0 = planVX0 - mg; val vy0 = planVY0 - mg; val vx1 = planVX1 + mg; val vy1 = planVY1 + mg
+        // Même arbitrage que le DXF : hors geste on trace les tuiles visibles ;
+        // en geste on ne les saute que si le budget visible est dépassé (dézoom
+        // sur très gros décor). → le décor ne clignote plus au pan quand on est
+        // zoomé, tout en restant fluide quand tout est à l'écran.
+        val segsVis = if (s.lowDetail && sp != null) visibleSegs(sp.byLayer, vx0, vy0, vx1, vy1) else 0
+        val wireOk = sp != null && (!s.lowDetail || segsVis <= GESTURE_SEG_BUDGET)
+        withTransform({
+            translate(s.centerPx.x, s.centerPx.y)
+            scale(bs, bs, Offset.Zero)
+            translate(-s.data.cx, -s.data.cy)
+        }) {
+            if (wireOk && sp != null) {
+                val sw = 0.8f / bs
+                for ((layer, tiles) in sp.byLayer) {
+                    val col = if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, layer)) else STRUCT_COLOR
+                    for (t in tiles) {
+                        if (!t.visible(vx0, vy0, vx1, vy1)) continue
+                        drawPath(t.path, col, style = Stroke(sw))
+                    }
+                }
+            }
+            // Structures sans fil de fer (ou repli quand le budget de geste saute
+            // le décor) : un point chacune, en UN SEUL tracé (Skia élague hors écran).
+            val dots = if (wireOk) s.structDots else s.fallbackDots
+            drawPath(dots, STRUCT_COLOR, style = Stroke(width = 3.2f / bs, cap = StrokeCap.Round))
+        }
+    }
+
+    // ---- Projecteurs, passe 1 : silhouettes fil de fer ----
+    // Une étiquette affichée reste visible quel que soit le zoom : les
+    // étiquettes ne « disparaissent » PLUS au dézoom (retour de test terrain).
+    // Le seuil de lisibilité (det > 0.02) n'est appliqué QUE si l'utilisateur a
+    // explicitement coché « masquer les étiquettes quand c'est trop dézoomé »
+    // (défaut : décoché) — filet optionnel pour un très gros show. L'allègement
+    // pendant les GESTES reste distinct (lowDetail), tout comme les étiquettes
+    // ARMÉES / SÉLECTIONNÉES qui ignorent de toute façon ces deux gardes.
+    val labelsZoomOk = s.showLabels && (!s.hideLabelsWhenZoomedOut || det > 0.02f)
+    val fw = s.fixWire
+    val fp = s.fixPaths
+    // Viewport plan des silhouettes (même projection que le décor) + arbitrage de
+    // geste : `silhouettesOn` décide UNE fois si la passe 1 a le droit de tracer.
+    // Elles restent donc affichées pendant un pan tant que le budget visible tient
+    // — c'est le cœur du « les icônes disparaissent » : avant, TOUT geste les
+    // éteignait (lowDetail), d'où le clignotement au moindre déplacement.
+    val fmg = fp?.tileSize ?: 0f
+    val fvx0 = planVX0 - fmg; val fvy0 = planVY0 - fmg; val fvx1 = planVX1 + fmg; val fvy1 = planVY1 + fmg
+    val fSegsVis = if (s.lowDetail && fp != null) visibleSegs(fp.byKey, fvx0, fvy0, fvx1, fvy1) else 0
+    val silhouettesOn = fp != null && fw != null && (!s.lowDetail || fSegsVis <= GESTURE_SEG_BUDGET)
+    fun silhouetteVisible(spec: String?): Boolean {
+        if (!silhouettesOn || fw == null || fp == null || spec == null) return false
+        val t = spec.trim()
+        if (t !in fp.specs || fw.edgesBySpec[t] == null) return false
+        return (fw.radiusBySpec[t] ?: 0f) * det > 7f
+    }
+    // ---- Passe 0 (câblage) : PASTILLE pleine sous la silhouette ----
+    // SPEC-cablage-plan §3 : en mode AFFECTATION seulement (iOS `assignFillFor`,
+    // `guard assigningForDraw`), chaque projecteur CÂBLÉ dans la famille de la
+    // voie porte une pastille pleine de la couleur de son distributeur (85 %,
+    // liseré couleur de fond), SOUS son symbole ; un projecteur non câblé n'en a
+    // pas (symbole gris). Les silhouettes étant tracées par TYPE (une passe pour
+    // tous les clones), c'est cette pastille qui porte la couleur quand on est
+    // assez près pour les voir. Hors affectation (« Colorer par câblage » du
+    // menu, PDF du plan), le dessin reste celui d'avant.
+    val cablingFill = s.cablingColor
+    if (CablingAssignColoring.showsAssignFill(s.colorMode, s.assigning) && silhouettesOn &&
+        !cablingFill.isNullOrEmpty()) {
+        s.data.fixtures.forEach { f ->
+            if (f.key in s.hiddenElements) return@forEach
+            val col = cablingFill[f.key] ?: return@forEach
+            if (!silhouetteVisible(f.spec)) return@forEach
+            val p = s.toDraw(f.px, f.py)
+            val r = ((f.spec?.trim()?.let { fw?.radiusBySpec?.get(it) } ?: 0f) * bs).coerceIn(7f, 48f)
+            if (p.x !in -r..w + r || p.y !in -r..h + r) return@forEach
+            drawCircle(col.copy(alpha = 0.85f), radius = r, center = p)
+            drawCircle(s.planBg, radius = r, center = p, style = Stroke(1.5f))
+        }
+    }
+    if (silhouettesOn && fp != null) {
+        withTransform({
+            translate(s.centerPx.x, s.centerPx.y)
+            scale(bs, bs, Offset.Zero)
+            translate(-s.data.cx, -s.data.cy)
+        }) {
+            val sw = 1.2f / bs
+            for ((key, tiles) in fp.byKey) {
+                val sep = key.indexOf(PATH_KEY_SEP)
+                if (sep < 0) continue
+                val layer = key.substring(0, sep)
+                if (!silhouetteVisible(key.substring(sep + 1))) continue
+                // Passe indexée par TYPE (dessinée une fois pour tous les clones) :
+                // en mode câblage (par INSTANCE), on ne peut pas la colorer par
+                // projecteur → gris neutre. La pastille (passe 2) porte la couleur.
+                val c = if (s.colorMode == PlanColorMode.LAYER && s.layerColors)
+                    Color(LayerColors.colorInt(s.layerIndex, layer)) else NEUTRAL_FIXTURE_GRAY
+                for (t in tiles) {
+                    if (!t.visible(fvx0, fvy0, fvx1, fvy1)) continue
+                    drawPath(t.path, c, style = Stroke(sw))
+                }
+            }
+        }
+    }
+
+    // ---- Passe 2 : pastilles, anneaux de sélection, étiquettes ----
+    s.labelHits?.clear()
+    s.symbolHits?.clear()
+    // Projecteurs portant au moins un bloc armé : calculé UNE fois (coût
+    // proportionnel au nombre de blocs armés, pas au nombre de projecteurs).
+    val activeFixtures: Set<String> =
+        if (s.activeLabelKeys.isEmpty()) emptySet()
+        else s.activeLabelKeys.mapTo(HashSet()) { labelBlockFixtureKey(it) }
+    // Décalage manuel maximal PAR PROJECTEUR, agrégé une seule fois : le culling
+    // en a besoin pour chaque projecteur, et balayer la table des décalages à
+    // l'intérieur de la boucle en ferait un produit (projecteurs × décalages).
+    val maxShiftByFixture = HashMap<String, Offset>(s.labelShift.size * 2)
+    for ((k, v) in s.labelShift) {
+        val fk = labelBlockFixtureKey(k)
+        val cur = maxShiftByFixture[fk]
+        maxShiftByFixture[fk] =
+            if (cur == null) Offset(abs(v.x), abs(v.y))
+            else Offset(max(cur.x, abs(v.x)), max(cur.y, abs(v.y)))
+    }
+    val labelPadX = LABEL_PAD_X.toPx()
+    val labelPadY = LABEL_PAD_Y.toPx()
+    val labelStroke = LABEL_STROKE.toPx()
+    val labelCullPx = LABEL_CULL_MARGIN.toPx()
+    // Couleur RÉELLE du voile de la pastille une fois composée sur le fond : c'est
+    // elle, et non le fond nu, qui décide de la lisibilité de l'encre.
+    val labelVeil = if (s.bgDark) compositeOver(Color.Black, 0.45f, s.planBg)
+                    else compositeOver(Color.White, 0.78f, s.planBg)
+    s.data.fixtures.forEachIndexed { i, f ->
+        if (f.key in s.hiddenElements) return@forEachIndexed
+        val p = s.toDraw(f.px, f.py)
+        // Culling : le décalage manuel LE PLUS GRAND des blocs de ce projecteur
+        // (chacun a le sien) — sinon un bloc traîné loin disparaîtrait dès que
+        // son projecteur sort du cadre, alors qu'il est encore à l'écran.
+        val maxSh = maxShiftByFixture[f.key] ?: Offset.Zero
+        val cullX = 40f + abs(maxSh.x) * s.labelShiftScale + labelCullPx
+        val cullY = 40f + abs(maxSh.y) * s.labelShiftScale + labelCullPx
+        if (p.x !in -cullX..w + cullX || p.y !in -cullY..h + cullY) return@forEachIndexed
+        // Couleur de la PASTILLE : en mode câblage, la couleur du distributeur de ce
+        // projecteur (non affecté = gris neutre) ; sinon comportement historique
+        // (calque si activé, sinon gris neutre). Seul site indexé par INSTANCE.
+        val c = if (s.colorMode != PlanColorMode.LAYER)
+            s.cablingColor?.get(f.key) ?: CABLING_UNASSIGNED_GRAY   // non affecté = gris câblage dédié
+        else if (s.layerColors) Color(LayerColors.colorInt(s.layerIndex, f.layer))
+        else NEUTRAL_FIXTURE_GRAY
+        val symRadius = if (silhouetteVisible(f.spec)) {
+            drawCircle(c, radius = 3f, center = p)
+            3f
+        } else {
+            drawCircle(c, radius = 7f, center = p)
+            drawCircle(Color.White, radius = 7f, center = p, style = Stroke(1.5f))
+            7f
+        }
+        s.symbolHits?.add(SymbolHit(p.x, p.y, max(symRadius, 7f)))
+        // ANNEAU de 2e DIMENSION câblage (E3) : couleur de l'AUTRE dimension du
+        // projecteur (DMX en mode Socapex, Socapex en mode DMX). Non affecté dans
+        // cette dimension (absent de la table) → pas d'anneau ; aucun en mode LAYER.
+        // Rayon entre la pastille (≤ 7) et l'anneau de sélection (13) → les trois
+        // restent distincts. Fin liseré de contraste dessous pour rester lisible sur
+        // tout fond, puis l'anneau coloré par-dessus.
+        if (s.colorMode != PlanColorMode.LAYER) {
+            val ring = s.cablingRingColor?.get(f.key)
+            if (ring != null) {
+                val rr = max(symRadius, 7f) + 3.5f
+                drawCircle(if (s.bgDark) Color.White else Color(0xFF111111),
+                    radius = rr, center = p, style = Stroke(4.5f))
+                drawCircle(ring, radius = rr, center = p, style = Stroke(3f))
+            }
+        }
+        if (i in s.selected) {
+            drawCircle(Color(0xFFFFC400), radius = 13f, center = p, style = Stroke(3f))
+        }
+        // Une étiquette DÉSIGNÉE (bloc armé, ou projecteur sélectionné) est
+        // toujours tracée : ni le seuil de zoom ni l'allègement de geste ne la
+        // font disparaître (cf. labelsZoomOk).
+        val forced = f.key in activeFixtures || i in s.selected
+        if (s.showLabels && (labelsZoomOk || forced) && (!s.lowDetail || forced)) {
+            val blocks = labelBlocks(f, s.labelFields, s.labelDetached, s.cablingText)
+            val fs = (9f * s.labelSize)
+            val off = 8f * s.labelOffset
+            // Encre dérivée de la même teinte que la pastille : en câblage `c` porte
+            // la couleur du distributeur (ou gris neutre), sinon la couleur de calque.
+            val tinted = s.colorMode != PlanColorMode.LAYER || s.layerColors
+            val labelInk = readableInk(if (tinted) c else s.inkColor, labelVeil)
+            // Empilement des blocs DÉTACHÉS sous le symbole : le premier bloc
+            // garde la place historique (à droite, au-dessus du centre), les
+            // suivants descendent — d'où « le n° en haut, le patch en bas » sans
+            // le moindre réglage. L'utilisateur affine ensuite au doigt.
+            var stackY = p.y + off * 0.5f
+            blocks.forEachIndexed { bi, block ->
+                val bkey = labelBlockKey(f.key, block.id)
+                val sh = (s.labelShift[bkey] ?: Offset.Zero) * s.labelShiftScale
+                val text = block.text
+                // Mesurer un texte est cher et le cache par défaut du TextMeasurer
+                // ne fait que 8 entrées → on mémorise par texte (sauts de ligne
+                // compris). La couleur n'est PAS mise en page ici (elle varie par
+                // calque).
+                val tl = s.labelCache.getOrPut(text) {
+                    s.measurer.measure(text, style = TextStyle(fontSize = fs.sp, color = s.inkColor))
+                }
+                val bw = tl.size.width + labelPadX * 2f
+                val bh = tl.size.height + labelPadY * 2f
+                val tx = p.x + off + sh.x
+                val ty = (if (bi == 0) p.y - fs * 0.7f else stackY) + sh.y
+                if (bi > 0) stackY += bh + labelPadY
+                val boxTL = Offset(tx - labelPadX, ty - labelPadY)
+                s.labelHits?.add(LabelHit(bkey, boxTL.x, boxTL.y, bw, bh))
+                val boxSize = Size(bw, bh)
+                val radius = CornerRadius(bh * 0.32f, bh * 0.32f)
+                drawRoundRect(
+                    if (s.bgDark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.78f),
+                    topLeft = boxTL, size = boxSize, cornerRadius = radius
+                )
+                val isActive = bkey in s.activeLabelKeys
+                if (isActive) {
+                    // Retour visuel de l'étiquette ACTIVE : halo ambré débordant.
+                    drawRoundRect(
+                        Color(0x55FFC400),
+                        topLeft = Offset(boxTL.x - labelStroke * 3f, boxTL.y - labelStroke * 3f),
+                        size = Size(bw + labelStroke * 6f, bh + labelStroke * 6f),
+                        cornerRadius = radius,
+                        style = Stroke(labelStroke * 5f)
+                    )
+                }
+                drawRoundRect(
+                    if (isActive) Color(0xFFFFC400) else labelInk.copy(alpha = 0.85f),
+                    topLeft = boxTL, size = boxSize, cornerRadius = radius,
+                    style = Stroke(if (isActive) labelStroke * 2.5f else labelStroke)
+                )
+                drawText(tl, color = labelInk, topLeft = Offset(tx, ty))
+            }
+        }
+    }
+
+    // ---- Barre d'échelle : longueur « ronde » à l'échelle courante ----
+    val anchor = s.scaleBarAnchor
+    if (anchor != null) {
+        val barPx = niceScaleBarMm(bs) * bs
+        val x0 = anchor.x; val y0 = anchor.y
+        drawLine(s.inkColor, Offset(x0, y0), Offset(x0 + barPx, y0), strokeWidth = 2.5f)
+        drawLine(s.inkColor, Offset(x0, y0 - 5f), Offset(x0, y0 + 5f), strokeWidth = 2.5f)
+        drawLine(s.inkColor, Offset(x0 + barPx, y0 - 5f), Offset(x0 + barPx, y0 + 5f), strokeWidth = 2.5f)
+        val tl = s.measurer.measure(
+            scaleBarLabel(niceScaleBarMm(bs)),
+            style = TextStyle(fontSize = 11.sp, color = s.inkColor)
+        )
+        drawText(tl, topLeft = Offset(x0, y0 - 22f))
+    }
+}
+
+/** Longueur « ronde » (mm monde) tenant dans ~90 px à l'échelle donnée. */
+internal fun niceScaleBarMm(pxPerMm: Float): Float {
+    if (pxPerMm <= 1e-6f) return 1f
+    val raw = 90f / pxPerMm
+    val mag = Math.pow(10.0, Math.floor(Math.log10(raw.toDouble()))).toFloat()
+    return when {
+        raw / mag < 1.5f -> 1f * mag
+        raw / mag < 3.5f -> 2f * mag
+        raw / mag < 7.5f -> 5f * mag
+        else -> 10f * mag
+    }
+}
+
+internal fun scaleBarLabel(niceMm: Float): String =
+    if (niceMm >= 1000f) {
+        val m = niceMm / 1000f
+        (if (m % 1f == 0f) m.toInt().toString() else m.toString()) + " m"
+    } else "${niceMm.toInt()} mm"

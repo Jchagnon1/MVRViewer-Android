@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fichier d'essai SYNTHÉTIQUE (SPEC-ma.md §4.4) : boîte 4 x 6 x 10 pouces, unité et axe DÉCLARÉS. -->
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor><authoring_tool>MVR Viewer tests</authoring_tool></contributor>
+    <created>2026-10-02T00:00:00</created>
+    <modified>2026-10-02T00:00:00</modified>
+    <unit name="inch" meter="0.0254"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+  <library_geometries>
+    <geometry id="box-mesh" name="box">
+      <mesh>
+        <source id="box-mesh-positions">
+          <float_array id="box-mesh-positions-array" count="24">0 0 -10 4 0 -10 4 6 -10 0 6 -10 0 0 0 4 0 0 4 6 0 0 6 0</float_array>
+          <technique_common>
+            <accessor source="#box-mesh-positions-array" count="8" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="box-mesh-vertices">
+          <input semantic="POSITION" source="#box-mesh-positions"/>
+        </vertices>
+        <triangles count="12">
+          <input semantic="VERTEX" source="#box-mesh-vertices" offset="0"/>
+          <p>0 3 2 0 2 1 4 5 6 4 6 7 0 1 5 0 5 4 3 7 6 3 6 2 0 4 7 0 7 3 1 2 6 1 6 5</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="box" name="box" type="NODE">
+        <instance_geometry url="#box-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#Scene"/>
+  </scene>
+</COLLADA>

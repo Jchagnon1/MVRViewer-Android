@@ -89,9 +89,10 @@ class SatelliteScreenTest {
 
     @Test fun mentionPoseeDesQueLImageEstDessinee() {
         val y2024 = ImageryDate.Capture(2024, 2024)
-        assertEquals("Source\u00A0: IGN – BD ORTHO®, prise de vue 2024", fr(SatelliteUi.creditRes(true, true, y2024)))
+        // Espace ORDINAIRE avant « : » : texte exact de SPEC-satellite-ign §4.1 et du web.
+        assertEquals("Source\u0020: IGN – BD ORTHO®, prise de vue 2024", fr(SatelliteUi.creditRes(true, true, y2024)))
         assertEquals("Source: IGN – BD ORTHO®, imagery 2024", en(SatelliteUi.creditRes(true, true, y2024)))
-        assertEquals("Source\u00A0: IGN – BD ORTHO® (cartes.gouv.fr)", fr(SatelliteUi.creditRes(true, true, null)))
+        assertEquals("Source\u0020: IGN – BD ORTHO® (cartes.gouv.fr)", fr(SatelliteUi.creditRes(true, true, null)))
         assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(SatelliteUi.creditRes(true, true, null)))
         assertNull("réglage éteint : ni image ni mention", SatelliteUi.creditRes(false, true, y2024))
         assertNull("pas d'image : pas de mention", SatelliteUi.creditRes(true, false, y2024))

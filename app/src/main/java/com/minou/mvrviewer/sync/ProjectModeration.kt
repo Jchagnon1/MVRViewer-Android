@@ -109,6 +109,12 @@ class SharePublisher(private val service: SyncService) {
      * [onProject] : le projet devient le projet courant AVANT l'envoi (écouteurs) ;
      * [onUploading] : progression de l'envoi du .mvr ; [onVersion] : la version publiée,
      * AVANT la vérification du code (même ordre qu'iOS).
+     *
+     * Une fois la version publiée, la publication est FAITE : un échec de la vérification
+     * du code (réseau coupé juste après) rend le code connu du projet, sans erreur — elle
+     * est refaite à l'ouverture de « Partager le projet » et du projet (§5.2, §5.11). Même
+     * choix que le web et iOS ; sinon l'appelant montrerait un échec et n'enverrait pas
+     * l'état local. Une annulation remonte telle quelle ([attempt]).
      */
     suspend fun publish(
         existing: CloudProject?, contentKey: String, name: String, sha256: String, data: ByteArray,
@@ -125,7 +131,7 @@ class SharePublisher(private val service: SyncService) {
         val version = service.publishMVRVersion(project.id, sha256)
         onVersion(project, version)
         val code = if (existing == null) ShareCodeResult(project.id, project.inviteCode)
-        else service.ensureCurrentCode(project.id)
+        else attempt { service.ensureCurrentCode(project.id) } ?: ShareCodeResult(project.id, project.inviteCode)
         return Published(project, version, code)
     }
 }

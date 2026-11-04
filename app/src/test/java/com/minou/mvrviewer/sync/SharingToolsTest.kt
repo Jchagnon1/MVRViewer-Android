@@ -46,6 +46,31 @@ class SharingToolsTest {
         assertEquals("jm", ProjectNames.displayName(acc))
     }
 
+    /**
+     * Relecture : Firebase Auth rend l'e-mail en MINUSCULES, alors que l'inscription sans
+     * nom enregistre l'adresse TELLE QUE SAISIE comme nom. Comparée à la lettre, elle
+     * devenait le nom du compte dans le projet (liste des membres, journal, signalement)
+     * dès la reprise de session. L'égalité se juge à la casse près, et la partie avant
+     * « @ » garde la casse saisie : même nom dans la session d'inscription et après.
+     */
+    @Test fun nomAfficheEMailALaCassePres() {
+        assertEquals("Bob", ProjectNames.displayName("Bob@Example.com", "bob@example.com"))
+        assertEquals("Casse.Device", ProjectNames.displayName("Casse.Device@Exemple.test", "casse.device@exemple.test"))
+        assertEquals("BOB", ProjectNames.displayName(" BOB@EXAMPLE.COM ", "bob@example.com"))
+        assertEquals("bob", ProjectNames.displayName("bob@example.com", " bob@example.com "))
+        // Session d'inscription (adresse saisie) puis reprise (adresse rendue par Firebase) :
+        // le MÊME nom, donc aucune réécriture de memberNames à chaque ouverture (§5.8).
+        val inscription = AccountInfo("u-1", "Casse.Device@Exemple.test", "Casse.Device@Exemple.test")
+        val reprise = AccountInfo("u-1", "casse.device@exemple.test", "Casse.Device@Exemple.test")
+        assertEquals("Casse.Device", ProjectNames.displayName(inscription))
+        assertEquals("Casse.Device", ProjectNames.displayName(reprise))
+        // Connexion sans profil Firebase (displayName absent) : l'adresse saisie sert de nom.
+        assertEquals("Casse.Device", ProjectNames.displayName(AccountInfo("u-1", "casse.device@exemple.test", "Casse.Device@Exemple.test")))
+        // Un vrai nom n'est jamais touché, même s'il ressemble à la partie avant « @ ».
+        assertEquals("Casse Device", ProjectNames.displayName("Casse Device", "casse.device@exemple.test"))
+        for (acc in listOf(inscription, reprise)) assertFalse(ProjectNames.displayName(acc).contains('@'))
+    }
+
     @Test fun nomDuProjetTronqueA200Unites() {
         assertEquals(200, ProjectNames.projectName("x".repeat(255)).length)
         assertEquals("Show.mvr", ProjectNames.projectName("Show.mvr"))

@@ -359,20 +359,23 @@ class SatelliteRequestTest {
     private fun text(lang: TestRes, p: Pair<Int, List<Any>>) = lang.res(p.first, p.second)
 
     @Test fun t9Mention() {
-        val nb = ' '
+        // Espace ORDINAIRE (U+0020) avant « : » : texte EXACT de SPEC-satellite-ign §4.1, du
+        // web (la référence, §7.5) et d'iOS — même texte à l'écran et dans les PDF des trois
+        // plateformes (relecture : Android avait une espace insécable).
+        val sp = ' '
         fun fr(d: ImageryDate?) = text(TestRes.FR, SatelliteUi.attributionRes(d))
         fun en(d: ImageryDate?) = text(TestRes.EN, SatelliteUi.attributionRes(d))
-        assertEquals("Source$nb: IGN – BD ORTHO®, prise de vue 2024", fr(ImageryDate.Capture(2024, 2024)))
-        assertEquals("Source$nb: IGN – BD ORTHO®, prises de vue 2021–2024", fr(ImageryDate.Capture(2021, 2024)))
-        assertEquals("Source$nb: IGN – BD ORTHO®, mise à jour du 22/10/2026", fr(ImageryDate.Updated(2026, 10, 22)))
-        assertEquals("Source$nb: IGN – BD ORTHO® (cartes.gouv.fr)", fr(null))
+        assertEquals("Source$sp: IGN – BD ORTHO®, prise de vue 2024", fr(ImageryDate.Capture(2024, 2024)))
+        assertEquals("Source$sp: IGN – BD ORTHO®, prises de vue 2021–2024", fr(ImageryDate.Capture(2021, 2024)))
+        assertEquals("Source$sp: IGN – BD ORTHO®, mise à jour du 22/10/2026", fr(ImageryDate.Updated(2026, 10, 22)))
+        assertEquals("Source$sp: IGN – BD ORTHO® (cartes.gouv.fr)", fr(null))
         assertEquals("Source: IGN – BD ORTHO®, imagery 2024", en(ImageryDate.Capture(2024, 2024)))
         assertEquals("Source: IGN – BD ORTHO®, imagery 2021–2024", en(ImageryDate.Capture(2021, 2024)))
         assertEquals("Source: IGN – BD ORTHO®, updated 2026-10-22", en(ImageryDate.Updated(2026, 10, 22)))
         assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(null))
         // Bornes dans le désordre, jour et mois sur 2 chiffres, date mal formée → sans date.
         assertEquals("Source: IGN – BD ORTHO®, imagery 2021–2024", en(ImageryDate.Capture(2024, 2021)))
-        assertEquals("Source$nb: IGN – BD ORTHO®, mise à jour du 05/03/2026", fr(ImageryDate.Updated(2026, 3, 5)))
+        assertEquals("Source$sp: IGN – BD ORTHO®, mise à jour du 05/03/2026", fr(ImageryDate.Updated(2026, 3, 5)))
         assertEquals("Source: IGN – BD ORTHO®, updated 2026-03-05", en(ImageryDate.Updated(2026, 3, 5)))
         assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(ImageryDate.Updated(2026, 13, 5)))
         assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(ImageryDate.Capture(24, 24)))
@@ -384,6 +387,10 @@ class SatelliteRequestTest {
             assertFalse(fr(ImageryDate.Capture(2024, 2024)).contains("2 024"))
         } finally {
             Locale.setDefault(saved)
+        }
+        for (k in listOf("sat_attribution", "sat_attribution_year", "sat_attribution_years", "sat_attribution_updated")) {
+            assertTrue(k, TestRes.FR.strings.getValue(k).startsWith("Source\u0020: IGN – BD ORTHO®"))
+            assertFalse(k, TestRes.FR.strings.getValue(k).contains('\u00A0'))
         }
         for (k in listOf("sat_attribution_year", "sat_attribution_years", "sat_attribution_updated")) {
             assertFalse(TestRes.FR.strings.getValue(k).contains("\$d"))

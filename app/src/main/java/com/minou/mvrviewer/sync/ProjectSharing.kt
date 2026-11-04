@@ -45,10 +45,18 @@ object ProjectNames {
      * complet (les co-membres n'y ont pas accès). Un nom refusé ferait échouer
      * « Rejoindre » (le nom part dans la même écriture) : la troncature n'est pas
      * facultative.
+     *
+     * L'égalité avec l'e-mail se juge À LA CASSE PRÈS : Firebase Auth rend l'adresse en
+     * minuscules, alors que l'inscription sans nom (ici, sur iOS et sur le web) enregistre
+     * comme nom l'adresse TELLE QUE SAISIE (« Casse.Device@Exemple.test »). La partie
+     * avant « @ » est alors prise dans ce nom : la casse saisie est gardée, et le nom ne
+     * change pas entre la session d'inscription et les suivantes (sinon §5.8 le
+     * réécrirait à chaque ouverture).
      */
     fun displayName(displayName: String, email: String): String {
         var name = displayName.trim()
-        if (name.isEmpty() || name == email) name = email.substringBefore('@')
+        if (name.isEmpty()) name = email.trim().substringBefore('@')
+        else if (name.equals(email.trim(), ignoreCase = true)) name = name.substringBefore('@')
         return Utf16Text.truncated(name, MAX_DISPLAY_NAME)
     }
 

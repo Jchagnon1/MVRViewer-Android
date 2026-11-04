@@ -177,8 +177,10 @@ class ModerationUiTest {
             fr.get("sync_report_no_mail_app_fmt", ContentReport.ADDRESS))
         assertEquals("No email app. Write to support@mvrviewer.com with the project's name and ID.",
             en.get("sync_report_no_mail_app_fmt", ContentReport.ADDRESS))
-        // Aucune espace ORDINAIRE avant « : ; ? ! » dans les textes français du partage et de la modération.
-        val keys = fr.strings.keys.filter { it.startsWith("sync_") || it.startsWith("sat_attribution") }
+        // Aucune espace ORDINAIRE avant « : ; ? ! » dans les textes français du partage et de la
+        // modération. (La mention IGN `sat_attribution*` suit le texte EXACT de
+        // SPEC-satellite-ign §4.1, espace ordinaire comprise : SatelliteRequestTest.t9Mention.)
+        val keys = fr.strings.keys.filter { it.startsWith("sync_") }
         assertTrue(keys.size >= 90)
         for (k in keys) {
             val v = fr.strings.getValue(k)

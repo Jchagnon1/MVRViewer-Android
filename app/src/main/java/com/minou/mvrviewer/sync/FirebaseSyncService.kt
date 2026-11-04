@@ -193,8 +193,10 @@ class FirebaseSyncService(context: Context) : SyncService {
      * Suppression DÉFINITIVE du compte (politique Google Play). Ordre imposé par
      * Firebase (tout ce qui touche Firestore doit précéder `user.delete()`, après
      * quoi il n'y a plus d'authentification) — et choisi pour qu'AUCUNE écriture
-     * ne soit émise tant qu'une étape faillible peut encore laisser le compte
-     * vivant (les étapes (a) à (c) ne font que LIRE) :
+     * Firestore ne soit émise tant qu'une étape faillible peut encore laisser le
+     * compte vivant (les étapes (a) à (c) ne touchent pas à Firestore autrement
+     * qu'en LISANT ; seuls les fichiers Storage des projets solo y sont supprimés,
+     * comme le veut l'ordre du SPEC) :
      *  (a) RE-AUTHENTIFICATION avec le mot de passe saisi — Firebase exige une
      *      connexion récente pour `delete()` ; un mot de passe faux s'arrête ICI,
      *      RIEN n'est écrit ;
@@ -205,15 +207,17 @@ class FirebaseSyncService(context: Context) : SyncService {
      *      Firestore (active par défaut), une écriture enfilée partirait plus
      *      tard, après que l'utilisateur a lu « Réessayez » ;
      *  (c) LECTURES serveur : projets où `memberUids` contient l'uid, invitations
-     *      `invites` où `createdBy == uid`, et pour chaque projet dont il est le
-     *      SEUL membre et le propriétaire, énumération des sous-collections
-     *      `sections` et `audit` et lecture de l'invitation du code courant
-     *      (gardée seulement si elle existe et pointe vers ce projet) ; puis, une
-     *      fois TOUTES les lectures faites, les fichiers Storage de ces projets
-     *      sont supprimés AU MIEUX (le propriétaire en a le droit tant que le
-     *      projet existe ; un reste est purgé côté serveur, et la pierre tombale
-     *      empêche de recréer le projet pour le relire — SPEC-partage-moderation
-     *      §5.9 étape 2) ;
+     *      `invites` où `createdBy == uid` ; puis, pour chaque projet dont il est
+     *      le SEUL membre et le propriétaire, « exactement les étapes 2 à 4 de
+     *      §5.9 » (§5.10), dans l'ordre du SPEC et des deux autres plateformes :
+     *      ses fichiers Storage supprimés AU MIEUX (le propriétaire en a le droit
+     *      tant que le projet existe ; un reste est purgé côté serveur, et la
+     *      pierre tombale empêche de recréer le projet pour le relire), PUIS
+     *      l'énumération des sous-collections `sections` et `audit` et la lecture
+     *      de l'invitation du code courant (gardée seulement si elle existe et
+     *      pointe vers ce projet). Une lecture qui échoue ensuite (coupure en
+     *      cours) laisse le compte vivant et ces projets sans fichiers : le nouvel
+     *      essai les termine ;
      *  (d) écritures en LOTS (§5.13 : ≤ 450 opérations ET ≤ 10 projets dont les
      *      règles lisent le document — au-delà de 20 accès, une requête groupée
      *      est refusée EN ENTIER), commités séquentiellement dans cet ordre
@@ -275,7 +279,6 @@ class FirebaseSyncService(context: Context) : SyncService {
         // (c) Lectures serveur → groupes ORDONNÉS (sous-documents avant leur
         // projet, [pierre tombale, projet] insécables, profil en dernier).
         val groups = ArrayList<WriteLots.Group<BatchOp>>()
-        val soloProjects = ArrayList<String>()
         try {
             val memberOf = bounded {
                 projects.whereArrayContains("memberUids", uid).get(Source.SERVER).await()
@@ -289,9 +292,10 @@ class FirebaseSyncService(context: Context) : SyncService {
                 val others = memberList(data).filter { it != uid }
                 val isOwner = data["ownerUid"] == uid
                 if (others.isEmpty() && isOwner) {
+                    // §5.10 : « exactement les étapes 2 à 4 de §5.9 » — fichiers, puis lectures.
+                    deleteBlobsBestEffort(doc.id)
                     val deletion = projectDeletionUnits(doc.reference, data, uid, myInvites)
                     deletedCodes += deletion.codes
-                    soloProjects += doc.id
                     groups += WriteLots.Group(doc.id, deletion.units)
                 } else {
                     // Seul membre mais pas propriétaire (données antérieures au
@@ -311,8 +315,6 @@ class FirebaseSyncService(context: Context) : SyncService {
         } catch (e: Exception) {
             throw mapDeleteError(e)
         }
-        // Fichiers des projets supprimés, au mieux, une fois TOUTES les lectures faites.
-        for (id in soloProjects) deleteBlobsBestEffort(id)
         // (d) Commit par lots séquentiels ; le timeout n'entoure QUE l'await de chaque commit.
         try {
             commitInLots(groups)
@@ -566,16 +568,26 @@ class FirebaseSyncService(context: Context) : SyncService {
     /**
      * Transaction BORNÉE : rien n'est mis en file hors ligne (une transaction exige le
      * serveur) ; Firestore la rejoue si un document lu change avant l'envoi.
+     *
+     * Elle commence par une lecture SERVEUR de [reading] (le projet) : hors ligne,
+     * `runTransaction` ne lâche qu'après ses 5 essais sur UNAVAILABLE (8 à 13 s mesurés
+     * sur les émulateurs Firebase, fenêtre « Partager le projet » bloquée sur sa roue),
+     * alors que §8 veut un échec TOUT DE SUITE ; la lecture échoue en 3 s environ (3,1 à
+     * 3,6 s mesurés, autant que la suppression du projet) sans rien mettre en file, comme
+     * la suppression du projet et la vérification du code (même schéma qu'iOS). La
+     * transaction garde ensuite l'atomicité.
      */
-    private suspend fun <T> transaction(body: (Transaction) -> T): T =
-        bounded { db.runTransaction { txn -> body(txn) }.await() }
+    private suspend fun <T> transaction(reading: DocumentReference, body: (Transaction) -> T): T = bounded {
+        reading.get(Source.SERVER).await()
+        db.runTransaction { txn -> body(txn) }.await()
+    }
 
     /** N4 / N5 : je me retire et j'efface mon nom ; propriétaire → le premier autre membre (le plus ancien) hérite. */
     override suspend fun leaveProject(projectId: String) {
         val uid = requireUid()
         val ref = projects.document(projectId)
         try {
-            transaction { txn ->
+            transaction(reading = ref) { txn ->
                 val data = txn.get(ref).data ?: throw TxnRefused()
                 val members = memberList(data)
                 if (uid !in members) throw TxnRefused()
@@ -599,7 +611,7 @@ class FirebaseSyncService(context: Context) : SyncService {
         val me = requireUid()
         val ref = projects.document(projectId)
         try {
-            transaction { txn ->
+            transaction(reading = ref) { txn ->
                 val data = txn.get(ref).data ?: throw TxnRefused()
                 val members = memberList(data)
                 if (data["ownerUid"] != me || me !in members || uid == me || uid !in members) throw TxnRefused()
@@ -619,7 +631,7 @@ class FirebaseSyncService(context: Context) : SyncService {
         val me = requireUid()
         val ref = projects.document(projectId)
         try {
-            transaction { txn ->
+            transaction(reading = ref) { txn ->
                 val data = txn.get(ref).data ?: throw TxnRefused()
                 if (data["ownerUid"] != me || me !in memberList(data)) throw TxnRefused()
                 txn.update(ref, "bannedUids", FieldValue.arrayRemove(uid))
@@ -641,7 +653,7 @@ class FirebaseSyncService(context: Context) : SyncService {
             val code = ShareCodes.generate()
             val newRef = invites.document(code)
             try {
-                transaction { txn ->
+                transaction(reading = ref) { txn ->
                     val data = txn.get(ref).data ?: throw TxnRefused()
                     if (data["ownerUid"] != uid || uid !in memberList(data)) throw TxnRefused()
                     var oldRef: DocumentReference? = null
@@ -690,9 +702,13 @@ class FirebaseSyncService(context: Context) : SyncService {
     }
 
     /**
-     * N9 (§5.9) : lecture SERVEUR (hors ligne → rien n'est fait) ; fichiers (au mieux) ;
-     * puis lots — sous-documents, invitations, et [pierre tombale, projet] ensemble, en
-     * dernier.
+     * N9 (§5.9), dans l'ordre du SPEC et des deux autres plateformes (§5 : séquences
+     * identiques) : 1. lecture SERVEUR du projet (hors ligne → rien n'est fait) ;
+     * 2. fichiers (au mieux, tant que le projet existe : la règle Storage le lit) ;
+     * 3. lectures des sections, du journal et des invitations ; 4. lots — sous-documents,
+     * invitations, et [pierre tombale, projet] ensemble, en dernier. Une lecture qui
+     * échoue à l'étape 3 (coupure en cours) laisse le projet sans fichiers : un nouvel
+     * essai le termine (plus rien à supprimer dans Storage).
      */
     override suspend fun deleteProject(projectId: String) {
         val uid = requireUid()
@@ -704,9 +720,8 @@ class FirebaseSyncService(context: Context) : SyncService {
         } ?: throw SyncException.ActionRefused
         if (data["ownerUid"] != uid || uid !in memberList(data)) throw SyncException.ActionRefused
         try {
-            // Lectures d'abord : un échec ici ne laisse aucun fichier supprimé.
-            val deletion = projectDeletionUnits(ref, data, uid, null)
             deleteBlobsBestEffort(projectId)
+            val deletion = projectDeletionUnits(ref, data, uid, null)
             commitInLots(listOf(WriteLots.Group(projectId, deletion.units)))
         } catch (e: Exception) {
             throw mapFirestore(e)

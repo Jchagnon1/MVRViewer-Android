@@ -88,6 +88,44 @@ class ProjectModerationTest {
         assertEquals(byOwner.code.code, svc.peekProject(old.id)!!.inviteCode)
     }
 
+    /** Service dont la vérification du code (§5.2) échoue : réseau coupé juste après la version. */
+    private class CodeCheckFails(inner: SyncService, val error: Exception) : SyncService by inner {
+        var calls = 0
+        override suspend fun ensureCurrentCode(projectId: String): ShareCodeResult {
+            calls++
+            throw error
+        }
+    }
+
+    /**
+     * Relecture : un échec de la vérification du code APRÈS la version publiée
+     * n'annule pas la publication (comme le web et iOS) — code connu rendu, vérification
+     * refaite à l'ouverture de « Partager le projet » (§5.2, §5.11). Avant, l'erreur
+     * remontait : publication montrée en échec, état local jamais envoyé (onPublished).
+     */
+    @Test fun publier_projetExistant_verificationDuCodeEnEchec_publicationFaite() = runBlocking<Unit> {
+        asUser("alice")
+        val first = SharePublisher(svc).publish(null, "key-1", "Show", sha, mvr)
+        val failing = CodeCheckFails(svc, SyncException.NetworkUnavailable)
+        var published: Int? = null
+        val again = SharePublisher(failing).publish(svc.projectMatchingContentKey("key-1"), "key-1", "Show", sha, mvr,
+            onVersion = { _, v -> published = v })
+        assertEquals(1, failing.calls)
+        assertEquals(3, again.version)
+        assertEquals(3, published)
+        assertEquals(ShareCodeResult(first.project.id, first.project.inviteCode), again.code)
+        assertEquals(3, svc.peekProject(first.project.id)!!.mvrVersion)
+        // Une ANNULATION n'est jamais avalée.
+        val cancelled = CodeCheckFails(svc, kotlinx.coroutines.CancellationException("écran quitté"))
+        var thrown: Throwable? = null
+        try {
+            SharePublisher(cancelled).publish(svc.projectMatchingContentKey("key-1"), "key-1", "Show", sha, mvr)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            thrown = e
+        }
+        assertTrue(thrown is kotlinx.coroutines.CancellationException)
+    }
+
     // MARK: §5.11 Ouverture
 
     @Test fun ouverture_monNomPose_codeVerifieChezLeProprietaireSeulement() = runBlocking<Unit> {
@@ -139,6 +177,29 @@ class ProjectModerationTest {
         assertEquals("b" to "bob", ProjectMembership.author(me, p.copy(memberNames = null), "Moi (hors ligne)"))
         assertEquals("b" to "bob", ProjectMembership.author(me, null, "Moi (hors ligne)"))
         assertEquals("" to "Moi (hors ligne)", ProjectMembership.author(null, p, "Moi (hors ligne)"))
+    }
+
+    /**
+     * Relecture (reproduit sur les émulateurs Firebase) : inscription SANS nom avec une
+     * adresse en majuscules, puis reprise de session — Firebase rend l'adresse en
+     * minuscules. Le nom écrit dans le projet à l'ouverture (§5.8), l'auteur du journal
+     * (§5.14) et la ligne « Nom » du signalement (§6.5) restent la partie avant « @ »,
+     * jamais l'adresse complète ; aucune réécriture d'une session à l'autre.
+     */
+    @Test fun ouverture_adresseEnMajuscules_jamaisCommeNomDansLeProjet() {
+        val inscription = AccountInfo("c", "Casse.Device@Exemple.test", "Casse.Device@Exemple.test")
+        val reprise = AccountInfo("c", "casse.device@exemple.test", "Casse.Device@Exemple.test")
+        val p = CloudProject("P", "k", "Show", "a", listOf("a", "c"), 2, null, null, 1.0,
+            inviteCode = "CQDE22", memberNames = mapOf("a" to "Alice"))
+        assertEquals("Casse.Device", ProjectMembership.nameToWrite(p, inscription))
+        val named = p.copy(memberNames = mapOf("a" to "Alice", "c" to "Casse.Device"))
+        assertNull(ProjectMembership.nameToWrite(named, reprise))
+        assertEquals("c" to "Casse.Device", ProjectMembership.author(reprise, p, "Moi (hors ligne)"))
+        val r = ContentReport.make(p, reprise, "1.10.0 (21)", "Membre sans nom", "Sans nom") { id, args ->
+            TestRes.FR.res(id, args)
+        }
+        assertTrue(r.body, r.body.lines().any { it.startsWith("Nom") && it.endsWith(": Casse.Device") })
+        assertFalse(r.body, r.body.lines().filter { it.startsWith("Nom") }.any { it.contains('@') })
     }
 
     // MARK: §5.5 Table locale des retirés

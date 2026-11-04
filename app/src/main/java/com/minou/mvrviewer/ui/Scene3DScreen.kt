@@ -1280,7 +1280,9 @@ fun Scene3DScreen(
     // CUITE dans l'alpha du bitmap : le matériau « image » de SceneView n'expose
     // que le paramètre `texture` (pas d'alpha réglable) → on la peint à l'alpha
     // voulu, puis on téléverse. Débounce léger pour absorber le glissé du curseur.
-    LaunchedEffect(satellite, options.showSatellite, options.satelliteOpacity) {
+    // Clé = l'IMAGE (bitmap), pas l'état : une date réglée après la publication (§2.4)
+    // donne un nouvel état avec la même image, sans refaire la texture.
+    LaunchedEffect(satellite?.bitmap, options.showSatellite, options.satelliteOpacity) {
         // Purge de l'ancien quad + ses ressources GPU (idempotent).
         satRoot.childNodes.toList().forEach {
             satRoot.removeChildNode(it); runCatching { it.destroy() }
@@ -2410,7 +2412,7 @@ fun Scene3DScreen(
             // colonne (contre le bas depuis le retrait de la barre flottante, elle
             // passait dessous — constat émulateur, tranche C).
             val satShown = satellite
-            val satCredit3D = SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)
+            val satCredit3D = SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.date)
             val satDens3D = androidx.compose.ui.platform.LocalDensity.current.density
             val (satLift3D, satOnTop3D) = run {
                 fun androidx.compose.ui.geometry.Rect.inDp() =

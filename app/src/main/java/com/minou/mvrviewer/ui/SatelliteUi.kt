@@ -33,6 +33,7 @@ import androidx.compose.ui.zIndex
 import com.minou.mvrviewer.R
 import com.minou.mvrviewer.mvr.GeoCalibration
 import com.minou.mvrviewer.mvr.IgnImagery
+import com.minou.mvrviewer.mvr.ImageryDate
 import com.minou.mvrviewer.mvr.SatelliteErrorKind
 import com.minou.mvrviewer.mvr.SatelliteResult
 import com.minou.mvrviewer.mvr.ignCovers
@@ -72,10 +73,27 @@ data class SatelliteRefresh<out T>(val overlay: T?, val status: SatelliteStatus,
  * ressource et de ses arguments, testée en JVM sur les vrais `strings.xml`.
  */
 object SatelliteUi {
-    /** Mention obligatoire (Licence Ouverte) : avec l'année si connue. */
-    fun attributionRes(year: Int?): Pair<Int, List<Any>> =
-        if (year != null) R.string.sat_attribution_year to listOf(year)
-        else R.string.sat_attribution to emptyList()
+    /**
+     * Mention obligatoire (Licence Ouverte 2.0, §4.1) selon la date connue : « prise de vue
+     * 2024 », « prises de vue 2021–2024 » (image à cheval sur deux campagnes), « mise à
+     * jour du 22/10/2026 » (anglais « updated 2026-10-22 »), sinon « (cartes.gouv.fr) ».
+     * Années et date passées en TEXTE (chiffres ASCII, jamais groupés « 2 024 ») ; jour et
+     * mois sur 2 chiffres ; une date mal formée → mention sans date (jamais inventée).
+     */
+    fun attributionRes(date: ImageryDate?): Pair<Int, List<Any>> = when (date) {
+        is ImageryDate.Capture -> {
+            val lo = minOf(date.from, date.to); val hi = maxOf(date.from, date.to)
+            if (lo < 1000 || hi > 9999) R.string.sat_attribution to emptyList()
+            else if (lo == hi) R.string.sat_attribution_year to listOf(lo.toString())
+            else R.string.sat_attribution_years to listOf(lo.toString(), hi.toString())
+        }
+        is ImageryDate.Updated ->
+            if (date.year !in 1000..9999 || date.month !in 1..12 || date.day !in 1..31) R.string.sat_attribution to emptyList()
+            else R.string.sat_attribution_updated to listOf(two(date.day), two(date.month), date.year.toString())
+        null -> R.string.sat_attribution to emptyList()
+    }
+
+    private fun two(v: Int): String = String.format(java.util.Locale.ROOT, "%02d", v)
 
     /** Message de la ligne d'état / du Toast ; null = rien à dire (prêt, inactif). */
     fun messageRes(status: SatelliteStatus): Pair<Int, List<Any>>? = when (status) {
@@ -104,8 +122,17 @@ object SatelliteUi {
      * [attributionRes] dès que l'image IGN est DESSINÉE ([show] et [imageDrawn]),
      * null sinon. Règle UNIQUE : l'image ne part jamais sans sa mention.
      */
-    fun creditRes(show: Boolean, imageDrawn: Boolean, year: Int?): Pair<Int, List<Any>>? =
-        if (show && imageDrawn) attributionRes(year) else null
+    fun creditRes(show: Boolean, imageDrawn: Boolean, date: ImageryDate?): Pair<Int, List<Any>>? =
+        if (show && imageDrawn) attributionRes(date) else null
+
+    /**
+     * PDF sans date connue (§7.5, relecture) : Android ne sait pas poser de lien dans un PDF
+     * (`PdfDocument`) — l'adresse de la fiche IGN est alors ÉCRITE en clair sous la pastille
+     * (texte réel du PDF, que les lecteurs rendent cliquable). Null : une date est connue
+     * (la mention la porte), ou aucune image n'est dessinée.
+     */
+    fun pdfSourceUrl(show: Boolean, imageDrawn: Boolean, date: ImageryDate?): String? =
+        if (show && imageDrawn && attributionRes(date).first == R.string.sat_attribution) IgnImagery.DATASET_URL else null
 
     /** 1re ancre de la calibration dans les emprises IGN (France) — pré-filtre sans réseau. */
     fun covered(calib: GeoCalibration): Boolean =
@@ -281,6 +308,15 @@ internal fun DrawScope.drawSatelliteAttribution(
     val box = satelliteCreditBox(tl.size.width.toFloat(), tl.size.height.toFloat(), right, bottom)
     drawRect(Color.White.copy(alpha = 0.8f), topLeft = box.topLeft, size = box.size)
     drawText(tl, topLeft = Offset(box.left + CREDIT_PAD_X, box.top + CREDIT_PAD_Y))
+}
+
+/**
+ * Adresse de la fiche IGN en clair SOUS la pastille ([SatelliteUi.pdfSourceUrl]) : 7 pt,
+ * alignée à droite sur [right], son haut à [top] (sous la zone image, au niveau du pied).
+ */
+internal fun DrawScope.drawSatelliteSourceUrl(measurer: TextMeasurer, url: String, right: Float, top: Float) {
+    val tl = measurer.measure(url, style = TextStyle(fontSize = 7.sp, color = Color(0xFF1A4F8B)))
+    drawText(tl, topLeft = Offset(right - tl.size.width, top))
 }
 
 private const val CREDIT_PAD_X = 3f

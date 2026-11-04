@@ -2,15 +2,26 @@ package com.minou.mvrviewer.mvr
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
-import java.util.Calendar
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -30,7 +41,7 @@ import kotlin.math.roundToLong
  * 2.0, sans clé), en France seulement — cf. [ImagerySources] et
  * SPEC-satellite-ign.md. Hors des emprises IGN : PAS de fond (message), aucune
  * requête. La mention « Source : IGN – BD ORTHO®… » est OBLIGATOIRE à l'écran
- * (plan et 3D) et dans le PDF, d'où [year].
+ * (plan et 3D) et dans le PDF, d'où [date] (SPEC-satellite-ign.md §2.4, §4.1).
  *
  * GÉOMÉTRIE (vérifiée sur le vrai service, 2026-10-13) : en WMS 1.3.0 / EPSG:4326,
  * le serveur rend EXACTEMENT le BBOX demandé, étiré à la taille demandée (il ne
@@ -45,11 +56,26 @@ class SatelliteOverlay(
     val seX: Float, val seY: Float,
     val swX: Float, val swY: Float,
     val key: String,
-    /** Année de prise de vue (GetFeatureInfo au centre) ; null = inconnue. */
-    val year: Int? = null,
+    /**
+     * Date de la mention (§2.4) : années de prise de vue des zones visibles, sinon date de
+     * mise à jour du jeu de données ; null = inconnue (mention sans date).
+     */
+    val date: ImageryDate? = null,
     /** URL GetMap qui a produit l'image. */
-    val url: String = ""
-)
+    val url: String = "",
+    /** Vrai tant que la date de CETTE image n'est pas réglée (l'image est publiée avant sa date). */
+    val datePending: Boolean = false,
+    /** Requête qui a produit l'image (emprise et taille EXACTES : la date en dépend). */
+    val request: SatelliteRequest? = null
+) {
+    /**
+     * La MÊME image avec sa date réglée : nouvel état pour l'interface (la mention suit),
+     * même [bitmap] (la texture 3D, construite par image, n'est pas refaite pour une date).
+     */
+    fun withDate(d: ImageryDate?): SatelliteOverlay = SatelliteOverlay(
+        bitmap, nwX, nwY, neX, neY, seX, seY, swX, swY, key, d, url, datePending = false, request = request
+    )
+}
 
 /** Boîte géographique (degrés), nord = maxLat, est = maxLon. */
 data class GeoBox(val minLat: Double, val minLon: Double, val maxLat: Double, val maxLon: Double) {
@@ -67,8 +93,10 @@ data class GeoBox(val minLat: Double, val minLon: Double, val maxLat: Double, va
  */
 data class SatelliteRequest(val bbox: GeoBox, val width: Int, val height: Int, val mPerPx: Double) {
     val url: String get() = IgnImagery.SOURCE.getMapUrl(bbox, width, height)
-    /** GetFeatureInfo au centre de la même image (date de prise de vue). */
-    val infoUrl: String get() = IgnImagery.SOURCE.featureInfoUrl(bbox, width, height)
+    /** WFS des zones de vol de la MÊME emprise (années de prise de vue, §2.4). */
+    val datesUrl: String get() = IgnImagery.captureDatesUrl(bbox)
+    /** Résolution native maximale des zones visibles à cette taille (20 cm au niveau 19, sinon null). */
+    val visibleMaxResCm: Int? get() = IgnImagery.visibleMaxResCm(bbox, width, height)
 }
 
 /**
@@ -100,8 +128,16 @@ sealed interface SatelliteResult<out T> {
     data class Error(val kind: SatelliteErrorKind, val status: Int? = null) : SatelliteResult<Nothing>
 }
 
-/** Réponse HTTP minimale (corps lu seulement pour un 200). */
-class SatelliteHttpReply(val status: Int, val contentType: String?, val body: ByteArray)
+/**
+ * Réponse HTTP minimale : corps d'un 200, ou d'une erreur 400 / 404 en XML ou texte de
+ * [IgnImagery.TRANSIENT_MAX_BODY] au plus (rapport d'exception : panne passagère ?).
+ */
+class SatelliteHttpReply(val status: Int, val contentType: String?, val body: ByteArray) {
+    /** Panne PASSAGÈRE de l'IGN ([IgnImagery.isTransientFailure]) : un nouvel essai, un seul. */
+    val isTransient: Boolean
+        get() = IgnImagery.isTransientFailure(status, contentType,
+            if (body.size > IgnImagery.TRANSIENT_MAX_BODY) null else String(body, Charsets.UTF_8))
+}
 
 /** Transport HTTP du service (doublure en test JVM). */
 fun interface SatelliteHttp {
@@ -109,8 +145,12 @@ fun interface SatelliteHttp {
     fun get(url: String, timeoutMs: Int): SatelliteHttpReply
 }
 
-/** Image décodée + la requête qui l'a produite + l'année de prise de vue. */
-class SatelliteLoaded<I>(val image: I, val plan: SatellitePlan, val year: Int?)
+/**
+ * Image décodée + la requête qui l'a produite + la date DÉJÀ connue à sa publication (date
+ * de mise à jour du jeu de données, sinon null) ; la date propre de l'image suit
+ * ([SatelliteService.date]).
+ */
+class SatelliteLoaded<I>(val image: I, val plan: SatellitePlan, val date: ImageryDate?)
 
 /**
  * Déroulé d'une image (SPEC-satellite-ign.md §5.1), indépendant d'Android (testé
@@ -119,29 +159,64 @@ class SatelliteLoaded<I>(val image: I, val plan: SatellitePlan, val year: Int?)
  *  2. zone + requête (pur) ;
  *  3. mémoires : URL déjà reçue BLANCHE → [SatelliteResult.NoImagery] sans réseau ;
  *     échec sur la même URL il y a moins de 30 s → le même échec, sans réseau —
- *     sauf [force] (geste explicite : l'utilisateur active le réglage) ;
- *  4. GetMap (30 s) : accepté seulement si 200 ET `image/…` ; sinon HTTP(code).
- *     Plus AUCUN essai à une autre taille : l'IGN ne répond pas 500 pour une
- *     résolution trop fine (contrairement à l'ancien service) ;
+ *     sauf [force] (geste explicite : l'utilisateur active le réglage, qui efface aussi
+ *     la mémoire des services de dates en panne) ;
+ *  4. GetMap (30 s) : accepté seulement si 200 ET `image/…` ; sinon HTTP(code). Panne
+ *     PASSAGÈRE ([IgnImagery.isTransientFailure] : 502, 503, 504, `LayerNotDefined`) :
+ *     UN nouvel essai de la même requête après ~1 s, dont la réponse fait foi ; jamais
+ *     sur les autres erreurs. Plus AUCUN essai à une autre taille ;
  *  5. image blanche → [SatelliteResult.NoImagery], URL mémorisée ;
- *  6. GetFeatureInfo (10 s) → année ou null : un échec ne bloque JAMAIS l'image.
- * Une instance par show (ses mémoires vivent avec lui).
+ *  6. image PUBLIÉE tout de suite, avec la date de mise à jour du jeu de données si elle
+ *     est déjà connue : la date ne la retient JAMAIS. Sa date propre suit ([date]) :
+ *     WFS et fiche CSW EN PARALLÈLE, 10 s EN TOUT (§2.4).
+ * Une instance par show (ses mémoires vivent avec lui ; la date de mise à jour du jeu de
+ * données aussi, lue une fois). [close] annule la fiche CSW en vol.
  */
 class SatelliteService<I : Any>(
     private val http: SatelliteHttp,
     private val decode: (ByteArray) -> I?,
     private val isBlank: (I) -> Boolean,
+    /** Horloge des mémoires (échec récent, panne d'un service de dates). */
     private val now: () -> Long = System::currentTimeMillis,
-    private val currentYear: () -> Int = { Calendar.getInstance().get(Calendar.YEAR) }
+    private val currentYear: () -> Int = { IgnImagery.gregorianYear() },
+    /** Heure RÉELLE de lecture d'une fiche CSW (une date plus tard que demain est refusée). */
+    private val wallClock: () -> Long = System::currentTimeMillis,
+    /** Borne de la date (WFS et fiche CSW ensemble). */
+    private val infoTimeoutMs: Long = SatelliteFetcher.INFO_TIMEOUT_MS.toLong(),
+    /** Un service de dates en panne n'est pas redemandé avant ce délai. */
+    private val dateRetryMs: Long = SatelliteFetcher.DATE_RETRY_MS,
+    /** Attente avant l'UNIQUE nouvel essai d'une panne passagère. */
+    private val transientRetryMs: Long = IgnImagery.TRANSIENT_RETRY_MS,
+    /** Pause du nouvel essai de GetMap (bloquant, comme le transport). */
+    private val sleep: (Long) -> Unit = { Thread.sleep(it) },
+    /** Portée de la fiche CSW : partagée par les dates successives, une image remplacée ne l'annule pas. */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
     private val blankUrls = HashSet<String>()
     private var lastErrorUrl: String? = null
     private var lastErrorAt = 0L
     private var lastError: SatelliteResult.Error? = null
 
+    /** Requêtes envoyées (nouveaux essais compris), pour les tests et le journal. */
+    class Stats {
+        @Volatile var getMaps = 0
+        @Volatile var wfs = 0
+        @Volatile var csw = 0
+        @Volatile var transientRetries = 0
+    }
+    val stats = Stats()
+
+    private enum class DateService { WFS, CSW }
+    /** Dernier échec du WFS / de la fiche CSW (horloge [now]). */
+    private val dateFailedAt = HashMap<DateService, Long>()
+    /** Date de mise à jour du jeu de données (fiche CSW), gardée par l'instance. */
+    private var datasetUpdate: ImageryDate.Updated? = null
+    /** Fiche CSW en vol (une à la fois, partagée). */
+    private var metaJob: Deferred<Unit>? = null
+
     /**
      * Charge l'image du contenu [minX]…[maxY] (monde, mm). [checkActive] est appelé
-     * entre les deux requêtes (annulation de la coroutine appelante).
+     * avant chaque nouvelle requête (annulation de la coroutine appelante).
      */
     fun load(
         calib: GeoCalibration, minX: Float, minY: Float, maxX: Float, maxY: Float,
@@ -155,6 +230,7 @@ class SatelliteService<I : Any>(
         val req = plan.request
         val url = req.url
         synchronized(this) {
+            if (force) dateFailedAt.clear()
             if (!force) {
                 if (url in blankUrls) return SatelliteResult.NoImagery
                 val e = lastError
@@ -162,14 +238,21 @@ class SatelliteService<I : Any>(
             }
         }
         val reply = try {
-            http.get(url, SatelliteFetcher.GETMAP_TIMEOUT_MS)
+            var r = getMap(url)
+            if (!r.isImage && r.isTransient) {
+                // Panne passagère : UN nouvel essai, après ~1 s ; sa réponse fait foi.
+                sleep(transientRetryMs)
+                checkActive()
+                stats.transientRetries++
+                r = getMap(url)
+            }
+            r
         } catch (_: SocketTimeoutException) {
             return fail(url, SatelliteResult.Error(SatelliteErrorKind.TIMEOUT))
         } catch (_: IOException) {
             return fail(url, SatelliteResult.Error(SatelliteErrorKind.NETWORK))
         }
-        val type = reply.contentType?.trim()?.lowercase()
-        if (reply.status != 200 || type == null || !type.startsWith("image/")) {
+        if (!reply.isImage) {
             return fail(url, SatelliteResult.Error(SatelliteErrorKind.HTTP, reply.status))
         }
         val img = runCatching { decode(reply.body) }.getOrNull()
@@ -178,17 +261,144 @@ class SatelliteService<I : Any>(
             synchronized(this) { blankUrls += url; clearErrorFor(url) }
             return SatelliteResult.NoImagery
         }
-        synchronized(this) { blankUrls -= url; clearErrorFor(url) }
-        checkActive()
-        val year = try {
-            val r = http.get(req.infoUrl, SatelliteFetcher.INFO_TIMEOUT_MS)
-            if (r.status == 200) IgnImagery.parseCaptureYear(String(r.body, Charsets.UTF_8), currentYear()) else null
-        } catch (_: IOException) {
-            null
-        } catch (_: RuntimeException) {
-            null
+        val known = synchronized(this) { blankUrls -= url; clearErrorFor(url); datasetUpdate }
+        return SatelliteResult.Ok(SatelliteLoaded(img, plan, known))
+    }
+
+    private val SatelliteHttpReply.isImage: Boolean
+        get() = status == 200 && contentType?.trim()?.lowercase()?.startsWith("image/") == true
+
+    private fun getMap(url: String): SatelliteHttpReply {
+        stats.getMaps++
+        return http.get(url, SatelliteFetcher.GETMAP_TIMEOUT_MS)
+    }
+
+    /**
+     * DATE de l'image publiée de [req] (§2.4), [infoTimeoutMs] EN TOUT : le WFS (années de
+     * prise de vue des zones VISIBLES) et la fiche CSW (une fois par instance, dès la 1re
+     * image : connue d'avance si les deux services tombent ensuite) partent ENSEMBLE ; →
+     * années, sinon date de mise à jour du jeu de données, sinon null. Un service en échec
+     * (HTTP, délai, réseau ; fiche illisible ou d'un autre identifiant) n'est pas redemandé
+     * avant [dateRetryMs] ; un WFS 200 « sans zone » ou illisible n'est pas une panne.
+     * Annulable (image remplacée, réglage coupé) : rien n'est alors rendu ; la fiche en
+     * vol, elle, continue pour la suite. Jamais d'exception d'E/S.
+     */
+    suspend fun date(req: SatelliteRequest): ImageryDate? = coroutineScope {
+        val meta = datasetUpdateRequest()
+        val info = if (failedRecently(DateService.WFS)) null else {
+            stats.wfs++
+            async { fetchText(req.datesUrl, infoTimeoutMs, DateService.WFS) }
         }
-        return SatelliteResult.Ok(SatelliteLoaded(img, plan, year))
+        if (info != null) {
+            val text = info.await()
+            if (text != null) {
+                IgnImagery.parseCaptureDates(text, currentYear(), req.visibleMaxResCm)?.let { return@coroutineScope it }
+            } else {
+                synchronized(this@SatelliteService) { dateFailedAt[DateService.WFS] = now() }
+            }
+        }
+        // La fiche a sa propre borne ([infoTimeoutMs] depuis SON départ, au plus tôt celui-ci).
+        // Fiche annulée par la fin du show ([close]) : sans objet, la date est celle connue.
+        try {
+            meta?.await()
+        } catch (e: CancellationException) {
+            ensureActive()
+        }
+        synchronized(this@SatelliteService) { datasetUpdate }
+    }
+
+    /**
+     * Fiche CSW avant un PDF (§7.5, relecture) : Android ne sait pas poser de lien dans un
+     * PDF — sans date connue, la fiche est REDEMANDÉE (geste de l'utilisateur : la mémoire
+     * de panne ne compte pas), [timeoutMs] au plus. Null si elle reste inconnue.
+     */
+    suspend fun datasetUpdateForExport(timeoutMs: Long = SatelliteFetcher.EXPORT_META_TIMEOUT_MS): ImageryDate.Updated? {
+        val known = synchronized(this) { datasetUpdate }
+        if (known != null) return known
+        val inFlight = synchronized(this) { metaJob?.takeIf { it.isActive } }
+        if (inFlight != null) {
+            try {
+                withTimeoutOrNull(timeoutMs) { inFlight.await() }
+            } catch (e: CancellationException) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            }
+            return synchronized(this) { datasetUpdate }
+        }
+        stats.csw++
+        val text = fetchText(IgnImagery.DATASET_RECORD_URL, timeoutMs, DateService.CSW)
+        val u = text?.let { IgnImagery.parseDatasetUpdate(it, wallClock()) }
+        return synchronized(this) {
+            if (u != null) datasetUpdate = u else dateFailedAt[DateService.CSW] = now()
+            datasetUpdate
+        }
+    }
+
+    /** Annule la fiche CSW en vol (fin du show). */
+    fun close() = scope.cancel()
+
+    private fun failedRecently(s: DateService): Boolean {
+        synchronized(this) {
+            val at = dateFailedAt[s]
+            return at != null && now() - at < dateRetryMs
+        }
+    }
+
+    /**
+     * Fiche CSW → [datasetUpdate] : UNE requête à la fois, partagée par les dates successives,
+     * dans [scope] (une image remplacée ne l'annule pas). Null : déjà connue, ou en panne
+     * depuis moins de [dateRetryMs].
+     */
+    private fun datasetUpdateRequest(): Deferred<Unit>? {
+        synchronized(this) {
+            if (datasetUpdate != null) return null
+            metaJob?.takeIf { it.isActive }?.let { return it }
+            val at = dateFailedAt[DateService.CSW]
+            if (at != null && now() - at < dateRetryMs) return null
+            stats.csw++
+            val job = scope.async {
+                val text = fetchText(IgnImagery.DATASET_RECORD_URL, infoTimeoutMs, DateService.CSW)
+                val u = text?.let { IgnImagery.parseDatasetUpdate(it, wallClock()) }
+                synchronized(this@SatelliteService) {
+                    if (u != null) datasetUpdate = u else dateFailedAt[DateService.CSW] = now()
+                }
+            }
+            metaJob = job
+            return job
+        }
+    }
+
+    /** Une réponse : son texte (200, sinon null) et si c'est une panne passagère. */
+    private class Once(val text: String?, val transient: Boolean)
+
+    /**
+     * GET borné par [budgetMs] EN TOUT → texte si 200, sinon null (statut, délai, réseau).
+     * Panne passagère : UN nouvel essai après [transientRetryMs], dans le temps qui reste
+     * (aucun s'il reste moins de 50 ms) ; le second essai fait foi.
+     */
+    private suspend fun fetchText(url: String, budgetMs: Long, service: DateService): String? {
+        val start = System.nanoTime()
+        val first = once(url, budgetMs)
+        if (!first.transient) return first.text
+        val left = budgetMs - (System.nanoTime() - start) / 1_000_000 - transientRetryMs
+        if (left <= 50) return null
+        delay(transientRetryMs)
+        stats.transientRetries++
+        if (service == DateService.WFS) stats.wfs++ else stats.csw++
+        return once(url, left).text
+    }
+
+    private suspend fun once(url: String, ms: Long): Once = try {
+        val r = withTimeout(ms) {
+            runInterruptible(Dispatchers.IO) { http.get(url, ms.coerceIn(1, Int.MAX_VALUE.toLong()).toInt()) }
+        }
+        val text = if (r.status == 200) String(r.body, Charsets.UTF_8) else null
+        Once(text, r.isTransient)
+    } catch (_: TimeoutCancellationException) {
+        Once(null, false)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        Once(null, false)
     }
 
     private fun fail(url: String, e: SatelliteResult.Error): SatelliteResult.Error {
@@ -217,9 +427,13 @@ object SatelliteFetcher {
     const val MIN_PX = 16
     /** Mètres par degré de latitude, sur la sphère de [GeoCalibration]. */
     const val M_PER_DEG = 6_371_000.0 * PI / 180.0
-    /** Délais (ms) : image, puis date de prise de vue. */
+    /** Délais (ms) : image, puis date de la mention (WFS et fiche CSW ensemble, §2.4). */
     const val GETMAP_TIMEOUT_MS = 30_000
     const val INFO_TIMEOUT_MS = 10_000
+    /** Un service de dates (WFS, fiche CSW) en panne n'est pas redemandé avant ce délai. */
+    const val DATE_RETRY_MS = 120_000L
+    /** Fiche CSW redemandée avant un PDF quand aucune date n'est connue (§7.5). */
+    const val EXPORT_META_TIMEOUT_MS = 5_000L
     /** Pas de nouvelle demande de la même image avant ce délai après un échec. */
     const val ERROR_RETRY_MS = 30_000L
     /** Image VIDE si au moins cette part de pixels est blanche (§3.3). */
@@ -379,21 +593,36 @@ object SatelliteFetcher {
             try {
                 val code = conn.responseCode
                 val type = conn.contentType
-                val body = if (code == 200) conn.inputStream.use { readCapped(it) } else ByteArray(0)
+                val body = when {
+                    code == 200 -> conn.inputStream.use { readCapped(it, MAX_BODY_BYTES) }
+                        ?: throw IOException("réponse trop grosse")
+                    // Rapport d'exception (400, 404 en XML ou texte) : lu pour y chercher une
+                    // panne passagère (`LayerNotDefined`), 64 Kio au plus ; sinon rien.
+                    (code == 400 || code == 404) && isTextual(type) ->
+                        runCatching { conn.errorStream?.use { readCapped(it, IgnImagery.TRANSIENT_MAX_BODY) } }
+                            .getOrNull() ?: ByteArray(0)
+                    else -> ByteArray(0)
+                }
                 return SatelliteHttpReply(code, type, body)
             } finally {
                 conn.disconnect()
             }
         }
 
-        private fun readCapped(input: InputStream): ByteArray {
+        private fun isTextual(type: String?): Boolean {
+            val t = type.orEmpty().lowercase()
+            return t.isEmpty() || t.contains("xml") || t.startsWith("text/")
+        }
+
+        /** Corps lu entier, ou null au-delà de [max] octets. */
+        private fun readCapped(input: InputStream, max: Int): ByteArray? {
             val out = java.io.ByteArrayOutputStream()
             val buf = ByteArray(64 * 1024)
             while (true) {
                 val n = input.read(buf)
                 if (n < 0) break
                 out.write(buf, 0, n)
-                if (out.size() > MAX_BODY_BYTES) throw IOException("réponse trop grosse")
+                if (out.size() > max) return null
             }
             return out.toByteArray()
         }
@@ -432,10 +661,13 @@ object SatelliteFetcher {
             is SatelliteResult.Ok -> {
                 val p = r.overlay.plan
                 // Coins = BBOX ARRONDI de la requête : exactement ce que l'IGN a rendu.
+                // Publiée AVANT sa date (§2.4) : date de mise à jour déjà connue ou rien,
+                // `datePending` ; [date] la règle ensuite.
                 SatelliteResult.Ok(
                     SatelliteOverlay(
                         r.overlay.image, p.nwX, p.nwY, p.neX, p.neY,
-                        p.seX, p.seY, p.swX, p.swY, key, r.overlay.year, p.request.url
+                        p.seX, p.seY, p.swX, p.swY, key, r.overlay.date, p.request.url,
+                        datePending = true, request = p.request
                     )
                 )
             }
@@ -443,6 +675,15 @@ object SatelliteFetcher {
             SatelliteResult.OutOfCoverage -> SatelliteResult.OutOfCoverage
             SatelliteResult.NoImagery -> SatelliteResult.NoImagery
         }
+    }
+
+    /**
+     * DATE de l'image publiée [overlay] (§2.4, voir [SatelliteService.date]) : null si
+     * l'image n'a pas de requête. Annulable (image remplacée, réglage coupé).
+     */
+    suspend fun date(service: SatelliteService<Bitmap>, overlay: SatelliteOverlay): ImageryDate? {
+        val req = overlay.request ?: return overlay.date
+        return withContext(Dispatchers.IO) { service.date(req) }
     }
 
     /** Bornes monde (mm) du contenu : projecteurs (+ plan DXF si présent). */

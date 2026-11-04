@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<csw:GetRecordByIdResponse xmlns:csw="http://www.opengis.net/cat/csw/2.0.2">
+  <csw:SummaryRecord xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dct="http://purl.org/dc/terms/" xmlns:geonet="http://www.fao.org/geonetwork">
+    <dc:identifier>IGNF_BD-ORTHO</dc:identifier>
+    <dc:title>BD ORTHO®</dc:title>
+    <dc:type>series</dc:type>
+    <dc:subject>Ortho-imagerie</dc:subject>
+    <dc:subject>National</dc:subject>
+    <dc:subject>Observation de la terre et environnement</dc:subject>
+    <dc:subject>hvd</dc:subject>
+    <dc:subject>Observation de la terre et environnement</dc:subject>
+    <dc:subject>données ouvertes</dc:subject>
+    <dc:subject>photographies aériennes</dc:subject>
+    <dc:subject>territoires</dc:subject>
+    <dc:subject>imageryBaseMapsEarthCover</dc:subject>
+    <dc:format>JP2_080</dc:format>
+    <dc:format>WMTS</dc:format>
+    <dc:format>WMS</dc:format>
+    <dc:format>WFS</dc:format>
+    <dct:modified>2026-10-22</dct:modified>
+    <dct:abstract>La BD ORTHO® est une collection d’ortho images géoréférencées et assemblées à partir des acquisitions aériennes triennales de l’IGN, en couleurs RVB et infrarouge, à 20 cm de résolution.
+
+Ces images aériennes sont des données de référence pour décrire et comprendre le territoire de manière détaillée. Elles servent de fonds de carte au quotidien par de nombreux professionnels au travers d’outils métiers et publics. Elles servent aussi à :
+- Produire de nombreuses bases de données pour l’occupation et l’usage des sols (OCSGE, Carhab), la foret (BD FORET®) et des modélisations 3D du terrain (MNS Correl)
+- Mettre à jour la BD TOPO® et entretenir le Registre Parcellaire Graphique (RPG) dans le cadre de la Politique Agricole Commune.
+
+Les prises de vues aériennes (PVA) sont réalisées chaque année sur une période estivale allant d’avril à octobre. Le programme d’acquisition suit une logique départementale ou territoriale et en tenant compte des contraintes d’actualité des programmes RPG et OCS GE.
+
+Quelques mois après le vol, une ortho express est mise à afin de permettre de disposer d’images exploitables rapidement.
+Cette ortho-image calculée automatiquement et sans correction géométrique interactive est désormais “vraie” c’est à dire que les éléments de sursol ne sont pas déversés, ce qui confère une meilleure visibilité du sol (avec pas ou peu de zones cachées) et une meilleure précision géométrique des objets en sursol afin moins de décalage que sur la BD ORTHO ®, notamment sur les bâtiments.
+
+Le produit couvre l'ensemble du territoire français métropolitain et ultramarin (sauf l’intérieur de la Guyane Française, la Polynésie Française, la Nouvelle-Calédonie et Wallis et Futuna) sauf sur les ZICAD (Zones Interdites à la Captation Aérienne des Données) pour lesquelles l’information est confidentielle conformément à la réglementation en vigueur.
+
+Il existe un millésime par an de BD ORTHO® depuis 2000 et un assemblage tous les 3 à 6 ans pour avoir un millésime couvrant l’ensemble du territoire.</dct:abstract>
+  </csw:SummaryRecord>
+</csw:GetRecordByIdResponse>
+

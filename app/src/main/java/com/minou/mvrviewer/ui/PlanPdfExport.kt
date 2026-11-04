@@ -337,11 +337,18 @@ private fun DrawScope.drawPdfPage(
     }
     // Mention OBLIGATOIRE de l'imagerie IGN (Licence Ouverte) dès que le fond est
     // dessiné dans la page : bas-droite de la zone image, 7 pt (même texte qu'à
-    // l'écran ; sans année, la variante « (cartes.gouv.fr) » nomme la source).
-    // Même règle que l'écran (SatelliteUi.creditRes) : image dessinée ⇒ mention.
+    // l'écran, avec la date connue au moment de l'export ; sans date, la variante
+    // « (cartes.gouv.fr) » nomme la source). Même règle que l'écran
+    // (SatelliteUi.creditRes) : image dessinée ⇒ mention. Sans date, l'adresse de la
+    // fiche IGN est écrite en clair sous la pastille (PdfDocument ne pose pas de lien,
+    // SPEC-satellite-ign §7.5).
     val sat = src.satellite
-    SatelliteUi.creditRes(v.showSatellite, sat != null && sat.bitmap.width > 0, sat?.year)?.let { (res, args) ->
+    val satDrawn = sat != null && sat.bitmap.width > 0
+    SatelliteUi.creditRes(v.showSatellite, satDrawn, sat?.date)?.let { (res, args) ->
         drawSatelliteAttribution(measurer, ctx.getString(res, *args.toTypedArray()), right, bottom)
+    }
+    SatelliteUi.pdfSourceUrl(v.showSatellite, satDrawn, sat?.date)?.let { url ->
+        drawSatelliteSourceUrl(measurer, url, right, bottom + 6f)
     }
     drawRect(Color(0xFF888888), topLeft = Offset(left, top), size = Size(cw, ch), style = Stroke(0.8f))
 

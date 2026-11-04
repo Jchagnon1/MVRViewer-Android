@@ -15,6 +15,7 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.URI
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * Fond satellite IGN (BD ORTHO®, WMS 1.3.0, EPSG:4326) — vecteurs COMMUNS T1-T10 de
@@ -185,19 +186,30 @@ class SatelliteRequestTest {
         }
     }
 
-    @Test fun urlGetFeatureInfoAuCentre() {
+    @Test fun t1UrlDesDatesWfsEtFiche() {
         val r = nn(SatelliteFetcher.requestForArea(GeoBox(48.8645, 2.3196, 48.8667, 2.3229), maxPx = 2048))
-        val q = query(r.infoUrl)
-        assertTrue(r.infoUrl.startsWith("https://data.geopf.fr/wms-r?"))
-        assertEquals("GetFeatureInfo", q["REQUEST"])
-        assertEquals("ORTHOIMAGERY.ORTHOPHOTOS", q["LAYERS"])
-        assertEquals("ORTHOIMAGERY.ORTHOPHOTOS", q["QUERY_LAYERS"])
-        assertEquals("image/jpeg", q["FORMAT"])        // obligatoire, sinon 400
-        assertEquals("text/plain", q["INFO_FORMAT"])
-        assertEquals("1", q["FEATURE_COUNT"])
-        assertEquals(q["BBOX"], query(r.url)["BBOX"])
-        assertEquals("603", q["I"]); assertEquals("612", q["J"])
-        assertEquals("1207", q["WIDTH"]); assertEquals("1224", q["HEIGHT"])
+        assertEquals(
+            "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature" +
+                "&TYPENAMES=ORTHOIMAGERY.ORTHOPHOTOS.GRAPHE-MOSAIQUAGE:graphe_bdortho&OUTPUTFORMAT=application/json" +
+                "&PROPERTYNAME=dep,pva,res,date_vol&COUNT=100&CQL_FILTER=INTERSECTS(geom,POLYGON((" +
+                "48.8645000%202.3196000,48.8645000%202.3229000,48.8667000%202.3229000,48.8667000%202.3196000," +
+                "48.8645000%202.3196000)))",
+            r.datesUrl
+        )
+        assertEquals(0.3042560, IgnImagery.pmResolution(r.bbox, r.width, r.height), 5e-7)
+        assertEquals(20, r.visibleMaxResCm)
+        assertEquals(
+            "https://data.geopf.fr/csw?SERVICE=CSW&VERSION=2.0.2&REQUEST=GetRecordById&ID=IGNF_BD-ORTHO&ELEMENTSETNAME=summary",
+            IgnImagery.DATASET_RECORD_URL
+        )
+        // Nombres indépendants de la langue, même en français (virgule décimale).
+        val saved = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.FRANCE)
+            assertFalse(r.datesUrl.contains("48,8645"))
+        } finally {
+            Locale.setDefault(saved)
+        }
     }
 
     // ---------------------------------------------------------------- T6
@@ -262,43 +274,121 @@ class SatelliteRequestTest {
     }
 
     // ---------------------------------------------------------------- T8
-    private val featureInfoConcorde = """
-        Results for FeatureType 'http://ORTHOIMAGERY.ORTHOPHOTOS.GRAPHE-MOSAIQUAGE:graphe_bdortho_75':
-        --------------------------------------------
-        dep = 75
-        pva = 2024
-        res = 20
-        echelle = 50
-        date_vol = 2024-08-22Z
-        ordre_debu = 719
-        ordre_fin = 9999
-        geom = [GEOMETRY (Polygon) with 4316 points]
-        --------------------------------------------
-    """.trimIndent()
+    /** Réponses ENREGISTRÉES de l'IGN (web `tests/fixtures/ign/`, 2026-11-03) : vecteurs communs. */
+    private fun fixture(name: String): String =
+        File(SatelliteRequestTest::class.java.classLoader!!.getResource("ign/$name")!!.toURI()).readText()
 
-    @Test fun t8AnneeDePriseDeVue() {
-        assertEquals(2024, IgnImagery.parseCaptureYear(featureInfoConcorde, 2026))
-        val sansDate = featureInfoConcorde.lines().filterNot { it.contains("date_vol") }
-            .joinToString("\n").replace("pva = 2024", "pva = 2023")
-        assertEquals(2023, IgnImagery.parseCaptureYear(sansDate, 2026))
-        assertNull(IgnImagery.parseCaptureYear("no features were found", 2026))
-        assertNull(IgnImagery.parseCaptureYear("date_vol = 1850-01-01Z", 2026))
-        assertNull(IgnImagery.parseCaptureYear("", 2026))
-        assertNull(IgnImagery.parseCaptureYear(null, 2026))
-        // Fins de ligne Windows, année future proche admise, trop lointaine refusée.
-        assertEquals(2023, IgnImagery.parseCaptureYear("dep = 93\r\npva = 2023\r\n", 2026))
-        assertEquals(2027, IgnImagery.parseCaptureYear("date_vol = 2027-01-02Z", 2026))
-        assertNull(IgnImagery.parseCaptureYear("date_vol = 2028-01-02Z", 2026))
+    /** « Maintenant » des vecteurs T8 : 2026-11-03 (UTC). */
+    private val nov3 = java.util.GregorianCalendar(java.util.TimeZone.getTimeZone("UTC")).apply {
+        clear(); set(2026, 10, 3)
+    }.timeInMillis
+
+    private fun captures(json: String?, maxResCm: Int? = null) = IgnImagery.parseCaptureDates(json, 2026, maxResCm)
+    private fun feature(props: String) = """{"type":"FeatureCollection","features":[{"type":"Feature","properties":{$props}}]}"""
+
+    @Test fun t8AnneesDePriseDeVue() {
+        assertEquals(ImageryDate.Capture(2024, 2024), captures(fixture("wfs-concorde.json")))
+        assertEquals(ImageryDate.Capture(2021, 2024), captures(fixture("wfs-strasbourg-kehl.json")))
+        assertEquals(ImageryDate.Capture(2025, 2025), captures(fixture("wfs-reunion-stdenis.json")))
+        assertNull(captures(fixture("wfs-mer-large.json")))
+        assertNull(captures(fixture("wfs-berlin.json")))
+        assertNull(captures(fixture("wfs-error-400.xml")))
+        assertNull(captures(""))
+        assertNull(captures(null))
+        assertNull(captures("{ pas du JSON"))
+        // Sans date_vol : pva (entier ou texte de 4 chiffres).
+        assertEquals(ImageryDate.Capture(2023, 2023), captures(feature(""""dep":"93","pva":2023""")))
+        assertEquals(ImageryDate.Capture(2023, 2023), captures(feature(""""pva":" 2023 """")))
+        assertNull(captures(feature(""""pva":"20234"""")))
+        // Bornes : 1850 et 2028 écartées, 2027 admise (année courante + 1).
+        assertNull(captures(feature(""""date_vol":"1850-05-01Z"""")))
+        assertNull(captures(feature(""""date_vol":"2028-01-02Z"""")))
+        assertEquals(ImageryDate.Capture(2027, 2027), captures(feature(""""date_vol":"2027-01-02Z"""")))
+        // date_vol prime sur pva.
+        assertEquals(ImageryDate.Capture(2022, 2022), captures(feature(""""pva":2021,"date_vol":" 2022-10-07Z"""")))
+    }
+
+    @Test fun t8DateDeMiseAJourDuJeuDeDonnees() {
+        assertEquals(ImageryDate.Updated(2026, 10, 22), IgnImagery.parseDatasetUpdate(fixture("csw-bdortho-summary.xml"), nov3))
+        assertNull(IgnImagery.parseDatasetUpdate(fixture("csw-unknown-id.xml"), nov3))
+        assertNull(IgnImagery.parseDatasetUpdate(null, nov3))
+        val ok = fixture("csw-bdortho-summary.xml")
+        // Autre identifiant, 30 février, 1999-12-31, date future (« maintenant » = 2026-10-20) → null.
+        assertNull(IgnImagery.parseDatasetUpdate(ok.replace("IGNF_BD-ORTHO", "IGNF_BD-TOPO"), nov3))
+        assertNull(IgnImagery.parseDatasetUpdate(ok.replace("2026-10-22", "2026-02-30"), nov3))
+        assertNull(IgnImagery.parseDatasetUpdate(ok.replace("2026-10-22", "1999-12-31"), nov3))
+        val oct20 = nov3 - 14L * 86_400_000L
+        assertNull(IgnImagery.parseDatasetUpdate(ok, oct20))
+        // Demain admis (fuseaux), après-demain non.
+        assertEquals(ImageryDate.Updated(2026, 10, 22), IgnImagery.parseDatasetUpdate(ok, nov3 - 12L * 86_400_000L))
+        // Deux dct:modified → la plus récente.
+        val two = ok.replace("<dct:modified>2026-10-22</dct:modified>",
+            "<dct:modified>2025-01-05</dct:modified><dct:modified>2026-10-22</dct:modified><dct:modified>2026-03-01</dct:modified>")
+        assertEquals(ImageryDate.Updated(2026, 10, 22), IgnImagery.parseDatasetUpdate(two, nov3))
+        // Année grégorienne, jamais le calendrier de l'appareil.
+        assertEquals(2026, IgnImagery.gregorianYear(nov3))
+    }
+
+    @Test fun t8GuyaneZonesVisibles() {
+        val apatou = GeoBox(5.055, -54.3463, 5.0586, -54.3427)
+        val json = fixture("wfs-guyane-apatou.json")
+        // Requête de l'app (1994 × 2002, ≈ 0,20 m/px) : niveau 19, seules les zones de 20 cm.
+        assertEquals(0.20097, IgnImagery.pmResolution(apatou, 1994, 2002), 5e-5)
+        assertEquals(20, IgnImagery.visibleMaxResCm(apatou, 1994, 2002))
+        assertEquals(ImageryDate.Capture(2022, 2022), captures(json, 20))
+        assertEquals(ImageryDate.Capture(2018, 2022), captures(json, null))
+        // Seuil 0,8 × 0,5971643 = 0,4777314 (mesures §1.9 d).
+        assertEquals(0.4777314, IgnImagery.LEVEL_RATIO * IgnImagery.PM_Z18_RES, 5e-8)
+        for ((w, h) in listOf(839 to 843, 838 to 846, 840 to 843, 887 to 890, 1994 to 2002)) {
+            assertEquals("$w × $h", 20, IgnImagery.visibleMaxResCm(apatou, w, h))
+        }
+        for ((w, h) in listOf(838 to 842, 834 to 845, 831 to 834, 798 to 801)) {
+            assertNull("$w × $h", IgnImagery.visibleMaxResCm(apatou, w, h))
+        }
+        assertNull("taille inconnue", IgnImagery.visibleMaxResCm(apatou, 0, 0))
+        // Image de 1,2 km (0,60 m/px) : aucune limite.
+        val big = nn(SatelliteFetcher.requestForArea(GeoBox(5.050, -54.3500, 5.0608, -54.3392), maxPx = 2048))
+        assertNull(big.visibleMaxResCm)
+        // Entités : `res` « 50 » (texte) écartée à 20 ; `res` absent gardée ; seulement invisibles → null.
+        assertNull(captures(feature(""""res":"50","date_vol":"2018-09-07Z""""), 20))
+        assertEquals(ImageryDate.Capture(2018, 2018), captures(feature(""""date_vol":"2018-09-07Z""""), 20))
+        assertEquals(ImageryDate.Capture(2022, 2022), captures(feature(""""res":20,"date_vol":"2022-10-07Z""""), 20))
     }
 
     // ---------------------------------------------------------------- T9
     private fun text(lang: TestRes, p: Pair<Int, List<Any>>) = lang.res(p.first, p.second)
 
     @Test fun t9Mention() {
-        assertEquals("Source : IGN – BD ORTHO®, prise de vue 2024", text(TestRes.FR, SatelliteUi.attributionRes(2024)))
-        assertEquals("Source: IGN – BD ORTHO®, imagery 2024", text(TestRes.EN, SatelliteUi.attributionRes(2024)))
-        assertEquals("Source : IGN – BD ORTHO® (cartes.gouv.fr)", text(TestRes.FR, SatelliteUi.attributionRes(null)))
-        assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", text(TestRes.EN, SatelliteUi.attributionRes(null)))
+        val nb = ' '
+        fun fr(d: ImageryDate?) = text(TestRes.FR, SatelliteUi.attributionRes(d))
+        fun en(d: ImageryDate?) = text(TestRes.EN, SatelliteUi.attributionRes(d))
+        assertEquals("Source$nb: IGN – BD ORTHO®, prise de vue 2024", fr(ImageryDate.Capture(2024, 2024)))
+        assertEquals("Source$nb: IGN – BD ORTHO®, prises de vue 2021–2024", fr(ImageryDate.Capture(2021, 2024)))
+        assertEquals("Source$nb: IGN – BD ORTHO®, mise à jour du 22/10/2026", fr(ImageryDate.Updated(2026, 10, 22)))
+        assertEquals("Source$nb: IGN – BD ORTHO® (cartes.gouv.fr)", fr(null))
+        assertEquals("Source: IGN – BD ORTHO®, imagery 2024", en(ImageryDate.Capture(2024, 2024)))
+        assertEquals("Source: IGN – BD ORTHO®, imagery 2021–2024", en(ImageryDate.Capture(2021, 2024)))
+        assertEquals("Source: IGN – BD ORTHO®, updated 2026-10-22", en(ImageryDate.Updated(2026, 10, 22)))
+        assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(null))
+        // Bornes dans le désordre, jour et mois sur 2 chiffres, date mal formée → sans date.
+        assertEquals("Source: IGN – BD ORTHO®, imagery 2021–2024", en(ImageryDate.Capture(2024, 2021)))
+        assertEquals("Source$nb: IGN – BD ORTHO®, mise à jour du 05/03/2026", fr(ImageryDate.Updated(2026, 3, 5)))
+        assertEquals("Source: IGN – BD ORTHO®, updated 2026-03-05", en(ImageryDate.Updated(2026, 3, 5)))
+        assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(ImageryDate.Updated(2026, 13, 5)))
+        assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(ImageryDate.Capture(24, 24)))
+        // Jamais « 2 024 » : les années partent en TEXTE, même dans une langue qui groupe.
+        val saved = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.FRANCE)
+            assertFalse(fr(ImageryDate.Capture(2024, 2024)).contains("2 024"))
+            assertFalse(fr(ImageryDate.Capture(2024, 2024)).contains("2 024"))
+        } finally {
+            Locale.setDefault(saved)
+        }
+        for (k in listOf("sat_attribution_year", "sat_attribution_years", "sat_attribution_updated")) {
+            assertFalse(TestRes.FR.strings.getValue(k).contains("\$d"))
+            assertFalse(TestRes.EN.strings.getValue(k).contains("\$d"))
+        }
         assertEquals("https://cartes.gouv.fr/rechercher-une-donnee/dataset/IGNF_BD-ORTHO", IgnImagery.DATASET_URL)
     }
 
@@ -332,34 +422,70 @@ class SatelliteRequestTest {
     }
 
     // ---------------------------------------------------------------- T10
-    /** Doublure du service IGN : GetMap → corps « IMG » / « BLANK », GetFeatureInfo → texte. */
+    /**
+     * Doublure du service IGN : GetMap → corps « IMG » / « BLANK » ; WFS (dates) et fiche
+     * CSW → réponses enregistrées par défaut. Chaque appel est noté.
+     */
     private class FakeIgn {
-        val calls = mutableListOf<String>()
-        var getMap: (String) -> SatelliteHttpReply = { SatelliteHttpReply(200, "image/jpeg", "IMG".toByteArray()) }
-        var featureInfo: (String) -> SatelliteHttpReply = { SatelliteHttpReply(200, "text/plain;charset=UTF-8", ByteArray(0)) }
+        val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
+        @Volatile var getMap: (String) -> SatelliteHttpReply = { SatelliteHttpReply(200, "image/jpeg", "IMG".toByteArray()) }
+        @Volatile var wfs: (String) -> SatelliteHttpReply = { SatelliteHttpReply(200, "application/json", WFS_CONCORDE.toByteArray()) }
+        @Volatile var csw: (String) -> SatelliteHttpReply = { SatelliteHttpReply(200, "application/xml", CSW_OK.toByteArray()) }
         val http = SatelliteHttp { url, _ ->
             calls += url
-            if ("REQUEST=GetFeatureInfo" in url) featureInfo(url) else getMap(url)
+            when {
+                "/wfs/ows?" in url -> wfs(url)
+                "/csw?" in url -> csw(url)
+                else -> getMap(url)
+            }
         }
         val getMaps get() = calls.count { "REQUEST=GetMap" in it }
-        val infos get() = calls.count { "REQUEST=GetFeatureInfo" in it }
+        val wfsCalls get() = calls.count { "/wfs/ows?" in it }
+        val cswCalls get() = calls.count { "/csw?" in it }
+
+        companion object {
+            lateinit var WFS_CONCORDE: String
+            lateinit var CSW_OK: String
+        }
     }
 
+    private fun reply(status: Int, type: String = "text/html", body: String = "x") = SatelliteHttpReply(status, type, body.toByteArray())
+    private val lnd = """<?xml version="1.0"?><ServiceExceptionReport version="1.3.0"><ServiceException code="LayerNotDefined">Layer not defined</ServiceException></ServiceExceptionReport>"""
+    private val owsLnd = """<ows:ExceptionReport><ows:Exception exceptionCode="LayerNotDefined"/></ows:ExceptionReport>"""
+    private val ipv = """<ServiceExceptionReport><ServiceException code="InvalidParameterValue"/></ServiceExceptionReport>"""
+    /** Ne répond jamais (dans la limite qu'on lui donne) : délai. */
+    private fun never(timeout: Int): SatelliteHttpReply { Thread.sleep(timeout.toLong()); throw SocketTimeoutException() }
+
     private var clock = 1_000_000L
-    private fun service(f: FakeIgn) = SatelliteService(
+    private fun service(f: FakeIgn, infoTimeoutMs: Long = 2_000, retryMs: Long = 20) = SatelliteService(
         http = f.http,
         decode = { b -> String(b).takeIf { it == "IMG" || it == "BLANK" } },
         isBlank = { it == "BLANK" },
         now = { clock },
-        currentYear = { 2026 }
+        currentYear = { 2026 },
+        infoTimeoutMs = infoTimeoutMs,
+        transientRetryMs = retryMs,
+        sleep = { Thread.sleep(it) }
     )
     private fun calibAt(lat: Double, lon: Double) = GeoCalibration().apply { addAnchor(GeoAnchor(0f, 0f, lat, lon)) }
     private val paris = calibAt(48.8656, 2.3212)
-    private fun SatelliteService<String>.go(c: GeoCalibration = paris, force: Boolean = false) =
-        load(c, -50_000f, -40_000f, 50_000f, 40_000f, force)
+    private fun SatelliteService<String>.go(c: GeoCalibration = paris, force: Boolean = false, grow: Float = 0f) =
+        load(c, -50_000f, -40_000f, 50_000f + grow, 40_000f, force)
+    /** Image publiée puis sa date (déroulé de SceneScreen). */
+    private fun SatelliteService<String>.dated(r: SatelliteResult<SatelliteLoaded<String>>): ImageryDate? =
+        kotlinx.coroutines.runBlocking { date((r as SatelliteResult.Ok).overlay.plan.request) }
+    private fun dateOf(r: SatelliteResult<SatelliteLoaded<String>>) = (r as SatelliteResult.Ok).overlay.date
+
+    private fun fake(): FakeIgn {
+        FakeIgn.WFS_CONCORDE = fixture("wfs-concorde.json")
+        FakeIgn.CSW_OK = fixture("csw-bdortho-summary.xml")
+        return FakeIgn()
+    }
+    private val y2024 = ImageryDate.Capture(2024, 2024)
+    private val updated = ImageryDate.Updated(2026, 10, 22)
 
     @Test fun t10HorsCouvertureAucuneRequete() {
-        val f = FakeIgn()
+        val f = fake()
         val r = service(f).go(calibAt(52.5163, 13.3777))   // Berlin
         assertEquals(SatelliteResult.OutOfCoverage, r)
         assertEquals(0, f.calls.size)
@@ -368,69 +494,291 @@ class SatelliteRequestTest {
     }
 
     @Test fun t10ImageBlancheMemoriseeRelanceSeulementForcee() {
-        val f = FakeIgn().apply { getMap = { SatelliteHttpReply(200, "image/jpeg", "BLANK".toByteArray()) } }
+        val f = fake().apply { getMap = { SatelliteHttpReply(200, "image/jpeg", "BLANK".toByteArray()) } }
         val s = service(f)
         assertEquals(SatelliteResult.NoImagery, s.go())
-        assertEquals(1, f.getMaps); assertEquals(0, f.infos)
+        assertEquals(1, f.getMaps); assertEquals(0, f.wfsCalls + f.cswCalls)
         clock += 3_600_000
         assertEquals(SatelliteResult.NoImagery, s.go())
         assertEquals("pas de relance sans geste", 1, f.getMaps)
         assertEquals(SatelliteResult.NoImagery, s.go(force = true))
         assertEquals("relance avec force", 2, f.getMaps)
-        assertEquals(0, f.infos)
+        assertEquals("aucune requête de date pour une image vide", 0, f.wfsCalls + f.cswCalls)
     }
 
-    @Test fun t10ImageNormaleAvecAnnee() {
-        val f = FakeIgn().apply {
-            featureInfo = { SatelliteHttpReply(200, "text/plain", featureInfoConcorde.toByteArray()) }
-        }
-        val r = service(f).go()
+    @Test fun t10ImageNormalePublieeAvantSaDate_puisAnnees() {
+        val f = fake()
+        val s = service(f)
+        val r = s.go()
         assertTrue(r is SatelliteResult.Ok)
-        val ok = (r as SatelliteResult.Ok).overlay
-        assertEquals("IMG", ok.image)
-        assertEquals(2024, ok.year)
-        assertEquals(1, f.getMaps); assertEquals(1, f.infos)
-        assertTrue("GetMap d'abord", "REQUEST=GetMap" in f.calls[0])
-        assertEquals(query(f.calls[0])["BBOX"], query(f.calls[1])["BBOX"])
-        assertEquals("48.8650604,2.3203797,48.8661396,2.3220203", query(f.calls[0])["BBOX"])
+        assertEquals("IMG", (r as SatelliteResult.Ok).overlay.image)
+        assertNull("publiée AVANT sa date (aucune date encore connue)", r.overlay.date)
+        assertEquals("aucune requête de date avant la publication", listOf(1, 0, 0), listOf(f.getMaps, f.wfsCalls, f.cswCalls))
+        assertEquals(y2024, s.dated(r))
+        assertEquals("1re image : GetMap + WFS + fiche CSW", listOf(1, 1, 1), listOf(f.getMaps, f.wfsCalls, f.cswCalls))
+        // WFS sur l'emprise EXACTE de l'image (le BBOX arrondi de l'URL GetMap).
+        val bbox = query(f.calls.first { "REQUEST=GetMap" in it })["BBOX"]!!.split(",")
+        val wfsUrl = f.calls.first { "/wfs/ows?" in it }
+        assertTrue(wfsUrl.contains("POLYGON((${bbox[0]}%20${bbox[1]},${bbox[0]}%20${bbox[3]},${bbox[2]}%20${bbox[3]},${bbox[2]}%20${bbox[1]},${bbox[0]}%20${bbox[1]}))"))
+        assertEquals("48.8650604,2.3203797,48.8661396,2.3220203", bbox.joinToString(","))
+        // 2e image (autre emprise) : la date de mise à jour est DÉJÀ dans la publication ; GetMap + WFS seulement.
+        val r2 = s.go(grow = 30_000f)
+        assertEquals(updated, dateOf(r2))
+        assertEquals(y2024, s.dated(r2))
+        assertEquals(listOf(2, 2, 1), listOf(f.getMaps, f.wfsCalls, f.cswCalls))
     }
 
-    @Test fun t10GetFeatureInfoEnEchecNeBloquePasLImage() {
+    @Test fun t10DateWfsEnEchec_dateDeMiseAJour_memoireDeDeuxMinutes() {
         for (fail in listOf<(String) -> SatelliteHttpReply>(
-            { throw SocketTimeoutException() },
-            { throw IOException("réseau") },
-            { SatelliteHttpReply(400, "text/xml", ByteArray(0)) },
-            { SatelliteHttpReply(200, "text/plain", "no features were found".toByteArray()) }
+            { reply(500) }, { reply(429) },
+            { throw SocketTimeoutException() }, { throw IOException("réseau") },
+            { reply(200, "application/json", "{ illisible") },
+            { reply(200, "application/json", fixture("wfs-mer-large.json")) }
         )) {
-            val f = FakeIgn().apply { featureInfo = fail }
-            val r = service(f).go()
-            assertTrue(r is SatelliteResult.Ok)
-            assertNull((r as SatelliteResult.Ok).overlay.year)
+            val f = fake().apply { wfs = fail }
+            val s = service(f)
+            assertEquals(updated, s.dated(s.go()))
         }
+        // WFS 500 : pas redemandé avant 2 min ; la date de mise à jour (déjà lue) suffit ; après, ses années.
+        val f = fake().apply { wfs = { reply(500) } }
+        val s = service(f)
+        assertEquals(updated, s.dated(s.go()))
+        assertEquals(listOf(1, 1), listOf(f.wfsCalls, f.cswCalls))
+        f.wfs = { reply(200, "application/json", fixture("wfs-concorde.json")) }
+        clock += 60_000
+        val r2 = s.go(grow = 20_000f)
+        assertEquals(updated, dateOf(r2))
+        assertEquals(updated, s.dated(r2))
+        assertEquals("1 min après : aucun WFS", listOf(1, 1), listOf(f.wfsCalls, f.cswCalls))
+        clock += 120_000
+        assertEquals(y2024, s.dated(s.go(grow = 40_000f)))
+        assertEquals("2 min plus tard : WFS redemandé, aucune fiche", listOf(2, 1), listOf(f.wfsCalls, f.cswCalls))
+        // Un WFS 200 « sans zone » n'est PAS une panne : redemandé à l'image suivante.
+        val g = fake().apply { wfs = { reply(200, "application/json", fixture("wfs-berlin.json")) } }
+        val t = service(g)
+        t.dated(t.go()); t.dated(t.go(grow = 20_000f))
+        assertEquals(2, g.wfsCalls)
+    }
+
+    @Test fun t10WfsEtFicheEnEchec_aucuneDateInventee_gesteEfface() {
+        for ((w, c) in listOf<Pair<(String) -> SatelliteHttpReply, (String) -> SatelliteHttpReply>>(
+            Pair({ reply(500) }, { reply(500) }),
+            Pair({ reply(500) }, { reply(200, "application/xml", fixture("csw-unknown-id.xml")) }),
+            Pair({ throw SocketTimeoutException() }, { throw SocketTimeoutException() })
+        )) {
+            val f = fake().apply { wfs = w; csw = c }
+            val s = service(f)
+            val r = s.go()
+            assertTrue(r is SatelliteResult.Ok)
+            assertNull(s.dated(r))
+            assertEquals(listOf(1, 1), listOf(f.wfsCalls, f.cswCalls))
+            // Image suivante (< 2 min) : ni l'un ni l'autre redemandé.
+            clock += 30_000
+            assertNull(s.dated(s.go(grow = 20_000f)))
+            assertEquals(listOf(1, 1), listOf(f.wfsCalls, f.cswCalls))
+            // Après 2 min : redemandés.
+            clock += 120_000
+            assertNull(s.dated(s.go(grow = 40_000f)))
+            assertEquals(listOf(2, 2), listOf(f.wfsCalls, f.cswCalls))
+            // Geste (force) : tout de suite.
+            assertNull(s.dated(s.go(grow = 60_000f, force = true)))
+            assertEquals(listOf(3, 3), listOf(f.wfsCalls, f.cswCalls))
+        }
+    }
+
+    @Test fun t10DateLente_imagePublieeTout_deSuite_dateBornee() {
+        val f = fake().apply { wfs = { never(5_000) }; csw = { never(5_000) } }
+        val s = service(f, infoTimeoutMs = 500)
+        val t0 = System.nanoTime()
+        val r = s.go()
+        assertTrue("image publiée avant la borne", r is SatelliteResult.Ok && (System.nanoTime() - t0) / 1e6 < 400)
+        val t1 = System.nanoTime()
+        assertNull(s.dated(r))
+        val ms = (System.nanoTime() - t1) / 1e6
+        assertTrue("date réglée en ≈ 500 ms ($ms)", ms in 400.0..950.0)
+        // Image suivante : aucune requête de date, réglée tout de suite.
+        val t2 = System.nanoTime()
+        assertNull(s.dated(s.go(grow = 20_000f)))
+        assertTrue((System.nanoTime() - t2) / 1e6 < 300)
+        assertEquals(listOf(1, 1), listOf(f.wfsCalls, f.cswCalls))
+        // 2 min plus tard : WFS et fiche redemandés.
+        clock += 121_000
+        f.wfs = { reply(200, "application/json", fixture("wfs-concorde.json")) }
+        assertEquals(y2024, s.dated(s.go(grow = 40_000f)))
+        assertEquals(listOf(2, 2), listOf(f.wfsCalls, f.cswCalls))
+    }
+
+    @Test fun t10FicheCswDAvance() {
+        val f = fake()
+        val s = service(f)
+        assertEquals(y2024, s.dated(s.go()))
+        assertEquals("1re image, WFS et fiche réussis", listOf(1, 1), listOf(f.wfsCalls, f.cswCalls))
+        // Puis les deux en panne : la 2e image est publiée AVEC la date de mise à jour, aucune 2e fiche.
+        f.wfs = { reply(503) }; f.csw = { reply(503) }
+        val r2 = s.go(grow = 20_000f)
+        assertEquals(updated, dateOf(r2))
+        assertEquals(updated, s.dated(r2))
+        assertEquals(1, f.cswCalls)
+        // Tout en panne dès le départ : aucune date (jamais inventée).
+        val g = fake().apply { wfs = { reply(500) }; csw = { reply(500) } }
+        val t = service(g)
+        assertNull(t.dated(t.go()))
+    }
+
+    @Test fun t10DateAnnulee_ficheEnVolPartagee() = kotlinx.coroutines.runBlocking<Unit> {
+        val f = fake().apply { wfs = { Thread.sleep(300); reply(200, "application/json", fixture("wfs-concorde.json")) }
+            csw = { Thread.sleep(300); reply(200, "application/xml", fixture("csw-bdortho-summary.xml")) } }
+        val s = service(f)
+        val r = s.go() as SatelliteResult.Ok
+        // Image remplacée pendant sa date : la date est annulée (rien de rendu)…
+        val job = launch(kotlinx.coroutines.Dispatchers.IO) { s.date(r.overlay.plan.request); error("date appliquée") }
+        kotlinx.coroutines.delay(80)
+        job.cancel(); job.join()
+        // … mais la fiche en vol continue et sert la date suivante (aucune 2e fiche).
+        val r2 = s.go(grow = 20_000f) as SatelliteResult.Ok
+        assertEquals(y2024, s.date(r2.overlay.plan.request))
+        assertEquals(1, f.cswCalls)
+        assertEquals(updated, s.datasetUpdateForExport())
+    }
+
+    @Test fun t10PdfFicheRedemandeeAvantLExport() = kotlinx.coroutines.runBlocking<Unit> {
+        val f = fake().apply { wfs = { reply(500) }; csw = { reply(500) } }
+        val s = service(f)
+        assertNull(s.dated(s.go()))
+        assertEquals(1, f.cswCalls)
+        // Geste « PDF » : redemandée malgré la panne récente.
+        f.csw = { reply(200, "application/xml", fixture("csw-bdortho-summary.xml")) }
+        assertEquals(updated, s.datasetUpdateForExport(1_000))
+        assertEquals(2, f.cswCalls)
+        // Connue : plus redemandée.
+        assertEquals(updated, s.datasetUpdateForExport(1_000))
+        assertEquals(2, f.cswCalls)
+        // Toujours en panne : null dans la borne.
+        val g = fake().apply { csw = { never(5_000) } }
+        val t0 = System.nanoTime()
+        assertNull(service(g).datasetUpdateForExport(300))
+        assertTrue((System.nanoTime() - t0) / 1e6 < 900)
+    }
+
+    @Test fun t10PannePassagereRegle() {
+        assertEquals(listOf(true, true, true), listOf(502, 503, 504).map { IgnImagery.isTransientFailure(it, "text/html", "<html>Bad Gateway</html>") })
+        assertEquals(listOf(false, false, false, false), listOf(500, 429, 403, 401).map { IgnImagery.isTransientFailure(it, "text/xml", lnd) })
+        assertTrue(IgnImagery.isTransientFailure(200, "text/xml", lnd))
+        assertTrue(IgnImagery.isTransientFailure(400, "application/xml", owsLnd))
+        assertTrue(IgnImagery.isTransientFailure(404, "", lnd))
+        assertFalse(IgnImagery.isTransientFailure(400, "text/xml", ipv))
+        assertFalse(IgnImagery.isTransientFailure(200, "text/xml", "<ServiceExceptionReport/>"))
+        assertFalse(IgnImagery.isTransientFailure(200, "image/jpeg", lnd))
+        assertFalse(IgnImagery.isTransientFailure(200, "application/json", lnd))
+        assertFalse(IgnImagery.isTransientFailure(200, "text/xml", lnd + " ".repeat(IgnImagery.TRANSIENT_MAX_BODY)))
+        assertEquals(1_000L, IgnImagery.TRANSIENT_RETRY_MS)
+        // Corps trop gros : jamais lu comme une panne passagère.
+        assertFalse(SatelliteHttpReply(200, "text/xml", ByteArray(IgnImagery.TRANSIENT_MAX_BODY + 1) { 'x'.code.toByte() }).isTransient)
+    }
+
+    @Test fun t10PannePassagereGetMap() {
+        // 503 puis l'image : publiée après la pause, même requête.
+        val f1 = fake()
+        var n1 = 0
+        f1.getMap = { if (n1++ == 0) reply(503) else SatelliteHttpReply(200, "image/jpeg", "IMG".toByteArray()) }
+        val s1 = service(f1, retryMs = 150)
+        val t0 = System.nanoTime()
+        assertTrue(s1.go() is SatelliteResult.Ok)
+        assertTrue("après la pause", (System.nanoTime() - t0) / 1e6 >= 145)
+        assertEquals(2, f1.getMaps)
+        assertEquals(f1.calls[0], f1.calls[1])
+        assertEquals(1, s1.stats.transientRetries)
+        // LayerNotDefined en 200 (XML), en 400 (OWS) puis l'image.
+        for (first in listOf(reply(200, "text/xml", lnd), reply(400, "application/xml", owsLnd))) {
+            val f = fake(); var n = 0
+            f.getMap = { if (n++ == 0) first else SatelliteHttpReply(200, "image/jpeg", "IMG".toByteArray()) }
+            assertTrue(service(f).go() is SatelliteResult.Ok)
+            assertEquals(2, f.getMaps)
+        }
+        // Panne qui dure : DEUX requêtes au plus, puis l'erreur ; pas de relance avant 30 s.
+        for (st in listOf(502, 503, 504)) {
+            val f = fake().apply { getMap = { reply(st) } }
+            val s = service(f)
+            assertEquals(SatelliteResult.Error(SatelliteErrorKind.HTTP, st), s.go())
+            assertEquals("$st : borné à un nouvel essai", 2, f.getMaps)
+            clock += 10_000
+            s.go()
+            assertEquals("$st : pas de relance avant 30 s", 2, f.getMaps)
+        }
+        // Jamais sur les autres erreurs.
+        for (r in listOf(reply(500), reply(429), reply(400, "text/xml", ipv), reply(200, "text/xml", "<ServiceExceptionReport/>"))) {
+            val f = fake().apply { getMap = { r } }
+            val s = service(f)
+            assertTrue(s.go() is SatelliteResult.Error)
+            assertEquals("${r.status} : aucun nouvel essai", 1, f.getMaps)
+            assertEquals(0, s.stats.transientRetries)
+        }
+        // Annulé pendant la pause : aucun second GetMap.
+        val f3 = fake().apply { getMap = { reply(503) } }
+        val s3 = service(f3, retryMs = 50)
+        try {
+            s3.load(paris, -50_000f, -40_000f, 50_000f, 40_000f, force = false) {
+                throw kotlinx.coroutines.CancellationException("annulé")
+            }
+            error("annulation attendue")
+        } catch (_: kotlinx.coroutines.CancellationException) {
+        }
+        assertEquals(1, f3.getMaps)
+    }
+
+    @Test fun t10PannePassagereDate() {
+        // WFS 504 puis les années : prise de vue 2024 (et non la seule date de mise à jour).
+        val f = fake(); var n = 0
+        f.wfs = { if (n++ == 0) reply(504) else reply(200, "application/json", fixture("wfs-concorde.json")) }
+        val s = service(f)
+        assertEquals(y2024, s.dated(s.go()))
+        assertEquals(listOf(2, 1), listOf(f.wfsCalls, f.cswCalls))
+        assertEquals(1, s.stats.transientRetries)
+        // WFS LayerNotDefined (200) puis les années.
+        val g = fake(); var m = 0
+        g.wfs = { if (m++ == 0) reply(200, "text/xml", lnd) else reply(200, "application/json", fixture("wfs-concorde.json")) }
+        val t = service(g)
+        assertEquals(y2024, t.dated(t.go()))
+        // CSW 503 puis la fiche (WFS en échec non passager) : date de mise à jour.
+        val h = fake(); var k = 0
+        h.wfs = { reply(500) }
+        h.csw = { if (k++ == 0) reply(503) else reply(200, "application/xml", fixture("csw-bdortho-summary.xml")) }
+        val u = service(h)
+        assertEquals(updated, u.dated(u.go()))
+        assertEquals(listOf(1, 2), listOf(h.wfsCalls, h.cswCalls))
+        // Panne qui dure : un nouvel essai chacun, puis mention sans date.
+        val i = fake().apply { wfs = { reply(503) }; csw = { reply(502) } }
+        val v = service(i)
+        assertNull(v.dated(v.go()))
+        assertEquals(listOf(2, 2), listOf(i.wfsCalls, i.cswCalls))
+        // Dans la borne de la date : moins de 50 ms restantes après la pause → pas de nouvel essai.
+        val j = fake().apply { wfs = { reply(503) }; csw = { reply(503) } }
+        val w = service(j, infoTimeoutMs = 120, retryMs = 100)
+        val t0 = System.nanoTime()
+        assertNull(w.dated(w.go()))
+        assertEquals(listOf(1, 1), listOf(j.wfsCalls, j.cswCalls))
+        assertTrue((System.nanoTime() - t0) / 1e6 < 400)
     }
 
     @Test fun t10ReponsesEnErreur() {
         // 200 mais pas une image (ServiceException XML) → http(200).
-        val xml = FakeIgn().apply { getMap = { SatelliteHttpReply(200, "text/xml", "<x/>".toByteArray()) } }
+        val xml = fake().apply { getMap = { SatelliteHttpReply(200, "text/xml", "<x/>".toByteArray()) } }
         assertEquals(SatelliteResult.Error(SatelliteErrorKind.HTTP, 200), service(xml).go())
-        // 502 → erreur, AUCUNE autre taille demandée.
-        val gw = FakeIgn().apply { getMap = { SatelliteHttpReply(502, "text/html", ByteArray(0)) } }
-        assertEquals(SatelliteResult.Error(SatelliteErrorKind.HTTP, 502), service(gw).go())
-        assertEquals(1, gw.calls.size)
+        assertEquals(1, xml.getMaps)
         // 400 (ServiceExceptionReport) → http(400).
-        val bad = FakeIgn().apply { getMap = { SatelliteHttpReply(400, "text/xml", ByteArray(0)) } }
+        val bad = fake().apply { getMap = { SatelliteHttpReply(400, "text/xml", ByteArray(0)) } }
         assertEquals(SatelliteResult.Error(SatelliteErrorKind.HTTP, 400), service(bad).go())
         // Réseau injoignable.
-        val net = FakeIgn().apply { getMap = { throw IOException("hôte inconnu") } }
+        val net = fake().apply { getMap = { throw IOException("hôte inconnu") } }
         assertEquals(SatelliteResult.Error(SatelliteErrorKind.NETWORK), service(net).go())
         // Image illisible.
-        val junk = FakeIgn().apply { getMap = { SatelliteHttpReply(200, "image/jpeg", "???".toByteArray()) } }
+        val junk = fake().apply { getMap = { SatelliteHttpReply(200, "image/jpeg", "???".toByteArray()) } }
         assertEquals(SatelliteResult.Error(SatelliteErrorKind.DECODE), service(junk).go())
-        assertEquals(0, junk.infos)
+        assertEquals(0, junk.wfsCalls + junk.cswCalls)
     }
 
     @Test fun t10DelaiPasDeRelanceAvant30s() {
-        val f = FakeIgn().apply { getMap = { throw SocketTimeoutException("30 s") } }
+        val f = fake().apply { getMap = { throw SocketTimeoutException("30 s") } }
         val s = service(f)
         val timeout = SatelliteResult.Error(SatelliteErrorKind.TIMEOUT)
         assertEquals(timeout, s.go())

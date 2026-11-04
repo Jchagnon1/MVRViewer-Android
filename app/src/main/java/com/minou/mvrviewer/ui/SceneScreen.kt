@@ -441,6 +441,35 @@ fun SceneScreen(
         satelliteStatus = r.status
         satActivationHandled = activation
         r.toast?.let { SatelliteUi.toast(ctx, it) }
+        // DATE de la mention (SPEC-satellite-ign §2.4) : l'image est déjà affichée ; WFS et
+        // fiche CSW en parallèle, 10 s en tout. Image remplacée ou réglage coupé pendant ce
+        // temps : cet effet est relancé, la date de l'ancienne n'est jamais appliquée ; une
+        // image gardée dont la date avait été interrompue la redemande ici.
+        val shown = r.overlay
+        if (shown != null && shown.datePending) {
+            val d = com.minou.mvrviewer.mvr.SatelliteFetcher.date(satService, shown)
+            if (satellite === shown) satellite = shown.withDate(d)
+        }
+    }
+    // Fin du show : la fiche CSW éventuellement en vol est annulée.
+    androidx.compose.runtime.DisposableEffect(satService) { onDispose { satService.close() } }
+
+    /**
+     * Fond satellite pour un PDF (SPEC-satellite-ign §7.5) : Android ne pose pas de lien
+     * dans un PDF — sans date connue au moment de l'export, la fiche CSW est redemandée
+     * (5 s au plus) avant de dessiner la page ; inconnue, la page écrit l'adresse de la
+     * fiche en clair sous la mention.
+     */
+    suspend fun satelliteForExport(): com.minou.mvrviewer.mvr.SatelliteOverlay? {
+        val s = satellite ?: return null
+        if (s.date != null || !options.showSatellite) return s
+        val d = satService.datasetUpdateForExport() ?: return s
+        val dated = com.minou.mvrviewer.mvr.SatelliteOverlay(
+            s.bitmap, s.nwX, s.nwY, s.neX, s.neY, s.seX, s.seY, s.swX, s.swY, s.key, d, s.url,
+            datePending = s.datePending, request = s.request
+        )
+        if (satellite === s) satellite = dated
+        return dated
     }
 
     // ---------------- SYNCHRO CLOUD ----------------
@@ -1211,11 +1240,12 @@ fun SceneScreen(
     fun exportCablingPdf(parts: Set<CablingPdfPart>) {
         if (cablingPdfBusy) return
         cablingPdfBusy = true
-        val inputs = CablingPdfInputs.freeze(
-            scene, mvrBytes, overrides, gdtfOverrides, customResolver, power,
-            cabling, dmxCabling, referencePlan, satellite, hiddenLayers
-        )
         scope.launch {
+            // Mention datée : la date connue au moment de l'export.
+            val inputs = CablingPdfInputs.freeze(
+                scene, mvrBytes, overrides, gdtfOverrides, customResolver, power,
+                cabling, dmxCabling, referencePlan, satelliteForExport(), hiddenLayers
+            )
             val file = try {
                 generateCablingPdf(ctx, inputs, parts, pdfTexts.titleOf(parts), pdfTexts)
             } finally { cablingPdfBusy = false }
@@ -1429,6 +1459,7 @@ fun SceneScreen(
             satellite = satellite,
             satelliteStatus = satelliteStatus,
             satelliteCovered = satelliteCovered,
+            satelliteForExport = { satelliteForExport() },
             hiddenLayers = hiddenLayers,
             onToggleLayer = { layer -> toggleRefPlanLayer(layer) },
             onCalibrationChanged = { calibTick++ },
@@ -1551,6 +1582,7 @@ fun SceneScreen(
                     // ici pour survivre aux bascules 3D ↔ plan.
                     referencePlan = referencePlan,
                     satellite = satellite,
+                    satelliteForExport = { satelliteForExport() },
                     hiddenLayers = hiddenLayers,
                     // AFFECTATION SUR LE PLAN (E2) : « Sélectionner sur le plan » sur un
                     // circuit / départ ferme le Câblage et arme l'affectation sur le plan

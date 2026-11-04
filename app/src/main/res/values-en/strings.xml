@@ -396,7 +396,9 @@
     <string name="refplan_segments_fmt">%1$d segments</string>
     <string name="refplan_truncated_fmt"> (+%1$d truncated)</string>
     <string name="sat_attribution">Source: IGN – BD ORTHO® (cartes.gouv.fr)</string>
-    <string name="sat_attribution_year">Source: IGN – BD ORTHO®, imagery %1$d</string>
+    <string name="sat_attribution_year">Source: IGN – BD ORTHO®, imagery %1$s</string>
+    <string name="sat_attribution_years">Source: IGN – BD ORTHO®, imagery %1$s–%2$s</string>
+    <string name="sat_attribution_updated">Source: IGN – BD ORTHO®, updated %3$s-%2$s-%1$s</string>
     <string name="sat_error_decode">Satellite unavailable: unreadable image.</string>
     <string name="sat_error_http">Satellite unavailable (IGN server error %1$d).</string>
     <string name="sat_error_network">Satellite unavailable: network unreachable.</string>

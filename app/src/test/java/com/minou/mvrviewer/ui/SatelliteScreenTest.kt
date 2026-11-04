@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.GeoAnchor
 import com.minou.mvrviewer.mvr.GeoCalibration
+import com.minou.mvrviewer.mvr.IgnImagery
+import com.minou.mvrviewer.mvr.ImageryDate
 import com.minou.mvrviewer.mvr.SatelliteErrorKind
 import com.minou.mvrviewer.mvr.SatelliteFetcher
 import com.minou.mvrviewer.mvr.SatelliteResult
@@ -86,13 +88,20 @@ class SatelliteScreenTest {
     // ------------------------------------------------ mention (écran + PDF)
 
     @Test fun mentionPoseeDesQueLImageEstDessinee() {
-        assertEquals("Source : IGN – BD ORTHO®, prise de vue 2024", fr(SatelliteUi.creditRes(true, true, 2024)))
-        assertEquals("Source: IGN – BD ORTHO®, imagery 2024", en(SatelliteUi.creditRes(true, true, 2024)))
-        assertEquals("Source : IGN – BD ORTHO® (cartes.gouv.fr)", fr(SatelliteUi.creditRes(true, true, null)))
+        val y2024 = ImageryDate.Capture(2024, 2024)
+        assertEquals("Source\u00A0: IGN – BD ORTHO®, prise de vue 2024", fr(SatelliteUi.creditRes(true, true, y2024)))
+        assertEquals("Source: IGN – BD ORTHO®, imagery 2024", en(SatelliteUi.creditRes(true, true, y2024)))
+        assertEquals("Source\u00A0: IGN – BD ORTHO® (cartes.gouv.fr)", fr(SatelliteUi.creditRes(true, true, null)))
         assertEquals("Source: IGN – BD ORTHO® (cartes.gouv.fr)", en(SatelliteUi.creditRes(true, true, null)))
-        assertNull("réglage éteint : ni image ni mention", SatelliteUi.creditRes(false, true, 2024))
-        assertNull("pas d'image : pas de mention", SatelliteUi.creditRes(true, false, 2024))
+        assertNull("réglage éteint : ni image ni mention", SatelliteUi.creditRes(false, true, y2024))
+        assertNull("pas d'image : pas de mention", SatelliteUi.creditRes(true, false, y2024))
         assertNull(SatelliteUi.creditRes(false, false, null))
+        // PDF : sans date, l'adresse de la fiche IGN en clair sous la pastille ; avec une date, rien.
+        assertEquals(IgnImagery.DATASET_URL, SatelliteUi.pdfSourceUrl(true, true, null))
+        assertNull(SatelliteUi.pdfSourceUrl(true, true, y2024))
+        assertNull(SatelliteUi.pdfSourceUrl(true, true, ImageryDate.Updated(2026, 10, 22)))
+        assertNull(SatelliteUi.pdfSourceUrl(true, false, null))
+        assertNull(SatelliteUi.pdfSourceUrl(false, true, null))
     }
 
     @Test fun pastilleDuPdfDansLeCoinBasDroitDeLaZoneImage() {
@@ -352,7 +361,8 @@ class SatelliteScreenTest {
 
     @Test fun cablageMentionDansLaPagePlanDesPdf() {
         val page = body(code("ui/PlanPdfExport.kt"), "fun DrawScope.drawPdfPage(")
-        assertCalls("drawPdfPage (PDF du plan)", page, "SatelliteUi.creditRes(", "drawSatelliteAttribution(")
+        assertCalls("drawPdfPage (PDF du plan)", page, "SatelliteUi.creditRes(", "drawSatelliteAttribution(",
+            "SatelliteUi.pdfSourceUrl(", "drawSatelliteSourceUrl(")
         // Les pages plan du PDF de câblage passent par la même page.
         assertCalls("renderPlanPagesInto", body(code("ui/PlanPdfExport.kt"), "fun renderPlanPagesInto("), "drawPdfPage(")
         assertCalls("PDF de câblage", code("ui/CablingPdfExport.kt"), "renderPlanPagesInto(")

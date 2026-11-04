@@ -143,6 +143,11 @@ fun PlanScreen(
     satelliteStatus: SatelliteStatus = SatelliteStatus.Idle,
     /** 1re ancre dans les emprises IGN (France) : sinon, réglage désactivé. */
     satelliteCovered: Boolean = true,
+    /**
+     * Fond satellite pour le PDF : sans date connue, la fiche CSW de l'IGN est redemandée
+     * (5 s au plus) avant la page (SPEC-satellite-ign §7.5) — cf. SceneScreen.
+     */
+    satelliteForExport: suspend () -> com.minou.mvrviewer.mvr.SatelliteOverlay? = { satellite },
     onCalibrationChanged: () -> Unit = {},
     hiddenLayers: Set<String> = emptySet(),
     // ---- Rangement des menus, tranche C (SPEC-menus-android §3.1–3.4) ----
@@ -2418,7 +2423,7 @@ fun PlanScreen(
             )
             lift.dp to SatelliteUi.mentionOnTop(mention, lift, satObstacles)
         }
-        val satCredit = SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.year)
+        val satCredit = SatelliteUi.creditRes(options.showSatellite, satShown != null, satShown?.date)
         satCredit?.let { credit ->
             SatelliteAttribution(credit, toolbarLayout, toolsPlan, lift = satLift,
                 onAnchor = { satMentionAnchorPx = it }, onTop = satMentionOnTop)
@@ -2602,16 +2607,18 @@ fun PlanScreen(
                             onClick = {
                                 exportBusy = true
                                 val pages = exportViews.toList()
-                                val src = PlanExportSource(
-                                    data = data, layerIndex = layerIndex,
-                                    wire = wire, fixWire = fixWire, dxfPaths = dxfPaths,
-                                    rasterPlan = referencePlan?.raster,
-                                    satellite = satellite,
-                                    legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
-                                        .toList().sortedByDescending { it.second },
-                                    documentTitle = sPdfDocTitle
-                                )
                                 exportScope.launch {
+                                    // Mention datée : la date connue au moment de l'export.
+                                    val sat = satelliteForExport()
+                                    val src = PlanExportSource(
+                                        data = data, layerIndex = layerIndex,
+                                        wire = wire, fixWire = fixWire, dxfPaths = dxfPaths,
+                                        rasterPlan = referencePlan?.raster,
+                                        satellite = sat,
+                                        legend = scene.fixtures.groupingBy { it.layerName }.eachCount()
+                                            .toList().sortedByDescending { it.second },
+                                        documentTitle = sPdfDocTitle
+                                    )
                                     val f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                                         runCatching { buildPlanPdf(ctxPlan, src, pages) }.getOrNull()
                                     }

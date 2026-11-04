@@ -13,7 +13,8 @@ import java.io.File
  *   MVR_IGN_LIVE=1 ./gradlew :app:testDebugUnitTest --tests '*SatelliteIgnLiveTest'
  *
  * Le code de l'app est utilisé tel quel (zone, requête, URL, transport HTTP avec
- * User-Agent, service, test « image vide », lecture de l'année) ; seul le décodage
+ * User-Agent, service, test « image vide », date de la mention : WFS du graphe de
+ * mosaïquage et fiche CSW, SPEC-satellite-ign §2.4) ; seul le décodage
  * passe par ImageIO au lieu de BitmapFactory (JVM ; appelé par réflexion, les tests
  * Android compilant contre android.jar qui n'a pas java.awt). JPEG reçus écrits dans
  * build/ign-proof/ pour un contrôle visuel. Une requête par seconde au plus.
@@ -73,16 +74,20 @@ class SatelliteIgnLiveTest {
         if (w != null) assertEquals("$name : largeur demandée", w, plan.request.width)
         if (h != null) assertEquals("$name : hauteur demandée", h, plan.request.height)
         val before = calls.size
-        val r = service().load(calib, -halfW, -halfH, halfW, halfH, force = false)
+        val svc = service()
+        val r = svc.load(calib, -halfW, -halfH, halfW, halfH, force = false)
         assertTrue("$name : $r\n  ${plan.request.url}", r is SatelliteResult.Ok)
         val ok = (r as SatelliteResult.Ok).overlay
         assertEquals("$name : largeur reçue = demandée", plan.request.width, ok.image.width)
         assertEquals("$name : hauteur reçue = demandée", plan.request.height, ok.image.height)
         assertEquals("$name : même URL", plan.request.url, calls[before])
-        assertEquals("$name : GetMap + GetFeatureInfo", 2, calls.size - before)
+        assertEquals("$name : image publiée après le seul GetMap", 1, calls.size - before)
+        // Date de la mention : WFS (zones visibles) + fiche CSW, 10 s en tout.
+        val date = kotlinx.coroutines.runBlocking { svc.date(plan.request) }
+        assertTrue("$name : date $date", date is ImageryDate.Capture && date.from >= 2020)
         File(out, "$name.jpg").writeBytes(lastBody)
         println("PREUVE $name : ${ok.image.width}×${ok.image.height} px, ${"%.3f".format(plan.request.mPerPx)} m/px, " +
-            "année ${ok.year}\n  ${plan.request.url}")
+            "date $date\n  ${plan.request.url}\n  ${plan.request.datesUrl}")
     }
 
     @Test fun parisConcorde() {
@@ -105,6 +110,13 @@ class SatelliteIgnLiveTest {
         proveImage("fort-de-france", 14.6037, -61.0730, 60_000f, 60_000f)
     }
 
+    @Test fun ficheCswReelle() {
+        live()
+        val u = kotlinx.coroutines.runBlocking { service().datasetUpdateForExport(10_000) }
+        assertTrue("fiche CSW : $u", u != null && u.year >= 2026)
+        println("PREUVE fiche CSW : mise à jour du ${u}")
+    }
+
     @Test fun horsFranceDetecte() {
         live()
         // Berlin : pré-filtre, AUCUNE requête.
@@ -118,7 +130,7 @@ class SatelliteIgnLiveTest {
         val r = service().load(calibAt(46.2044, 6.1432), -50_000f, -40_000f, 50_000f, 40_000f, force = false)
         assertEquals(SatelliteResult.NoImagery, r)
         assertEquals(1, calls.size - before)
-        assertFalse(calls.last().contains("GetFeatureInfo"))
+        assertFalse(calls.last().contains("/wfs/"))
         println("PREUVE hors France : Berlin → hors couverture (0 requête) ; Genève → image blanche → « pas d'imagerie »\n  ${calls.last()}")
     }
 }

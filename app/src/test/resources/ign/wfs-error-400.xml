@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?><ows:ExceptionReport xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:ows="http://www.opengis.net/ows/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.0.0" xsi:schemaLocation="http://www.opengis.net/ows/1.1 https://data.geopf.fr/wfs/schemas/ows/1.1.0/owsAll.xsd">
+  <ows:Exception exceptionCode="NoApplicableCode">
+    <ows:ExceptionText>java.lang.IllegalArgumentException: Invalid number of points in LineString (found 1 - must be 0 or &amp;gt;= 2)
+Invalid number of points in LineString (found 1 - must be 0 or &amp;gt;= 2)</ows:ExceptionText>
+  </ows:Exception>
+</ows:ExceptionReport>

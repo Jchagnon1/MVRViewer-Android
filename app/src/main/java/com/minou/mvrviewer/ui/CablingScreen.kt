@@ -124,6 +124,8 @@ fun CablingScreen(
     // sans DXF/satellite (le PDF reste correct).
     referencePlan: com.minou.mvrviewer.mvr.ReferencePlan? = null,
     satellite: com.minou.mvrviewer.mvr.SatelliteOverlay? = null,
+    /** Fond satellite pour le PDF, date redemandée au besoin (SPEC-satellite-ign §7.5). */
+    satelliteForExport: suspend () -> com.minou.mvrviewer.mvr.SatelliteOverlay? = { satellite },
     hiddenLayers: Set<String> = emptySet(),
     // AFFECTATION SUR LE PLAN (E2) : appelé quand l'utilisateur choisit
     // « Sélectionner sur le plan » sur un circuit / départ. SceneScreen bascule alors
@@ -199,11 +201,12 @@ fun CablingScreen(
     fun runExport(parts: Set<CablingPdfPart>, title: String) {
         if (exportBusy) return
         exportBusy = true
-        val inputs = CablingPdfInputs.freeze(
-            scene, mvrBytes, overrides, gdtfOverrides, customResolver, power,
-            cabling, dmxCabling, referencePlan, satellite, hiddenLayers
-        )
         exportScope.launch {
+            // Mention datée : la date connue au moment de l'export.
+            val inputs = CablingPdfInputs.freeze(
+                scene, mvrBytes, overrides, gdtfOverrides, customResolver, power,
+                cabling, dmxCabling, referencePlan, satelliteForExport(), hiddenLayers
+            )
             val file = generateCablingPdf(ctxCabling, inputs, parts, title, pdfTexts)
             exportBusy = false
             if (file != null) sharePlanPdf(ctxCabling, file)

@@ -398,8 +398,10 @@
     <string name="refplan_pdf_pages_fmt">PDF de %1$d pages — page 1 utilisée</string>
     <string name="refplan_segments_fmt">%1$d segments</string>
     <string name="refplan_truncated_fmt"> (+%1$d tronqués)</string>
-    <string name="sat_attribution">Source : IGN – BD ORTHO® (cartes.gouv.fr)</string>
-    <string name="sat_attribution_year">Source : IGN – BD ORTHO®, prise de vue %1$d</string>
+    <string name="sat_attribution">Source : IGN – BD ORTHO® (cartes.gouv.fr)</string>
+    <string name="sat_attribution_year">Source : IGN – BD ORTHO®, prise de vue %1$s</string>
+    <string name="sat_attribution_years">Source : IGN – BD ORTHO®, prises de vue %1$s–%2$s</string>
+    <string name="sat_attribution_updated">Source : IGN – BD ORTHO®, mise à jour du %1$s/%2$s/%3$s</string>
     <string name="sat_error_decode">Satellite indisponible : image illisible.</string>
     <string name="sat_error_http">Satellite indisponible (erreur %1$d du serveur de l\'IGN).</string>
     <string name="sat_error_network">Satellite indisponible : réseau injoignable.</string>

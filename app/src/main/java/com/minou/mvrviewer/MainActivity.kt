@@ -30,6 +30,7 @@ import com.minou.mvrviewer.ui.IncomingFiles
 import com.minou.mvrviewer.ui.SceneScreen
 import com.minou.mvrviewer.ui.SceneViewModel
 import com.minou.mvrviewer.ui.theme.MvrViewerTheme
+import com.minou.mvrviewer.sync.syncMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -141,9 +142,45 @@ private fun App(
     // au démarrage (session Firebase persistée, ou compte stub local).
     val sync: SyncViewModel = viewModel()
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { sync.restoreSessionIfPossible() }
-
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    /**
+     * Ouvre un projet partagé : téléchargement, puis COPIE LOCALE gardée dans
+     * `CloudDownloads/` et les « Projets récents » (SPEC-partage-moderation §5.12, §9 :
+     * elle reste sur l'appareil si l'on quitte le projet ou si l'on en est retiré).
+     * Échec du téléchargement : message lisible (§7), jamais le texte brut du SDK.
+     */
+    val openCloudProject: (com.minou.mvrviewer.sync.CloudProject) -> Unit = { project ->
+        scope.launch {
+            val bytes = try {
+                sync.downloadMvr(project)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(ctx, e.syncMessage(ctx), android.widget.Toast.LENGTH_LONG).show()
+                null
+            } ?: return@launch
+            withContext(Dispatchers.IO) { com.minou.mvrviewer.ui.CloudDownloads.keep(ctx, bytes, project.name) }
+            vm.openBytes(bytes, project.name)
+        }
+    }
+    LaunchedEffect(Unit) {
+        // Crochets de TEST (débogable + backend LOCAL) : MVR_SYNC_ACCOUNT=<e-mail> connecte
+        // ce compte du bouchon (créé au besoin) ; MVR_SYNC_JOIN=<code> rejoint puis ouvre.
+        val hookAccount = com.minou.mvrviewer.ui.DebugHooks.takeSyncAccount()
+        if (hookAccount == null || !runCatching { sync.debugSignInLocal(hookAccount) }.getOrDefault(false)) {
+            sync.restoreSessionIfPossible()
+        }
+        com.minou.mvrviewer.ui.DebugHooks.takeSyncJoin()?.let { code ->
+            try {
+                openCloudProject(sync.join(code))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("MVR_SYNC", "échec du crochet MVR_SYNC_JOIN : ${e.syncMessage(ctx)}")
+            }
+        }
+    }
+
     // Bibliothèque MA ouverte depuis l'ACCUEIL (bouton, ou profil reçu sans show).
     var homeMaOpen by remember { mutableStateOf(false) }
     // « Compte & réglages » ouvert depuis l'ACCUEIL (bouton, carte) — écran plein
@@ -192,26 +229,14 @@ private fun App(
                 onOpenMaLibrary = { homeMaOpen = true },
                 onOpenAccountSettings = { homeAccountOpen = true },
                 sync = sync,
-                onOpenCloudProject = { project ->
-                    scope.launch {
-                        runCatching { sync.downloadMvr(project) }.getOrNull()?.let {
-                            vm.openBytes(it, project.name)
-                        }
-                    }
-                },
+                onOpenCloudProject = openCloudProject,
                 progress = vm.progress
             )
         is SceneViewModel.UiState.Loading ->
             HomeScreen(
                 state = s, modifier = modifier, onOpen = { uri: Uri -> vm.open(uri) },
                 sync = sync,
-                onOpenCloudProject = { project ->
-                    scope.launch {
-                        runCatching { sync.downloadMvr(project) }.getOrNull()?.let {
-                            vm.openBytes(it, project.name)
-                        }
-                    }
-                },
+                onOpenCloudProject = openCloudProject,
                 // Étapes nommées + pourcentage global du chargement (#4).
                 progress = vm.progress,
                 // « Fermer le projet » pendant la lecture : chargement annulé, accueil.
@@ -224,7 +249,13 @@ private fun App(
                 sync = sync,
                 maLibrary = vm.maLibrary,
                 maInbox = vm.maInbox,
-                onReopenBytes = { bytes, name -> vm.openBytes(bytes, name) },
+                // Nouvelle version rouverte : la copie locale (§9) est remplacée, puis rouverte.
+                onReopenBytes = { bytes, name ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) { com.minou.mvrviewer.ui.CloudDownloads.keep(ctx, bytes, name) }
+                        vm.openBytes(bytes, name)
+                    }
+                },
                 // OBJET 3D ouvert seul depuis l'accueil : la scène est vide, la
                 // vue 3D importe ce modèle au premier affichage.
                 initialModelUri = vm.pendingModelUri.value,

@@ -4,7 +4,20 @@ import androidx.compose.ui.res.pluralStringResource
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.minou.mvrviewer.sync.syncMessage
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,6 +66,7 @@ import com.minou.mvrviewer.R
  * Écran d'accueil : ouvrir un .mvr (Storage Access Framework) + liste des
  * PROJETS RÉCENTS pour rouvrir sans re-naviguer (équivalent de HomeView iOS).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     state: SceneViewModel.UiState,
@@ -70,7 +84,14 @@ fun HomeScreen(
     onCancelLoading: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showJoin by remember { mutableStateOf(false) }
+    /** Menu de ligne ouvert (id du projet partagé), confirmation en attente, action en cours, erreur lisible. */
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    var confirmation by remember { mutableStateOf<ModerationConfirmation?>(null) }
+    var moderationBusy by remember { mutableStateOf(false) }
+    var moderationError by remember { mutableStateOf<String?>(null) }
+    val reporter = rememberContentReporter()
     // Le MVR n'a pas de type MIME standard : on ouvre en "*/*".
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -167,27 +188,58 @@ fun HomeScreen(
                 }
                 // Synchro cloud : projets partagés.
                 if (sync != null) {
-                    // Projets partagés (cloud) : ouverts en un tap (comme iOS RootView).
+                    // Projet quitté ou supprimé depuis le menu de ligne, accès perdu
+                    // (SPEC-partage-moderation §5.12, §6.3) : le message, une fois.
+                    Box(Modifier.widthIn(max = 420.dp)) { ProjectNoticeBanner(sync) }
+                    moderationError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp).testTag("home.moderationError"))
+                    }
+                    // Projets partagés (cloud) : ouverts en un tap (comme iOS RootView) ;
+                    // APPUI LONG → menu de ligne (§6.1) : signaler ou quitter SANS
+                    // télécharger le projet (un contenu abusif n'a pas à être ouvert).
                     val projects by sync.cloudProjects.collectAsState()
+                    val auth by sync.auth.collectAsState()
                     if (projects.isNotEmpty()) {
-                        Text(stringResource(R.string.home_shared_projects), style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 20.dp, bottom = 4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 20.dp, bottom = 4.dp)) {
+                            Text(stringResource(R.string.home_shared_projects), style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (moderationBusy) {
+                                val label = stringResource(R.string.sync_moderation_progress)
+                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(start = 8.dp)
+                                    .size(16.dp).semantics { contentDescription = label }.testTag("home.moderationBusy"))
+                            }
+                        }
                         LazyColumn(modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth().heightIn(max = 170.dp)) {
                             items(projects, key = { it.id }) { p ->
                                 HorizontalDivider()
-                                Row(verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().clickable { onOpenCloudProject(p) }
-                                        .padding(vertical = 12.dp)) {
-                                    Icon(Icons.Filled.CloudDownload, contentDescription = null,
-                                        modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                                        Text(p.name, style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(pluralStringResource(R.plurals.home_members_version, p.memberUids.size, p.memberUids.size, p.mvrVersion),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Box {
+                                    Row(verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                            .combinedClickable(
+                                                enabled = !moderationBusy,
+                                                onClick = { onOpenCloudProject(p) },
+                                                onLongClick = { menuFor = p.id }
+                                            )
+                                            .padding(vertical = 12.dp)
+                                            .testTag("home.cloudProject.${p.id}")) {
+                                        Icon(Icons.Filled.CloudDownload, contentDescription = null,
+                                            modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                            Text(p.name, style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(pluralStringResource(R.plurals.home_members_version, p.memberUids.size, p.memberUids.size, p.mvrVersion),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
                                     }
+                                    val account = auth.accountOrNull
+                                    if (account != null) CloudRowMenu(
+                                        p, account, expanded = menuFor == p.id, onDismiss = { menuFor = null },
+                                        onReport = { menuFor = null; reporter.report(ctx, p, account) },
+                                        onConfirm = { menuFor = null; confirmation = it }
+                                    )
                                 }
                             }
                         }
@@ -261,10 +313,75 @@ fun HomeScreen(
             if (showJoin) JoinProjectDialog(sync, onDismiss = { showJoin = false }) { project ->
                 onOpenCloudProject(project)
             }
+            // Quitter ou supprimer depuis le menu de ligne (GRATUIT, §10) : le message vient
+            // du ViewModel (bandeau ci-dessus), l'erreur lisible s'affiche au-dessus (§7).
+            confirmation?.let { c ->
+                ModerationConfirmDialog(c, onDismiss = { confirmation = null }, onConfirm = {
+                    if (!moderationBusy) {
+                        moderationBusy = true
+                        moderationError = null
+                        scope.launch {
+                            try {
+                                when (c) {
+                                    is ModerationConfirmation.Leave -> sync.leaveProject(c.project)
+                                    is ModerationConfirmation.Delete -> sync.deleteProject(c.project)
+                                    is ModerationConfirmation.NewCode, is ModerationConfirmation.Remove -> Unit
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                moderationError = e.syncMessage(ctx)
+                            } finally {
+                                moderationBusy = false
+                            }
+                        }
+                    }
+                })
+            }
+            reporter.Fallback()
         }
     }
 }
 
+
+/**
+ * Menu de ligne de « Projets partagés » (SPEC-partage-moderation §6.1), dans cet ordre :
+ * « Signaler un contenu… » ; « Quitter le projet… » (sauf propriétaire seul) ;
+ * « Supprimer le projet… » (propriétaire seulement, rouge). GRATUIT (§10).
+ */
+@Composable
+private fun CloudRowMenu(
+    p: com.minou.mvrviewer.sync.CloudProject, account: com.minou.mvrviewer.sync.AccountInfo,
+    expanded: Boolean, onDismiss: () -> Unit,
+    onReport: () -> Unit, onConfirm: (ModerationConfirmation) -> Unit
+) {
+    val unnamed = stringResource(R.string.sync_unnamed_member)
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.sync_report_content)) },
+            leadingIcon = { Icon(Icons.Outlined.Flag, contentDescription = null) },
+            onClick = onReport,
+            modifier = Modifier.testTag("home.menu.report")
+        )
+        ModerationConfirmation.leave(p, account.uid, unnamed)?.let { leave ->
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.sync_leave_project)) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
+                onClick = { onConfirm(leave) },
+                modifier = Modifier.testTag("home.menu.leave")
+            )
+        }
+        if (p.ownerUid == account.uid) {
+            val red = MaterialTheme.colorScheme.error
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.sync_delete_project), color = red) },
+                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = red) },
+                onClick = { onConfirm(ModerationConfirmation.Delete(p)) },
+                modifier = Modifier.testTag("home.menu.delete")
+            )
+        }
+    }
+}
 
 /** Carte d'invitation au compte — touche d'identité (voile jaune), une seule action. */
 @Composable

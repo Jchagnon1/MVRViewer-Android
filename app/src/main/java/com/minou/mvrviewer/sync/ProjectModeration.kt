@@ -221,6 +221,143 @@ class RemovedMembers(private val store: Store) {
     }
 }
 
+/** Une ligne de la liste des membres ou des personnes retirées (§6.2). */
+data class ProjectMemberRow(
+    val uid: String,
+    /** Nom affiché (§4) ; « Membre sans nom » à défaut ; homonymes suivis de « · » et des 4 premiers caractères de l'uid. */
+    val label: String,
+    val isMe: Boolean,
+    val isOwner: Boolean
+)
+
+/**
+ * Membres d'un projet partagé tels que la fenêtre « Partager le projet » et le menu de
+ * ligne de « Projets partagés » les montrent (§6.1-6.3) — calcul PUR, même règle qu'iOS
+ * (`ProjectMembers`). Le nom vient de `memberNames` (jamais du profil d'un autre compte).
+ * [unnamed] = « Membre sans nom » dans la langue de l'interface.
+ */
+object ProjectMembers {
+    /** Membres de `memberUids` : propriétaire d'abord, puis par nom. */
+    fun rows(p: CloudProject, me: String, unnamed: String): List<ProjectMemberRow> {
+        val uids = p.memberUids.distinct()
+        val names = p.memberNames.orEmpty()
+        val labels = labelled(uids, unnamed) { names[it] }
+        return uids.map { ProjectMemberRow(it, labels[it] ?: unnamed, it == me, it == p.ownerUid) }
+            .sortedWith(compareBy<ProjectMemberRow> { !it.isOwner }.then(byLabel))
+    }
+
+    /**
+     * Personnes retirées (`bannedUids`) : le nom vient de la table LOCALE de l'appareil qui
+     * a fait le retrait (§5.5), sinon « Membre sans nom ».
+     */
+    fun removedRows(p: CloudProject, localNames: Map<String, String>, unnamed: String): List<ProjectMemberRow> {
+        val uids = p.bannedUids.orEmpty().filter { it !in p.memberUids }.distinct()
+        val labels = labelled(uids, unnamed) { localNames[it] }
+        return uids.map { ProjectMemberRow(it, labels[it] ?: unnamed, isMe = false, isOwner = false) }.sortedWith(byLabel)
+    }
+
+    /** Nom affiché d'un membre (homonymes compris) — titre de « Retirer… », héritier, propriétaire du signalement. */
+    fun label(uid: String, p: CloudProject, unnamed: String): String =
+        rows(p, "", unnamed).firstOrNull { it.uid == uid }?.label
+            ?: p.memberNames?.get(uid)?.trim()?.takeIf { it.isNotEmpty() } ?: unnamed
+
+    /** HÉRITIER de la propriété si le propriétaire [me] quitte (§5.4) : le premier autre membre, donc le plus ancien. */
+    fun heir(p: CloudProject, me: String): String? = p.memberUids.firstOrNull { it != me }
+
+    /** Propriétaire SEUL : pas de « Quitter », seulement « Supprimer le projet ». */
+    fun isOwnerAlone(p: CloudProject, me: String): Boolean = p.ownerUid == me && heir(p, me) == null
+
+    /** Ordre « par nom » : sans tenir compte de la casse ni des accents, puis l'uid (ordre stable). */
+    private val byLabel: Comparator<ProjectMemberRow> = run {
+        val collator = java.text.Collator.getInstance().apply { strength = java.text.Collator.PRIMARY }
+        Comparator<ProjectMemberRow> { a, b -> collator.compare(a.label, b.label) }.thenBy { it.uid }
+    }
+
+    /**
+     * Libellés uid → nom, avec la règle des HOMONYMES (§4) : un nom porté par plusieurs
+     * comptes de la liste (« Membre sans nom » compris) est suivi de « · » et des 4
+     * premiers caractères de l'uid, en majuscules.
+     */
+    private fun labelled(uids: List<String>, unnamed: String, name: (String) -> String?): Map<String, String> {
+        val base = uids.associateWith { uid -> name(uid)?.trim()?.takeIf { it.isNotEmpty() } ?: unnamed }
+        val count = base.values.groupingBy { it }.eachCount()
+        return base.mapValues { (uid, n) -> if ((count[n] ?: 0) > 1) "$n · ${uid.take(4).uppercase()}" else n }
+    }
+}
+
+/**
+ * SIGNALER UN CONTENU (SPEC-partage-moderation §5.7, §6.5) — gratuit, tout membre, sans
+ * aucune écriture : un e-mail PRÉREMPLI vers l'assistance, jamais envoyé par l'app
+ * (l'utilisateur l'envoie, le corrige ou l'abandonne dans sa messagerie). Calcul pur,
+ * testé en JVM sur les vrais strings.xml : [make] reçoit le résolveur de textes.
+ */
+data class ContentReport(
+    val projectName: String,
+    val projectId: String,
+    val subject: String,
+    val body: String
+) {
+    /** `mailto:` (RFC 6068) : objet et corps encodés en entier (seuls les caractères non réservés ASCII restent tels quels — un « & » ou un « = » dans le nom du projet ne coupe jamais l'adresse), lignes en CRLF. */
+    val mailto: String
+        get() {
+            val crlf = body.replace("\r\n", "\n").replace("\n", "\r\n")
+            return "mailto:$ADDRESS?subject=${encode(subject)}&body=${encode(crlf)}"
+        }
+
+    /** « Copier le signalement » (pas de messagerie) : l'objet puis le corps. */
+    val clipboardText: String get() = "$subject\n\n$body"
+
+    companion object {
+        /** Adresse de l'assistance : la SEULE du code ([com.minou.mvrviewer.LegalLinks.SUPPORT_EMAIL]). */
+        const val ADDRESS = com.minou.mvrviewer.LegalLinks.SUPPORT_EMAIL
+        /** Plateforme écrite dans le corps (« Application : MVR Viewer 1.10.0 (21) (Android) »). */
+        const val PLATFORM = "Android"
+
+        /**
+         * Le signalement du projet [p] par le compte [account], dans la langue de
+         * l'interface ([text] résout une ressource et ses arguments) : objet et corps du
+         * §6.5. Nom du signaleur = §4 (jamais l'e-mail complet ; il peut le corriger avant
+         * d'envoyer). [unnamedProject] = nom d'un projet sans nom.
+         */
+        fun make(
+            p: CloudProject, account: AccountInfo, version: String,
+            unnamedMember: String, unnamedProject: String,
+            text: (id: Int, args: List<Any>) -> String
+        ): ContentReport {
+            val name = p.name.ifBlank { unnamedProject }
+            val owner = ProjectMembers.label(p.ownerUid, p, unnamedMember)
+            val subject = text(R.string.sync_report_subject_fmt, listOf(name, p.id))
+            val lines = listOf(
+                text(R.string.sync_report_project_fmt, listOf(name)),
+                text(R.string.sync_report_project_id_fmt, listOf(p.id)),
+                text(R.string.sync_report_owner_fmt, listOf(owner)),
+                text(R.string.sync_report_name_fmt, listOf(ProjectNames.displayName(account))),
+                text(R.string.sync_report_account_fmt, listOf(account.email, account.uid)),
+                text(R.string.sync_report_app_fmt, listOf(version, PLATFORM)),
+                "",
+                text(R.string.sync_report_reasons, emptyList()),
+                "",
+                "",
+                text(R.string.sync_report_good_faith, emptyList())
+            )
+            return ContentReport(name, p.id, subject, lines.joinToString("\n"))
+        }
+
+        private const val UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+
+        /** Encodage « pourcent » UTF-8 de tout sauf les caractères non réservés (RFC 3986). */
+        fun encode(s: String): String {
+            val sb = StringBuilder()
+            for (b in s.toByteArray(Charsets.UTF_8)) {
+                val c = (b.toInt() and 0xFF)
+                if (c < 0x80 && UNRESERVED.indexOf(c.toChar()) >= 0) sb.append(c.toChar())
+                else sb.append('%').append("0123456789ABCDEF"[c shr 4]).append("0123456789ABCDEF"[c and 0xF])
+            }
+            return sb.toString()
+        }
+    }
+}
+
 /** Sur l'appareil : préférences `mvrviewer.sync.removedMembers`. */
 class PrefsRemovedMembersStore(context: Context) : RemovedMembers.Store {
     private val prefs = context.applicationContext

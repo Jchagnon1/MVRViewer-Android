@@ -446,8 +446,20 @@ object EmailAddress {
     }
 }
 
-/** Message AFFICHABLE d'une erreur de synchro, dans la langue du téléphone. */
-fun Throwable.syncMessage(ctx: android.content.Context): String {
-    val res = (this as? SyncException)?.messageRes
-    return if (res != null) ctx.getString(res) else message ?: ctx.getString(com.minou.mvrviewer.R.string.err_unknown)
+/**
+ * Message AFFICHABLE d'une erreur de synchro, dans la langue de l'app : le texte d'une
+ * [SyncException] ; une erreur réseau → le message réseau existant ; toute autre erreur →
+ * « Service de synchronisation indisponible. » — JAMAIS le texte brut d'un SDK
+ * (« Missing or insufficient permissions. », SPEC-partage-moderation §7).
+ */
+fun Throwable.syncMessage(ctx: android.content.Context): String = ctx.stringOr(syncMessageRes()) { message }
+
+/** Ressource du message de [syncMessage] (null : le texte propre d'une [SyncException.Message]). */
+internal fun Throwable.syncMessageRes(): Int? = when (this) {
+    is SyncException -> messageRes
+    is java.io.IOException -> com.minou.mvrviewer.R.string.sync_err_network
+    else -> com.minou.mvrviewer.R.string.sync_err_backend_unavailable
 }
+
+private inline fun android.content.Context.stringOr(res: Int?, fallback: () -> String?): String =
+    if (res != null) getString(res) else fallback() ?: getString(com.minou.mvrviewer.R.string.err_unknown)

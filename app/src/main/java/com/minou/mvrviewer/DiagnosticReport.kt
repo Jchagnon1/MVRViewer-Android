@@ -17,8 +17,8 @@ import androidx.core.content.FileProvider
  * testés en JVM (`DiagnosticReportTest`).
  */
 object DiagnosticReport {
-    /** Adresse publique de l'assistance (décision du 3 novembre 2026). */
-    const val SUPPORT_EMAIL = "support@mvrviewer.com"
+    /** Adresse publique de l'assistance (décision du 3 novembre 2026) : la constante unique de [LegalLinks]. */
+    const val SUPPORT_EMAIL = LegalLinks.SUPPORT_EMAIL
 
     /** « 1.10.0 (21) » ; le seul numéro connu s'il manque l'autre. */
     fun versionLabel(versionName: String?, versionCode: Long?): String {

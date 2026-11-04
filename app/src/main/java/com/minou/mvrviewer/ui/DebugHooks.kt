@@ -29,6 +29,11 @@ import android.content.Intent
  * - `MVR_FORCE_TABLET_LAYOUT=1` (tranche E) : applique le défaut TABLETTE (barre
  *   gauche préremplie) sur un téléphone, pour toute la vie du processus
  *   (`=0` le retire).
+ * - `MVR_SYNC_ACCOUNT=<e-mail>` (partage et modération) : AVEC `MVR_FORCE_LOCAL_SYNC`
+ *   seulement (jamais le vrai projet Firebase), connecte ce compte du bouchon local au
+ *   lancement, créé au besoin (nom affiché = partie avant « @ ») ;
+ * - `MVR_SYNC_JOIN=<code>` : après la connexion, rejoint le projet de ce code puis
+ *   l'ouvre (comme « Rejoindre un projet »).
  */
 object DebugHooks {
     @Volatile private var autoPlan = false
@@ -38,6 +43,8 @@ object DebugHooks {
     @Volatile private var autoPanels: ScenePanels? = null
     @Volatile private var autoSelect: String? = null
     @Volatile private var resetToolbars = false
+    @Volatile private var syncAccount: String? = null
+    @Volatile private var syncJoin: String? = null
     /** Défaut tablette forcé (lu par la scène à chaque composition, jamais consommé). */
     @Volatile var forceTabletLayout = false
         private set
@@ -59,6 +66,8 @@ object DebugHooks {
         intent.getStringExtra("MVR_AUTO_SELECT")?.trim()?.takeIf { it.isNotEmpty() }?.let { autoSelect = it }
         if (flag(intent, "MVR_RESET_TOOLBARS")) resetToolbars = true
         if (intent.hasExtra("MVR_FORCE_TABLET_LAYOUT")) forceTabletLayout = flag(intent, "MVR_FORCE_TABLET_LAYOUT")
+        intent.getStringExtra("MVR_SYNC_ACCOUNT")?.trim()?.takeIf { it.isNotEmpty() }?.let { syncAccount = it }
+        intent.getStringExtra("MVR_SYNC_JOIN")?.trim()?.takeIf { it.isNotEmpty() }?.let { syncJoin = it }
     }
 
     /** Booléen d'intent : `--ez X true` comme `--es X 1` / `true`. */
@@ -73,4 +82,6 @@ object DebugHooks {
     fun takeAutoPanels(): ScenePanels? = autoPanels.also { autoPanels = null }
     fun takeAutoSelect(): String? = autoSelect.also { autoSelect = null }
     fun takeResetToolbars(): Boolean = resetToolbars.also { resetToolbars = false }
+    fun takeSyncAccount(): String? = syncAccount.also { syncAccount = null }
+    fun takeSyncJoin(): String? = syncJoin.also { syncJoin = null }
 }

@@ -42,6 +42,13 @@ object LegalLinks {
     const val BASE_URL = "https://mvrviewer.com"
 
     /**
+     * Adresse de l'assistance (celle de la page /support), SEULE occurrence dans le
+     * code : rapport de diagnostic ([DiagnosticReport]) et signalement d'un contenu
+     * ([com.minou.mvrviewer.sync.ContentReport], SPEC-partage-moderation §6.5).
+     */
+    const val SUPPORT_EMAIL = "support@mvrviewer.com"
+
+    /**
      * Vrai si [language] (« fr », « fr-CA », « fr_FR »…) est du français.
      */
     fun isFrench(language: String): Boolean =

@@ -459,8 +459,15 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     /** Nouveau code (§5.2, N2) : l'ancien ne fait plus entrer personne. */
     suspend fun rotateInviteCode(projectId: String): String {
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
-        return service.rotateInviteCode(projectId).also { applyCodeResult(ShareCodeResult(projectId, it)) }
+        return committed { service.rotateInviteCode(projectId).also { applyCodeResult(ShareCodeResult(projectId, it)) } }
     }
+
+    /**
+     * Une action de modération va jusqu'au bout dans [viewModelScope] : la fenêtre qui
+     * l'a lancée peut disparaître (rotation) sans couper une suppression en lots ni
+     * laisser l'état du ViewModel à moitié à jour ; l'appelant n'attend que le résultat.
+     */
+    private suspend fun <T> committed(block: suspend () -> T): T = viewModelScope.async { block() }.await()
 
     /**
      * Quitter (§5.4) : le projet quitté se détache aussitôt (écouteurs, envois) ; le
@@ -468,29 +475,33 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun leaveProject(project: CloudProject) {
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
-        expectedDepartures += project.id
-        try {
-            service.leaveProject(project.id)
-            if (_currentProject.value?.id == project.id) dropCurrentProject()
-        } finally {
-            expectedDepartures -= project.id
+        committed {
+            expectedDepartures += project.id
+            try {
+                service.leaveProject(project.id)
+                if (_currentProject.value?.id == project.id) dropCurrentProject()
+            } finally {
+                expectedDepartures -= project.id
+            }
+            _projectNotice.value = ProjectNotice(project.id, project.name, ProjectNotice.Kind.LEFT)
+            refreshProjects()
         }
-        _projectNotice.value = ProjectNotice(project.id, project.name, ProjectNotice.Kind.LEFT)
-        refreshProjects()
     }
 
     /** Supprimer le projet pour tout le monde (§5.9) — propriétaire. */
     suspend fun deleteProject(project: CloudProject) {
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
-        expectedDepartures += project.id
-        try {
-            service.deleteProject(project.id)
-            if (_currentProject.value?.id == project.id) dropCurrentProject()
-        } finally {
-            expectedDepartures -= project.id
+        committed {
+            expectedDepartures += project.id
+            try {
+                service.deleteProject(project.id)
+                if (_currentProject.value?.id == project.id) dropCurrentProject()
+            } finally {
+                expectedDepartures -= project.id
+            }
+            _projectNotice.value = ProjectNotice(project.id, project.name, ProjectNotice.Kind.DELETED)
+            refreshProjects()
         }
-        _projectNotice.value = ProjectNotice(project.id, project.name, ProjectNotice.Kind.DELETED)
-        refreshProjects()
     }
 
     /**
@@ -502,27 +513,31 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         val known = _currentProject.value?.takeIf { it.id == projectId }
             ?: _cloudProjects.value.firstOrNull { it.id == projectId }
         val name = known?.memberNames?.get(uid)
-        service.removeMember(projectId, uid)
-        if (name != null) removedMembers.record(projectId, uid, name)
-        val cp = _currentProject.value
-        if (cp != null && cp.id == projectId) {
-            _currentProject.value = cp.copy(
-                memberUids = cp.memberUids - uid,
-                bannedUids = cp.bannedUids.orEmpty().let { if (uid in it) it else it + uid },
-                memberNames = cp.memberNames?.minus(uid)
-            )
+        committed {
+            service.removeMember(projectId, uid)
+            if (name != null) removedMembers.record(projectId, uid, name)
+            val cp = _currentProject.value
+            if (cp != null && cp.id == projectId) {
+                _currentProject.value = cp.copy(
+                    memberUids = cp.memberUids - uid,
+                    bannedUids = cp.bannedUids.orEmpty().let { if (uid in it) it else it + uid },
+                    memberNames = cp.memberNames?.minus(uid)
+                )
+            }
+            refreshProjects()
         }
-        refreshProjects()
     }
 
     /** Autoriser à revenir (§5.6) : la personne rejoindra avec le code courant. */
     suspend fun allowBack(uid: String, projectId: String) {
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
-        service.allowBack(projectId, uid)
-        val cp = _currentProject.value
-        if (cp != null && cp.id == projectId) _currentProject.value = cp.copy(bannedUids = cp.bannedUids?.minus(uid))
-        removedMembers.forget(projectId, uid)
-        refreshProjects()
+        committed {
+            service.allowBack(projectId, uid)
+            val cp = _currentProject.value
+            if (cp != null && cp.id == projectId) _currentProject.value = cp.copy(bannedUids = cp.bannedUids?.minus(uid))
+            removedMembers.forget(projectId, uid)
+            refreshProjects()
+        }
     }
 
     /** Noms des personnes que J'AI retirées de ce projet (table locale, §5.5). */
@@ -863,6 +878,25 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         catch (e: Exception) { signUp(email, password, email) }
     }
 
+    /**
+     * Crochet de TEST `MVR_SYNC_ACCOUNT` (app débogable, backend LOCAL seulement — jamais
+     * le vrai projet Firebase) : se connecter à [email], compte créé au besoin avec le mot
+     * de passe d'essai du bouchon ; son nom affiché est la partie avant « @ » (§4). Rend
+     * faux si le backend n'est pas le bouchon local.
+     */
+    suspend fun debugSignInLocal(email: String): Boolean {
+        if (BackendSelector.firebaseAvailable(ctx)) return false
+        if (_auth.value.accountOrNull?.email == email) return true
+        runCatching { service.signOut() }
+        stopObserving()
+        cancelOpenMaintenance()
+        _auth.value = AuthState.SignedOut
+        _currentProject.value = null
+        _cloudProjects.value = emptyList()
+        signInOrSignUp(email, DEBUG_LOCAL_PASSWORD)
+        return true
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopObserving()
@@ -875,6 +909,9 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 }
+
+/** Mot de passe d'essai des comptes du bouchon LOCAL créés par le crochet `MVR_SYNC_ACCOUNT` (aucun compte réel). */
+private const val DEBUG_LOCAL_PASSWORD = "essai-local-1234"
 
 /** Lecture de la taille d'un blob 3D de type MA (hors ligne : échec rapide, pas 10 min). */
 private const val BLOB_METADATA_TIMEOUT_MS = 20_000L

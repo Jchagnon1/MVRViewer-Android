@@ -269,6 +269,11 @@ object SectionCodec {
 
     // ---- Docs Firestore : CloudProject / AuditEntry ↔ Map ------------------
 
+    /**
+     * Document ENTIER du projet — écrit seulement à la création (J1). Les champs
+     * facultatifs nuls sont OMIS (comme les Optionals Swift) : la règle de création
+     * n'accepte que des clés connues, `bannedUids` vide, `memberNames` = mon nom seul.
+     */
     fun projectToMap(p: CloudProject): Map<String, Any?> = buildMap {
         put("id", p.id)
         put("contentKey", p.contentKey)
@@ -279,12 +284,19 @@ object SectionCodec {
         p.mvrBlobSHA?.let { put("mvrBlobSHA", it) }
         p.refPlanBlobSHA?.let { put("refPlanBlobSHA", it) }
         put("updatedAtEpoch", p.updatedAtEpoch)
+        p.inviteCode?.let { put("inviteCode", it) }
+        p.bannedUids?.let { put("bannedUids", it) }
+        p.memberNames?.let { put("memberNames", it) }
     }
 
+    /**
+     * Lecture TOLÉRANTE (projets anciens sans les champs du partage, clés inconnues
+     * comme `joinProof` ignorées). `memberNames` peut arriver en `Map` (Firestore) ou
+     * en `JSONObject` (bouchon local) ; une valeur non textuelle est ignorée.
+     */
     fun projectFromMap(map: Map<String, Any?>?): CloudProject? {
         map ?: return null
         val id = map["id"] as? String ?: return null
-        @Suppress("UNCHECKED_CAST")
         val members = (map["memberUids"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
         return CloudProject(
             id = id,
@@ -295,8 +307,22 @@ object SectionCodec {
             mvrVersion = (map["mvrVersion"] as? Number)?.toInt() ?: 1,
             mvrBlobSHA = map["mvrBlobSHA"] as? String,
             refPlanBlobSHA = map["refPlanBlobSHA"] as? String,
-            updatedAtEpoch = (map["updatedAtEpoch"] as? Number)?.toDouble() ?: 0.0
+            updatedAtEpoch = (map["updatedAtEpoch"] as? Number)?.toDouble() ?: 0.0,
+            inviteCode = map["inviteCode"] as? String,
+            bannedUids = (map["bannedUids"] as? List<*>)?.filterIsInstance<String>(),
+            memberNames = stringMap(map["memberNames"])
         )
+    }
+
+    /** Carte texte → texte depuis un `Map` Firestore ou un `JSONObject` ; null si absente. */
+    private fun stringMap(raw: Any?): Map<String, String>? = when (raw) {
+        is Map<*, *> -> buildMap {
+            for ((k, v) in raw) if (k is String && v is String) put(k, v)
+        }
+        is JSONObject -> buildMap {
+            raw.keys().forEach { k -> (raw.opt(k) as? String)?.let { put(k, it) } }
+        }
+        else -> null
     }
 
     // Les coordonnées machine sont OMISES si nulles : une entrée ancienne relue

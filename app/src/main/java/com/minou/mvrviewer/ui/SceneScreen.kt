@@ -2,6 +2,7 @@ package com.minou.mvrviewer.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -1613,13 +1614,18 @@ fun SceneScreen(
             // Bannière « nouvelle version → rouvrir » : SOUS la rangée du haut, jamais
             // sur ← ni sur ⋯ (§3.1) ; elle peut couvrir le bloc d'état et la pastille
             // le temps qu'on y réponde.
+            // Dessous : le bandeau d'APPARTENANCE (accès perdu, projet quitté ou supprimé —
+            // SPEC-partage-moderation §5.12), même place, même règle.
             Box(Modifier.align(Alignment.TopCenter).padding(top = 54.dp)) {
-                MvrVersionBanner(sync) { notice ->
-                    scope.launch {
-                        val bytes = runCatching { sync.downloadMvr(notice.sha256, notice.projectId) }.getOrNull()
-                        sync.consumePendingVersion()
-                        if (bytes != null) onReopenBytes(bytes, fileName)
+                Column {
+                    MvrVersionBanner(sync) { notice ->
+                        scope.launch {
+                            val bytes = runCatching { sync.downloadMvr(notice.sha256, notice.projectId) }.getOrNull()
+                            sync.consumePendingVersion()
+                            if (bytes != null) onReopenBytes(bytes, fileName)
+                        }
                     }
+                    ProjectNoticeBanner(sync)
                 }
             }
 

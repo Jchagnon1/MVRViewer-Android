@@ -950,6 +950,15 @@
     <string name="sync_err_too_many_requests">Too many attempts. Wait a few minutes, then try again.</string>
     <string name="sync_copy_code">Copy the code</string>
     <string name="sync_code_copied">Code copied</string>
+    <!-- Partage et modération (SPEC-partage-moderation §6.4, §7) -->
+    <string name="sync_err_action_refused">Action refused: you may no longer be the owner or a member of this project.</string>
+    <string name="sync_err_join_refused">This code no longer works, or you no longer have access to this project. Ask the owner for a new code.</string>
+    <string name="sync_notice_access_lost_fmt">You no longer have access to the project “%1$s”: it was deleted or you were removed. The file stays open on this device, without updates.</string>
+    <string name="sync_notice_left_fmt">You left the project “%1$s”.</string>
+    <string name="sync_notice_deleted_fmt">Project “%1$s” deleted.</string>
+    <string name="sync_code_adopted">This project now has a single code: codes shared before no longer work.</string>
+    <string name="sync_code_replaced_fmt">New code created: %1$s.</string>
+    <string name="sync_ask_owner_for_code">Ask the project owner for the code.</string>
     <string name="licenses_title">Notices &amp; licences</string>
     <string name="licenses_search">Search for a component</string>
     <string name="licenses_clear_search">Clear the search</string>

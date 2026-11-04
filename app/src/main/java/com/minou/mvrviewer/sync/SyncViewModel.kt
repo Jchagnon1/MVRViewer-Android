@@ -71,6 +71,24 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     private val _events = MutableSharedFlow<RemoteEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<RemoteEvent> = _events.asSharedFlow()
 
+    /**
+     * Message d'APPARTENANCE en attente (accès perdu, projet quitté ou supprimé —
+     * SPEC-partage-moderation §5.12, §6.3) ; l'interface l'efface une fois montré
+     * ([consumeProjectNotice]).
+     */
+    private val _projectNotice = MutableStateFlow<ProjectNotice?>(null)
+    val projectNotice: StateFlow<ProjectNotice?> = _projectNotice.asStateFlow()
+    /** Code courant changé par la vérification (§5.2) ; montré puis effacé par « Partager le projet ». */
+    private val _shareCodeNotice = MutableStateFlow<ShareCodeNotice?>(null)
+    val shareCodeNotice: StateFlow<ShareCodeNotice?> = _shareCodeNotice.asStateFlow()
+
+    /** Projets que JE quitte ou supprime en ce moment : leur perte d'accès n'est pas « vous en avez été retiré ». */
+    private val expectedDepartures = HashSet<String>()
+    /** Mise à jour de l'ouverture d'un projet partagé (mon nom, code courant), en tâche de fond. */
+    private var openMaintenanceJob: Job? = null
+    /** Personnes que j'ai retirées : uid → nom, sur CET appareil seulement (§5.5). */
+    private val removedMembers = RemovedMembers(PrefsRemovedMembersStore(ctx))
+
     val backendLabel: String get() = BackendSelector.activeBackendLabel(ctx)
     val isCurrentProjectShared: Boolean get() = _currentProject.value != null
 
@@ -209,9 +227,12 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching { service.signOut() }
             stopObserving()
+            cancelOpenMaintenance()
             _auth.value = AuthState.SignedOut
             _currentProject.value = null
             _cloudProjects.value = emptyList()
+            _projectNotice.value = null
+            _shareCodeNotice.value = null
             com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
             com.minou.mvrviewer.ui.ProAccess.clearAccount()
         }
@@ -257,9 +278,12 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     /** État local « déconnecté » : identifiants de reconnexion silencieuse effacés, projets cloud oubliés. */
     private fun clearSignedInState() {
         runCatching { SyncCredentialStore.clear(ctx) }
+        cancelOpenMaintenance()
         _auth.value = AuthState.SignedOut
         _currentProject.value = null
         _cloudProjects.value = emptyList()
+        _projectNotice.value = null
+        _shareCodeNotice.value = null
         com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
         com.minou.mvrviewer.ui.ProAccess.clearAccount()
     }
@@ -278,11 +302,13 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             currentMvrBytes = mvrBytes
             currentMvrSha = null
             stopObserving()
+            cancelOpenMaintenance()
             _currentProject.value = null
             loadAndMergeAudit() // journal local dispo même sans compte
             if (_auth.value.isSignedIn) {
                 runCatching { projectForOpenedDocument(contentKey) }.getOrNull()?.let {
                     setCurrentProject(it)
+                    startOpenMaintenance(it)
                     loadAndMergeAudit()
                 }
             }
@@ -292,7 +318,46 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun reattachAfterAuth() {
         val key = currentContentKey ?: return
-        runCatching { projectForOpenedDocument(key) }.getOrNull()?.let { setCurrentProject(it) }
+        runCatching { projectForOpenedDocument(key) }.getOrNull()?.let {
+            setCurrentProject(it)
+            startOpenMaintenance(it)
+        }
+    }
+
+    /**
+     * Ouverture d'un projet partagé (SPEC-partage-moderation §5.11), SANS bloquer
+     * l'ouverture : mon nom dans le projet s'il manque ou a changé (§5.8) — pris tout de
+     * suite pour signer le journal (§5.14), écrit avant les entrées qui suivront — et,
+     * chez le propriétaire, le code courant vérifié (§5.2). Erreurs ignorées. GRATUIT.
+     */
+    private fun startOpenMaintenance(p: CloudProject) {
+        val me = _auth.value.accountOrNull ?: return
+        ProjectMembership.nameToWrite(p, me)?.let { name ->
+            val cp = _currentProject.value
+            if (cp != null && cp.id == p.id) {
+                _currentProject.value = cp.copy(memberNames = cp.memberNames.orEmpty() + (me.uid to name))
+            }
+        }
+        openMaintenanceJob?.cancel()
+        openMaintenanceJob = viewModelScope.launch {
+            ProjectMembership.openMaintenance(service, p, me)?.let { applyCodeResult(it) }
+        }
+    }
+
+    private fun cancelOpenMaintenance() {
+        openMaintenanceJob?.cancel()
+        openMaintenanceJob = null
+    }
+
+    /** Le code rendu par une vérification ou une rotation devient celui du projet courant ; un changement non demandé est annoncé (§5.2). */
+    private fun applyCodeResult(result: ShareCodeResult) {
+        val code = result.code
+        val cp = _currentProject.value
+        if (code != null && cp != null && cp.id == result.projectId && cp.inviteCode != code) {
+            _currentProject.value = cp.copy(inviteCode = code)
+        }
+        val change = result.change
+        if (change != null && code != null) _shareCodeNotice.value = ShareCodeNotice(result.projectId, code, change)
     }
 
     /** Projet cloud du document ouvert : voir [DownloadedProjects]. */
@@ -301,6 +366,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     fun detach() {
         stopObserving()
+        cancelOpenMaintenance()
         _currentProject.value = null
         currentContentKey = null
         currentMvrBytes = null
@@ -319,7 +385,14 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     // MARK: - Publier / rejoindre
 
-    suspend fun publishCurrentProject(name: String): InviteCode {
+    /**
+     * Publie le .mvr ouvert (SPEC-partage-moderation §5.1, [SharePublisher]) : NOUVEAU
+     * projet = projet + invitation dans un lot attendu ; projet EXISTANT = aucune
+     * invitation créée, le code est celui du projet (vérifié chez le propriétaire ; null
+     * pour un membre d'un projet ancien : « Demandez le code au propriétaire du
+     * projet. »). Garde Pro inchangée.
+     */
+    suspend fun publishCurrentProject(name: String): ShareCodeResult {
         // Partager = ouvrir SON projet à l'équipe : édition. Rejoindre reste gratuit.
         if (!com.minou.mvrviewer.ui.ProAccess.gate("partager un projet") {}) throw SyncException.Message("Version Pro requise")
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
@@ -329,34 +402,152 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         if (key == null || data == null || sha == null) throw SyncException.Message(ctx.getString(com.minou.mvrviewer.R.string.sync_err_no_open_project))
         _status.value = SyncStatus.Syncing
         try {
-            val project = runCatching { projectForOpenedDocument(key) }.getOrNull()
-                ?: service.createProject(key, name)
-            setCurrentProject(project)
-            if (!service.blobExists(project.id, sha)) {
-                _status.value = SyncStatus.Uploading(0.0)
-                service.uploadBlob(project.id, sha, BlobKind.MVR, data) { p ->
-                    _status.value = SyncStatus.Uploading(p)
+            val existing = runCatching { projectForOpenedDocument(key) }.getOrNull()
+            val published = SharePublisher(service).publish(
+                existing, key, name, sha, data,
+                onProject = { setCurrentProject(it) },
+                onUploading = { p -> _status.value = SyncStatus.Uploading(p) },
+                onVersion = { project, version ->
+                    // Notre version devient celle du projet courant (sinon il resterait à la
+                    // version d'avant), si son événement ne l'a pas déjà fait.
+                    if (_currentProject.value?.id == project.id) {
+                        advanceMvrVersion(version, sha, _auth.value.accountOrNull?.uid ?: "")
+                    }
                 }
-            }
-            val version = service.publishMVRVersion(project.id, sha)
-            // Notre version devient celle du projet courant (sinon il resterait à la version
-            // d'avant), si son événement ne l'a pas déjà fait.
-            if (_currentProject.value?.id == project.id) {
-                advanceMvrVersion(version, sha, _auth.value.accountOrNull?.uid ?: "")
-            }
-            val invite = service.createInvite(project.id)
+            )
+            applyCodeResult(published.code)
             refreshProjects()
-            return invite
+            return published.code
         } finally {
             _status.value = SyncStatus.Idle
         }
     }
 
+    /** Rejoint un projet par code (§5.3, gratuit : preuve du code et mon nom dans la même écriture). */
     suspend fun join(code: String): CloudProject {
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
         val p = service.joinProject(code)
         refreshProjects()
         return p
+    }
+
+    // MARK: - Partage et modération (SPEC-partage-moderation §5)
+    //
+    // GRATUITES (décision du 3/11/2026, §10) : aucune garde Pro, jamais par le filet
+    // `push` — elles portent sur l'APPARTENANCE et l'administration du projet, pas sur
+    // le contenu du show. Les refus des règles arrivent en [SyncException.ActionRefused],
+    // le hors-ligne en [SyncException.NetworkUnavailable] (rien n'est mis en file).
+
+    /** Efface le message d'appartenance une fois montré. */
+    fun consumeProjectNotice() { _projectNotice.value = null }
+
+    /** Efface le message de changement de code une fois montré par « Partager le projet ». */
+    fun consumeShareCodeNotice(notice: ShareCodeNotice) {
+        if (_shareCodeNotice.value == notice) _shareCodeNotice.value = null
+    }
+
+    /**
+     * Vérifie le code courant (§5.2) — chez le propriétaire, adoption, code disparu ou
+     * repris → nouveau code (annoncé par [shareCodeNotice]) ; chez un membre, le code lu
+     * (null : projet ancien).
+     */
+    suspend fun ensureCurrentCode(projectId: String): ShareCodeResult {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        return service.ensureCurrentCode(projectId).also { applyCodeResult(it) }
+    }
+
+    /** Nouveau code (§5.2, N2) : l'ancien ne fait plus entrer personne. */
+    suspend fun rotateInviteCode(projectId: String): String {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        return service.rotateInviteCode(projectId).also { applyCodeResult(ShareCodeResult(projectId, it)) }
+    }
+
+    /**
+     * Quitter (§5.4) : le projet quitté se détache aussitôt (écouteurs, envois) ; le
+     * fichier ouvert reste sur l'appareil. Message « Vous avez quitté le projet… ».
+     */
+    suspend fun leaveProject(project: CloudProject) {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        expectedDepartures += project.id
+        try {
+            service.leaveProject(project.id)
+            if (_currentProject.value?.id == project.id) dropCurrentProject()
+        } finally {
+            expectedDepartures -= project.id
+        }
+        _projectNotice.value = ProjectNotice(project.id, project.name, ProjectNotice.Kind.LEFT)
+        refreshProjects()
+    }
+
+    /** Supprimer le projet pour tout le monde (§5.9) — propriétaire. */
+    suspend fun deleteProject(project: CloudProject) {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        expectedDepartures += project.id
+        try {
+            service.deleteProject(project.id)
+            if (_currentProject.value?.id == project.id) dropCurrentProject()
+        } finally {
+            expectedDepartures -= project.id
+        }
+        _projectNotice.value = ProjectNotice(project.id, project.name, ProjectNotice.Kind.DELETED)
+        refreshProjects()
+    }
+
+    /**
+     * Retirer un membre (§5.5) = retrait + blocage. Son nom quitte le document partagé ;
+     * il reste dans une table LOCALE de cet appareil (liste « Personnes retirées »).
+     */
+    suspend fun removeMember(uid: String, projectId: String) {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        val known = _currentProject.value?.takeIf { it.id == projectId }
+            ?: _cloudProjects.value.firstOrNull { it.id == projectId }
+        val name = known?.memberNames?.get(uid)
+        service.removeMember(projectId, uid)
+        if (name != null) removedMembers.record(projectId, uid, name)
+        val cp = _currentProject.value
+        if (cp != null && cp.id == projectId) {
+            _currentProject.value = cp.copy(
+                memberUids = cp.memberUids - uid,
+                bannedUids = cp.bannedUids.orEmpty().let { if (uid in it) it else it + uid },
+                memberNames = cp.memberNames?.minus(uid)
+            )
+        }
+        refreshProjects()
+    }
+
+    /** Autoriser à revenir (§5.6) : la personne rejoindra avec le code courant. */
+    suspend fun allowBack(uid: String, projectId: String) {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        service.allowBack(projectId, uid)
+        val cp = _currentProject.value
+        if (cp != null && cp.id == projectId) _currentProject.value = cp.copy(bannedUids = cp.bannedUids?.minus(uid))
+        removedMembers.forget(projectId, uid)
+        refreshProjects()
+    }
+
+    /** Noms des personnes que J'AI retirées de ce projet (table locale, §5.5). */
+    fun removedMemberNames(projectId: String): Map<String, String> = removedMembers.names(projectId)
+
+    /**
+     * Plus d'accès au projet courant (§5.12) : écouteurs et envois arrêtés, projet courant
+     * vidé, message (sauf départ voulu), liste rafraîchie. Le fichier ouvert, ses réglages
+     * locaux et le journal local RESTENT.
+     */
+    private fun handleAccessLost(projectId: String) {
+        val lost = _currentProject.value?.takeIf { it.id == projectId } ?: return
+        dropCurrentProject()
+        if (projectId !in expectedDepartures) {
+            _projectNotice.value = ProjectNotice(projectId, lost.name, ProjectNotice.Kind.ACCESS_LOST)
+        }
+        viewModelScope.launch { refreshProjects() }
+    }
+
+    /** Détache le projet courant SANS fermer le document (contrairement à [detach]) : il reste ouvert, comme un fichier local. */
+    private fun dropCurrentProject() {
+        stopObserving()
+        cancelOpenMaintenance()
+        if (_pendingMvrVersion.value?.projectId == _currentProject.value?.id) _pendingMvrVersion.value = null
+        _currentProject.value = null
     }
 
     suspend fun downloadMvr(project: CloudProject): ByteArray {
@@ -381,9 +572,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         if (!_auth.value.isSignedIn) return null
         val sha = ContentHash.sha256Hex(interopBytes)
         return runCatching {
-            if (!service.blobExists(project.id, sha)) {
-                service.uploadBlob(project.id, sha, BlobKind.REF_PLAN, interopBytes, null)
-            }
+            // §5.15 : jamais d'écrasement ; un refus suivi d'un fichier présent est un succès.
+            ProjectBlobs.putIfAbsent(service, project.id, sha, BlobKind.REF_PLAN, interopBytes)
             sha
         }.getOrNull()
     }
@@ -395,7 +585,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     private val fixtureUploader = FixtureBlobUploader(
         scope = viewModelScope,
         exists = { pid, sha -> service.blobExists(pid, sha) },
-        upload = { pid, sha, data -> service.uploadBlob(pid, sha, BlobKind.FIXTURE_3D, data, null) }
+        // §5.15 : appelé après un `exists` « absent » ; un refus suivi d'un fichier présent est un succès.
+        upload = { pid, sha, data -> ProjectBlobs.uploadAbsent(service, pid, sha, BlobKind.FIXTURE_3D, data) }
     )
 
     /**
@@ -544,9 +735,14 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     // MARK: - Journal de modifications (audit)
 
-    /** Auteur courant (compte connecté, sinon local hors-ligne). */
+    /**
+     * Auteur courant (SPEC-partage-moderation §5.14) : connecté, mon uid et MON nom dans
+     * le projet partagé (à défaut mon nom affiché, jamais l'e-mail complet) ; sinon
+     * « Moi (hors ligne) », entrée locale seulement.
+     */
     val currentAuthor: Pair<String, String>
-        get() = _auth.value.accountOrNull?.let { it.uid to it.displayName } ?: ("" to ctx.getString(com.minou.mvrviewer.R.string.sync_me_offline))
+        get() = ProjectMembership.author(_auth.value.accountOrNull, _currentProject.value,
+            ctx.getString(com.minou.mvrviewer.R.string.sync_me_offline))
 
     fun newAuditId(): String = UUID.randomUUID().toString()
     fun nowEpoch(): Double = System.currentTimeMillis() / 1000.0
@@ -602,7 +798,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     private fun startObserving(projectId: String) {
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
-            service.observe(projectId).collect { handleInbound(it) }
+            service.observe(projectId).collect { handleInbound(it, projectId) }
         }
     }
 
@@ -611,7 +807,14 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         observeJob = null
     }
 
-    private fun handleInbound(event: RemoteEvent) {
+    private fun handleInbound(event: RemoteEvent, projectId: String) {
+        // Un événement encore en route d'un projet détaché (quitté, retiré, autre show
+        // ouvert) n'a plus rien à appliquer.
+        if (_currentProject.value?.id != projectId) return
+        if (ProjectMembership.lostAccess(event, _auth.value.accountOrNull?.uid)) {
+            handleAccessLost(projectId)
+            return
+        }
         when (event) {
             is RemoteEvent.Section -> {
                 if (ourRecentOpIds.containsKey(event.change.opId)) return // notre écho
@@ -623,6 +826,12 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             }
             is RemoteEvent.MvrVersion -> advanceMvrVersion(event.version, event.sha256, event.updatedBy)
             is RemoteEvent.MembershipChanged -> viewModelScope.launch { refreshProjects() }
+            is RemoteEvent.ProjectUpdated -> {
+                val cp = _currentProject.value ?: return
+                val merged = ProjectMembership.merged(cp, event.project)
+                if (merged != cp) _currentProject.value = merged
+            }
+            is RemoteEvent.AccessLost -> handleAccessLost(projectId) // déjà traité par lostAccess
             is RemoteEvent.Audit -> {
                 val key = currentContentKey
                 _auditLog.value =

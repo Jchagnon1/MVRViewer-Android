@@ -70,21 +70,23 @@ class LocalSyncServiceAccountTest {
         val svc = service()
         val owner = svc.signUp("owner@example.com", "secret123", "Owner")
         val p = svc.createProject("key-1", "Projet partagé")
-        val invite = svc.createInvite(p.id)
+        val code = p.inviteCode!! // code courant posé à la création (§5.1)
         svc.signOut()
         val member = svc.signUp("member@example.com", "secret123", "Membre")
-        svc.joinProject(invite.code)
+        svc.joinProject(code)
         svc.signOut()
 
         svc.signIn("owner@example.com", "secret123")
         svc.deleteAccount("secret123")
 
         // Le projet survit pour l'autre membre, sans l'uid supprimé, et ce
-        // membre en devient le propriétaire (transfert de propriété).
+        // membre en devient le propriétaire (transfert de propriété). Lecture
+        // réservée aux membres (règle de lecture) : par le membre restant.
+        svc.signIn("member@example.com", "secret123")
         val kept = svc.project(p.id)!!
         assertEquals(listOf(member.uid), kept.memberUids)
         assertEquals(member.uid, kept.ownerUid)
-        svc.signIn("member@example.com", "secret123")
+        assertTrue(owner.uid !in kept.memberNames.orEmpty())
         assertEquals(listOf(p.id), svc.listProjects().map { it.id })
         assertTrue(owner.uid !in svc.listProjects().single().memberUids)
     }
@@ -93,13 +95,13 @@ class LocalSyncServiceAccountTest {
         val svc = service()
         val owner = svc.signUp("owner@example.com", "secret123", "Owner")
         val p = svc.createProject("key-1", "Projet partagé")
-        val invite = svc.createInvite(p.id)
+        val code = p.inviteCode!! // code courant posé à la création (§5.1)
         svc.signOut()
         val first = svc.signUp("first@example.com", "secret123", "Premier")
-        svc.joinProject(invite.code)
+        svc.joinProject(code)
         svc.signOut()
         val second = svc.signUp("second@example.com", "secret123", "Second")
-        svc.joinProject(invite.code)
+        svc.joinProject(code)
         svc.signOut()
 
         svc.signIn("owner@example.com", "secret123")
@@ -107,6 +109,7 @@ class LocalSyncServiceAccountTest {
 
         // Propriété au PREMIER autre membre (ordre de memberUids), les autres
         // membres conservés dans l'ordre, l'ancien propriétaire retiré.
+        svc.signIn("first@example.com", "secret123")
         val kept = svc.project(p.id)!!
         assertEquals(first.uid, kept.ownerUid)
         assertEquals(listOf(first.uid, second.uid), kept.memberUids)
@@ -114,7 +117,7 @@ class LocalSyncServiceAccountTest {
         // L'invitation créée par le compte supprimé n'existe plus.
         svc.signUp("late@example.com", "secret123", "Retardataire")
         assertThrows(SyncException.InviteInvalidOrExpired::class.java) {
-            runBlocking { svc.joinProject(invite.code) }
+            runBlocking { svc.joinProject(code) }
         }
     }
 
@@ -122,27 +125,28 @@ class LocalSyncServiceAccountTest {
         val svc = service()
         val owner = svc.signUp("owner@example.com", "secret123", "Owner")
         val p = svc.createProject("key-1", "Projet partagé")
-        val invite = svc.createInvite(p.id)
+        val code = p.inviteCode!! // code courant posé à la création (§5.1)
         svc.signOut()
         svc.signUp("member@example.com", "secret123", "Membre")
-        svc.joinProject(invite.code)
+        svc.joinProject(code)
 
         svc.deleteAccount("secret123")
 
         // Un simple membre qui part ne change pas le propriétaire ; l'invitation
         // du propriétaire reste valable.
+        svc.signIn("owner@example.com", "secret123")
         val kept = svc.project(p.id)!!
         assertEquals(owner.uid, kept.ownerUid)
         assertEquals(listOf(owner.uid), kept.memberUids)
         svc.signUp("other@example.com", "secret123", "Autre")
-        assertEquals(p.id, svc.joinProject(invite.code).id)
+        assertEquals(p.id, svc.joinProject(code).id)
     }
 
     @Test fun deleteAccountRemovesProjectsWhereSoleMember() = runBlocking<Unit> {
         val svc = service()
         val acc = svc.signUp("jm@example.com", "secret123", "JM")
         val p = svc.createProject("key-1", "Projet solo")
-        val invite = svc.createInvite(p.id)
+        val code = p.inviteCode!! // code courant posé à la création (§5.1)
         svc.appendAudit(p.id, listOf(AuditEntry(
             id = "a1", epoch = 1.0, authorUid = acc.uid, authorName = "JM", kind = "patch",
             target = "Projecteur 1", field = "Adresse", oldValue = "1.1", newValue = "1.2"
@@ -151,12 +155,16 @@ class LocalSyncServiceAccountTest {
         svc.deleteAccount("secret123")
 
         // Seul membre ET propriétaire : le projet disparaît entièrement (audit
-        // compris) et son code d'invitation ne mène plus nulle part.
+        // compris, illisible) et son code d'invitation ne mène plus nulle part ;
+        // une pierre tombale interdit de le recréer sous le même identifiant.
         assertNull(svc.project(p.id))
-        assertTrue(svc.fetchAudit(p.id).isEmpty())
         svc.signUp("other@example.com", "secret123", "Autre")
+        assertThrows(SyncException.ActionRefused::class.java) { runBlocking { svc.fetchAudit(p.id) } }
         assertThrows(SyncException.InviteInvalidOrExpired::class.java) {
-            runBlocking { svc.joinProject(invite.code) }
+            runBlocking { svc.joinProject(code) }
+        }
+        assertThrows(SyncException.ActionRefused::class.java) {
+            runBlocking { svc.createLegacyProject("key-1", "Recréé", id = p.id) }
         }
     }
 

@@ -25,18 +25,55 @@ data class AccountInfo(
  * Un projet cloud : identité stable d'équipe (`id`) + clé de réunion locale
  * (`contentKey` = empreinte FNV-1a du .mvr, == [ProjectStore.keyFor]) + pointeurs
  * de blobs + membres. Mappé 1:1 sur le doc Firestore `/projects/{id}`.
+ *
+ * Partage et modération (SPEC-partage-moderation.md §3.1) : [inviteCode],
+ * [bannedUids], [memberNames] sont OPTIONNELS — un projet ancien (écrit par un
+ * client d'avant) n'en a aucun et se lit inchangé. Le document n'est écrit en
+ * entier qu'à sa création (J1, [SectionCodec.projectToMap] omet les nuls) ;
+ * ensuite, seules des mises à jour CHAMP PAR CHAMP. `joinProof` n'est lu par
+ * aucun client (clé ignorée).
  */
 data class CloudProject(
     val id: String,
     val contentKey: String,
     val name: String,
     val ownerUid: String,
+    /** ORDRE D'ARRIVÉE (les règles le garantissent) : l'héritier de la propriété est le premier autre membre. */
     val memberUids: List<String>,
     val mvrVersion: Int,
     val mvrBlobSHA: String?,
     val refPlanBlobSHA: String?,
-    val updatedAtEpoch: Double
+    val updatedAtEpoch: Double,
+    /** Code COURANT : présent = projet « strict », seul ce code fait entrer ; absent = projet ancien. */
+    val inviteCode: String? = null,
+    /** Comptes retirés par le propriétaire : ne peuvent plus revenir. */
+    val bannedUids: List<String>? = null,
+    /** Nom affiché de chaque membre (uid → nom, 80 unités UTF-16 au plus) ; chacun n'écrit que le sien. */
+    val memberNames: Map<String, String>? = null
+) {
+    /** Projet « strict » (a un code courant). */
+    val isStrict: Boolean get() = inviteCode != null
+}
+
+/**
+ * Code de partage à afficher pour un projet (SPEC-partage-moderation §5.1, §5.2) —
+ * rendu par « Publier » et par la vérification du code courant.
+ * [code] null = projet ANCIEN vu par un membre non propriétaire (« Demandez le code
+ * au propriétaire du projet. ») ; [change] = ce que la vérification vient de changer
+ * (message à montrer une fois).
+ */
+data class ShareCodeResult(
+    val projectId: String,
+    val code: String?,
+    val change: ShareCodeChange? = null
 )
+
+enum class ShareCodeChange {
+    /** Projet ancien : il a maintenant un code courant (« Ce projet a maintenant un code unique… »). */
+    ADOPTED,
+    /** Code courant disparu (son auteur a supprimé son compte) ou repris par un autre projet : remplacé. */
+    REPLACED
+}
 
 /** Code d'invitation (partage par code court). */
 data class InviteCode(
@@ -49,7 +86,9 @@ data class InviteCode(
      * changé : ne pas le retirer d'un seul côté (iOS, site, règles).
      */
     val url: String,
-    val expiresAtEpoch: Double? = null
+    val expiresAtEpoch: Double? = null,
+    /** Auteur de l'invitation (champ `createdBy`) : la suppression de compte efface toutes les siennes. */
+    val createdBy: String? = null
 )
 
 enum class BlobKind(val raw: String) {
@@ -329,6 +368,17 @@ sealed class RemoteEvent {
     data class MvrVersion(val version: Int, val sha256: String, val updatedBy: String) : RemoteEvent()
     data class MembershipChanged(val memberUids: List<String>) : RemoteEvent()
     data class Audit(val entries: List<AuditEntry>) : RemoteEvent()
+    /**
+     * Nouvel état du document projet (écouteur J4) : membres, propriétaire, noms,
+     * bannis, code courant. Le ViewModel y lit son nom du projet (auteur du journal,
+     * §5.14) et y voit s'il n'est plus membre (§5.12).
+     */
+    data class ProjectUpdated(val project: CloudProject) : RemoteEvent()
+    /**
+     * Accès au projet perdu (§5.12) : écouteur refusé (`permission-denied`) ou
+     * document supprimé — retiré, ou projet supprimé.
+     */
+    data object AccessLost : RemoteEvent()
 }
 
 /**
@@ -366,6 +416,17 @@ sealed class SyncException(
     object InvalidEmail : SyncException("Adresse e-mail invalide.", com.minou.mvrviewer.R.string.sync_err_invalid_email)
     /** Trop de demandes rapprochées (Firebase les limite) : patienter. */
     object TooManyRequests : SyncException("Trop de tentatives. Patientez quelques minutes puis réessayez.", com.minou.mvrviewer.R.string.sync_err_too_many_requests)
+    /**
+     * Action de partage ou de modération refusée par les règles (`permission-denied`) :
+     * plus propriétaire, plus membre… (SPEC-partage-moderation §7). Jamais le texte
+     * brut du SDK.
+     */
+    object ActionRefused : SyncException("Action refusée : vous n'êtes peut-être plus propriétaire ou membre de ce projet.", com.minou.mvrviewer.R.string.sync_err_action_refused)
+    /**
+     * « Rejoindre » refusé (§5.3) : code ancien, compte retiré ou projet supprimé —
+     * indiscernables, et c'est voulu.
+     */
+    object JoinRefused : SyncException("Ce code ne fonctionne plus, ou vous n'avez plus accès à ce projet. Demandez un nouveau code au propriétaire.", com.minou.mvrviewer.R.string.sync_err_join_refused)
     class Message(msg: String) : SyncException(msg)
 }
 

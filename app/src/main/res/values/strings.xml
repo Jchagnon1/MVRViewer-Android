@@ -960,6 +960,15 @@
     <string name="sync_err_too_many_requests">Trop de tentatives. Patientez quelques minutes puis réessayez.</string>
     <string name="sync_copy_code">Copier le code</string>
     <string name="sync_code_copied">Code copié</string>
+    <!-- Partage et modération (SPEC-partage-moderation §6.4, §7) -->
+    <string name="sync_err_action_refused">Action refusée : vous n\'êtes peut-être plus propriétaire ou membre de ce projet.</string>
+    <string name="sync_err_join_refused">Ce code ne fonctionne plus, ou vous n\'avez plus accès à ce projet. Demandez un nouveau code au propriétaire.</string>
+    <string name="sync_notice_access_lost_fmt">Vous n\'avez plus accès au projet « %1$s » : il a été supprimé ou vous en avez été retiré. Le fichier reste ouvert sur cet appareil, sans mise à jour.</string>
+    <string name="sync_notice_left_fmt">Vous avez quitté le projet « %1$s ».</string>
+    <string name="sync_notice_deleted_fmt">Projet « %1$s » supprimé.</string>
+    <string name="sync_code_adopted">Ce projet a maintenant un code unique : les codes donnés avant ne fonctionnent plus.</string>
+    <string name="sync_code_replaced_fmt">Nouveau code créé : %1$s.</string>
+    <string name="sync_ask_owner_for_code">Demandez le code au propriétaire du projet.</string>
     <string name="licenses_title">Mentions et licences</string>
     <string name="licenses_search">Rechercher un composant</string>
     <string name="licenses_clear_search">Effacer la recherche</string>

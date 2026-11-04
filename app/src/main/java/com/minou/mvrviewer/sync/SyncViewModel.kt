@@ -76,6 +76,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private var currentContentKey: String? = null
     private var currentMvrBytes: ByteArray? = null
+    /** SHA-256 de [currentMvrBytes], calculé au plus une fois par document ([openedMvrSha]). */
+    private var currentMvrSha: String? = null
+    /** Lien « .mvr téléchargé → projet » ([projectForOpenedDocument]). */
+    private val downloadedProjects = DownloadedProjects(PrefsDownloadedProjectsStore(ctx))
 
     // Anti-écho : opId qu'on vient d'émettre (TTL 60 s) → on ignore leur retour.
     private val ourRecentOpIds = HashMap<String, Long>()
@@ -272,11 +276,12 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             currentContentKey = contentKey
             currentMvrBytes = mvrBytes
+            currentMvrSha = null
             stopObserving()
             _currentProject.value = null
             loadAndMergeAudit() // journal local dispo même sans compte
             if (_auth.value.isSignedIn) {
-                runCatching { service.projectMatchingContentKey(contentKey) }.getOrNull()?.let {
+                runCatching { projectForOpenedDocument(contentKey) }.getOrNull()?.let {
                     setCurrentProject(it)
                     loadAndMergeAudit()
                 }
@@ -287,14 +292,29 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun reattachAfterAuth() {
         val key = currentContentKey ?: return
-        runCatching { service.projectMatchingContentKey(key) }.getOrNull()?.let { setCurrentProject(it) }
+        runCatching { projectForOpenedDocument(key) }.getOrNull()?.let { setCurrentProject(it) }
     }
+
+    /** Projet cloud du document ouvert : voir [DownloadedProjects]. */
+    private suspend fun projectForOpenedDocument(contentKey: String): CloudProject? =
+        downloadedProjects.projectFor(service, contentKey, _auth.value.accountOrNull?.uid)
 
     fun detach() {
         stopObserving()
         _currentProject.value = null
         currentContentKey = null
         currentMvrBytes = null
+        currentMvrSha = null
+    }
+
+    /**
+     * Empreinte du .mvr ouvert, mise en cache : elle ne se calcule qu'à la publication ou à
+     * l'annonce d'une version plus récente (pas à chaque ouverture d'un gros show).
+     */
+    private fun openedMvrSha(): String? {
+        currentMvrSha?.let { return it }
+        val data = currentMvrBytes ?: return null
+        return ContentHash.sha256Hex(data).also { currentMvrSha = it }
     }
 
     // MARK: - Publier / rejoindre
@@ -303,21 +323,27 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         // Partager = ouvrir SON projet à l'équipe : édition. Rejoindre reste gratuit.
         if (!com.minou.mvrviewer.ui.ProAccess.gate("partager un projet") {}) throw SyncException.Message("Version Pro requise")
         if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
-        val key = currentContentKey; val data = currentMvrBytes
-        if (key == null || data == null) throw SyncException.Message(ctx.getString(com.minou.mvrviewer.R.string.sync_err_no_open_project))
+        // L'empreinte est prise AVANT toute suspension : c'est elle qui reconnaît l'écho de
+        // notre propre publication (handleInbound → MvrVersionRule).
+        val key = currentContentKey; val data = currentMvrBytes; val sha = openedMvrSha()
+        if (key == null || data == null || sha == null) throw SyncException.Message(ctx.getString(com.minou.mvrviewer.R.string.sync_err_no_open_project))
         _status.value = SyncStatus.Syncing
         try {
-            val project = runCatching { service.projectMatchingContentKey(key) }.getOrNull()
+            val project = runCatching { projectForOpenedDocument(key) }.getOrNull()
                 ?: service.createProject(key, name)
             setCurrentProject(project)
-            val sha = ContentHash.sha256Hex(data)
             if (!service.blobExists(project.id, sha)) {
                 _status.value = SyncStatus.Uploading(0.0)
                 service.uploadBlob(project.id, sha, BlobKind.MVR, data) { p ->
                     _status.value = SyncStatus.Uploading(p)
                 }
             }
-            service.publishMVRVersion(project.id, sha)
+            val version = service.publishMVRVersion(project.id, sha)
+            // Notre version devient celle du projet courant (sinon il resterait à la version
+            // d'avant), si son événement ne l'a pas déjà fait.
+            if (_currentProject.value?.id == project.id) {
+                advanceMvrVersion(version, sha, _auth.value.accountOrNull?.uid ?: "")
+            }
             val invite = service.createInvite(project.id)
             refreshProjects()
             return invite
@@ -342,7 +368,10 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         val pid = projectId ?: _currentProject.value?.id ?: throw SyncException.ProjectNotFound
         return service.downloadBlob(pid, BlobRef(sha256, BlobKind.MVR, 0, "")) { p ->
             _status.value = SyncStatus.Downloading(p)
-        }.also { _status.value = SyncStatus.Idle }
+        }.also {
+            downloadedProjects.remember(it, pid)
+            _status.value = SyncStatus.Idle
+        }
     }
 
     /** Téléverse le plan DXF (`refplan.bin`, format d'échange DXP1) ; renvoie le SHA. */
@@ -592,13 +621,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _events.tryEmit(event)
             }
-            is RemoteEvent.MvrVersion -> {
-                val cp = _currentProject.value
-                if (cp != null && event.version > cp.mvrVersion) {
-                    _pendingMvrVersion.value =
-                        MvrVersionNotice(cp.id, event.version, event.sha256, event.updatedBy)
-                }
-            }
+            is RemoteEvent.MvrVersion -> advanceMvrVersion(event.version, event.sha256, event.updatedBy)
             is RemoteEvent.MembershipChanged -> viewModelScope.launch { refreshProjects() }
             is RemoteEvent.Audit -> {
                 val key = currentContentKey
@@ -607,6 +630,15 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
                     else mergeAuditInMemory(event.entries)
             }
         }
+    }
+
+    /** Version du .mvr publiée ici ou reçue : voir [MvrVersionRule]. */
+    private fun advanceMvrVersion(version: Int, sha256: String, updatedBy: String) {
+        val r = MvrVersionRule.advance(
+            _currentProject.value, _pendingMvrVersion.value, version, sha256, updatedBy, ::openedMvrSha
+        ) ?: return
+        _currentProject.value = r.project
+        _pendingMvrVersion.value = r.notice
     }
 
     private fun pruneOpIds() {

@@ -135,6 +135,10 @@ interface SyncService {
      * MON NOM DANS LE PROJET (§5.8, N8) : `memberNames.<moi>` = [name] (tronqué à 80
      * unités UTF-16). Mis en file hors ligne (sans enjeu) : rend la main sans attendre
      * le serveur ; l'écriture part AVANT les entrées du journal envoyées ensuite.
+     * [name] est le nom affiché ([ProjectNames.displayName], bords déjà retirés par
+     * `trimEdges` AVANT la troncature) : ne pas le redécouper ici. Une troncature qui
+     * finit sur une espace la garde, et c'est cette valeur que [ProjectMembership.nameToWrite]
+     * compare au nom écrit (sinon §5.8 le réécrirait à chaque ouverture).
      */
     suspend fun setMyProjectName(projectId: String, name: String)
 

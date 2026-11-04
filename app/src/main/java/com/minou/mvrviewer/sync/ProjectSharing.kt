@@ -40,8 +40,36 @@ object ProjectNames {
     const val MAX_PROJECT_NAME = 200
 
     /**
-     * `nomAffiché` : `displayName` sans espaces aux bords ; vide ou ÉGAL à l'e-mail →
-     * la partie de l'e-mail avant « @ » ; tronqué à 80 unités UTF-16. Jamais l'e-mail
+     * « Sans espaces aux bords » (§4) : la liste EXACTE des 31 points de code retirés aux
+     * deux bords du nom ET de l'e-mail, la même sur les trois clients — la propriété
+     * Unicode `White_Space` (25 points) plus U+001C–U+001F, U+200B et U+FEFF, l'union de
+     * ce que retirent les `trim` standard. Ceux-ci différaient (mesuré, §4) : Kotlin
+     * `trim()` gardait U+0085, U+200B et U+FEFF, d'où un nom invisible (U+200B seul) ou
+     * « U+200B Bob » ici quand iOS donnait « Bob ». Rien d'autre : U+00AD, U+180E,
+     * U+200C, U+200D, U+2060 et les accents combinants restent. Tous du plan de base :
+     * une unité UTF-16 chacun, jamais une moitié de paire de substitution.
+     */
+    val edgeSpaces = setOf(0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x200B, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF)
+
+    /**
+     * [s] sans les caractères de [edgeSpaces] à ses deux bords (la formule Kotlin du §4),
+     * point de code par point de code, jamais par graphème. Jamais `trim()` pour un nom.
+     */
+    fun trimEdges(s: String) = s.trim { it.code in edgeSpaces }
+
+    /**
+     * Nom ENREGISTRÉ à l'inscription (profil Firebase Auth, `users/{uid}`, bouchon
+     * local) : le nom saisi sans espaces aux bords ([trimEdges], la découpe du nom
+     * affiché) ; vide → l'adresse saisie. Un nom fait seulement de caractères retirés
+     * (U+200B seul : `ifBlank` le gardait) n'est donc jamais enregistré : le libellé du
+     * compte n'est jamais vide, et le nom affiché ne dépend pas d'une découpe différente.
+     */
+    fun signUpName(displayName: String, email: String): String = trimEdges(displayName).ifEmpty { email }
+
+    /**
+     * `nomAffiché` : `displayName` sans espaces aux bords ([trimEdges]) ; vide ou ÉGAL à
+     * l'e-mail (lui aussi sans espaces aux bords) → la partie avant « @ » ; tronqué à 80
+     * unités UTF-16. Jamais l'e-mail
      * complet (les co-membres n'y ont pas accès). Un nom refusé ferait échouer
      * « Rejoindre » (le nom part dans la même écriture) : la troncature n'est pas
      * facultative.
@@ -52,11 +80,15 @@ object ProjectNames {
      * avant « @ » est alors prise dans ce nom : la casse saisie est gardée, et le nom ne
      * change pas entre la session d'inscription et les suivantes (sinon §5.8 le
      * réécrirait à chaque ouverture).
+     *
+     * Cas communs aux trois clients : `tests/fixtures/nom-affiche/vectors.json` du dépôt
+     * web (DisplayNameVectorsTest).
      */
     fun displayName(displayName: String, email: String): String {
-        var name = displayName.trim()
-        if (name.isEmpty()) name = email.trim().substringBefore('@')
-        else if (name.equals(email.trim(), ignoreCase = true)) name = name.substringBefore('@')
+        var name = trimEdges(displayName)
+        val mail = trimEdges(email)
+        if (name.isEmpty()) name = mail.substringBefore('@')
+        else if (name.equals(mail, ignoreCase = true)) name = name.substringBefore('@')
         return Utf16Text.truncated(name, MAX_DISPLAY_NAME)
     }
 

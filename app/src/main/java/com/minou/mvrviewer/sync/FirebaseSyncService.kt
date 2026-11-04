@@ -84,14 +84,14 @@ class FirebaseSyncService(context: Context) : SyncService {
 
     override suspend fun restoreSession(): AccountInfo? {
         val u = auth.currentUser ?: return null
-        return AccountInfo(u.uid, u.email ?: "", u.displayName ?: (u.email ?: "")).also { account = it }
+        return AccountInfo.fromAuth(u.uid, u.email, u.displayName).also { account = it }
     }
 
     override suspend fun signUp(email: String, password: String, displayName: String): AccountInfo {
         try {
             val result = auth.createUserWithEmailAndPassword(email, password).await()
             val user = result.user ?: throw SyncException.SignUpFailed
-            val name = displayName.ifBlank { email }
+            val name = ProjectNames.signUpName(displayName, email)
             // Profil + doc utilisateur : NON bloquants (ne pas retarder la connexion).
             user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(name).build())
             db.collection("users").document(user.uid).set(mapOf("email" to email, "displayName" to name))
@@ -105,7 +105,8 @@ class FirebaseSyncService(context: Context) : SyncService {
         try {
             val result = auth.signInWithEmailAndPassword(email, password).await()
             val u = result.user ?: throw SyncException.InvalidCredentials
-            return AccountInfo(u.uid, u.email ?: email, u.displayName ?: email).also { account = it }
+            // Sans displayName Firebase : l'adresse RENDUE par Firebase, comme la reprise (§4).
+            return AccountInfo.fromAuth(u.uid, u.email, u.displayName, typedEmail = email).also { account = it }
         } catch (e: Exception) {
             throw mapAuthError(e)
         }

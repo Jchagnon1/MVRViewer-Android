@@ -143,7 +143,7 @@ class LocalSyncService private constructor(
         val all = accounts()
         if (all.has(key)) throw SyncException.EmailInUse
         val uid = java.util.UUID.randomUUID().toString()
-        val name = displayName.ifBlank { email }
+        val name = ProjectNames.signUpName(displayName, email)
         all.put(key, JSONObject()
             .put("uid", uid).put("email", email)
             .put("displayName", name).put("password", password))

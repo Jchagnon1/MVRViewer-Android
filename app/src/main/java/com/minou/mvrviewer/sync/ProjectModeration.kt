@@ -265,7 +265,7 @@ object ProjectMembers {
     /** Nom affiché d'un membre (homonymes compris) — titre de « Retirer… », héritier, propriétaire du signalement. */
     fun label(uid: String, p: CloudProject, unnamed: String): String =
         rows(p, "", unnamed).firstOrNull { it.uid == uid }?.label
-            ?: p.memberNames?.get(uid)?.trim()?.takeIf { it.isNotEmpty() } ?: unnamed
+            ?: p.memberNames?.get(uid)?.let(ProjectNames::trimEdges)?.takeIf { it.isNotEmpty() } ?: unnamed
 
     /** HÉRITIER de la propriété si le propriétaire [me] quitte (§5.4) : le premier autre membre, donc le plus ancien. */
     fun heir(p: CloudProject, me: String): String? = p.memberUids.firstOrNull { it != me }
@@ -282,10 +282,12 @@ object ProjectMembers {
     /**
      * Libellés uid → nom, avec la règle des HOMONYMES (§4) : un nom porté par plusieurs
      * comptes de la liste (« Membre sans nom » compris) est suivi de « · » et des 4
-     * premiers caractères de l'uid, en majuscules.
+     * premiers caractères de l'uid, en majuscules. Un nom sans espaces aux bords
+     * ([ProjectNames.trimEdges], la découpe du nom affiché §4) : réduit à rien (U+200B
+     * seul), c'est un membre sans nom, jamais un libellé invisible.
      */
     private fun labelled(uids: List<String>, unnamed: String, name: (String) -> String?): Map<String, String> {
-        val base = uids.associateWith { uid -> name(uid)?.trim()?.takeIf { it.isNotEmpty() } ?: unnamed }
+        val base = uids.associateWith { uid -> name(uid)?.let(ProjectNames::trimEdges)?.takeIf { it.isNotEmpty() } ?: unnamed }
         val count = base.values.groupingBy { it }.eachCount()
         return base.mapValues { (uid, n) -> if ((count[n] ?: 0) > 1) "$n · ${uid.take(4).uppercase()}" else n }
     }

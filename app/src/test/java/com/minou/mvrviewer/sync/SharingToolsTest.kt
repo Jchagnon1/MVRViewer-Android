@@ -64,11 +64,15 @@ class SharingToolsTest {
         val reprise = AccountInfo("u-1", "casse.device@exemple.test", "Casse.Device@Exemple.test")
         assertEquals("Casse.Device", ProjectNames.displayName(inscription))
         assertEquals("Casse.Device", ProjectNames.displayName(reprise))
-        // Connexion sans profil Firebase (displayName absent) : l'adresse saisie sert de nom.
-        assertEquals("Casse.Device", ProjectNames.displayName(AccountInfo("u-1", "casse.device@exemple.test", "Casse.Device@Exemple.test")))
+        // Connexion sans profil Firebase (displayName absent) : l'adresse RENDUE par Firebase
+        // sert de nom, comme à la reprise et sur le web — jamais l'adresse saisie, qui donnait
+        // « Casse.Device » à la connexion puis « casse.device » après relance (§5.8 réécrivait).
+        val connexion = AccountInfo.fromAuth("u-1", "casse.device@exemple.test", null, typedEmail = "Casse.Device@Exemple.test")
+        assertEquals(AccountInfo.fromAuth("u-1", "casse.device@exemple.test", null), connexion)
+        assertEquals("casse.device", ProjectNames.displayName(connexion))
         // Un vrai nom n'est jamais touché, même s'il ressemble à la partie avant « @ ».
         assertEquals("Casse Device", ProjectNames.displayName("Casse Device", "casse.device@exemple.test"))
-        for (acc in listOf(inscription, reprise)) assertFalse(ProjectNames.displayName(acc).contains('@'))
+        for (acc in listOf(inscription, reprise, connexion)) assertFalse(ProjectNames.displayName(acc).contains('@'))
     }
 
     @Test fun nomDuProjetTronqueA200Unites() {

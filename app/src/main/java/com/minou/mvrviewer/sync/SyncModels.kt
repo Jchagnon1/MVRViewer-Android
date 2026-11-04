@@ -19,7 +19,23 @@ data class AccountInfo(
     val uid: String,
     val email: String,
     val displayName: String
-)
+) {
+    companion object {
+        /**
+         * Compte d'une session Firebase, à la CONNEXION comme à la REPRISE : l'adresse et
+         * le nom RENDUS par Firebase Auth (même règle qu'iOS `AccountInfo.fromAuth` et que
+         * le web `accountOf`). Sans `displayName`, le nom part de l'adresse rendue par
+         * Firebase (en minuscules), jamais de l'adresse SAISIE : « Casse.Device@Exemple.test »
+         * tapé à la connexion donnait « Casse.Device » dans le projet, puis « casse.device »
+         * après relance, et §5.8 réécrivait le nom à chaque fois (SPEC-partage-moderation
+         * §4). L'adresse saisie ([typedEmail]) ne sert que si Firebase n'en rend aucune.
+         */
+        fun fromAuth(uid: String, email: String?, displayName: String?, typedEmail: String = ""): AccountInfo {
+            val address = email ?: typedEmail
+            return AccountInfo(uid, address, displayName ?: address)
+        }
+    }
+}
 
 /**
  * Un projet cloud : identité stable d'équipe (`id`) + clé de réunion locale

@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.R
 import com.minou.mvrviewer.mvr.GdtfCredentialStore
 import com.minou.mvrviewer.mvr.GdtfShareClient
+import com.minou.mvrviewer.sync.ProjectNames
 import com.minou.mvrviewer.sync.SyncViewModel
 import com.minou.mvrviewer.sync.syncMessage
 import kotlinx.coroutines.launch
@@ -256,7 +257,8 @@ private fun AccountSection(sync: SyncViewModel, form: AccountFormState, onForgot
                     busy = true; error = null
                     scope.launch {
                         try {
-                            if (isSignUp) sync.signUp(email.trim(), password, displayName.trim())
+                            // Nom : la découpe du nom affiché (§4, trimEdges), pas trim().
+                            if (isSignUp) sync.signUp(email.trim(), password, ProjectNames.trimEdges(displayName))
                             else sync.signIn(email.trim(), password)
                             password = ""
                         } catch (e: Exception) { error = e.syncMessage(ctx) } finally { busy = false }

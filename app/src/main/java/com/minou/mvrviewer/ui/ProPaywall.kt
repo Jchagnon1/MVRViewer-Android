@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -69,26 +70,32 @@ fun ProPaywallHost() {
                             tint = Color(0xFF9E9E9E), modifier = Modifier.size(18.dp))
                     }
                 }
-                ProAccess.paywallReason?.let { reason ->
-                    Spacer(Modifier.height(8.dp))
-                    val what = ProPaywallText.reasonRes(reason)?.let { stringResource(it) } ?: reason
-                    Text(stringResource(R.string.pro_paywall_reason_fmt, what),
-                        style = MaterialTheme.typography.titleSmall)
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(R.string.pro_paywall_pitch),
-                    style = MaterialTheme.typography.bodyMedium, color = Color(0xFF555555)
-                )
-                Spacer(Modifier.height(10.dp))
-                Column(
-                    modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())
-                ) {
-                    for ((res, args) in ProPaywallText.FEATURES) {
-                        Row(verticalAlignment = Alignment.Top,
-                            modifier = Modifier.padding(vertical = 3.dp)) {
-                            Text("•", color = Accent.inkLight, modifier = Modifier.width(16.dp))
-                            Text(stringResource(res, *args.toTypedArray()), style = MaterialTheme.typography.bodyMedium)
+                // HAUT qui défile : en paysage (écran bas), c'est cette partie qui rétrécit
+                // (weight, fill = false) — le bouton d'achat, la phrase de renonciation et
+                // le reste du bas restent toujours entiers à l'écran. En portrait, rien ne
+                // change (le haut tient, la liste garde son propre défilement).
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                    ProAccess.paywallReason?.let { reason ->
+                        Spacer(Modifier.height(8.dp))
+                        val what = ProPaywallText.reasonRes(reason)?.let { stringResource(it) } ?: reason
+                        Text(stringResource(R.string.pro_paywall_reason_fmt, what),
+                            style = MaterialTheme.typography.titleSmall)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        stringResource(R.string.pro_paywall_pitch),
+                        style = MaterialTheme.typography.bodyMedium, color = Color(0xFF555555)
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Column(
+                        modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())
+                    ) {
+                        for ((res, args) in ProPaywallText.FEATURES) {
+                            Row(verticalAlignment = Alignment.Top,
+                                modifier = Modifier.padding(vertical = 3.dp)) {
+                                Text("•", color = Accent.inkLight, modifier = Modifier.width(16.dp))
+                                Text(stringResource(res, *args.toTypedArray()), style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
@@ -108,6 +115,15 @@ fun ProPaywallHost() {
                     Text(if (price != null) stringResource(R.string.pro_unlock_price_fmt, price)
                          else stringResource(R.string.pro_unlock))
                 }
+                // Renonciation au droit de rétractation (CGU §6.7) : JUSTE sous le bouton
+                // d'achat, lue avant de le toucher, sans étape en plus ; même phrase qu'iOS.
+                // Gris #555555 sur le fond blanc FORCÉ du paywall (≈ 7,5:1) : lisible en
+                // thème clair comme en thème sombre.
+                Text(
+                    stringResource(R.string.pro_purchase_withdrawal_waiver),
+                    style = MaterialTheme.typography.bodySmall, color = Color(0xFF555555),
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).testTag("pro.withdrawalWaiver")
+                )
                 OutlinedButton(
                     onClick = { ProAccess.restore() },
                     enabled = !ProAccess.isBusy,

@@ -726,6 +726,9 @@
     <string name="pro_feature_custom_types">Créer des types de projecteurs personnalisés</string>
     <string name="pro_feature_share">Partager un projet et pousser vos modifications</string>
     <string name="pro_unlock_price_fmt">Débloquer la version Pro — %1$s</string>
+    <!-- Renonciation au droit de rétractation, JUSTE SOUS le bouton d'achat (CGU §6.7) :
+         phrase IDENTIQUE sur iOS et Android, ne pas la reformuler d'un côté seulement. -->
+    <string name="pro_purchase_withdrawal_waiver">En confirmant l\'achat, vous demandez l\'accès immédiat à la version Pro et renoncez expressément à votre droit de rétractation.</string>
     <string name="pro_one_time_purchase">Achat unique, sans abonnement. Valable sur tous vos appareils avec le même compte Google.</string>
     <string name="pro_error_play_unavailable">Google Play indisponible.</string>
     <string name="pro_error_purchase_failed">L\'achat n\'a pas abouti.</string>

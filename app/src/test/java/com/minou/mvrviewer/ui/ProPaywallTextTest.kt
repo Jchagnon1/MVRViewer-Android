@@ -83,6 +83,51 @@ class ProPaywallTextTest {
         }
     }
 
+    /**
+     * Renonciation au droit de rétractation (CGU §6.7) : la phrase EXACTE, commune à
+     * iOS et Android, en français ET en anglais, posée JUSTE SOUS le bouton qui lance
+     * Google Play (rien entre les deux, avant « Restaurer un achat ») ; et ce bouton est
+     * le SEUL endroit de l'app qui lance un achat (sinon il faudrait la phrase ailleurs).
+     */
+    @Test fun renonciationAuDroitDeRetractationSousLeBoutonDAchat() {
+        assertEquals("En confirmant l'achat, vous demandez l'accès immédiat à la version Pro et " +
+            "renoncez expressément à votre droit de rétractation.", fr.get("pro_purchase_withdrawal_waiver"))
+        assertEquals("By confirming the purchase, you request immediate access to the Pro version and " +
+            "expressly waive your right of withdrawal.", en.get("pro_purchase_withdrawal_waiver"))
+
+        val paywall = src("ui/ProPaywall.kt")
+        val buy = paywall.indexOf("ProAccess.purchase(it)")
+        val buyEnd = paywall.indexOf("stringResource(R.string.pro_unlock))", buy)
+        val waiver = paywall.indexOf("stringResource(R.string.pro_purchase_withdrawal_waiver)")
+        val restore = paywall.indexOf("ProAccess.restore()")
+        assertTrue("bouton d'achat", buy >= 0 && buyEnd > buy)
+        assertTrue("phrase après le bouton d'achat", waiver > buyEnd)
+        assertTrue("phrase avant « Restaurer un achat »", restore > waiver)
+        // Entre la fin du bouton d'achat et la phrase : le seul Text de la phrase.
+        val between = paywall.substring(buyEnd, waiver)
+        assertEquals(1, Regex("""\bText\(""").findAll(between).count())
+        assertFalse(between.contains("Button(") || between.contains("Spacer(") || between.contains("Column("))
+        assertFalse("écrite en dur", paywall.contains("En confirmant l") || paywall.contains("By confirming"))
+
+        val sources = javaDir.walkTopDown().filter { it.isFile && it.extension == "kt" }
+            .associate { it.relativeTo(javaDir).path to it.readText() }
+        assertEquals(setOf("ui/ProPaywall.kt"), sources.filterValues { it.contains("ProAccess.purchase(") }.keys)
+        assertEquals(setOf("ui/ProAccess.kt"), sources.filterValues { it.contains("launchBillingFlow") }.keys)
+    }
+
+    /** Jamais de prix barré ni d'« ancien prix » (pratique commerciale trompeuse). */
+    @Test fun aucunPrixBarre() {
+        val sources = javaDir.walkTopDown().filter { it.isFile && it.extension == "kt" }.map { it.readText() }
+        for (s in sources) {
+            assertFalse("texte barré", s.contains("LineThrough") || s.contains("StrikethroughSpan"))
+        }
+        for (r in listOf(fr, en)) for ((k, v) in r.strings) if (k.startsWith("pro_")) {
+            for (w in listOf("au lieu de", "ancien prix", "prix normal", "instead of", "regular price", "usual price")) {
+                assertFalse("$k : « $w »", v.contains(w, ignoreCase = true))
+            }
+        }
+    }
+
     @Test fun plusAucunTexteEnDurDansLEcranDAchat() {
         val paywall = src("ui/ProPaywall.kt")
         for (s in listOf("\"MVR Viewer Pro\"", "\"Fermer\"", "Pour \$reason", "Lire un show", "\"Modifier le patch",

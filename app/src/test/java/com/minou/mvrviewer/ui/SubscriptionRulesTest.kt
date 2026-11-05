@@ -109,6 +109,41 @@ class SubscriptionRulesTest {
         assertFalse(ProStatusLine.BillingFailed.offersSubscription)
     }
 
+    @Test fun paiementEnEchecDeLUneOuLAutreBoutique() {
+        // App Store `billing_retry` (Apple retente le paiement, §2.1), aucun abonnement
+        // sur l'appareil : « Paiement en échec », jamais « expirée » ni « Se réabonner »
+        // (qui pousserait vers un second abonnement pendant qu'Apple retente).
+        val appleRetry = ProGrant(false, appstore = SourceView(false, "billing_retry", now - 2 * day, null), fromServer = true)
+        assertEquals(ProStatusLine.BillingFailed, line(null, appleRetry))
+        assertFalse(line(null, appleRetry).offersSubscription)
+        // Google Play `on_hold`.
+        assertEquals(ProStatusLine.BillingFailed, line(null,
+            ProGrant(false, play = SourceView(false, "on_hold", now - day), fromServer = true)))
+        // « Suspendue » seulement si rien d'autre ne donne le Pro.
+        assertEquals("abonnement géré ailleurs, vivant", ProStatusLine.OtherDevice(now + 10 * day), line(null,
+            ProGrant(true, now + 10 * day, appstore = SourceView(false, "billing_retry", now - 2 * day),
+                play = SourceView(true, "active", now + 10 * day), fromServer = true), isPro = true))
+        assertEquals("licence admin", ProStatusLine.Licence(null), line(null,
+            ProGrant(true, null, appstore = SourceView(false, "billing_retry", now - 2 * day), fromServer = true), isPro = true))
+        assertEquals("Pro gardé hors ligne", ProStatusLine.Licence(null), line(null, appleRetry, isPro = true))
+    }
+
+    @Test fun margeDeRenouvellementGoogleSansLaDateDeExpires() {
+        // V21 (§3.7) : abonné Google, appareil SANS l'abonnement (autre compte Google),
+        // F < maintenant < F + 6 h — Google a renouvelé, le balayage n'a pas encore relu.
+        // Jamais la date de `expires` (F + 6 h, §5.5) : « Version Pro active », sans date.
+        val f = now - 3_600_000L
+        val v21 = ProGrant(true, f + 21_600_000L, play = SourceView(true, "active", f, null, true), fromServer = true)
+        assertEquals(ProStatusLine.Licence(null), line(null, v21, isPro = true))
+        assertEquals("Version Pro active", SubscriptionTexts.statusLine(line(null, v21, isPro = true), TestRes.FR.proTexts()))
+        // Même chose pour une source App Store active mais échue (notification en retard).
+        assertEquals(ProStatusLine.Licence(null), line(null,
+            ProGrant(true, now + day, appstore = SourceView(true, "active", now - 60_000L), fromServer = true), isPro = true))
+        // Licence admin datée, sans source de boutique active : SA date.
+        assertEquals(ProStatusLine.Licence(now + 3 * day), line(null,
+            ProGrant(true, now + 3 * day, appstore = SourceView(false, "expired", now - day), fromServer = true)))
+    }
+
     @Test fun textesDesLignesDEtatEnFrancaisEtEnAnglais() {
         val d = 1_805_112_000_000L // 2027-03-15 (UTC)
         val fr = TestRes.FR.proTexts()

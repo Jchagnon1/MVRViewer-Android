@@ -109,6 +109,56 @@ class ProGrantTest {
         assertFalse(ProGrant.fromDocument(emptyMap(), true).pro)
     }
 
+    /**
+     * Document Firestore → valeurs simples ([ProGrant.plainDocument], appelé par
+     * `FirebaseSyncService.plainValues`) : sous une clé de temps, SEUL un Timestamp
+     * est une date ; un nombre, un texte ou une table saisis à la main (RawValue que
+     * le serveur recopie, §3.7) sont opaques — retirés, jamais lus comme des
+     * millisecondes. Avant : `{pro: true, expires: 1700000000}` (secondes saisies dans
+     * la console) donnait un Pro expiré en 1970 sur Android et sans échéance sur le
+     * site. Mêmes entrées que `ProGrantTests.testNonTimestampTimeValuesAreOpaque` (iOS).
+     */
+    @Test fun nonTimestampTimeValuesAreOpaque() {
+        class FakeTimestamp(val ms: Long)
+        val stamp = 1_825_521_600_000L
+        val raw: Map<String, Any?> = mapOf(
+            "pro" to true,
+            "expires" to 1_700_000_000L,
+            "sources" to mapOf(
+                "play" to mapOf("active" to true, "status" to "active", "expiresAt" to FakeTimestamp(stamp),
+                    "graceUntil" to "2027-01-01", "autoRenew" to true, "basePlanId" to "annual"),
+                "appstore" to mapOf("active" to false, "expiresAt" to 1_830_000_000_000.0,
+                    "revokedAt" to mapOf("seconds" to 1_800_000_000L)),
+                "admin" to mapOf("active" to true, "origin" to "manual", "count" to 3L)
+            )
+        )
+        val plain = ProGrant.plainDocument(raw) { (it as? FakeTimestamp)?.ms }
+        assertFalse("nombre sous `expires` : opaque", plain.containsKey("expires"))
+        assertEquals(true, plain["pro"])
+        val sources = plain["sources"] as Map<*, *>
+        val play = sources["play"] as Map<*, *>
+        assertEquals("Timestamp → ms", stamp, play["expiresAt"])
+        assertFalse("texte sous une clé de temps : opaque", play.containsKey("graceUntil"))
+        assertEquals("annual", play["basePlanId"])
+        val appstore = sources["appstore"] as Map<*, *>
+        assertFalse("nombre (ms) sous une clé de temps : opaque", appstore.containsKey("expiresAt"))
+        assertFalse("table { seconds } : opaque", appstore.containsKey("revokedAt"))
+        assertEquals("hors clé de temps : inchangé", 3L, (sources["admin"] as Map<*, *>)["count"])
+
+        val grant = ProGrant.fromDocument(plain, fromServer = true)
+        assertTrue(grant.pro)
+        assertNull("licence sans échéance, comme sur le site", grant.expires)
+        assertTrue(grant.isActive(1_800_000_000_000L))
+        assertEquals(stamp, grant.play?.expiresAt)
+        assertNull(grant.play?.graceUntil)
+        assertNull(grant.appstore?.expiresAt)
+
+        // Entier ou flottant écrit dans Firestore : jamais une échéance.
+        for (n in listOf<Any>(1_700_000_000, 1_830_000_000_000L, 1_830_000_000_000.0)) {
+            assertNull("$n", ProGrant.fromDocument(ProGrant.plainDocument(mapOf("pro" to true, "expires" to n)) { null }, true).expires)
+        }
+    }
+
     @Test fun aSourceIsLiveOnlyIfActiveAndInTheFuture() {
         val now = 1_800_000_000_000L
         assertTrue(ProGrant.SourceView(true, "active", now + 1).isLive(now))

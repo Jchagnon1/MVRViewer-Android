@@ -11,6 +11,7 @@ import com.minou.mvrviewer.sync.SyncService
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -123,8 +124,8 @@ class ProAccessAckOrderTest {
         ProAccess.forceForTests(null)
     }
 
-    /** Câblage du SyncViewModel : `done` APRÈS la réponse du serveur. */
-    private fun wire(reply: () -> Pair<Int, String>, verifies: Boolean = true) {
+    /** Câblage du SyncViewModel (init) : `done` APRÈS la réponse du serveur. */
+    private fun wireLinker(reply: () -> Pair<Int, String>, verifies: Boolean = true) {
         val svc = TokenService(local)
         val linker = PurchaseLinker(svc, FakeServer(reply), MemoryStore(), { ProAccess.currentProof() }, { uid },
             { _, _ -> log += "grant" }, { })
@@ -132,8 +133,14 @@ class ProAccessAckOrderTest {
             try { runBlocking { linker.linkPurchase(explicit) } } finally { done() }
         }
         ProAccess.verifiesPurchases = verifies
-        ProAccess.accountUid = if (verifies) uid else null
         ProAccess.playGateway = FakePlay()
+    }
+
+    /** Câblage complet, compte de la session CONNU (reprise de session terminée). */
+    private fun wire(reply: () -> Pair<Int, String>, verifies: Boolean = true) {
+        wireLinker(reply, verifies)
+        ProAccess.accountUid = if (verifies) uid else null
+        ProAccess.markAccountResolved()
     }
 
     private suspend fun signIn() {
@@ -180,6 +187,75 @@ class ProAccessAckOrderTest {
         ProAccess.applyPurchases(listOf(sub()), explicit = true)
         // Acquitté AVANT toute tentative d'envoi.
         assertEquals("ack:$TOKEN", log.first())
+    }
+
+    // MARK: - Démarrage à froid : Google Play répond AVANT la reprise de la session
+
+    /** Faux minuteurs : rien ne part tout seul ; [fire] déclenche ceux qui restent. */
+    private class FakeTimers : ProTimers {
+        val pending = mutableListOf<Pair<Long, () -> Unit>>()
+        override fun schedule(delayMs: Long, action: () -> Unit): () -> Unit {
+            val entry = delayMs to action
+            pending += entry
+            return { pending.remove(entry) }
+        }
+        fun fire() { pending.toList().forEach { pending.remove(it); it.second() } }
+    }
+
+    @Test fun achatNonAcquitteLuAvantLaRepriseDeLaSessionAttendLeCompte() = runBlocking {
+        // Session Firebase persistée : le compte EST connecté, mais pas encore
+        // rattaché à ProAccess (`bindProAccount` vient après la première composition).
+        signIn()
+        wireLinker({ 200 to """{"ok":true,"status":"granted","pro":true,"store":"play","test":true}""" })
+        var finished = false
+        ProAccess.applyPurchases(listOf(sub()), explicit = false) { finished = true }
+        // Rien n'est acquitté « sans compte » : la séquence attend.
+        assertEquals(emptyList<String>(), log)
+        assertFalse(finished)
+        // L'appareil est débloqué tout de suite quand même.
+        assertTrue(ProAccess.purchased)
+        // Reprise terminée (SyncViewModel.bindProAccount) : la preuve part AVANT l'acquittement.
+        ProAccess.bindAccount(uid!!)
+        ProAccess.accountUid = uid
+        ProAccess.markAccountResolved()
+        assertEquals(listOf("post", "grant", "query", "ack:$TOKEN"), log)
+        assertTrue(finished)
+        // Une seule fois.
+        ProAccess.markAccountResolved()
+        assertEquals(4, log.size)
+    }
+
+    @Test fun repriseSansCompteAcquittementLocal() {
+        wireLinker({ 200 to "{}" })
+        ProAccess.applyPurchases(listOf(sub()), explicit = false)
+        assertEquals(emptyList<String>(), log)
+        ProAccess.markAccountResolved() // aucune session à reprendre
+        assertEquals(listOf("ack:$TOKEN"), log)
+        // Compte connu : un nouveau relevé n'attend plus.
+        log.clear()
+        ProAccess.applyPurchases(listOf(sub()), explicit = false)
+        assertEquals(listOf("ack:$TOKEN"), log)
+    }
+
+    @Test fun compteJamaisConnuAcquittementApresLeDelaiMaximal() {
+        val timers = FakeTimers()
+        ProAccess.timers = timers
+        wireLinker({ 200 to "{}" })
+        ProAccess.applyPurchases(listOf(sub()), explicit = false)
+        ProAccess.applyPurchases(listOf(sub()), explicit = false) // un seul minuteur
+        assertEquals(listOf(ProAccess.ACCOUNT_WAIT_MAX_MS), timers.pending.map { it.first })
+        assertEquals(emptyList<String>(), log)
+        timers.fire()
+        assertEquals(listOf("ack:$TOKEN"), log)
+        assertTrue(timers.pending.isEmpty())
+    }
+
+    @Test fun abonnementDejaAcquitteNAttendPas() {
+        wireLinker({ 200 to "{}" })
+        ProAccess.applyPurchases(listOf(sub(acknowledged = true)), explicit = false)
+        // Rien à acquitter : la preuve suit son déclencheur habituel (ici, sans compte : rien).
+        assertEquals(emptyList<String>(), log)
+        assertTrue(ProAccess.purchased)
     }
 
     @Test fun achatEnAttenteNiPreuveNiAcquittement() = runBlocking {

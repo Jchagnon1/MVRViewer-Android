@@ -103,6 +103,35 @@ object ProState {
         }
         return Output(pro, reason, cache)
     }
+
+    // MARK: - Échéance de la licence, app ouverte (§4.1.5, comme `src/ui/pro.js`)
+
+    /** Plafond du minuteur d'échéance de la licence (réarmé au-delà), comme sur le site. */
+    const val LICENCE_DEADLINE_CAP_MS: Long = 24L * 3_600_000L
+
+    /**
+     * Une lecture SERVEUR faite AVANT l'échéance de la licence lue ne dit rien de
+     * l'état APRÈS elle (renouvelée ? marge Google de 6 h passée ?) : elle ne vaut
+     * plus `onlineLicence`. Sans cela, l'app restée au premier plan perdait le Pro à
+     * l'échéance ET effaçait la part licence du cache, là où le site le garde (marge
+     * de 72 h, recette R10) jusqu'à la relecture. Une lecture faite APRÈS
+     * l'échéance (licence vraiment terminée, P6) vaut. [readAt] : instant de la
+     * dernière lecture serveur réussie (null : inconnu, la lecture vaut).
+     */
+    fun licenceReadStillOnline(online: Boolean, licence: Licence?, readAt: Long?, now: Long): Boolean {
+        if (!online) return false
+        val expires = licence?.takeIf { it.pro }?.expires ?: return true
+        if (expires > now || readAt == null) return true
+        return readAt >= expires
+    }
+
+    /** Délai (ms) avant l'échéance de la licence lue, plafonné à 24 h ; null sans
+     *  licence Pro datée à venir. +1 ms : le minuteur échoit APRÈS l'échéance. */
+    fun licenceDeadlineDelay(licence: Licence?, now: Long): Long? {
+        val expires = licence?.takeIf { it.pro }?.expires ?: return null
+        if (expires <= now) return null
+        return minOf(expires - now, LICENCE_DEADLINE_CAP_MS) + 1
+    }
 }
 
 /**

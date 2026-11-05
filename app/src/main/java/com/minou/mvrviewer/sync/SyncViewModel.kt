@@ -162,6 +162,9 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
                 // Session perdue (compte supprimé ailleurs, données effacées) : comme
                 // une déconnexion, la part licence du cache Pro est oubliée (§2.4).
                 if (_auth.value.accountOrNull == null) com.minou.mvrviewer.ui.ProAccess.clearAccountLicence()
+                // Compte de la session CONNU (aucun) : un abonnement non acquitté
+                // lu entre-temps est acquitté localement (§4.3 point 3).
+                com.minou.mvrviewer.ui.ProAccess.markAccountResolved()
                 return@launch
             }
             _auth.value = AuthState.SignedIn(acc)
@@ -175,13 +178,16 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     /** Compte connecté → ProAccess : compte de la licence (part du cache), uid pour
      *  l'`obfuscatedAccountId` du flux d'achat SEULEMENT si le backend vérifie les
      *  achats (sinon l'abonnement serait refusé `409` à tout vrai compte), crochet
-     *  d'envoi de la preuve (re)branché. */
+     *  d'envoi de la preuve (re)branché ; puis compte de la session déclaré CONNU :
+     *  un abonnement non acquitté lu par Google Play AVANT la reprise de la session
+     *  (démarrage à froid) part maintenant, preuve d'abord (§4.3 point 1). */
     private fun bindProAccount(acc: AccountInfo) {
         val pro = com.minou.mvrviewer.ui.ProAccess
         pro.verifiesPurchases = service.verifiesPurchases
         pro.bindAccount(acc.uid)
         pro.accountUid = if (service.verifiesPurchases) acc.uid else null
         pro.purchaseLinker = purchaseLinker
+        pro.markAccountResolved()
     }
 
     /**

@@ -254,9 +254,12 @@ object SubscriptionRules {
     /**
      * Ligne d'état de la section Pro (§5.5). Les dates viennent des sources de la
      * licence (`expiresAt`, `graceUntil`), jamais de `expires` (marge Google,
-     * §3.7). Abonnement de CET appareil : son état vient de la source Play de la
+     * §3.7) : `expires` ne date que la licence admin, sans source de boutique
+     * active. Abonnement de CET appareil : son état vient de la source Play de la
      * licence (grâce, échéance, renouvellement) ; sans elle (pas de compte, preuve
-     * pas encore rattachée), « Abonnement actif » sans date (§12).
+     * pas encore rattachée), « Abonnement actif » sans date (§12). Paiement en
+     * échec (App Store `billing_retry`, Google Play `on_hold`), de l'une OU l'autre
+     * boutique : « suspendue » seulement si rien d'autre ne donne le Pro.
      */
     fun statusLine(device: DeviceSubscription?, licence: ProGrant?, isPro: Boolean, now: Long): ProStatusLine {
         val play = licence?.play
@@ -275,11 +278,18 @@ object SubscriptionRules {
         sources.filter { it.isLive(now) }.mapNotNull { it.effectiveEnd }.maxOrNull()?.let {
             return ProStatusLine.OtherDevice(it)
         }
-        when (play?.status) {
-            "billing_retry", "on_hold" -> return ProStatusLine.BillingFailed
-            "paused" -> return ProStatusLine.Paused(play.expiresAt?.takeIf { it > now })
+        // `billing_retry` n'existe que chez Apple, `on_hold` que chez Google (§2.1).
+        if (!isPro && sources.any { it.status == "billing_retry" || it.status == "on_hold" }) {
+            return ProStatusLine.BillingFailed
         }
-        if (licence != null && licence.isActive(now)) return ProStatusLine.Licence(licence.expires)
+        if (play?.status == "paused") return ProStatusLine.Paused(play.expiresAt?.takeIf { it > now })
+        if (licence != null && licence.isActive(now)) {
+            // Source de boutique active mais échue (renouvellement Google pas encore
+            // relu : `expires` porte la marge de 6 h, V21) : « Version Pro active »,
+            // sans date — jamais celle de `expires` (§5.5).
+            if (sources.any { it.active }) return ProStatusLine.Licence(null)
+            return ProStatusLine.Licence(licence.expires)
+        }
         // Pro gardé hors ligne, ou forcé (`MVR_PRO`) : « Version Pro active ».
         if (isPro) return ProStatusLine.Licence(null)
         sources.filter { !it.isLive(now) }.mapNotNull { it.effectiveEnd }.filter { it <= now }.maxOrNull()?.let {

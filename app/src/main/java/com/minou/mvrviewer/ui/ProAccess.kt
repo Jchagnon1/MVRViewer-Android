@@ -2,6 +2,8 @@ package com.minou.mvrviewer.ui
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -54,7 +56,9 @@ import java.lang.ref.WeakReference
  *
  * Singleton `object`, comme [ToolbarLayoutStore] : l'état Pro est global à
  * l'appareil, et Compose l'observe par les `mutableStateOf`. Initialisé une
- * fois dans MainActivity.onCreate ; le [BillingClient] se reconnecte seul.
+ * fois dans MainActivity.onCreate ; le [BillingClient] se reconnecte seul
+ * (`enableAutoServiceReconnection`) et chaque relecture ([refresh], donc chaque
+ * retour au premier plan) rétablit d'abord une connexion perdue.
  */
 object ProAccess {
     /** Abonnement Pro (Play Console) — IDENTIQUE à [PurchaseLink.PRO_SUBSCRIPTION_ID]. */
@@ -72,10 +76,18 @@ object ProAccess {
     /** Abonnement Pro de Google Play présent sur l'appareil (null : aucun). */
     var device by mutableStateOf<DeviceSubscription?>(null)
         private set
-    /** Licence du compte connecté (null : déconnecté, pas encore lue, ou lecture
-     *  en échec — jamais `pro: false` sur une erreur). */
+    /** Dernière licence LUE pour le compte connecté (null : déconnecté ou pas encore
+     *  lue) — affichage (ligne d'état, double abonnement…), comme `lastGrant` sur le
+     *  site. Une lecture en échec ne l'efface pas, mais rend la licence INCONNUE pour
+     *  l'état Pro ([licenceUnknown]) — jamais `pro: false` sur une erreur. */
     var licence by mutableStateOf<ProGrant?>(null)
         private set
+    /** La dernière lecture de la licence a ÉCHOUÉ : l'entrée `licence` de [ProState]
+     *  vaut null (§2.4 : « lecture en échec » = inconnue) ; le cache daté prend le relais. */
+    private var licenceUnknown by mutableStateOf(false)
+    /** Instant de la dernière lecture SERVEUR réussie de la licence
+     *  ([ProState.licenceReadStillOnline]). */
+    private var licenceReadAt: Long? = null
     /** Compte auquel appartient [licence] (et la part `licence` du cache). */
     var licenceUid by mutableStateOf<String?>(null)
         private set
@@ -84,7 +96,9 @@ object ProAccess {
     private var productAnswered by mutableStateOf(false)
     /** … et abonnements relus depuis : ensemble, `onlineStore`. */
     private var purchasesAnswered by mutableStateOf(false)
-    /** Lecture SERVEUR réussie de la licence depuis le dernier passage au premier plan. */
+    /** Lecture SERVEUR réussie de la licence depuis le dernier passage au premier
+     *  plan — et depuis la dernière lecture (une lecture en échec ou venue du cache
+     *  Firestore la fait retomber, comme sur le site). */
     var onlineLicence by mutableStateOf(false)
         private set
     /** Dernier état Pro connu (§2.4), persisté dans `pro.cache`. */
@@ -95,13 +109,13 @@ object ProAccess {
     /** Vrai si Pro, évalué À L'INSTANT (une échéance passée app ouverte compte
      *  aussitôt). Forçage DEBUG/tests prioritaire. Propriété calculée sur des
      *  états Compose : l'observation fonctionne. */
-    val isPro: Boolean get() = evaluation(System.currentTimeMillis()).pro
+    val isPro: Boolean get() = evaluation(clock()).pro
     /** Raison du dernier état (tests, journal). */
-    val proReason: ProState.Reason get() = evaluation(System.currentTimeMillis()).reason
+    val proReason: ProState.Reason get() = evaluation(clock()).reason
     /** Abonnement Play actif sur l'appareil. */
     val purchased: Boolean get() = storeEntitlement?.active == true
     /** Licence du compte active (sans échéance ou d'échéance future). */
-    val grantedByAccount: Boolean get() = licence?.isActive(System.currentTimeMillis()) == true
+    val grantedByAccount: Boolean get() = licence?.isActive(clock()) == true
 
     // MARK: - Boutique
 
@@ -214,6 +228,30 @@ object ProAccess {
             ) { result -> then(result.responseCode == BillingClient.BillingResponseCode.OK) }
         }
     }
+    /** Minuteurs (échéance de la licence, attente du compte) : fil principal dans
+     *  l'app ([init]) ; null dans les tests JVM qui n'en posent pas (pas de Looper). */
+    internal var timers: ProTimers? = null
+    /** Horloge (ms depuis 1970) ; remplaçable par les tests JVM. */
+    internal var clock: () -> Long = { System.currentTimeMillis() }
+    /** Annule le minuteur d'échéance de la licence armé ([armLicenceDeadline]). */
+    private var licenceDeadlineCancel: (() -> Unit)? = null
+
+    // MARK: - Compte de la session (§4.3, point 1)
+
+    /** Délai maximal d'attente du compte avant d'acquitter quand même (filet : la
+     *  reprise de session Firebase est locale, elle répond bien avant). */
+    const val ACCOUNT_WAIT_MAX_MS: Long = 30_000L
+    /** Le compte de la session est CONNU (reprise de session terminée, connecté ou
+     *  non) : posé par le SyncViewModel ([markAccountResolved]). Avant, un abonnement
+     *  non acquitté ATTEND — au démarrage à froid, Google Play peut répondre avant la
+     *  reprise de la session Firebase, et l'app l'acquitterait « sans compte » alors
+     *  que la preuve doit partir d'abord. */
+    private var accountResolved = false
+    /** Séquence preuve/acquittement en attente du compte (jetons du dernier relevé). */
+    private var pendingAck: PendingAck? = null
+    private var accountWaitCancel: (() -> Unit)? = null
+
+    private class PendingAck(val tokens: List<String>, val explicit: Boolean, val finished: List<() -> Unit>)
 
     /** TESTS UNITAIRES (JVM, sans Activity ni Play) : force l'état ; `null` rend la
      *  main aux états réels. Les tests qui exercent une MUTATION gardée doivent se
@@ -224,9 +262,19 @@ object ProAccess {
 
     /** TESTS : repart d'un état neutre (ni boutique lue, ni licence, ni cache). */
     internal fun resetForTests() {
+        licenceDeadlineCancel?.invoke()
+        licenceDeadlineCancel = null
+        accountWaitCancel?.invoke()
+        accountWaitCancel = null
+        timers = null
+        clock = { System.currentTimeMillis() }
+        accountResolved = false
+        pendingAck = null
         storeEntitlement = null
         device = null
         licence = null
+        licenceUnknown = false
+        licenceReadAt = null
         licenceUid = null
         productAnswered = false
         purchasesAnswered = false
@@ -253,6 +301,7 @@ object ProAccess {
         val app = ctx.applicationContext
         appContext = app
         texts = ContextProTexts(app)
+        timers = MainLooperTimers
         this.debugOverride = debugOverride
         (ctx as? Activity)?.let { inAppMessagesActivity = WeakReference(it) }
         val p = prefs(app)
@@ -276,26 +325,68 @@ object ProAccess {
 
     // MARK: - Évaluation
 
-    private fun evaluation(now: Long): ProState.Output = ProState.evaluate(ProState.Input(
-        now = now,
-        override = debugOverride,
-        store = storeEntitlement,
-        licence = licence?.let { ProState.Licence(it.pro, it.expires) },
-        onlineStore = onlineStore,
-        onlineLicence = onlineLicence,
-        cache = cacheRecord?.cache
-    ))
+    /** Entrée `licence` de [ProState] : null si la dernière lecture a échoué. */
+    private fun stateLicence(): ProState.Licence? =
+        if (licenceUnknown) null else licence?.let { ProState.Licence(it.pro, it.expires) }
+
+    private fun evaluation(now: Long): ProState.Output {
+        val stateLicence = stateLicence()
+        return ProState.evaluate(ProState.Input(
+            now = now,
+            override = debugOverride,
+            store = storeEntitlement,
+            licence = stateLicence,
+            onlineStore = onlineStore,
+            onlineLicence = ProState.licenceReadStillOnline(onlineLicence, stateLicence, licenceReadAt, now),
+            cache = cacheRecord?.cache
+        ))
+    }
 
     /** Réévalue l'état Pro (après chaque relecture de Play ou de la licence, et au
      *  premier plan) et mémorise le cache — jamais sous `MVR_PRO`. Ferme le paywall
-     *  si le Pro est là. */
+     *  si le Pro est là. Réarme le minuteur d'échéance de la licence. */
     private fun reevaluate() {
-        val output = evaluation(System.currentTimeMillis())
+        val output = evaluation(clock())
         if (debugOverride == null) {
             val record = ProCacheRecord(cacheRecord?.uid ?: licenceUid, output.cache)
             if (record != cacheRecord) saveCache(record)
         }
+        armLicenceDeadline()
         if (output.pro) showPaywall = false
+    }
+
+    // MARK: - Échéance de la licence, app ouverte (§4.1.5, comme `onDeadline` du site)
+
+    /** (Ré)arme le minuteur sur l'échéance de la licence lue, plafonné à 24 h — jamais
+     *  sous `MVR_PRO` ni sans minuteurs (tests JVM). */
+    private fun armLicenceDeadline() {
+        licenceDeadlineCancel?.invoke()
+        licenceDeadlineCancel = null
+        val t = timers ?: return
+        if (debugOverride != null) return
+        val delay = ProState.licenceDeadlineDelay(stateLicence(), clock()) ?: return
+        licenceDeadlineCancel = t.schedule(delay) {
+            licenceDeadlineCancel = null
+            licenceDeadlineReached()
+        }
+    }
+
+    /**
+     * Minuteur échu. Échéance de la licence passée : comme au retour au premier plan,
+     * [onlineLicence] retombe AVANT toute évaluation (le Pro reste, par la part
+     * licence du cache, jusqu'à 72 h), puis la licence est relue ([grantRefresher]) —
+     * le serveur tranche (renouvelée → Pro sans interruption ; terminée → plus de
+     * Pro). Plafond de 24 h atteint : réarmé.
+     */
+    private fun licenceDeadlineReached() {
+        val expires = stateLicence()?.takeIf { it.pro }?.expires
+        if (expires == null || expires > clock()) {
+            armLicenceDeadline()
+            return
+        }
+        onlineLicence = false
+        reevaluate()
+        refreshLicence { }
     }
 
     private fun saveCache(record: ProCacheRecord) {
@@ -353,6 +444,8 @@ object ProAccess {
     fun bindAccount(uid: String) {
         if (licenceUid != uid) {
             licence = null
+            licenceUnknown = false
+            licenceReadAt = null
             onlineLicence = false
         }
         licenceUid = uid
@@ -363,13 +456,23 @@ object ProAccess {
         reevaluate()
     }
 
-    /** Licence lue pour le compte [uid] (§4.1.4). `null` = lecture EN ÉCHEC : rien ne
-     *  change (ni licence, ni cache). Ferme le paywall si le Pro est là. */
+    /** Licence lue pour le compte [uid] (§4.1.4). `null` = lecture EN ÉCHEC : licence
+     *  INCONNUE pour l'état Pro (jamais `pro: false`) — la part licence du cache n'est
+     *  pas effacée, la dernière licence lue reste affichée. Une lecture en échec ou
+     *  venue du cache Firestore (`fromServer` faux) fait retomber [onlineLicence],
+     *  comme sur le site (§4.1.5). Ferme le paywall si le Pro est là. */
     fun applyAccountLicence(grant: ProGrant?, uid: String) {
         if (licenceUid != uid) bindAccount(uid)
-        if (grant == null) return
+        if (grant == null) {
+            licenceUnknown = true
+            onlineLicence = false
+            reevaluate()
+            return
+        }
         licence = grant
-        if (grant.fromServer) onlineLicence = true
+        licenceUnknown = false
+        onlineLicence = grant.fromServer
+        if (grant.fromServer) licenceReadAt = clock()
         reevaluate()
     }
 
@@ -377,6 +480,8 @@ object ProAccess {
      *  sont oubliées. */
     fun clearAccountLicence() {
         licence = null
+        licenceUnknown = false
+        licenceReadAt = null
         licenceUid = null
         onlineLicence = false
         emailVerified = null
@@ -391,6 +496,8 @@ object ProAccess {
      *  absente (`false`). Nul-sûr sans [init]. */
     fun setAccountGrant(granted: Boolean) {
         licence = ProGrant(pro = granted, fromServer = true)
+        licenceUnknown = false
+        licenceReadAt = clock()
         onlineLicence = true
         reevaluate()
     }
@@ -444,6 +551,23 @@ object ProAccess {
         linkRefusalAlert = null
     }
 
+    /**
+     * Le compte de la session est connu (SyncViewModel : reprise de session terminée,
+     * connexion, inscription, déconnexion) — [accountUid] et [verifiesPurchases] sont
+     * posés. Lance la séquence preuve/acquittement restée en attente ([applyPurchases]) :
+     * compte connecté → la preuve part AVANT l'acquittement (§4.3 point 1, recette
+     * R8) ; sinon acquittement local. Idempotent.
+     */
+    fun markAccountResolved() {
+        accountWaitCancel?.invoke()
+        accountWaitCancel = null
+        accountResolved = true
+        val pending = pendingAck ?: return
+        pendingAck = null
+        runProofThenAck(pending.tokens, pending.explicit,
+            finished = if (pending.finished.isEmpty()) null else ({ pending.finished.forEach { it() } }))
+    }
+
     // MARK: - Souscrire (§4.1.6)
 
     /** Ce qu'exige le bouton du paywall. */
@@ -466,13 +590,13 @@ object ProAccess {
     /** Abonné par l'AUTRE boutique (§5.6) : échéance, sinon null. */
     val otherStoreSubscriptionEnd: Long?
         get() {
-            if (debugSubscribeState == "otherStore") return System.currentTimeMillis() + 200L * 86_400_000L
-            return SubscriptionRules.otherStoreSubscriptionEnd(licence, System.currentTimeMillis())
+            if (debugSubscribeState == "otherStore") return clock() + 200L * 86_400_000L
+            return SubscriptionRules.otherStoreSubscriptionEnd(licence, clock())
         }
 
     /** Ligne d'état de la section Pro de Compte & réglages (§5.5). */
     val statusLine: ProStatusLine
-        get() = SubscriptionRules.statusLine(device, licence, isPro, System.currentTimeMillis())
+        get() = SubscriptionRules.statusLine(device, licence, isPro, clock())
 
     /** Un abonnement Play existe sur l'appareil (« Gérer » du paywall, « Demander un
      *  remboursement », lien de gestion précis). */
@@ -501,6 +625,9 @@ object ProAccess {
             .enablePendingPurchases(
                 PendingPurchasesParams.newBuilder().enableOneTimeProducts().build()
             )
+            // Billing 8 : une connexion perdue (mise à jour du Play Store…) est
+            // rétablie par la bibliothèque à l'appel suivant.
+            .enableAutoServiceReconnection()
             .build()
         client = c
         c.startConnection(object : BillingClientStateListener {
@@ -513,10 +640,17 @@ object ProAccess {
                     refresh()
                 }
             }
-            // Le client se reconnecte à la prochaine action ([purchase],
-            // [restore]) : pas de boucle de reconnexion agressive.
-            override fun onBillingServiceDisconnected() {}
+            // Pas de boucle de reconnexion : la prochaine relecture ([refresh], au
+            // plus tard au retour au premier plan) ou action ([purchase],
+            // [restore]) rétablit la connexion AVANT de lire.
+            override fun onBillingServiceDisconnected() = billingDisconnected()
         })
+    }
+
+    /** Service de facturation perdu : les abonnements devront être RELUS avant de
+     *  compter comme une réponse de Google Play (`onlineStore`, §2.4). */
+    private fun billingDisconnected() {
+        purchasesAnswered = false
     }
 
     private fun ensureConnected(onFailure: (() -> Unit)? = null, then: () -> Unit) {
@@ -533,7 +667,7 @@ object ProAccess {
                 else if (onFailure != null) onFailure()
                 else lastError = result.debugMessage.ifEmpty { null } ?: messageResolver(R.string.pro_error_play_unavailable)
             }
-            override fun onBillingServiceDisconnected() {}
+            override fun onBillingServiceDisconnected() = billingDisconnected()
         })
     }
 
@@ -603,8 +737,9 @@ object ProAccess {
     }
 
     /** Retour au premier plan (§4.1.2) : Google Play ET la licence doivent
-     *  répondre à nouveau pour effacer leur part du cache ; Play est relu ici, la
-     *  licence par le SyncViewModel (`onForeground`). */
+     *  répondre à nouveau pour effacer leur part du cache ; Play est relu ici (la
+     *  connexion perdue d'abord rétablie, [refresh]), la licence par le
+     *  SyncViewModel (`onForeground`). */
     fun onForeground() {
         productAnswered = false
         purchasesAnswered = false
@@ -617,17 +752,22 @@ object ProAccess {
      * à jour ; la preuve part ensuite (automatique, ou [explicit]) AVANT tout
      * acquittement par l'app. [finished] : `true` une fois la relecture appliquée
      * et la séquence preuve/acquittement terminée ; `false` si Play n'a pas répondu.
+     * Service déconnecté (Play Store mis à jour, connexion du lancement en échec) :
+     * la connexion est RÉTABLIE avant de relire — sinon un abonnement expiré ou
+     * remboursé resterait Pro tant que le processus vit (§4.1.2).
      */
     fun refresh(explicit: Boolean = false, finished: ((ok: Boolean) -> Unit)? = null) {
         if (debugOverride != null) { finished?.invoke(true); return }
-        val c = client ?: run { finished?.invoke(false); return }
-        if (!c.isReady) { finished?.invoke(false); return }
-        queryProduct()
-        queryStoreCountry()
-        c.queryPurchasesAsync(subsQuery()) { result, purchases ->
-            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                applyPurchases(snapshotsOf(purchases), explicit) { finished?.invoke(true) }
-            } else finished?.invoke(false)
+        if (client == null) { finished?.invoke(false); return }
+        ensureConnected(onFailure = { finished?.invoke(false) }) {
+            val c = client ?: run { finished?.invoke(false); return@ensureConnected }
+            queryProduct()
+            queryStoreCountry()
+            c.queryPurchasesAsync(subsQuery()) { result, purchases ->
+                if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                    applyPurchases(snapshotsOf(purchases), explicit) { finished?.invoke(true) }
+                } else finished?.invoke(false)
+            }
         }
     }
 
@@ -672,8 +812,12 @@ object ProAccess {
     /**
      * Abonnements lus chez Play : état appliqué TOUT DE SUITE ([applyStoreState]),
      * puis ORDRE « preuve PUIS acquittement » ([ProofThenAck], §4.3) pour un
-     * abonnement non acquitté ; sinon la preuve part simplement. [finished] :
-     * appelé une fois tout terminé. Nul-sûr sans [init] (tests JVM).
+     * abonnement non acquitté ; sinon la preuve part simplement. Abonnement non
+     * acquitté lu AVANT que le compte de la session soit connu (démarrage à froid :
+     * Play répond avant la reprise de la session) : la séquence attend
+     * [markAccountResolved] — au plus [ACCOUNT_WAIT_MAX_MS], le délai de 3 jours
+     * de Google laisse toute la marge. [finished] : appelé une fois tout terminé.
+     * Nul-sûr sans [init] (tests JVM).
      */
     internal fun applyPurchases(
         snapshots: List<PlayPurchaseSnapshot>, explicit: Boolean, finished: (() -> Unit)? = null
@@ -682,6 +826,22 @@ object ProAccess {
         val unacknowledged = snapshots
             .filter { it.isProSubscription && it.purchased && !it.acknowledged && it.purchaseToken.isNotEmpty() }
             .map { it.purchaseToken }
+        if (unacknowledged.isNotEmpty() && !accountResolved) {
+            val previous = pendingAck
+            pendingAck = PendingAck(unacknowledged, explicit || previous?.explicit == true,
+                previous?.finished.orEmpty() + listOfNotNull(finished))
+            if (accountWaitCancel == null) {
+                accountWaitCancel = timers?.schedule(ACCOUNT_WAIT_MAX_MS) {
+                    accountWaitCancel = null
+                    markAccountResolved()
+                }
+            }
+            return
+        }
+        runProofThenAck(unacknowledged, explicit, finished)
+    }
+
+    private fun runProofThenAck(unacknowledged: List<String>, explicit: Boolean, finished: (() -> Unit)?) {
         val linker = purchaseLinker
         ProofThenAck(playGateway).run(
             unacknowledged = unacknowledged,
@@ -756,7 +916,7 @@ object ProAccess {
 
     private fun finishRestore(from: RestoreScreen, playFailed: Boolean) {
         isBusy = false
-        val now = System.currentTimeMillis()
+        val now = clock()
         val outcome = SubscriptionRules.restoreOutcome(isPro, playFailed, SubscriptionRules.expiredPlayEnd(licence, now))
         val message = texts?.let { SubscriptionTexts.restore(outcome, it) }
         restoreMessage = message
@@ -777,5 +937,23 @@ object ProAccess {
     private fun clearRestoreMessage() {
         if (restoreMessage != null) restoreMessage = null
         if (restoreMessageScreen != null) restoreMessageScreen = null
+    }
+}
+
+/** Minuteurs de [ProAccess] (échéance de la licence, attente du compte) — abstraits
+ *  pour les tests JVM (pas de Looper). */
+internal interface ProTimers {
+    /** Programme [action] sur le fil principal dans [delayMs] ; rend son annulation. */
+    fun schedule(delayMs: Long, action: () -> Unit): () -> Unit
+}
+
+/** Minuteurs de l'app : `Handler` du fil principal (l'état Pro est un état Compose). */
+internal object MainLooperTimers : ProTimers {
+    private val handler by lazy { Handler(Looper.getMainLooper()) }
+
+    override fun schedule(delayMs: Long, action: () -> Unit): () -> Unit {
+        val runnable = Runnable { action() }
+        handler.postDelayed(runnable, delayMs)
+        return { handler.removeCallbacks(runnable) }
     }
 }

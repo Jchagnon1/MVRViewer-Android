@@ -178,14 +178,11 @@ class FirebaseSyncService(context: Context) : SyncService {
         }
     }
 
-    /** `Timestamp` → millisecondes, en profondeur (sources), pour [ProGrant]. */
-    private fun plainValues(data: Map<String, Any?>): Map<String, Any?> = data.mapValues { (_, v) ->
-        when (v) {
-            is com.google.firebase.Timestamp -> v.toDate().time
-            is Map<*, *> -> plainValues(v.entries.associate { (k, x) -> k.toString() to x })
-            else -> v
-        }
-    }
+    /** `Timestamp` → millisecondes, en profondeur (sources), pour [ProGrant] ; sous
+     *  une clé de temps, toute autre forme (nombre saisi à la main…) est opaque et
+     *  retirée — jamais lue comme des millisecondes ([ProGrant.plainDocument], §3.7). */
+    private fun plainValues(data: Map<String, Any?>): Map<String, Any?> =
+        ProGrant.plainDocument(data) { (it as? com.google.firebase.Timestamp)?.toDate()?.time }
 
     /**
      * Adresse vérifiée ? `reload()` relit le compte (le lien de vérification a pu

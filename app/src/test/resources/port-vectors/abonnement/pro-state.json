@@ -1,0 +1,447 @@
+{
+  "schema": "mvrviewer.vectors.pro-state/1",
+  "spec": "SPEC-abonnement.md §2.4 (fonction pure proState, IDENTIQUE iOS, Android, web)",
+  "source": "attendus écrits à la main d'après la table P1-P15 du §2.4 (2026-11-05) ; implémentation de référence : functions/test/helpers/abonnementRef.js",
+  "units": "temps en millisecondes depuis l'époque Unix ; now = 1800000000000 (2027-01-15T08:00:00Z)",
+  "constants": {
+    "MARGE_HORS_LIGNE_MS": 259200000
+  },
+  "cacheForm": "cache = { store: { until } | null, licence: { until: ms|null, perpetual: bool } | null } ; un cache d'entrée null vaut { store: null, licence: null } ; expect.cache est TOUJOURS l'objet complet après mise à jour",
+  "vectors": [
+    {
+      "id": "P1",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": true,
+          "until": 1802592000000
+        },
+        "licence": null,
+        "onlineStore": true,
+        "onlineLicence": false,
+        "cache": null
+      },
+      "expect": {
+        "pro": true,
+        "reason": "store",
+        "cache": {
+          "store": {
+            "until": 1802592000000
+          },
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P2",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": false,
+          "until": null
+        },
+        "licence": null,
+        "onlineStore": true,
+        "onlineLicence": false,
+        "cache": {
+          "store": {
+            "until": 1799913600000
+          },
+          "licence": null
+        }
+      },
+      "expect": {
+        "pro": false,
+        "reason": "aucun",
+        "cache": {
+          "store": null,
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P3",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": false,
+          "until": null
+        },
+        "licence": null,
+        "onlineStore": false,
+        "onlineLicence": false,
+        "cache": {
+          "store": {
+            "until": 1799913600000
+          },
+          "licence": null
+        }
+      },
+      "expect": {
+        "pro": true,
+        "reason": "hors-ligne",
+        "cache": {
+          "store": {
+            "until": 1799913600000
+          },
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P4",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": false,
+          "until": null
+        },
+        "licence": null,
+        "onlineStore": false,
+        "onlineLicence": false,
+        "cache": {
+          "store": {
+            "until": 1799712000000
+          },
+          "licence": null
+        }
+      },
+      "expect": {
+        "pro": false,
+        "reason": "aucun",
+        "cache": {
+          "store": {
+            "until": 1799712000000
+          },
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P5",
+      "note": "web : store null",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": null,
+        "licence": {
+          "pro": true,
+          "expires": 1817280000000
+        },
+        "onlineStore": false,
+        "onlineLicence": true,
+        "cache": null
+      },
+      "expect": {
+        "pro": true,
+        "reason": "licence",
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": 1817280000000,
+            "perpetual": false
+          }
+        }
+      }
+    },
+    {
+      "id": "P6",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": null,
+        "licence": {
+          "pro": true,
+          "expires": 1799996400000
+        },
+        "onlineStore": false,
+        "onlineLicence": true,
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": 1799996400000,
+            "perpetual": false
+          }
+        }
+      },
+      "expect": {
+        "pro": false,
+        "reason": "aucun",
+        "cache": {
+          "store": null,
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P7",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": null,
+        "licence": {
+          "pro": true,
+          "expires": null
+        },
+        "onlineStore": false,
+        "onlineLicence": true,
+        "cache": null
+      },
+      "expect": {
+        "pro": true,
+        "reason": "licence",
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": null,
+            "perpetual": true
+          }
+        }
+      }
+    },
+    {
+      "id": "P8",
+      "note": "le crochet de test ne touche jamais au cache",
+      "input": {
+        "now": 1800000000000,
+        "override": false,
+        "store": {
+          "active": true,
+          "until": 1802592000000
+        },
+        "licence": null,
+        "onlineStore": true,
+        "onlineLicence": false,
+        "cache": null
+      },
+      "expect": {
+        "pro": false,
+        "reason": "override",
+        "cache": {
+          "store": null,
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P9",
+      "note": "Android : la bibliothèque ne donne pas l'échéance",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": true,
+          "until": null
+        },
+        "licence": null,
+        "onlineStore": true,
+        "onlineLicence": false,
+        "cache": null
+      },
+      "expect": {
+        "pro": true,
+        "reason": "store",
+        "cache": {
+          "store": {
+            "until": 1800000000000
+          },
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P10",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": false,
+          "until": null
+        },
+        "licence": null,
+        "onlineStore": false,
+        "onlineLicence": false,
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": null,
+            "perpetual": true
+          }
+        }
+      },
+      "expect": {
+        "pro": true,
+        "reason": "hors-ligne",
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": null,
+            "perpetual": true
+          }
+        }
+      }
+    },
+    {
+      "id": "P11",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": true,
+          "until": 1802592000000
+        },
+        "licence": {
+          "pro": false,
+          "expires": null
+        },
+        "onlineStore": true,
+        "onlineLicence": true,
+        "cache": null
+      },
+      "expect": {
+        "pro": true,
+        "reason": "store",
+        "cache": {
+          "store": {
+            "until": 1802592000000
+          },
+          "licence": null
+        }
+      }
+    },
+    {
+      "id": "P12",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": true,
+          "until": 1800864000000
+        },
+        "licence": {
+          "pro": true,
+          "expires": 1803456000000
+        },
+        "onlineStore": true,
+        "onlineLicence": true,
+        "cache": null
+      },
+      "expect": {
+        "pro": true,
+        "reason": "store",
+        "cache": {
+          "store": {
+            "until": 1800864000000
+          },
+          "licence": {
+            "until": 1803456000000,
+            "perpetual": false
+          }
+        }
+      }
+    },
+    {
+      "id": "P13",
+      "note": "lecture de la licence en échec : licence null",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": false,
+          "until": null
+        },
+        "licence": null,
+        "onlineStore": true,
+        "onlineLicence": false,
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": 1808640000000,
+            "perpetual": false
+          }
+        }
+      },
+      "expect": {
+        "pro": true,
+        "reason": "hors-ligne",
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": 1808640000000,
+            "perpetual": false
+          }
+        }
+      }
+    },
+    {
+      "id": "P14",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": false,
+          "until": null
+        },
+        "licence": null,
+        "onlineStore": true,
+        "onlineLicence": false,
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": 1799712000000,
+            "perpetual": false
+          }
+        }
+      },
+      "expect": {
+        "pro": false,
+        "reason": "aucun",
+        "cache": {
+          "store": null,
+          "licence": {
+            "until": 1799712000000,
+            "perpetual": false
+          }
+        }
+      }
+    },
+    {
+      "id": "P15",
+      "input": {
+        "now": 1800000000000,
+        "override": null,
+        "store": {
+          "active": false,
+          "until": null
+        },
+        "licence": {
+          "pro": true,
+          "expires": 1799996400000
+        },
+        "onlineStore": true,
+        "onlineLicence": true,
+        "cache": {
+          "store": {
+            "until": 1800432000000
+          },
+          "licence": {
+            "until": 1799996400000,
+            "perpetual": false
+          }
+        }
+      },
+      "expect": {
+        "pro": false,
+        "reason": "aucun",
+        "cache": {
+          "store": null,
+          "licence": null
+        }
+      }
+    }
+  ]
+}

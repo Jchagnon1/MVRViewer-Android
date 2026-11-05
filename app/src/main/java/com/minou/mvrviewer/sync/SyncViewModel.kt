@@ -107,78 +107,132 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private var observeJob: Job? = null
 
-    // Licence Pro PAR COMPTE (posée par l'admin, cf. SyncService.fetchProGrant) :
-    // relue après CHAQUE connexion réussie et par « Restaurer un achat »
-    // (crochet ProAccess.grantRefresher), retirée à la déconnexion.
-    private val grantRefresher: () -> Unit = { refreshProGrant() }
+    /** Adresse e-mail du compte connecté VÉRIFIÉE ? (SPEC-abonnement §4.1.6) — relue
+     *  à la connexion, au retour au premier plan et à l'ouverture du paywall et de
+     *  Compte & réglages ; null : déconnecté ou inconnu. */
+    private val _emailVerified = MutableStateFlow<Boolean?>(null)
+    val emailVerified: StateFlow<Boolean?> = _emailVerified.asStateFlow()
 
-    // ACHAT PRO RECONNU PARTOUT (SPEC-purchase.md §6.1/§6.3) : la preuve de
-    // l'achat Play part vers la fonction `verifyPurchase`, qui rattache l'achat
-    // au compte et écrit `entitlements/{uid}` (lu par fetchProGrant, inchangé)
-    // → le Pro acheté ici vaut aussi sur iPhone et sur le web. Déclencheurs :
-    // ProAccess (achat, « Restaurer un achat », relecture Play au lancement)
-    // via [purchaseLinker], chaque relecture de licence, retour au premier plan
-    // après un échec réessayable ([onForeground]).
+    /** Le backend fait-il vérifier les achats (`verifyPurchase`) ? (Firebase oui, démo non.) */
+    val verifiesPurchases: Boolean get() = service.verifiesPurchases
+
+    // Licence Pro du COMPTE (`entitlements/{uid}`, cf. SyncService.fetchProGrant) :
+    // relue après CHAQUE connexion réussie, au retour au premier plan et par
+    // « Restaurer mes achats » (crochet ProAccess.grantRefresher, `done` appelé
+    // APRÈS la lecture), oubliée à la déconnexion.
+    private val grantRefresher: (() -> Unit) -> Unit = { done ->
+        if (_auth.value.accountOrNull == null) done()
+        else viewModelScope.launch { try { purchaseLinks.refreshProGrant() } finally { done() } }
+    }
+
+    // ABONNEMENT PRO RECONNU PARTOUT (SPEC-purchase.md §6.1/§6.3, SPEC-abonnement
+    // §4.1) : la preuve de l'abonnement Play part vers la fonction `verifyPurchase`,
+    // qui le vérifie, l'acquitte, le rattache au compte et écrit `entitlements/{uid}`
+    // (lu par fetchProGrant) → le Pro souscrit ici vaut aussi sur iPhone et sur le
+    // web. Déclencheurs : ProAccess (abonnement, « Restaurer mes achats », relecture
+    // Play — dont un nouvel `orderId`) via [purchaseLinker], chaque relecture de
+    // licence, retour au premier plan ([onForeground]).
     private val purchaseLinks = PurchaseLinker(
         service = service,
         transport = HttpPurchaseLinkTransport(),
         store = PrefsPurchaseLinkStore(ctx),
         proof = { com.minou.mvrviewer.ui.ProAccess.currentProof() },
         currentUid = { _auth.value.accountOrNull?.uid },
-        applyGrant = { com.minou.mvrviewer.ui.ProAccess.setAccountGrant(it) },
+        applyGrant = { uid, grant -> com.minou.mvrviewer.ui.ProAccess.applyAccountLicence(grant, uid) },
         showRefusal = { com.minou.mvrviewer.ui.ProAccess.setAccountLinkRefusal(it) }
     )
-    private val purchaseLinker: (Boolean) -> Unit = { explicit -> linkPurchase(explicit) }
+    /** `done` APRÈS la réponse du serveur, quelle qu'elle soit : c'est ensuite que
+     *  ProAccess acquitte un abonnement que le serveur n'aurait pas acquitté (§4.3). */
+    private val purchaseLinker: (Boolean, () -> Unit) -> Unit = { explicit, done ->
+        viewModelScope.launch { try { purchaseLinks.linkPurchase(explicit) } finally { done() } }
+    }
 
     init {
         com.minou.mvrviewer.ui.ProAccess.grantRefresher = grantRefresher
         com.minou.mvrviewer.ui.ProAccess.purchaseLinker = purchaseLinker
+        com.minou.mvrviewer.ui.ProAccess.verifiesPurchases = service.verifiesPurchases
     }
 
     // MARK: - Auth
 
     fun restoreSessionIfPossible() {
         viewModelScope.launch {
-            val acc = runCatching { service.restoreSession() }.getOrNull() ?: return@launch
+            val acc = runCatching { service.restoreSession() }.getOrNull()
+            if (acc == null) {
+                // Session perdue (compte supprimé ailleurs, données effacées) : comme
+                // une déconnexion, la part licence du cache Pro est oubliée (§2.4).
+                if (_auth.value.accountOrNull == null) com.minou.mvrviewer.ui.ProAccess.clearAccountLicence()
+                return@launch
+            }
             _auth.value = AuthState.SignedIn(acc)
             bindProAccount(acc)
             refreshProGrant()
+            refreshEmailVerification()
             refreshProjects()
         }
     }
 
-    /** Compte connecté → ProAccess : uid pour l'`obfuscatedAccountId` du flux
-     *  d'achat, crochet d'envoi de la preuve (re)branché. */
+    /** Compte connecté → ProAccess : compte de la licence (part du cache), uid pour
+     *  l'`obfuscatedAccountId` du flux d'achat SEULEMENT si le backend vérifie les
+     *  achats (sinon l'abonnement serait refusé `409` à tout vrai compte), crochet
+     *  d'envoi de la preuve (re)branché. */
     private fun bindProAccount(acc: AccountInfo) {
-        com.minou.mvrviewer.ui.ProAccess.accountUid = acc.uid
-        com.minou.mvrviewer.ui.ProAccess.purchaseLinker = purchaseLinker
+        val pro = com.minou.mvrviewer.ui.ProAccess
+        pro.verifiesPurchases = service.verifiesPurchases
+        pro.bindAccount(acc.uid)
+        pro.accountUid = if (service.verifiesPurchases) acc.uid else null
+        pro.purchaseLinker = purchaseLinker
     }
 
     /**
-     * Relit la licence par compte pour la session courante et l'applique à
+     * Relit la licence du compte pour la session courante et l'applique à
      * [com.minou.mvrviewer.ui.ProAccess]. No-op si déconnecté. Dans
      * [viewModelScope] (ne retarde pas la connexion). ORDRE (SPEC-purchase
-     * §6.1) : envoi automatique de la preuve d'achat si nécessaire →
-     * `fetchProGrant` → réparation (licence fausse alors que l'achat est
-     * mémorisé rattaché : un envoi forcé par session). Garde de course : si la
-     * session a changé pendant l'envoi ou la lecture (déconnexion, autre
-     * compte), le résultat n'est pas appliqué. Rien ici ne lève.
+     * §6.1) : envoi automatique de la preuve si nécessaire → `fetchProGrant` →
+     * réparation (§4.1.3). Une lecture en ÉCHEC ne change rien. Garde de course :
+     * si la session a changé pendant l'envoi ou la lecture, le résultat n'est pas
+     * appliqué. Rien ici ne lève.
      */
     private fun refreshProGrant() {
         if (_auth.value.accountOrNull == null) return
         viewModelScope.launch { purchaseLinks.refreshProGrant() }
     }
 
-    /** Envoie la preuve d'achat (déclencheurs ProAccess) ; `explicit` = geste
-     *  de l'utilisateur. Rattaché → licence relue. No-op si déconnecté. */
+    /** Envoie la preuve d'abonnement ; `explicit` = geste de l'utilisateur.
+     *  Rattaché → licence relue. No-op si déconnecté. */
     fun linkPurchase(explicit: Boolean) {
         viewModelScope.launch { purchaseLinks.linkPurchase(explicit) }
     }
 
-    /** Retour au premier plan (MainActivity.onResume) : renvoi automatique,
-     *  SEULEMENT si la dernière tentative a échoué de façon réessayable. */
+    /**
+     * Retour au premier plan (MainActivity.onResume, SPEC-abonnement §4.1.2) : la
+     * licence du compte est relue (renouvellement, résiliation, échéance passée
+     * app en arrière-plan) — la relecture renvoie d'abord une preuve restée « à
+     * réessayer » ou d'une nouvelle période — puis l'adresse e-mail (lien de
+     * vérification ouvert dans la messagerie). Google Play est relu par
+     * `ProAccess.onForeground`.
+     */
     fun onForeground() {
-        if (purchaseLinks.lastOutcomeIsRetry()) linkPurchase(explicit = false)
+        refreshProGrant()
+        refreshEmailVerification()
+    }
+
+    /** Relit l'état de vérification de l'adresse du compte connecté et le donne au
+     *  paywall (bouton « Vérifiez votre adresse… »). */
+    fun refreshEmailVerification() {
+        val uid = _auth.value.accountOrNull?.uid ?: return
+        viewModelScope.launch {
+            val verified = runCatching { service.reloadEmailVerified() }.getOrNull()
+            if (_auth.value.accountOrNull?.uid != uid) return@launch
+            _emailVerified.value = verified
+            com.minou.mvrviewer.ui.ProAccess.emailVerified = verified
+        }
+    }
+
+    /** « Renvoyer l'e-mail de vérification » (gratuit). */
+    suspend fun sendEmailVerification() {
+        if (!_auth.value.isSignedIn) throw SyncException.NotSignedIn
+        service.sendEmailVerification()
     }
 
     suspend fun signIn(email: String, password: String) {
@@ -188,6 +242,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _auth.value = AuthState.SignedIn(acc)
             bindProAccount(acc)
             refreshProGrant()
+            refreshEmailVerification()
             refreshProjects()
             reattachAfterAuth()
         } catch (e: Exception) {
@@ -203,6 +258,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _auth.value = AuthState.SignedIn(acc)
             bindProAccount(acc)
             refreshProGrant()
+            refreshEmailVerification()
             refreshProjects()
             reattachAfterAuth()
         } catch (e: Exception) {
@@ -233,7 +289,9 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             _cloudProjects.value = emptyList()
             _projectNotice.value = null
             _shareCodeNotice.value = null
-            com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
+            _emailVerified.value = null
+            // Licence du compte oubliée, ET sa part du cache Pro (§2.4).
+            com.minou.mvrviewer.ui.ProAccess.clearAccountLicence()
             com.minou.mvrviewer.ui.ProAccess.clearAccount()
         }
     }
@@ -284,7 +342,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         _cloudProjects.value = emptyList()
         _projectNotice.value = null
         _shareCodeNotice.value = null
-        com.minou.mvrviewer.ui.ProAccess.setAccountGrant(false)
+        _emailVerified.value = null
+        com.minou.mvrviewer.ui.ProAccess.clearAccountLicence()
         com.minou.mvrviewer.ui.ProAccess.clearAccount()
     }
 

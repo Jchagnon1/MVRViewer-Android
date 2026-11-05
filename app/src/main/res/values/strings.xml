@@ -385,9 +385,9 @@
     <string name="power_tab_hint">Réglez la conso par TYPE : votre valeur profite à tous les projecteurs de ce type et alimente la bibliothèque partagée. Le câblage se met à jour aussitôt.</string>
     <string name="power_to_enter">à saisir</string>
     <string name="power_watts_gdtf_fmt">%1$d W · GDTF</string>
-    <string name="pro_link_invalid_purchase">Cet achat n\'a pas pu être vérifié.</string>
-    <string name="pro_link_owned_by_other_account">Cet achat est déjà rattaché à un autre compte MVR Viewer. Connectez-vous avec ce compte pour retrouver la version Pro sur vos autres appareils.</string>
-    <string name="pro_link_revoked">Cet achat a été remboursé ou annulé : il ne donne plus accès à la version Pro.</string>
+    <string name="pro_link_invalid_purchase">Cet abonnement n\'a pas pu être vérifié.</string>
+    <string name="pro_link_owned_by_other_account">Cet abonnement est déjà rattaché à un autre compte MVR Viewer. Connectez-vous avec ce compte pour retrouver la version Pro sur vos autres appareils.</string>
+    <string name="pro_link_revoked">Cet abonnement a été remboursé ou révoqué : il ne donne plus accès à la version Pro.</string>
     <string name="pro_link_test_purchase_refused">Les achats de test ne sont pas acceptés.</string>
     <string name="raster_jpeg">Image JPEG</string>
     <string name="raster_pdf">PDF</string>
@@ -711,13 +711,82 @@
     <string name="account_signed_in">Connecté</string>
     <string name="account_not_signed_in">Non connecté</string>
     <string name="pro_section_title">MVR Viewer Pro</string>
-    <string name="pro_active">Version Pro active — édition débloquée</string>
     <string name="pro_pitch">La lecture est gratuite ; l\'édition (patch, câblage, imports…) passe en Pro.</string>
-    <string name="pro_unlock">Débloquer la version Pro</string>
-    <string name="pro_restore">Restaurer un achat</string>
-    <!-- Écran d'achat Pro (ProPaywall.kt), textes d'iOS ProPaywallView. -->
+    <string name="pro_restore">Restaurer mes achats</string>
+    <!-- Abonnement Pro annuel (SPEC-abonnement §5) : écran Pro (ProPaywall.kt), Compte &amp; réglages,
+         mêmes textes qu'iOS SAUF la phrase sous le bouton (§5.2, propre à Google Play). -->
     <string name="pro_paywall_reason_fmt">Pour %1$s, il faut la version Pro.</string>
-    <string name="pro_paywall_pitch">Lire un show reste entièrement gratuit — 3D, plan, patch, univers, câblage, export PDF, projets partagés. La version Pro débloque tout ce qui MODIFIE le projet.</string>
+    <string name="pro_kind_annual">Abonnement annuel</string>
+    <string name="pro_price_per_year_fmt">%1$s par an</string>
+    <string name="pro_subscribe_fmt">S\'abonner — %1$s par an</string>
+    <string name="pro_loading_price">Chargement du prix…</string>
+    <string name="pro_free_note">La version gratuite permet toujours d\'ouvrir et de consulter tous vos fichiers et projets.</string>
+    <string name="pro_sign_in_to_subscribe">Se connecter pour s\'abonner</string>
+    <string name="pro_account_needed">Un compte gratuit est nécessaire pour s\'abonner : il porte la version Pro sur tous vos appareils et sur le site, et nous permet de vous envoyer la confirmation et le rappel avant chaque renouvellement.</string>
+    <string name="pro_verify_email_to_subscribe">Vérifiez votre adresse e-mail pour vous abonner : elle reçoit la confirmation et le rappel avant chaque renouvellement.</string>
+    <string name="pro_resend_verification">Renvoyer l\'e-mail de vérification</string>
+    <string name="pro_verification_sent">E-mail de vérification envoyé.</string>
+    <!-- Phrase EXACTE sous le bouton, Google Play (§5.2, décidée le 05/11 : courte, AVEC renonciation,
+         sans délai de 24 h) ; « TTC » seulement si le pays de la boutique est dans l'EEE, au Royaume-Uni
+         ou en Suisse. Reprise par l'e-mail M1 et l'article 6.7 des CGU : ne pas la reformuler ici seulement. -->
+    <string name="pro_terms_vat_fmt">Abonnement annuel à renouvellement automatique : %1$s TTC par an. Sauf résiliation avant l\'échéance, il est reconduit pour un an au prix alors en vigueur, toute hausse vous étant annoncée à l\'avance. Résiliable à tout moment dans Google Play › Paiements et abonnements › Abonnements ; l\'accès Pro reste ouvert jusqu\'à la fin de l\'année payée. En vous abonnant, vous demandez l\'accès immédiat à MVR Viewer Pro et reconnaissez perdre votre droit de rétractation de 14 jours dès son activation.</string>
+    <string name="pro_terms_fmt">Abonnement annuel à renouvellement automatique : %1$s par an. Sauf résiliation avant l\'échéance, il est reconduit pour un an au prix alors en vigueur, toute hausse vous étant annoncée à l\'avance. Résiliable à tout moment dans Google Play › Paiements et abonnements › Abonnements ; l\'accès Pro reste ouvert jusqu\'à la fin de l\'année payée. En vous abonnant, vous demandez l\'accès immédiat à MVR Viewer Pro et reconnaissez perdre votre droit de rétractation de 14 jours dès son activation.</string>
+    <string name="pro_terms_of_use">Conditions d\'utilisation</string>
+    <string name="pro_privacy_policy">Confidentialité</string>
+    <!-- Identité de l'éditeur AVANT la conclusion (L221-12, §5.1 ligne 9 bis) : %1$s nom, %2$s adresse, %3$s lien. -->
+    <string name="pro_publisher_fmt">Éditeur : %1$s · %2$s · %3$s</string>
+    <string name="pro_publisher_legal_notice">Mentions légales</string>
+    <string name="pro_manage">Gérer ou résilier mon abonnement</string>
+    <string name="pro_refund">Demander un remboursement</string>
+    <string name="pro_pending">Achat en attente d\'approbation : la version Pro s\'activera dès sa confirmation.</string>
+    <string name="pro_expired_fmt">Version Pro expirée le %1$s. Vos fichiers et projets restent lisibles.</string>
+    <string name="pro_already_subscribed_fmt">Vous êtes déjà abonné à MVR Viewer Pro jusqu\'au %1$s. Cet abonnement se gère sur l\'appareil où vous l\'avez souscrit.</string>
+    <string name="pro_restore_nothing">Aucun abonnement à restaurer pour ce compte Google.</string>
+    <string name="pro_restore_expired_fmt">Votre abonnement a expiré le %1$s.</string>
+    <!-- Offre d'introduction (§5.4, affichage générique : aucune offre en v1). -->
+    <string name="pro_offer_free_trial_fmt">Essai gratuit de %1$s, puis %2$s par an.</string>
+    <string name="pro_offer_pay_up_front_fmt">%1$s pour %2$s, puis %3$s par an.</string>
+    <string name="pro_offer_pay_as_you_go_fmt">%1$s par %2$s pendant %3$s, puis %4$s par an.</string>
+    <plurals name="pro_duration_days">
+        <item quantity="one">%1$d jour</item>
+        <item quantity="many">%1$d jours</item>
+        <item quantity="other">%1$d jours</item>
+    </plurals>
+    <plurals name="pro_duration_weeks">
+        <item quantity="one">%1$d semaine</item>
+        <item quantity="many">%1$d semaines</item>
+        <item quantity="other">%1$d semaines</item>
+    </plurals>
+    <plurals name="pro_duration_months">
+        <item quantity="one">%1$d mois</item>
+        <item quantity="many">%1$d mois</item>
+        <item quantity="other">%1$d mois</item>
+    </plurals>
+    <plurals name="pro_duration_years">
+        <item quantity="one">%1$d an</item>
+        <item quantity="many">%1$d ans</item>
+        <item quantity="other">%1$d ans</item>
+    </plurals>
+    <string name="pro_period_day">jour</string>
+    <string name="pro_period_week">semaine</string>
+    <string name="pro_period_month">mois</string>
+    <string name="pro_period_year">an</string>
+    <!-- Compte &amp; réglages, section « MVR Viewer Pro » (§5.5) : dates tirées des sources de la licence. -->
+    <string name="pro_status_renews_fmt">Abonnement actif — renouvellement le %1$s</string>
+    <string name="pro_status_active_no_renewal_fmt">Abonnement actif jusqu\'au %1$s — renouvellement automatique désactivé</string>
+    <string name="pro_status_active">Abonnement actif</string>
+    <string name="pro_status_grace_fmt">Problème de paiement : mettez à jour votre moyen de paiement avant le %1$s pour garder la version Pro.</string>
+    <string name="pro_status_billing_failed">Paiement en échec : la version Pro est suspendue jusqu\'au règlement.</string>
+    <string name="pro_status_paused_fmt">Abonnement en pause : la version Pro reprendra le %1$s.</string>
+    <string name="pro_status_paused">Abonnement en pause : la version Pro reprendra à la fin de la pause.</string>
+    <string name="pro_status_other_device_fmt">Version Pro active jusqu\'au %1$s — abonnement géré sur un autre appareil</string>
+    <string name="pro_status_licence">Version Pro active</string>
+    <string name="pro_status_licence_until_fmt">Version Pro active jusqu\'au %1$s</string>
+    <string name="pro_subscribe_again">Se réabonner</string>
+    <string name="pro_subscribe_to_pro">S\'abonner à la version Pro</string>
+    <string name="account_email_unverified">Adresse e-mail non vérifiée : vous risquez de ne pas recevoir la confirmation et le rappel avant reconduction.</string>
+    <!-- Suppression du compte avec un abonnement à renouvellement (§5.7), AVANT la confirmation. -->
+    <string name="account_delete_subscription_warning">Supprimer votre compte ne résilie pas votre abonnement MVR Viewer Pro : la boutique où vous l\'avez souscrit continuera de le facturer. Résiliez-le d\'abord avec « Gérer ou résilier mon abonnement ». Si vous supprimez votre compte sans résilier, nous gardons seulement votre adresse e-mail, jusqu\'à la fin de l\'abonnement, pour vous envoyer les messages que la loi impose (rappel avant reconduction, accusé de résiliation).</string>
     <string name="pro_feature_patch">Modifier le patch : adresses, univers, modes, noms</string>
     <string name="pro_feature_cabling">Affecter le câblage électrique et les lignes DMX</string>
     <string name="pro_feature_orient">Retourner et orienter les projecteurs</string>
@@ -725,11 +794,6 @@
     <string name="pro_feature_models_fmt">Importer des objets 3D (%1$s)</string>
     <string name="pro_feature_custom_types">Créer des types de projecteurs personnalisés</string>
     <string name="pro_feature_share">Partager un projet et pousser vos modifications</string>
-    <string name="pro_unlock_price_fmt">Débloquer la version Pro — %1$s</string>
-    <!-- Renonciation au droit de rétractation, JUSTE SOUS le bouton d'achat (CGU §6.7) :
-         phrase IDENTIQUE sur iOS et Android, ne pas la reformuler d'un côté seulement. -->
-    <string name="pro_purchase_withdrawal_waiver">En confirmant l\'achat, vous demandez l\'accès immédiat à la version Pro et renoncez expressément à votre droit de rétractation.</string>
-    <string name="pro_one_time_purchase">Achat unique, sans abonnement. Valable sur tous vos appareils avec le même compte Google.</string>
     <string name="pro_error_play_unavailable">Google Play indisponible.</string>
     <string name="pro_error_purchase_failed">L\'achat n\'a pas abouti.</string>
     <string name="pro_error_product_unavailable">Le produit n\'est pas disponible pour le moment. Vérifiez votre connexion et réessayez.</string>

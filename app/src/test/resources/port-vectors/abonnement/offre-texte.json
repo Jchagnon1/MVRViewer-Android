@@ -1,0 +1,147 @@
+{
+  "schema": "mvrviewer.vectors.offre-texte/1",
+  "spec": "SPEC-abonnement.md §5.4 (ligne d'offre d'introduction, affichage générique ; aucune offre n'existe en v1)",
+  "source": "attendus écrits à la main d'après les formules du §5.4 (2026-11-05) ; implémentation de référence : functions/test/helpers/abonnementRef.js",
+  "form": "offer = { kind: freeTrial | payUpFront | payAsYouGo, duration: P{n}D|W|M|Y (durée totale de l'offre), period?: P1D|P1W|P1M|P1Y (payAsYouGo : période facturée), offerPrice?: texte de la boutique } ; price = prix annuel de la boutique (texte) ; pluriels : fr jour(s), semaine(s), mois, an(s) ; en day(s), week(s), month(s), year(s)",
+  "vectors": [
+    {
+      "id": "O1",
+      "lang": "fr",
+      "price": "25,99 €",
+      "offer": {
+        "kind": "freeTrial",
+        "duration": "P1W"
+      },
+      "expect": "Essai gratuit de 1 semaine, puis 25,99 € par an."
+    },
+    {
+      "id": "O2",
+      "lang": "en",
+      "price": "€25.99",
+      "offer": {
+        "kind": "freeTrial",
+        "duration": "P1W"
+      },
+      "expect": "Free for 1 week, then €25.99 per year."
+    },
+    {
+      "id": "O3",
+      "lang": "fr",
+      "price": "25,99 €",
+      "offer": {
+        "kind": "freeTrial",
+        "duration": "P14D"
+      },
+      "expect": "Essai gratuit de 14 jours, puis 25,99 € par an."
+    },
+    {
+      "id": "O4",
+      "lang": "en",
+      "price": "€25.99",
+      "offer": {
+        "kind": "freeTrial",
+        "duration": "P1M"
+      },
+      "expect": "Free for 1 month, then €25.99 per year."
+    },
+    {
+      "id": "O5",
+      "lang": "fr",
+      "price": "25,99 €",
+      "offer": {
+        "kind": "freeTrial",
+        "duration": "P3M"
+      },
+      "expect": "Essai gratuit de 3 mois, puis 25,99 € par an."
+    },
+    {
+      "id": "O6",
+      "lang": "fr",
+      "price": "25,99 €",
+      "offer": {
+        "kind": "payUpFront",
+        "duration": "P3M",
+        "offerPrice": "4,99 €"
+      },
+      "expect": "4,99 € pour 3 mois, puis 25,99 € par an."
+    },
+    {
+      "id": "O7",
+      "lang": "en",
+      "price": "€25.99",
+      "offer": {
+        "kind": "payUpFront",
+        "duration": "P1Y",
+        "offerPrice": "€19.99"
+      },
+      "expect": "€19.99 for 1 year, then €25.99 per year."
+    },
+    {
+      "id": "O8",
+      "lang": "fr",
+      "price": "25,99 €",
+      "offer": {
+        "kind": "payUpFront",
+        "duration": "P2Y",
+        "offerPrice": "39,99 €"
+      },
+      "expect": "39,99 € pour 2 ans, puis 25,99 € par an."
+    },
+    {
+      "id": "O9",
+      "lang": "fr",
+      "price": "25,99 €",
+      "offer": {
+        "kind": "payAsYouGo",
+        "duration": "P3M",
+        "period": "P1M",
+        "offerPrice": "0,99 €"
+      },
+      "expect": "0,99 € par mois pendant 3 mois, puis 25,99 € par an."
+    },
+    {
+      "id": "O10",
+      "lang": "en",
+      "price": "€25.99",
+      "offer": {
+        "kind": "payAsYouGo",
+        "duration": "P6M",
+        "period": "P1M",
+        "offerPrice": "€0.99"
+      },
+      "expect": "€0.99 per month for 6 months, then €25.99 per year."
+    },
+    {
+      "id": "O11",
+      "lang": "en",
+      "price": "€25.99",
+      "offer": {
+        "kind": "payAsYouGo",
+        "duration": "P2W",
+        "period": "P1W",
+        "offerPrice": "€0.49"
+      },
+      "expect": "€0.49 per week for 2 weeks, then €25.99 per year."
+    },
+    {
+      "id": "O12",
+      "lang": "en",
+      "price": "€25.99",
+      "offer": {
+        "kind": "freeTrial",
+        "duration": "P1D"
+      },
+      "expect": "Free for 1 day, then €25.99 per year."
+    },
+    {
+      "id": "O13",
+      "lang": "fr",
+      "price": "25,99 €",
+      "offer": {
+        "kind": "freeTrial",
+        "duration": "P1Y"
+      },
+      "expect": "Essai gratuit de 1 an, puis 25,99 € par an."
+    }
+  ]
+}

@@ -54,8 +54,9 @@ import com.minou.mvrviewer.SignUpConsent
 // utilisateur » : la politique de confidentialité doit être facile à trouver
 // DANS l'app), « Mentions et licences » (écran interne, hors ligne) et le
 // numéro de version. Section TOUJOURS présente (connecté ou non, sans
-// synchro). AUCUNE signature d'éditeur dans l'app : l'éditeur n'est nommé que
-// dans les pages légales du site.
+// synchro). AUCUNE signature d'éditeur ici : l'éditeur n'est nommé que dans les
+// pages légales du site et, parce que la loi l'impose avant la souscription, sur
+// la ligne « Éditeur » de l'écran Pro (LegalLinks.PUBLISHER_NAME).
 
 /** Ouvre [url] dans le navigateur du système ; sans navigateur, un message bref. */
 fun openExternalUrl(context: Context, url: String) {

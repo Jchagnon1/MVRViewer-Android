@@ -62,9 +62,25 @@ class TestRes(lang: String) {
 
     fun res(id: Int, args: List<Any>): String = get(nameOf(id), *args.toTypedArray())
 
+    /** Pluriel d'un identifiant `R.plurals.x`. */
+    fun pluralRes(id: Int, n: Int, vararg args: Any): String =
+        plural(PLURAL_NAMES[id] ?: error("pluriel inconnu : $id"), n, *args)
+
+    /** Ces ressources comme source de textes de l'abonnement ; dates longues dans la
+     *  langue des ressources, fuseau UTC (stable d'une machine à l'autre). */
+    fun proTexts(): ProTexts = object : ProTexts {
+        override fun string(id: Int, vararg args: Any): String = res(id, args.toList())
+        override fun plural(id: Int, count: Int, vararg args: Any): String = pluralRes(id, count, *args)
+        override fun date(ms: Long): String = java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG, locale)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date(ms))
+    }
+
     companion object {
         private val ID_NAMES: Map<Int, String> by lazy {
             R.string::class.java.fields.associate { it.getInt(null) to it.name }
+        }
+        private val PLURAL_NAMES: Map<Int, String> by lazy {
+            R.plurals::class.java.fields.associate { it.getInt(null) to it.name }
         }
         val FR by lazy { TestRes("fr") }
         val EN by lazy { TestRes("en") }

@@ -49,6 +49,16 @@ object LegalLinks {
     const val SUPPORT_EMAIL = "support@mvrviewer.com"
 
     /**
+     * IDENTITÉ DE L'ÉDITEUR — nommée SEULEMENT là où la loi l'impose (décision du
+     * 3 novembre 2026 : MVR Viewer et la société de design de l'éditeur restent
+     * séparés) : la ligne « Éditeur » de l'écran Pro, près des liens légaux
+     * (SPEC-abonnement §5.1 ligne 9 bis, L221-12 : identité AVANT la conclusion du
+     * contrat, que la feuille d'achat de Google Play ne donne pas). SEULE
+     * occurrence dans l'app (ProPaywallTextTest).
+     */
+    const val PUBLISHER_NAME = "Confess Design (SASU)"
+
+    /**
      * Vrai si [language] (« fr », « fr-CA », « fr_FR »…) est du français.
      */
     fun isFrench(language: String): Boolean =

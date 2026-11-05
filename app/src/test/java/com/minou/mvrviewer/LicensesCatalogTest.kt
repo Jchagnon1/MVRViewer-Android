@@ -99,11 +99,20 @@ class LicensesCatalogTest {
         )
     }
 
-    /** L'éditeur n'est JAMAIS nommé dans l'app (seulement dans les pages légales du site), et aucun « © ». */
+    /**
+     * L'éditeur n'est nommé dans l'app QUE là où la loi l'impose — la ligne « Éditeur »
+     * de l'écran Pro, avant la souscription (SPEC-abonnement §5.1 ligne 9 bis, L221-12),
+     * par la seule constante `LegalLinks.PUBLISHER_NAME` — et aucun « © ».
+     */
     @Test fun aucuneSignatureDEditeur() {
         val all = main.walkTopDown().filter { it.isFile && (it.extension == "kt" || it.extension == "xml") }.toList()
         assertTrue(all.size > 50)
-        for (f in all) assertFalse("${f.name} : Confess", f.readText().contains("Confess", ignoreCase = true))
+        for (f in all) if (f.name != "LegalLinks.kt") {
+            assertFalse("${f.name} : Confess", f.readText().contains("Confess", ignoreCase = true))
+        }
+        val legal = all.single { it.name == "LegalLinks.kt" }.readText()
+        assertEquals(1, Regex("Confess").findAll(legal).count())
+        assertTrue(legal.contains("const val PUBLISHER_NAME = \"Confess Design (SASU)\""))
         // Textes et code de l'INTERFACE : ressources, écrans (ui/), liens légaux et catalogue.
         val ui = all.filter { f ->
             f.extension == "xml" || f.path.contains("/ui/") || f.name in setOf("LegalLinks.kt", "ThirdPartyLicenses.kt")
@@ -140,8 +149,11 @@ class LicensesCatalogTest {
         assertEquals("14 included components", TestRes.EN.plural("licenses_children", 14, 14))
         // Sources de données réellement appelées par le code Android : IGN (satellite,
         // France) et GDTF Share (l'ancienne imagerie mondiale : SatelliteRequestTest).
+        // play.google.com : pages de gestion de l'abonnement et de remboursement,
+        // seulement OUVERTES dans le navigateur (SPEC-abonnement §4.3), aucune donnée lue.
         val code = File(main, "java").walkTopDown().filter { it.extension == "kt" }.joinToString("\n") { it.readText() }
         val hosts = Regex("https://([a-z0-9.-]+)").findAll(code).map { it.groupValues[1] }.toSet()
-        assertEquals(setOf("data.geopf.fr", "cartes.gouv.fr", "gdtf-share.com", "mvrviewer.com", "mvrviewer-app.web.app"), hosts)
+        assertEquals(setOf("data.geopf.fr", "cartes.gouv.fr", "gdtf-share.com", "mvrviewer.com", "mvrviewer-app.web.app",
+            "play.google.com"), hosts)
     }
 }

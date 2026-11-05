@@ -52,12 +52,40 @@ interface SyncService {
     suspend fun deleteAccount(password: String)
 
     /**
-     * Licence Pro attribuée au COMPTE connecté par l'administrateur (document
-     * Firestore `entitlements/{uid}`, champ `pro: true`, optionnellement
-     * `expires` Timestamp dans le futur) ; false si absent, hors ligne ou
-     * déconnecté ; ne lève jamais.
+     * LICENCE PRO DU COMPTE connecté (document Firestore `entitlements/{uid}`, écrit
+     * par la fonction `verifyPurchase` ou posé par l'administrateur, jamais
+     * inscriptible par l'app) : `pro`, `expires` (échéance d'abonnement ou de
+     * licence admin) et les sources des boutiques (SPEC-abonnement §3.7, §4.1.4).
+     * Document absent → `pro: false`. `null` = INCONNU : déconnecté, ou lecture EN
+     * ÉCHEC (hors ligne sans cache, erreur) — jamais un `pro: false`, qui
+     * effacerait à tort la part licence du cache Pro. Ne lève jamais (seule une
+     * annulation de la coroutine appelante remonte). Relue à chaque connexion, au
+     * retour au premier plan et par « Restaurer mes achats ».
      */
-    suspend fun fetchProGrant(): Boolean
+    suspend fun fetchProGrant(): ProGrant?
+
+    /**
+     * ADRESSE E-MAIL VÉRIFIÉE ? (SPEC-abonnement §4.1.6) — relit le compte connecté
+     * auprès du service (`reload`) puis rend son état ; hors ligne, le dernier état
+     * connu. `null` : déconnecté ou inconnu. Ne lève jamais.
+     */
+    suspend fun reloadEmailVerified(): Boolean?
+
+    /**
+     * Renvoie l'e-mail de vérification de l'adresse du compte connecté, dans la
+     * langue affichée par l'app. GRATUIT, jamais gardé Pro. Erreurs :
+     * [SyncException.NotSignedIn], [SyncException.NetworkUnavailable],
+     * [SyncException.TooManyRequests].
+     */
+    suspend fun sendEmailVerification()
+
+    /**
+     * Ce backend fait-il vérifier les achats par la fonction `verifyPurchase` ?
+     * Firebase : oui. Backend local (« démo ») : non — ses uid n'existeront jamais
+     * côté serveur : ni compte ni adresse vérifiée exigés pour s'abonner (§4.1.6),
+     * pas d'`obfuscatedAccountId`, et l'acquittement reste local (§4.3).
+     */
+    val verifiesPurchases: Boolean
 
     /**
      * idToken Firebase du compte connecté, pour authentifier l'envoi de la

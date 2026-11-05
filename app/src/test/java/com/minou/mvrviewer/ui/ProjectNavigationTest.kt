@@ -311,11 +311,12 @@ class ProjectNavigationTest {
         "account_signed_in" to ("Connecté" to "Signed in"),
         "account_not_signed_in" to ("Non connecté" to "Not signed in"),
         "pro_section_title" to ("MVR Viewer Pro" to "MVR Viewer Pro"),
-        "pro_active" to ("Version Pro active — édition débloquée" to "Pro version active — editing unlocked"),
         "pro_pitch" to ("La lecture est gratuite ; l'édition (patch, câblage, imports…) passe en Pro." to
             "Reading is free; editing (patch, cabling, imports…) requires Pro."),
-        "pro_unlock" to ("Débloquer la version Pro" to "Unlock Pro"),
-        "pro_restore" to ("Restaurer un achat" to "Restore a purchase"),
+        // Abonnement annuel (SPEC-abonnement §5.5) : remplacent « Débloquer la version Pro »
+        // et « Restaurer un achat ».
+        "pro_subscribe_to_pro" to ("S'abonner à la version Pro" to "Subscribe to Pro"),
+        "pro_restore" to ("Restaurer mes achats" to "Restore Purchases"),
         "home_account_prompt_title" to ("Créez votre compte (gratuit)" to "Create your account (free)"),
         "home_account_prompt_body" to ("C'est par lui que vous recevez les projets partagés par votre chef de chantier, avec ses modifications en direct. Lire est gratuit ; seule l'édition passe en Pro." to
             "It's how you receive projects shared by your crew chief, with their changes live. Reading is free; only editing requires Pro."),

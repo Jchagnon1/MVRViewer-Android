@@ -95,6 +95,12 @@ class FirebaseSyncService(context: Context) : SyncService {
             // Profil + doc utilisateur : NON bloquants (ne pas retarder la connexion).
             user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(name).build())
             db.collection("users").document(user.uid).set(mapOf("email" to email, "displayName" to name))
+            // Vérification de l'adresse dès l'inscription (SPEC-abonnement §4.1.6) :
+            // une adresse fausse ferait échouer, sans que personne le sache, la
+            // confirmation et le rappel avant reconduction. NON bloquant ;
+            // « Renvoyer l'e-mail de vérification » existe.
+            applyEmailLanguage(auth)
+            user.sendEmailVerification()
             return AccountInfo(user.uid, email, name).also { account = it }
         } catch (e: Exception) {
             throw mapAuthError(e)
@@ -151,26 +157,68 @@ class FirebaseSyncService(context: Context) : SyncService {
     }
 
     /**
-     * Licence par compte : `entitlements/{uid}` — posée par l'administrateur
-     * dans la console Firebase, JAMAIS écrite par l'app (la règle Firestore ne
-     * doit autoriser que la lecture de son propre document). Source par
-     * DÉFAUT : le cache hors ligne convient (la licence change rarement ; une
-     * relecture serveur suit dès que le réseau revient). Toute erreur → false ;
-     * seule une annulation de la coroutine appelante remonte telle quelle (ce
-     * n'est pas une erreur métier, et son résultat ne serait pas appliqué).
+     * Licence Pro du compte : `entitlements/{uid}` = { pro, expires?, sources? }
+     * (SPEC-abonnement §3.7), JAMAIS écrite par l'app. Lecture par défaut : le
+     * serveur, sinon le cache hors ligne de Firestore — [ProGrant.fromServer] le
+     * dit (une licence lue en cache ne remplace pas une lecture serveur pour
+     * `onlineLicence`). Document absent → `pro: false`. Toute ERREUR → `null`
+     * (inconnu), jamais `pro: false` (§4.1.4) ; seule une annulation de la
+     * coroutine appelante remonte telle quelle.
      */
-    override suspend fun fetchProGrant(): Boolean {
-        val uid = auth.currentUser?.uid ?: return false
+    override suspend fun fetchProGrant(): ProGrant? {
+        val uid = auth.currentUser?.uid ?: return null
         return try {
             val snap = db.collection("entitlements").document(uid).get().await()
-            val pro = snap.getBoolean("pro") == true
-            val expires = snap.getTimestamp("expires")
-            pro && (expires == null || expires.toDate().after(Date()))
+            val fromServer = !snap.metadata.isFromCache
+            val data = snap.data ?: return ProGrant(pro = false, fromServer = fromServer)
+            ProGrant.fromDocument(plainValues(data), fromServer)
         } catch (e: Exception) {
             if (e is CancellationException && e !is TimeoutCancellationException) throw e
-            false
+            null
         }
     }
+
+    /** `Timestamp` → millisecondes, en profondeur (sources), pour [ProGrant]. */
+    private fun plainValues(data: Map<String, Any?>): Map<String, Any?> = data.mapValues { (_, v) ->
+        when (v) {
+            is com.google.firebase.Timestamp -> v.toDate().time
+            is Map<*, *> -> plainValues(v.entries.associate { (k, x) -> k.toString() to x })
+            else -> v
+        }
+    }
+
+    /**
+     * Adresse vérifiée ? `reload()` relit le compte (le lien de vérification a pu
+     * être ouvert sur un autre appareil) ; en échec (hors ligne), le dernier état
+     * connu de la session.
+     */
+    override suspend fun reloadEmailVerified(): Boolean? {
+        val user = auth.currentUser ?: return null
+        try {
+            user.reload().await()
+        } catch (e: Exception) {
+            if (e is CancellationException && e !is TimeoutCancellationException) throw e
+        }
+        return (auth.currentUser ?: user).isEmailVerified
+    }
+
+    /** E-mail de vérification, dans la langue affichée par l'app. */
+    override suspend fun sendEmailVerification() {
+        val user = auth.currentUser ?: throw SyncException.NotSignedIn
+        applyEmailLanguage(auth)
+        try {
+            user.sendEmailVerification().await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: FirebaseTooManyRequestsException) {
+            throw SyncException.TooManyRequests
+        } catch (e: Exception) {
+            throw mapAuthError(e)
+        }
+    }
+
+    /** Firebase fait vérifier les achats (`verifyPurchase`, même projet). */
+    override val verifiesPurchases: Boolean = true
 
     /**
      * idToken du compte connecté pour l'envoi de la preuve d'achat à la

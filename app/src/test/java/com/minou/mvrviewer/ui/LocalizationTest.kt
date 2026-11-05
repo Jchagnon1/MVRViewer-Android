@@ -35,7 +35,7 @@ class LocalizationTest {
         "refplan_reading", "labels_section_appearance", "labels_size", "labels_offset", "labels_section_placement",
         "labels_placement_help", "labels_turn_off_fmt", "labels_separate_blocks", "account_settings_title",
         "account_section_account", "account_section_services", "account_signed_in", "account_not_signed_in",
-        "pro_active", "pro_pitch", "pro_unlock", "pro_restore", "home_account_prompt_title",
+        "pro_status_licence", "pro_pitch", "pro_subscribe_to_pro", "pro_restore", "home_account_prompt_title",
         "home_account_prompt_body", "home_account_prompt_action", "models_title", "models_gdtf_signed_in",
         "models_gdtf_sign_in", "layers_title", "card_kind_fixture", "card_title_fmt", "card_layer_fmt",
         "card_fixture_number_fmt", "card_dmx_fmt", "card_details", "card_power_to_enter", "banner_clear_selection",

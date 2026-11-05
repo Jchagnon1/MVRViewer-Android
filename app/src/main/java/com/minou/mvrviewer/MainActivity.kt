@@ -55,6 +55,21 @@ class MainActivity : ComponentActivity() {
         val proOverride = if (isDebuggable && intent.hasExtra("MVR_PRO"))
             intent.getBooleanExtra("MVR_PRO", false) else null
         com.minou.mvrviewer.ui.ProAccess.init(this, proOverride)
+        // Écran Pro sans Google Play ni Firebase (captures, essais) — débogable seulement :
+        //   --es MVR_PAYWALL_PRICE "25,99 €" --es MVR_STOREFRONT FR
+        //   --es MVR_SUBSCRIBE_STATE signIn|verifyEmail|ready|otherStore --ez MVR_AUTO_PAYWALL true
+        if (isDebuggable) {
+            com.minou.mvrviewer.ui.ProAccess.setDebugPaywall(
+                price = intent.getStringExtra("MVR_PAYWALL_PRICE"),
+                subscribeState = intent.getStringExtra("MVR_SUBSCRIBE_STATE"),
+                storeCountry = intent.getStringExtra("MVR_STOREFRONT")
+            )
+            if (intent.getBooleanExtra("MVR_AUTO_PAYWALL", false) || intent.getStringExtra("MVR_AUTO_PAYWALL") == "1") {
+                window.decorView.postDelayed({
+                    com.minou.mvrviewer.ui.ProAccess.openPaywall("modifier le patch")
+                }, 2_000L)
+            }
+        }
         // GDTF Share simulé (DEBUG seulement) : dossier `getList.json` + `<rid>.gdtf`
         // (`<rid>.fail` = panne), poussé par adb dans le stockage propre à l'app :
         //   adb shell am start -n com.minou.mvrviewer/.MainActivity \
@@ -89,8 +104,9 @@ class MainActivity : ComponentActivity() {
                         incomingUris = incomingUris.value,
                         onUrisConsumed = { incomingUris.value = emptyList() }
                     )
-                    // Paywall posé UNE fois, par-dessus tout écran.
-                    com.minou.mvrviewer.ui.ProPaywallHost()
+                    // Paywall posé UNE fois, par-dessus tout écran (« Se connecter pour
+                    // s'abonner » ouvre Compte & réglages par-dessus, avec la synchro).
+                    com.minou.mvrviewer.ui.ProPaywallHost(sync = viewModel())
                     // Refus du rattachement de l'achat au compte (après un geste
                     // fait dans le paywall, déjà fermé) — SPEC-purchase §6.4.
                     com.minou.mvrviewer.ui.ProLinkRefusalHost()
@@ -103,12 +119,12 @@ class MainActivity : ComponentActivity() {
     // déjà arrive ici plutôt que de recréer l'activité.
     override fun onResume() {
         super.onResume()
-        // Achat validé hors app, remboursement : relire les droits au retour.
-        com.minou.mvrviewer.ui.ProAccess.refresh()
-        // Preuve d'achat restée en échec RÉESSAYABLE (hors ligne, 503…) :
-        // renvoyée une fois par retour au premier plan (SPEC-purchase §6.1).
-        // MÊME instance que le `viewModel()` de l'écran (magasin de l'activité,
-        // clé par défaut).
+        // Retour au premier plan (SPEC-abonnement §4.1.2) : Google Play ET la licence
+        // du compte sont relus (renouvellement, résiliation, remboursement, échéance
+        // passée app en arrière-plan) ; la relecture de licence renvoie d'abord une
+        // preuve restée « à réessayer » ou d'une nouvelle période. MÊME instance que
+        // le `viewModel()` de l'écran (magasin de l'activité, clé par défaut).
+        com.minou.mvrviewer.ui.ProAccess.onForeground()
         ViewModelProvider(this)[SyncViewModel::class.java].onForeground()
     }
 

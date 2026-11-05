@@ -15,32 +15,39 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * ACHAT PRO RECONNU SUR TOUTES LES PLATEFORMES — côté Android
- * (SPEC-purchase.md §3.3, §6.1, §6.3 ; miroir de `PurchaseLink.swift` iOS).
+ * ABONNEMENT PRO RECONNU SUR TOUTES LES PLATEFORMES — côté Android
+ * (SPEC-purchase.md §3.3, §6.1, §6.3 ; SPEC-abonnement.md §3.2, §4.1, §4.3 ;
+ * miroir de `PurchaseLink.swift` iOS).
  *
- * L'achat Play ne vaut, en lui-même, que sur l'appareil. Pour qu'il compte aussi
- * sur iPhone et sur le web, l'app envoie sa PREUVE (le `purchaseToken` Play) à la
- * fonction serveur `verifyPurchase` (`POST /api/purchase/verify`, authentifiée par
- * l'idToken Firebase) ; la fonction la vérifie auprès de Google, rattache l'achat
- * au COMPTE et écrit `entitlements/{uid}` — le document que [SyncService.fetchProGrant]
- * lit DÉJÀ. Ce fichier est PUR (JVM, testable sans Activity ni Play) :
- * dérivations, corps JSON, interprétation de la réponse, décision d'envoi,
- * mémoire de la dernière issue, transport HTTP, et l'orchestration [PurchaseLinker].
+ * L'abonnement Play ne vaut, en lui-même, que sur l'appareil. Pour qu'il compte
+ * aussi sur iPhone et sur le web, l'app envoie sa PREUVE (le `purchaseToken` Play)
+ * à la fonction serveur `verifyPurchase` (`POST /api/purchase/verify`, authentifiée
+ * par l'idToken Firebase) ; la fonction la vérifie auprès de Google
+ * (`subscriptionsv2.get`), l'ACQUITTE (le serveur d'abord, l'app ensuite seulement,
+ * §3.4 étape 5), rattache l'abonnement au COMPTE et écrit `entitlements/{uid}`
+ * (licence DATÉE) — le document que [SyncService.fetchProGrant] lit. Ce fichier est
+ * PUR (JVM, testable sans Activity ni Play) : dérivations, corps JSON,
+ * interprétation de la réponse, décision d'envoi, mémoire de la dernière issue,
+ * transport HTTP, et l'orchestration [PurchaseLinker].
  *
  * PAS DE FILE D'ATTENTE à persister (§6.1) : la preuve se relit à tout moment
  * depuis Play (`queryPurchasesAsync` répond aussi hors ligne). On ne mémorise que
- * l'ISSUE de la dernière tentative ([PurchaseLinkRecord], préférence `pro.link`) ;
- * une issue « retry » (hors ligne, non connecté au serveur, 503…) est renvoyée au
- * déclencheur suivant (connexion, lancement, retour au premier plan).
+ * l'ISSUE de la dernière tentative par (abonnement, PÉRIODE, compte)
+ * ([PurchaseLinkRecord], préférence `pro.link`) : chaque renouvellement (nouvel
+ * `orderId`) repart une fois vers le serveur. Une issue « retry » (hors ligne, non
+ * connecté au serveur, 503…) est renvoyée au déclencheur suivant (connexion,
+ * lancement, retour au premier plan).
  *
- * L'état Pro LOCAL ne dépend jamais du serveur : l'achat Play débloque l'appareil
- * même si l'envoi échoue ; le serveur n'ajoute QUE la licence par compte.
+ * L'état Pro LOCAL ne dépend jamais du serveur : l'abonnement Play débloque
+ * l'appareil même si l'envoi échoue ; le serveur n'ajoute QUE la licence du compte.
  */
 object PurchaseLink {
     /** Route Hosting STABLE (réécrite vers la fonction `verifyPurchase`, §1.1). */
     const val ENDPOINT = "https://mvrviewer-app.web.app/api/purchase/verify"
-    /** Produit Pro — IDENTIQUE à `ProAccess.PRODUCT_ID` et à l'App Store. */
-    const val PRODUCT_ID = "com.minou.mvrviewer.pro"
+    /** Abonnement Pro (Play Console, SPEC-abonnement §1.1) — un produit = le droit Pro. */
+    const val PRO_SUBSCRIPTION_ID = "com.minou.mvrviewer.pro.subscription"
+    /** Plan de base annuel (renouvellement automatique, `P1Y`). */
+    const val PRO_BASE_PLAN_ID = "annual"
     const val PACKAGE_NAME = "com.minou.mvrviewer"
     /** Préférences partagées avec `ProAccess` ; clé de la dernière issue (§6.1). */
     const val PREFS = "mvrviewer.display"
@@ -63,26 +70,36 @@ object PurchaseLink {
     fun playPurchaseId(purchaseToken: String): String =
         "play_" + ContentHash.sha256Hex(purchaseToken.toByteArray(Charsets.UTF_8))
 
-    /** Preuve d'un achat Play : corps EXACT du §1.2 (forme Android). */
-    fun proofFor(purchaseToken: String): PurchaseProof = PurchaseProof(
+    /** Langue des e-mails de l'abonnement (`lang` du corps, §3.2) : « fr » pour une
+     *  app affichée en français, « en » sinon. */
+    fun language(displayed: String): String = if (com.minou.mvrviewer.LegalLinks.isFrench(displayed)) "fr" else "en"
+
+    /**
+     * Preuve d'un abonnement Play : corps EXACT du §3.2 (forme Android, avec
+     * `lang`) ; `periodKey` = `orderId` de la période (§4.1.1).
+     */
+    fun proofFor(purchaseToken: String, orderId: String? = null, lang: String = "fr"): PurchaseProof = PurchaseProof(
         purchaseId = playPurchaseId(purchaseToken),
+        periodKey = orderId,
         json = JSONObject()
             .put("platform", "android")
             .put("purchaseToken", purchaseToken)
-            .put("productId", PRODUCT_ID)
+            .put("productId", PRO_SUBSCRIPTION_ID)
             .put("packageName", PACKAGE_NAME)
+            .put("lang", if (lang == "en") "en" else "fr")
             .toString()
     )
 
     /**
-     * Jeton de la preuve parmi les achats lus chez Play : le premier achat du
-     * produit Pro à l'état PURCHASED. Un achat EN ATTENTE (PENDING) ne produit
+     * Abonnement de la preuve parmi les achats lus chez Play : le premier
+     * abonnement Pro à l'état PURCHASED. Un achat EN ATTENTE (PENDING) ne produit
      * jamais de preuve (§6.3) — le serveur répondrait 202 sans rien écrire.
      */
-    fun selectProofToken(purchases: List<PlayPurchaseSnapshot>): String? =
-        purchases.firstOrNull {
-            PRODUCT_ID in it.products && it.purchased && it.purchaseToken.isNotEmpty()
-        }?.purchaseToken
+    fun selectProof(purchases: List<PlayPurchaseSnapshot>): PlayPurchaseSnapshot? =
+        purchases.firstOrNull { it.isProSubscription && it.purchased && it.purchaseToken.isNotEmpty() }
+
+    /** Jeton de [selectProof]. */
+    fun selectProofToken(purchases: List<PlayPurchaseSnapshot>): String? = selectProof(purchases)?.purchaseToken
 
     /**
      * Issue d'une réponse de `verifyPurchase` (table §1.2 / §6.1) :
@@ -114,24 +131,29 @@ object PurchaseLink {
     }
 
     /**
-     * Faut-il envoyer la preuve (§6.1) ? Jamais sans preuve ni compte ; toujours
-     * pour un geste EXPLICITE (acheter, « Restaurer un achat » — même si la
-     * mémoire dit déjà fait) ; sinon SAUTÉ si la dernière issue pour CET achat et
-     * CE compte est définitive (« linked » ou « refused »). Une issue « retry »,
-     * un autre achat ou un autre compte ⇒ envoi.
+     * Faut-il envoyer la preuve (SPEC-abonnement §4.1.1) ? Jamais sans preuve ni
+     * compte ; toujours pour un geste EXPLICITE (s'abonner, « Restaurer mes
+     * achats » — même si la mémoire dit déjà fait) ; en automatique, SAUTÉ
+     * seulement si la dernière issue porte sur CET abonnement, CETTE période
+     * (`orderId`) et CE compte, et qu'elle est définitive (« linked » ou
+     * « refused »). Une entrée ancienne sans `periodKey` ne bloque rien : chaque
+     * renouvellement repart.
      */
-    fun shouldSend(proofId: String?, uid: String?, explicit: Boolean, record: PurchaseLinkRecord?): Boolean {
+    fun shouldSend(
+        proofId: String?, periodKey: String?, uid: String?, explicit: Boolean, record: PurchaseLinkRecord?
+    ): Boolean {
         if (proofId == null || uid == null) return false
         if (explicit) return true
         if (record == null) return true
         val settled = record.outcome == PurchaseLinkRecord.LINKED || record.outcome == PurchaseLinkRecord.REFUSED
-        return !(settled && record.purchaseId == proofId && record.uid == uid)
+        val samePeriod = record.periodKey != null && record.periodKey == periodKey
+        return !(settled && record.purchaseId == proofId && record.uid == uid && samePeriod)
     }
 
     /**
      * Texte localisé (FR + EN, `strings.xml`) d'un refus DÉFINITIF, affiché
-     * seulement après un geste explicite (§6.4). Aucune de ces phrases ne cite
-     * une autre plateforme d'achat. Code inconnu → message générique.
+     * seulement après un geste explicite (SPEC-abonnement §5.9). Aucune de ces
+     * phrases ne cite une autre plateforme d'achat. Code inconnu → message générique.
      */
     fun refusalMessageRes(code: String): Int = when (code) {
         "owned_by_other_account" -> R.string.pro_link_owned_by_other_account
@@ -141,20 +163,32 @@ object PurchaseLink {
     }
 }
 
-/** Ce que l'app retient d'un `Purchase` Play pour en tirer une preuve. */
+/** Ce que l'app retient d'un `Purchase` Play (abonnement) pour en tirer une preuve. */
 data class PlayPurchaseSnapshot(
     val products: List<String>,
     /** `Purchase.PurchaseState.PURCHASED` (faux pour PENDING). */
     val purchased: Boolean,
-    val purchaseToken: String
-)
+    val purchaseToken: String,
+    /** `Purchase.isAcknowledged`. */
+    val acknowledged: Boolean = true,
+    /** `Purchase.isAutoRenewing`. */
+    val autoRenewing: Boolean = true,
+    /** `Purchase.orderId` : clé de la période (§4.1.1) ; null pour un achat en attente. */
+    val orderId: String? = null
+) {
+    val isProSubscription: Boolean get() = PurchaseLink.PRO_SUBSCRIPTION_ID in products
+    /** Achat EN ATTENTE (paiement Play différé). */
+    val pending: Boolean get() = isProSubscription && !purchased
+}
 
-/** Preuve prête à envoyer : id serveur de l'achat + corps JSON du §1.2. */
-data class PurchaseProof(val purchaseId: String, val json: String)
+/** Preuve prête à envoyer : id serveur de l'abonnement, clé de la période
+ *  (`orderId`) et corps JSON du §3.2. */
+data class PurchaseProof(val purchaseId: String, val periodKey: String? = null, val json: String)
 
 /** Issue d'un envoi de preuve (§6.1). */
 sealed class PurchaseLinkOutcome {
-    /** Achat rattaché à ce compte (200 `granted` ou `already`). */
+    /** Abonnement rattaché à ce compte (200 `granted`, `already` ou `inactive` :
+     *  un abonnement expiré rattaché n'est pas une erreur, aucun message). */
     data object Linked : PurchaseLinkOutcome()
     /** Refus DÉFINITIF (400/403/409/410/422) — `code` du contrat §1.2. */
     data class Refused(val code: String) : PurchaseLinkOutcome()
@@ -163,10 +197,12 @@ sealed class PurchaseLinkOutcome {
 }
 
 /**
- * Dernière issue d'envoi (UNE entrée), indexée par (achat, compte) — §6.1 :
- * `{ purchaseId, uid, outcome: "linked"|"refused"|"retry", code, at }`.
- * Persistée en JSON dans la préférence `pro.link`. JAMAIS effacée à la
- * déconnexion (elle porte l'uid : un autre compte n'en hérite pas).
+ * Dernière issue d'envoi (UNE entrée), indexée par (abonnement, PÉRIODE, compte)
+ * — SPEC-abonnement §4.1.1 : `{ purchaseId, periodKey, uid, outcome:
+ * "linked"|"refused"|"retry", code, at }`. Persistée en JSON dans la préférence
+ * `pro.link`. JAMAIS effacée à la déconnexion (elle porte l'uid : un autre compte
+ * n'en hérite pas). Entrée de l'achat unique : sans `periodKey` (elle ne bloque
+ * plus aucun envoi).
  */
 data class PurchaseLinkRecord(
     val purchaseId: String,
@@ -174,10 +210,13 @@ data class PurchaseLinkRecord(
     val outcome: String,
     val code: String?,
     /** Instant de la tentative (ms epoch). */
-    val at: Long
+    val at: Long,
+    /** `orderId` de la période envoyée ; null : entrée ancienne. */
+    val periodKey: String? = null
 ) {
     fun toJson(): String = JSONObject()
         .put("purchaseId", purchaseId)
+        .apply { if (periodKey != null) put("periodKey", periodKey) }
         .put("uid", uid)
         .put("outcome", outcome)
         .apply { if (code != null) put("code", code) }
@@ -189,11 +228,12 @@ data class PurchaseLinkRecord(
         const val REFUSED = "refused"
         const val RETRY = "retry"
 
-        fun of(purchaseId: String, uid: String, outcome: PurchaseLinkOutcome, at: Long) = when (outcome) {
-            PurchaseLinkOutcome.Linked -> PurchaseLinkRecord(purchaseId, uid, LINKED, null, at)
-            is PurchaseLinkOutcome.Refused -> PurchaseLinkRecord(purchaseId, uid, REFUSED, outcome.code, at)
-            PurchaseLinkOutcome.Retry -> PurchaseLinkRecord(purchaseId, uid, RETRY, null, at)
-        }
+        fun of(purchaseId: String, uid: String, outcome: PurchaseLinkOutcome, at: Long, periodKey: String? = null) =
+            when (outcome) {
+                PurchaseLinkOutcome.Linked -> PurchaseLinkRecord(purchaseId, uid, LINKED, null, at, periodKey)
+                is PurchaseLinkOutcome.Refused -> PurchaseLinkRecord(purchaseId, uid, REFUSED, outcome.code, at, periodKey)
+                PurchaseLinkOutcome.Retry -> PurchaseLinkRecord(purchaseId, uid, RETRY, null, at, periodKey)
+            }
 
         /** Relit l'entrée ; `null` si absente ou illisible (comme si rien n'avait été tenté). */
         fun fromJson(s: String?): PurchaseLinkRecord? {
@@ -207,7 +247,8 @@ data class PurchaseLinkRecord(
                 PurchaseLinkRecord(
                     purchaseId, uid, outcome,
                     o.optString("code", "").takeIf { it.isNotEmpty() },
-                    o.optLong("at", 0L)
+                    o.optLong("at", 0L),
+                    o.optString("periodKey", "").takeIf { it.isNotEmpty() }
                 )
             }.getOrNull()
         }
@@ -288,22 +329,29 @@ class HttpPurchaseLinkTransport(
 }
 
 /**
- * ORCHESTRATION de l'envoi (§6.1) — sans Android : le `SyncViewModel` la
- * branche sur le vrai service, le vrai transport et `ProAccess` ; les tests JVM
- * sur `LocalSyncService.forTesting`, un faux transport et une fausse preuve.
+ * ORCHESTRATION de l'envoi (SPEC-purchase §6.1, SPEC-abonnement §4.1) — sans
+ * Android : le `SyncViewModel` la branche sur le vrai service, le vrai transport et
+ * `ProAccess` ; les tests JVM sur `LocalSyncService.forTesting`, un faux transport
+ * et une fausse preuve.
  *
- *  - [linkPurchase] : déclencheurs `ProAccess` (achat, « Restaurer un achat »,
- *    relecture Play à la connexion de Billing) et retour au premier plan ;
+ *  - [linkPurchase] : déclencheurs `ProAccess` (abonnement, « Restaurer mes
+ *    achats », relecture Play — dont un NOUVEL `orderId`, §4.1.2) et retour au
+ *    premier plan ; il ne rend la main qu'APRÈS la réponse du serveur (ou tout de
+ *    suite si rien n'est envoyé) : c'est ce qui permet à `ProAccess` d'acquitter
+ *    l'achat APRÈS la preuve (§4.3) ;
  *  - [refreshProGrant] : relecture de licence (connexion, inscription, session
- *    restaurée, « Restaurer un achat ») — ORDRE (1) envoi automatique si
- *    nécessaire → (2) `fetchProGrant` → (3) RÉPARATION : licence `false` alors
- *    que cet achat est mémorisé « linked » pour ce compte → UN envoi forcé par
- *    session, puis nouvelle lecture.
+ *    restaurée, retour au premier plan, « Restaurer mes achats ») — ORDRE (1)
+ *    envoi automatique si nécessaire → (2) `fetchProGrant` → (3) RÉPARATION
+ *    (§4.1.3) : licence non Pro alors que cet abonnement ACTIF est mémorisé
+ *    « linked » pour ce compte → UN envoi forcé par session, puis nouvelle lecture.
+ *
+ * Une lecture de licence EN ÉCHEC (`null`, §4.1.4) ne déclenche aucune réparation
+ * et ne change rien (ni licence, ni cache) : [applyGrant] reçoit `null`.
  *
  * RÉPARATION INDÉPENDANTE DE L'ORDRE D'ARRIVÉE : elle exige DEUX faits — la
- * licence lue `false` (Firestore) ET la preuve locale mémorisée « linked »
+ * licence lue non Pro (Firestore) ET la preuve locale mémorisée « linked »
  * (Play). Au démarrage à froid, la session restaurée relit la licence AVANT que
- * Play ait rendu l'achat (`queryPurchasesAsync` est asynchrone) : la condition
+ * Play ait rendu l'abonnement (`queryPurchasesAsync` est asynchrone) : la condition
  * est donc évaluée là où arrive CHACUN des deux faits — après la lecture de
  * licence ([refreshProGrant], avec la preuve du moment) ET à l'arrivée de la
  * preuve ([linkPurchase] automatique sauté car « linked », avec la dernière
@@ -322,23 +370,24 @@ class PurchaseLinker(
     private val service: SyncService,
     private val transport: PurchaseLinkTransport,
     private val store: PurchaseLinkStore,
-    /** Preuve de l'achat local VALIDE, `null` s'il n'y en a pas (`ProAccess.currentProof`). */
+    /** Preuve de l'abonnement local VALIDE, `null` s'il n'y en a pas (`ProAccess.currentProof`). */
     private val proof: () -> PurchaseProof?,
     /** uid du compte connecté, `null` si déconnecté. */
     private val currentUid: () -> String?,
-    /** Applique la licence par compte relue (`ProAccess.setAccountGrant`). */
-    private val applyGrant: (Boolean) -> Unit,
+    /** Applique la licence relue pour ce compte (`ProAccess.applyAccountLicence`) ;
+     *  `null` = lecture en échec (rien ne change). */
+    private val applyGrant: (uid: String, grant: ProGrant?) -> Unit,
     /** Pose (code) ou efface (`null`) le message de refus (`ProAccess.setAccountLinkRefusal`). */
     private val showRefusal: (String?) -> Unit,
     private val now: () -> Long = { System.currentTimeMillis() }
 ) {
     private val mutex = Mutex()
-    /** Comptes déjà « réparés » pendant cette session de l'app (§6.1, au plus une fois). */
+    /** Comptes déjà « réparés » pendant cette session de l'app (§4.1.3, au plus une fois). */
     private val repairedUids = HashSet<String>()
-    /** Dernière licence lue dans CETTE session (uid → valeur) ; `null` tant
+    /** Dernière licence LUE dans CETTE session (uid → licence) ; `null` tant
      *  qu'aucune lecture n'a abouti. Sert à évaluer la réparation quand la
      *  preuve Play arrive APRÈS la lecture de licence (démarrage à froid). */
-    @Volatile private var lastGrant: Pair<String, Boolean>? = null
+    @Volatile private var lastGrant: Pair<String, ProGrant>? = null
 
     /** Dernière tentative en échec RÉESSAYABLE ? (retour au premier plan, §6.1). */
     fun lastOutcomeIsRetry(): Boolean = store.load()?.outcome == PurchaseLinkRecord.RETRY
@@ -346,8 +395,9 @@ class PurchaseLinker(
     /**
      * Envoie la preuve si [PurchaseLink.shouldSend] le veut (ou [force] :
      * réparation) ; rend l'issue, `null` si rien n'a été envoyé (pas de compte,
-     * pas de preuve, déjà réglé, ou compte connecté ≠ [expectedUid] une fois le
-     * verrou obtenu). Mémorise l'issue et pose / efface le message.
+     * pas de preuve, déjà réglé pour cette période, ou compte connecté ≠
+     * [expectedUid] une fois le verrou obtenu). Mémorise l'issue (avec la clé de
+     * période) et pose / efface le message.
      */
     suspend fun send(
         explicit: Boolean,
@@ -357,9 +407,9 @@ class PurchaseLinker(
         val uid = currentUid() ?: return null
         if (expectedUid != null && uid != expectedUid) return null
         val p = proof() ?: return null
-        if (!PurchaseLink.shouldSend(p.purchaseId, uid, explicit || force, store.load())) return null
+        if (!PurchaseLink.shouldSend(p.purchaseId, p.periodKey, uid, explicit || force, store.load())) return null
         val outcome = post(p)
-        store.save(PurchaseLinkRecord.of(p.purchaseId, uid, outcome, now()))
+        store.save(PurchaseLinkRecord.of(p.purchaseId, uid, outcome, now(), p.periodKey))
         if (currentUid() == uid) {
             when (outcome) {
                 PurchaseLinkOutcome.Linked -> showRefusal(null)
@@ -396,58 +446,62 @@ class PurchaseLinker(
     }
 
     /**
-     * Déclencheur d'envoi ; si l'achat vient d'être rattaché, relit la licence
-     * (lecture seule). Envoi automatique SAUTÉ (achat déjà « linked » pour ce
-     * compte) alors que la dernière licence lue dans la session pour ce compte
-     * est `false` : c'est la preuve qui arrive APRÈS la lecture de licence
-     * (démarrage à froid) → la réparation du §6.1 est évaluée ICI.
+     * Déclencheur d'envoi ; si l'abonnement vient d'être rattaché (ou déclaré
+     * remboursé), relit la licence. Envoi automatique SAUTÉ (période déjà
+     * « linked » pour ce compte) alors que la dernière licence lue dans la session
+     * pour ce compte n'est pas Pro : c'est la preuve qui arrive APRÈS la lecture
+     * de licence (démarrage à froid) → la réparation du §4.1.3 est évaluée ICI.
+     * Rend la main APRÈS la réponse du serveur.
      */
     suspend fun linkPurchase(explicit: Boolean): PurchaseLinkOutcome? {
         val uid = currentUid() ?: return null
         val outcome = send(explicit)
-        if (outcome == PurchaseLinkOutcome.Linked) {
-            val granted = readGrant(uid)
-            if (currentUid() == uid) applyGrant(granted)
-        } else if (outcome == null && lastGrant == (uid to false)) {
-            val repaired = repairIfNeeded(uid)
-            if (repaired != null && currentUid() == uid) applyGrant(repaired)
+        if (outcome == PurchaseLinkOutcome.Linked || outcome == PurchaseLinkOutcome.Refused("revoked")) {
+            val grant = readGrant(uid)
+            if (currentUid() == uid) applyGrant(uid, grant)
+        } else if (outcome == null) {
+            val last = lastGrant
+            if (last != null && last.first == uid && !last.second.isActive(now())) {
+                val repaired = repairIfNeeded(uid)
+                if (repaired != null && currentUid() == uid) applyGrant(uid, repaired)
+            }
         }
         return outcome
     }
 
     /**
-     * Relecture de la licence par compte, dans l'ordre du §6.1. Rend la licence
-     * appliquée, `null` si déconnecté ou si le compte a changé entre-temps
-     * (résultat ignoré). L'envoi ne relance JAMAIS la relecture Play (pas de
-     * récursion avec `ProAccess.refresh`).
+     * Relecture de la licence du compte, dans l'ordre du §6.1. Rend la licence
+     * appliquée ; `null` si déconnecté, si la lecture a échoué (rien n'est alors
+     * changé) ou si le compte a changé entre-temps (résultat ignoré). L'envoi ne
+     * relance JAMAIS la relecture Play (pas de récursion avec `ProAccess.refresh`).
      */
-    suspend fun refreshProGrant(): Boolean? {
+    suspend fun refreshProGrant(): ProGrant? {
         val uid = currentUid() ?: return null
         send(explicit = false)
-        var granted = readGrant(uid)
-        if (!granted) granted = repairIfNeeded(uid) ?: granted
+        var grant = readGrant(uid)
+        if (grant != null && !grant.isActive(now())) grant = repairIfNeeded(uid) ?: grant
         if (currentUid() != uid) return null
-        applyGrant(granted)
-        return granted
+        applyGrant(uid, grant)
+        return grant
     }
 
-    /** `fetchProGrant` + mémoire de la dernière licence lue pour ce compte
-     *  (seulement si le compte n'a pas changé pendant la lecture). */
-    private suspend fun readGrant(uid: String): Boolean {
-        val granted = service.fetchProGrant()
-        if (currentUid() == uid) lastGrant = uid to granted
-        return granted
+    /** `fetchProGrant` + mémoire de la dernière licence LUE pour ce compte
+     *  (seulement si la lecture a réussi et que le compte n'a pas changé). */
+    private suspend fun readGrant(uid: String): ProGrant? {
+        val grant = service.fetchProGrant()
+        if (grant != null && currentUid() == uid) lastGrant = uid to grant
+        return grant
     }
 
     /**
-     * RÉPARATION (§6.1), appelée quand la licence lue pour [uid] est `false` :
-     * si l'achat local est mémorisé « linked » pour ce compte et que la
+     * RÉPARATION (§4.1.3), appelée quand la licence lue pour [uid] n'est pas Pro :
+     * si l'abonnement local ACTIF est mémorisé « linked » pour ce compte et que la
      * réparation n'a pas encore été faite dans la session → UN envoi forcé
-     * (automatique : jamais de message), puis relecture. Rend la licence
-     * relue, `null` si aucune réparation n'a eu lieu ou si l'envoi n'a pas
-     * abouti à « linked ».
+     * (automatique : jamais de message), puis relecture. Rend la licence relue,
+     * `null` si aucune réparation n'a eu lieu, si l'envoi n'a pas abouti à
+     * « linked » ou si la relecture a échoué.
      */
-    private suspend fun repairIfNeeded(uid: String): Boolean? {
+    private suspend fun repairIfNeeded(uid: String): ProGrant? {
         if (!claimRepair(uid)) return null
         if (send(explicit = false, force = true, expectedUid = uid) != PurchaseLinkOutcome.Linked) return null
         return readGrant(uid)

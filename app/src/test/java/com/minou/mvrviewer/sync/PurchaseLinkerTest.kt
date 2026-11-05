@@ -1,10 +1,8 @@
 package com.minou.mvrviewer.sync
 
-import com.android.billingclient.api.Purchase
 import com.minou.mvrviewer.R
 import com.minou.mvrviewer.ui.ProAccess
 import kotlinx.coroutines.runBlocking
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -18,15 +16,17 @@ import org.junit.rules.TemporaryFolder
 import java.io.IOException
 
 /**
- * Scénarios clients de l'achat reconnu partout (SPEC-purchase.md §6.1, §6.3,
- * §8.3) : [PurchaseLinker] — l'orchestration que le SyncViewModel branche sur
- * ProAccess — exercé sur le stub [LocalSyncService.forTesting] (licence par
- * compte `proGrants`), un FAUX serveur (transport injecté) et une fausse preuve.
- * Verrouille : envoi AVANT la relecture de licence, message seulement pour un
- * refus définitif APRÈS un geste explicite, 401 → un seul nouvel essai avec
- * jeton forcé, déconnexion, réparation une fois par session, backend local sans
- * jeton → aucun appel, garde de course. Plus l'intégration ProAccess (preuve,
- * `obfuscatedAccountId`, message localisé, déconnexion).
+ * Scénarios clients de l'abonnement reconnu partout (SPEC-purchase.md §6.1, §6.3,
+ * §8.3 ; SPEC-abonnement.md §4.1) : [PurchaseLinker] — l'orchestration que le
+ * SyncViewModel branche sur ProAccess — exercé sur le stub
+ * [LocalSyncService.forTesting] (licence du compte `proGrants` /
+ * `proGrantDocuments`), un FAUX serveur (transport injecté) et une fausse preuve.
+ * Verrouille : envoi AVANT la relecture de licence, une preuve par PÉRIODE
+ * (`orderId`), message seulement pour un refus définitif APRÈS un geste explicite,
+ * 401 → un seul nouvel essai avec jeton forcé, déconnexion, réparation une fois par
+ * session (licence non Pro OU échue), lecture en échec → rien ne change, backend
+ * local sans jeton → aucun appel, garde de course. Plus l'intégration ProAccess
+ * (preuve, `obfuscatedAccountId`, message localisé, déconnexion).
  */
 class PurchaseLinkerTest {
 
@@ -47,7 +47,7 @@ class PurchaseLinkerTest {
         /** Appelé (une fois) PENDANT la prochaine lecture de licence : simule
          *  Play qui répond alors que la lecture Firestore est en vol. */
         var onFetch: (() -> Unit)? = null
-        override suspend fun fetchProGrant(): Boolean {
+        override suspend fun fetchProGrant(): ProGrant? {
             log += "fetch"
             onFetch?.let { onFetch = null; it() }
             return local.fetchProGrant()
@@ -77,9 +77,10 @@ class PurchaseLinkerTest {
     private lateinit var service: TokenService
     private val transport = FakeTransport()
     private val store = MemoryStore()
-    private var proof: PurchaseProof? = PurchaseLink.proofFor(TOKEN)
+    private var proof: PurchaseProof? = PurchaseLink.proofFor(TOKEN, ORDER)
     private var uid: String? = null
-    private val grants = mutableListOf<Boolean>()
+    /** Licences appliquées (`pro`, ou null pour une lecture en échec). */
+    private val grants = mutableListOf<Boolean?>()
     /** Résolveur de textes d'origine de ProAccess, rétabli après chaque test. */
     private val defaultResolver = ProAccess.messageResolver
     private val refusals = mutableListOf<String?>()
@@ -90,7 +91,7 @@ class PurchaseLinkerTest {
         store = store,
         proof = { proof },
         currentUid = { uid },
-        applyGrant = { grants += it },
+        applyGrant = { _, g -> grants += g?.pro },
         showRefusal = { refusals += it },
         now = { 1_000L }
     )
@@ -108,30 +109,31 @@ class PurchaseLinkerTest {
             store = store,
             proof = { ProAccess.currentProof() },
             currentUid = { uid },
-            applyGrant = { grants += it },
+            applyGrant = { _, g -> grants += g?.pro },
             showRefusal = { ProAccess.setAccountLinkRefusal(it) },
             now = { 1_000L }
         )
-        ProAccess.purchaseLinker = { explicit -> runBlocking { l.linkPurchase(explicit) } }
+        ProAccess.purchaseLinker = { explicit, done -> runBlocking { l.linkPurchase(explicit) }; done() }
         return l
     }
 
-    /** VRAI `Purchase` Play (le constructeur public ne lit que du JSON). */
-    private fun playPurchase(token: String = TOKEN, pending: Boolean = false) = Purchase(
-        JSONObject()
-            .put("productIds", JSONArray().put(ProAccess.PRODUCT_ID))
-            .put("purchaseState", if (pending) 4 else 0)
-            .put("purchaseToken", token)
-            .put("acknowledged", true)
-            .toString(),
-        "signature"
-    )
+    /** Abonnement Pro tel que ProAccess le retient d'un `Purchase` Play (PURCHASED,
+     *  déjà acquitté : l'ordre preuve/acquittement est testé par ProAccessAckOrderTest).
+     *  Pas de vrai `Purchase` ici : son `getOrderId()` appelle `TextUtils`, absent des
+     *  tests JVM. */
+    private fun snapshot(order: String = ORDER) = PlayPurchaseSnapshot(
+        products = listOf(ProAccess.PRO_SUBSCRIPTION_ID), purchased = true, purchaseToken = TOKEN,
+        acknowledged = true, autoRenewing = true, orderId = order)
 
     /** Relecture Play aboutie, suivie du même déclencheur que ProAccess
-     *  (connexion du BillingClient : `false` ; achat / « Restaurer » : `true`). */
-    private fun playAnswers(explicit: Boolean) {
-        ProAccess.applyPurchases(listOf(playPurchase())) { ProAccess.purchaseLinker?.invoke(explicit) }
+     *  (connexion du BillingClient : `false` ; abonnement / « Restaurer » : `true`). */
+    private fun playAnswers(explicit: Boolean, order: String = ORDER) {
+        ProAccess.applyPurchases(listOf(snapshot(order)), explicit)
     }
+
+    /** Mémoire « linked » de CETTE période pour ce compte. */
+    private fun linked(account: String, period: String? = ORDER) =
+        PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account, PurchaseLinkRecord.LINKED, null, 1L, period)
 
     /** Inscription sur le stub ; le faux serveur ACCORDE la licence à ce compte quand il répond 200. */
     private suspend fun signUp(email: String = "jm@example.com"): String {
@@ -148,12 +150,12 @@ class PurchaseLinkerTest {
         local = LocalSyncService.forTesting(tmp.newFolder("CloudSim"))
         service = TokenService(local)
         ProAccess.forceForTests(null)
+        ProAccess.resetForTests()
     }
 
     @After fun tearDown() {
         ProAccess.clearAccount()
-        ProAccess.setAccountGrant(false)
-        ProAccess.applyPurchases(emptyList()) // plus d'achat ni de preuve
+        ProAccess.resetForTests() // plus d'abonnement, de preuve ni de licence
         ProAccess.dismissLinkRefusalAlert()
         ProAccess.showPaywall = false
         ProAccess.lastError = null
@@ -169,12 +171,13 @@ class PurchaseLinkerTest {
         serverGrantsOnSuccess(account)
         val granted = linker().refreshProGrant()
         assertEquals(listOf("post", "fetch"), log)
-        assertEquals(true, granted)
-        assertEquals(listOf(true), grants)
+        assertEquals(true, granted?.pro)
+        assertEquals(listOf<Boolean?>(true), grants)
         // Corps EXACT de la preuve, jeton en cache.
-        assertEquals(listOf(PurchaseLink.proofFor(TOKEN).json to "cached-token"), transport.calls)
+        assertEquals(listOf(PurchaseLink.proofFor(TOKEN, ORDER).json to "cached-token"), transport.calls)
+        // Mémoire avec la clé de période (`orderId`).
         assertEquals(PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1_000L), store.record)
+            PurchaseLinkRecord.LINKED, null, 1_000L, ORDER), store.record)
         // Succès : message effacé, rien d'autre.
         assertEquals(listOf<String?>(null), refusals)
     }
@@ -184,9 +187,9 @@ class PurchaseLinkerTest {
         val account = signUp()
         local.proGrants += account
         proof = null
-        assertEquals(true, linker().refreshProGrant())
+        assertEquals(true, linker().refreshProGrant()?.pro)
         assertEquals(listOf("fetch"), log)
-        assertEquals(listOf(true), grants)
+        assertEquals(listOf<Boolean?>(true), grants)
         assertNull(store.record)
     }
 
@@ -200,29 +203,33 @@ class PurchaseLinkerTest {
         assertTrue(service.tokenRequests.isEmpty())
     }
 
-    // MARK: - Mémoire de l'issue (§6.1)
+    // MARK: - Mémoire de l'issue (SPEC-abonnement §4.1.1)
 
-    @Test fun automaticSendIsSkippedOnceSettledForThisPurchaseAndAccount() = runBlocking {
+    @Test fun automaticSendIsSkippedOnceSettledForThisPeriodAndAccount() = runBlocking {
         val account = signUp()
         // Licence déjà lue vraie (sinon « linked » + licence fausse = réparation, testée plus bas).
         local.proGrants += account
         val pid = PurchaseLink.playPurchaseId(TOKEN)
         for (settled in listOf(PurchaseLinkRecord.LINKED, PurchaseLinkRecord.REFUSED)) {
             log.clear()
-            store.record = PurchaseLinkRecord(pid, account, settled, null, 1L)
+            store.record = PurchaseLinkRecord(pid, account, settled, null, 1L, ORDER)
             linker().refreshProGrant()
             assertEquals(listOf("fetch"), log)
         }
         assertTrue(transport.calls.isEmpty())
     }
 
-    @Test fun retryOtherAccountOrOtherPurchaseIsSentAgain() = runBlocking {
+    @Test fun retryOtherAccountOtherPurchaseNewPeriodOrOldEntryIsSentAgain() = runBlocking {
         val account = signUp()
         val pid = PurchaseLink.playPurchaseId(TOKEN)
         val cases = listOf(
-            PurchaseLinkRecord(pid, account, PurchaseLinkRecord.RETRY, null, 1L),
-            PurchaseLinkRecord(pid, "another-uid", PurchaseLinkRecord.LINKED, null, 1L),
-            PurchaseLinkRecord("play_other", account, PurchaseLinkRecord.LINKED, null, 1L)
+            PurchaseLinkRecord(pid, account, PurchaseLinkRecord.RETRY, null, 1L, ORDER),
+            PurchaseLinkRecord(pid, "another-uid", PurchaseLinkRecord.LINKED, null, 1L, ORDER),
+            PurchaseLinkRecord("play_other", account, PurchaseLinkRecord.LINKED, null, 1L, ORDER),
+            // Période PRÉCÉDENTE réglée : le renouvellement repart une fois (filet).
+            PurchaseLinkRecord(pid, account, PurchaseLinkRecord.LINKED, null, 1L, "GPA.previous"),
+            // Entrée de l'achat unique, sans periodKey : ne bloque rien.
+            PurchaseLinkRecord(pid, account, PurchaseLinkRecord.LINKED, null, 1L)
         )
         for ((i, r) in cases.withIndex()) {
             store.record = r
@@ -233,8 +240,7 @@ class PurchaseLinkerTest {
 
     @Test fun explicitActionAlwaysSendsEvenIfAlreadyLinked() = runBlocking {
         val account = signUp()
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         assertEquals(PurchaseLinkOutcome.Linked, linker().linkPurchase(explicit = true))
         assertEquals(1, transport.calls.size)
     }
@@ -248,7 +254,7 @@ class PurchaseLinkerTest {
         assertTrue(refusals.isEmpty())
         assertTrue(grants.isEmpty()) // refusé : pas de relecture
         assertEquals(PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.REFUSED, "owned_by_other_account", 1_000L), store.record)
+            PurchaseLinkRecord.REFUSED, "owned_by_other_account", 1_000L, ORDER), store.record)
     }
 
     /**
@@ -264,9 +270,10 @@ class PurchaseLinkerTest {
         ProAccess.messageResolver = { id -> "res:$id" }
         val l = proAccessLinker()
         var paywallOpenWhenSending: Boolean? = null
-        ProAccess.purchaseLinker = { explicit ->
+        ProAccess.purchaseLinker = { explicit, done ->
             paywallOpenWhenSending = ProAccess.showPaywall
             runBlocking { l.linkPurchase(explicit) }
+            done()
         }
         // Appareil gratuit : la garde ouvre le paywall.
         assertFalse(ProAccess.gate("modifier le patch") {})
@@ -382,7 +389,7 @@ class PurchaseLinkerTest {
         assertEquals(PurchaseLinkOutcome.Linked, linker().linkPurchase(explicit = false))
         assertEquals(listOf("cached-token", "fresh-token"), transport.calls.map { it.second })
         assertEquals(listOf(false, true), service.tokenRequests)
-        assertEquals(listOf(true), grants)
+        assertEquals(listOf<Boolean?>(true), grants)
     }
 
     @Test fun persistentUnauthorizedIsRetryAfterExactlyTwoCalls() = runBlocking {
@@ -416,25 +423,46 @@ class PurchaseLinkerTest {
         val account = signUp()
         // Mémorisé « linked » pour ce compte, mais la licence lue est fausse
         // (document retouché, écriture perdue…) et le serveur ne la rétablit pas.
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         val l = linker()
-        assertEquals(false, l.refreshProGrant())
+        assertEquals(false, l.refreshProGrant()?.pro)
         assertEquals(listOf("fetch", "post", "fetch"), log)
         log.clear()
-        assertEquals(false, l.refreshProGrant())
+        assertEquals(false, l.refreshProGrant()?.pro)
         assertEquals(listOf("fetch"), log) // pas de second envoi forcé dans la session
         assertTrue(refusals.none { it != null }) // envoi forcé = automatique : jamais de message
     }
 
     @Test fun repairThatSucceedsRestoresTheGrant() = runBlocking {
         val account = signUp()
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         serverGrantsOnSuccess(account)
-        assertEquals(true, linker().refreshProGrant())
+        assertEquals(true, linker().refreshProGrant()?.pro)
         assertEquals(listOf("fetch", "post", "fetch"), log)
-        assertEquals(listOf(true), grants)
+        assertEquals(listOf<Boolean?>(true), grants)
+    }
+
+    @Test fun anExpiredLicenceIsRepairedLikeAMissingOne() = runBlocking {
+        // §4.1.3 : licence `pro: true` mais d'échéance PASSÉE (renouvellement que le
+        // serveur n'a pas vu) alors que l'abonnement de l'appareil est actif.
+        val account = signUp()
+        store.record = linked(account)
+        local.proGrantDocuments[account] = ProGrant(pro = true, expires = 500L, fromServer = true) // now = 1 000
+        transport.onPost = { local.proGrantDocuments[account] = ProGrant(pro = true, expires = 9_000L, fromServer = true) }
+        val grant = linker().refreshProGrant()
+        assertEquals(listOf("fetch", "post", "fetch"), log)
+        assertEquals(9_000L, grant?.expires)
+    }
+
+    @Test fun aFailedGrantReadChangesNothingAndNeverRepairs() = runBlocking {
+        val account = signUp()
+        store.record = linked(account)
+        local.proGrantFetchFails = true
+        assertNull(linker().refreshProGrant())
+        // Lecture en échec : appliquée comme `null` (rien ne change), aucun envoi forcé.
+        assertEquals(listOf("fetch"), log)
+        assertEquals(listOf<Boolean?>(null), grants)
+        assertTrue(transport.calls.isEmpty())
     }
 
     // MARK: - Réparation au démarrage à froid : indépendante de l'ordre d'arrivée
@@ -447,18 +475,17 @@ class PurchaseLinkerTest {
      */
     @Test fun coldStartRepairHappensWhenPlayAnswersAfterTheGrantRead() = runBlocking {
         val account = signUp()
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         serverGrantsOnSuccess(account)
         val l = proAccessLinker()
         // (1) Session restaurée, Play pas encore répondu.
         assertNull(ProAccess.currentProof())
-        assertEquals(false, l.refreshProGrant())
+        assertEquals(false, l.refreshProGrant()?.pro)
         assertEquals(listOf("fetch"), log)
         // (2) Play répond (relecture à la connexion du BillingClient).
         playAnswers(explicit = false)
         assertEquals(listOf("fetch", "post", "fetch"), log)
-        assertEquals(listOf(false, true), grants)
+        assertEquals(listOf<Boolean?>(false, true), grants)
         assertEquals(PurchaseLinkRecord.LINKED, store.record?.outcome)
         // Envoi forcé = automatique : aucun message.
         assertNull(ProAccess.accountLinkMessage)
@@ -467,44 +494,41 @@ class PurchaseLinkerTest {
 
     @Test fun coldStartRepairIsStillAtMostOncePerSession() = runBlocking {
         val account = signUp()
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         // Le serveur répond 200 mais la licence reste fausse.
         val l = proAccessLinker()
-        assertEquals(false, l.refreshProGrant())
+        assertEquals(false, l.refreshProGrant()?.pro)
         playAnswers(explicit = false)
         assertEquals(listOf("fetch", "post", "fetch"), log)
-        assertEquals(listOf(false, false), grants)
+        assertEquals(listOf<Boolean?>(false, false), grants)
         log.clear()
         // Nouvelles relectures Play et de licence dans la même session : plus d'envoi forcé.
         playAnswers(explicit = false)
         assertEquals(emptyList<String>(), log)
-        assertEquals(false, l.refreshProGrant())
+        assertEquals(false, l.refreshProGrant()?.pro)
         assertEquals(listOf("fetch"), log)
         assertEquals(1, transport.calls.size)
     }
 
     @Test fun playAnsweringDuringTheGrantReadRepairsExactlyOnce() = runBlocking {
         val account = signUp()
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         serverGrantsOnSuccess(account)
         val l = proAccessLinker()
         // Play répond PENDANT la lecture Firestore (l'autre ordre d'arrivée).
         service.onFetch = { playAnswers(explicit = false) }
-        assertEquals(true, l.refreshProGrant())
+        assertEquals(true, l.refreshProGrant()?.pro)
         assertEquals(listOf("fetch", "post", "fetch"), log)
         assertEquals(1, transport.calls.size)
-        assertEquals(listOf(true), grants)
+        assertEquals(listOf<Boolean?>(true), grants)
     }
 
     @Test fun playAnsweringAfterATrueGrantCostsNoReadAndNoSend() = runBlocking {
         val account = signUp()
         local.proGrants += account
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         val l = proAccessLinker()
-        assertEquals(true, l.refreshProGrant())
+        assertEquals(true, l.refreshProGrant()?.pro)
         playAnswers(explicit = false)
         // Cas courant de chaque lancement : rien de plus que la lecture de licence.
         assertEquals(listOf("fetch"), log)
@@ -513,8 +537,7 @@ class PurchaseLinkerTest {
 
     @Test fun proofArrivingBeforeAnyGrantReadDoesNotRepairOnItsOwn() = runBlocking {
         val account = signUp()
-        store.record = PurchaseLinkRecord(PurchaseLink.playPurchaseId(TOKEN), account,
-            PurchaseLinkRecord.LINKED, null, 1L)
+        store.record = linked(account)
         proAccessLinker()
         // Aucune licence lue dans la session : la relecture de licence à venir décidera.
         playAnswers(explicit = false)
@@ -530,8 +553,9 @@ class PurchaseLinkerTest {
         signUp()
         val l = linker(svc = local)
         assertEquals(PurchaseLinkOutcome.Retry, l.linkPurchase(explicit = true))
-        assertEquals(false, l.refreshProGrant())
+        assertEquals(false, l.refreshProGrant()?.pro)
         assertTrue(transport.calls.isEmpty())
+        assertFalse(local.verifiesPurchases)
         assertTrue(refusals.isEmpty())
     }
 
@@ -553,13 +577,15 @@ class PurchaseLinkerTest {
     // MARK: - Intégration ProAccess
 
     @Test fun pendingPurchaseNeverYieldsAProof() {
-        val pro = listOf(ProAccess.PRODUCT_ID)
+        val pro = listOf(ProAccess.PRO_SUBSCRIPTION_ID)
         ProAccess.rememberPurchases(listOf(PlayPurchaseSnapshot(pro, purchased = false, purchaseToken = "t-pending")))
         assertNull(ProAccess.currentProof())
-        ProAccess.rememberPurchases(listOf(PlayPurchaseSnapshot(pro, purchased = true, purchaseToken = TOKEN)))
+        ProAccess.rememberPurchases(listOf(PlayPurchaseSnapshot(pro, purchased = true, purchaseToken = TOKEN, orderId = ORDER)))
         val p = ProAccess.currentProof()!!
         assertEquals(PurchaseLink.playPurchaseId(TOKEN), p.purchaseId)
+        assertEquals(ORDER, p.periodKey)
         assertEquals(TOKEN, JSONObject(p.json).getString("purchaseToken"))
+        assertEquals("fr", JSONObject(p.json).getString("lang")) // sans Context : langue par défaut
         // Relecture Play sans achat (remboursé) : plus de preuve.
         ProAccess.rememberPurchases(emptyList())
         assertNull(ProAccess.currentProof())
@@ -578,7 +604,7 @@ class PurchaseLinkerTest {
         ProAccess.messageResolver = { id -> "res:$id" }
         transport.responses += { 410 to err("revoked") }
         PurchaseLinker(service, transport, store, { proof }, { uid },
-            { grants += it }, { ProAccess.setAccountLinkRefusal(it) }, { 1_000L })
+            { _, g -> grants += g?.pro }, { ProAccess.setAccountLinkRefusal(it) }, { 1_000L })
             .linkPurchase(explicit = true)
         assertEquals("res:${R.string.pro_link_revoked}", ProAccess.accountLinkMessage)
         assertEquals("res:${R.string.pro_link_revoked}", ProAccess.linkRefusalAlert)
@@ -598,19 +624,48 @@ class PurchaseLinkerTest {
         // explicite attend la relecture Play (qui n'a pas lieu ici).
         var refreshed = 0
         var linked = 0
-        ProAccess.grantRefresher = { refreshed++ }
-        ProAccess.purchaseLinker = { linked++ }
+        ProAccess.grantRefresher = { done -> refreshed++; done() }
+        ProAccess.purchaseLinker = { _, done -> linked++; done() }
         try {
-            ProAccess.restore()
+            ProAccess.restore(ProAccess.RestoreScreen.ACCOUNT)
             assertEquals(1, refreshed)
             assertEquals(0, linked)
+            assertFalse(ProAccess.isBusy)
         } finally {
             ProAccess.grantRefresher = null
         }
     }
 
+    // MARK: - Renouvellement (SPEC-abonnement §4.1.2) : nouvel orderId → nouvel envoi
+
+    @Test fun aRenewalWithANewOrderIdIsSentOnceAutomatically() = runBlocking {
+        val account = signUp()
+        local.proGrants += account
+        proAccessLinker()
+        playAnswers(explicit = false)
+        assertEquals(1, transport.calls.size)
+        // Même période, nouvelles relectures : rien.
+        playAnswers(explicit = false)
+        assertEquals(1, transport.calls.size)
+        // Google renouvelle : nouvel orderId → la preuve repart UNE fois.
+        playAnswers(explicit = false, order = "$ORDER..0")
+        assertEquals(2, transport.calls.size)
+        assertEquals("$ORDER..0", store.record?.periodKey)
+        playAnswers(explicit = false, order = "$ORDER..0")
+        assertEquals(2, transport.calls.size)
+    }
+
+    @Test fun anExpiredSubscriptionLinkedAsInactiveShowsNoMessage() = runBlocking {
+        signUp()
+        transport.responses += { 200 to """{"ok":true,"status":"inactive","pro":false,"store":"play","test":false}""" }
+        assertEquals(PurchaseLinkOutcome.Linked, linker().linkPurchase(explicit = true))
+        assertEquals(listOf<String?>(null), refusals) // succès : message effacé, aucun texte
+        assertEquals(PurchaseLinkRecord.LINKED, store.record?.outcome)
+    }
+
     private companion object {
         const val TOKEN = "opaque-token-1.AO-J1Oz"
+        const val ORDER = "GPA.3346-1234-5678-90123"
         const val OK = """{"ok":true,"status":"granted","pro":true,"store":"play","test":false}"""
         fun err(code: String) = """{"ok":false,"code":"$code","retryable":false,"error":"…"}"""
     }

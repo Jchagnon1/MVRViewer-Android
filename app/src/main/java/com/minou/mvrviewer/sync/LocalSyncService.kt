@@ -59,11 +59,27 @@ class LocalSyncService private constructor(
     private var currentUser: AccountInfo? = null
 
     /**
-     * Crochet de test / démo : uids titulaires d'une LICENCE PRO PAR COMPTE —
-     * l'équivalent local du document Firestore `entitlements/{uid}` que
-     * l'administrateur pose dans la console (cf. [fetchProGrant]).
+     * Crochet de test / démo : uids titulaires d'une LICENCE PRO admin SANS
+     * échéance — l'équivalent local du document Firestore `entitlements/{uid}`
+     * que l'administrateur pose dans la console (cf. [fetchProGrant]).
      */
     val proGrants: MutableSet<String> = mutableSetOf()
+
+    /**
+     * Crochet de test : document `entitlements/{uid}` COMPLET (échéance, sources
+     * des boutiques), prioritaire sur [proGrants] — l'équivalent de ce qu'écrit
+     * la fonction `verifyPurchase`.
+     */
+    val proGrantDocuments: MutableMap<String, ProGrant> = mutableMapOf()
+
+    /** Crochet de test : la prochaine lecture de licence échoue (hors ligne sans cache). */
+    @Volatile var proGrantFetchFails: Boolean = false
+
+    /** Crochet de test : adresses (en minuscules) VÉRIFIÉES. */
+    val verifiedEmails: MutableSet<String> = mutableSetOf()
+
+    /** Adresses auxquelles un e-mail de vérification serait PARTI (rien n'est envoyé). */
+    val sentEmailVerifications: MutableList<String> = mutableListOf()
 
     /** Diffusion en process pour observe() : (projectId, event). */
     private val bus = MutableSharedFlow<Pair<String, RemoteEvent>>(extraBufferCapacity = 128)
@@ -203,10 +219,29 @@ class LocalSyncService private constructor(
         if (accounts().has(key)) sentPasswordResets.add(key)
     }
 
-    override suspend fun fetchProGrant(): Boolean = lock.withLock {
-        val uid = currentUser?.uid ?: return false
-        uid in proGrants
+    /** Même contrat que Firebase : `null` si déconnecté ou en échec, `pro: false`
+     *  si aucun document — lu « au serveur » (le stub n'a pas de cache hors ligne). */
+    override suspend fun fetchProGrant(): ProGrant? = lock.withLock {
+        val uid = currentUser?.uid ?: return null
+        if (proGrantFetchFails) return null
+        proGrantDocuments[uid]?.let { return it.copy(fromServer = true) }
+        ProGrant(pro = uid in proGrants, fromServer = true)
     }
+
+    override suspend fun reloadEmailVerified(): Boolean? = lock.withLock {
+        val email = currentUser?.email?.lowercase() ?: return null
+        email in verifiedEmails
+    }
+
+    override suspend fun sendEmailVerification() = lock.withLock {
+        val email = currentUser?.email?.lowercase() ?: throw SyncException.NotSignedIn
+        if (simulatesOffline) throw SyncException.NetworkUnavailable
+        sentEmailVerifications.add(email)
+        Unit
+    }
+
+    /** Démo locale : aucun serveur ne vérifie les achats (§4.1.6, §4.3). */
+    override val verifiesPurchases: Boolean = false
 
     /** Pas de serveur derrière le stub : aucun idToken → l'envoi de la preuve
      *  d'achat est sauté, sans message (SPEC-purchase §6.3). */

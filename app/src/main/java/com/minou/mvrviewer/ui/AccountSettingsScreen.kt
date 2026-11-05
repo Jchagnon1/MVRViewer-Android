@@ -67,7 +67,9 @@ import kotlinx.coroutines.launch
  * 1. « Compte » (si la synchro est branchée) : formulaire de connexion /
  *    création, ou nom, e-mail, serveur, « Se déconnecter » ; isolé en rouge,
  *    « Supprimer mon compte » (droit, jamais gardé Pro) ;
- * 2. « MVR Viewer Pro » : état, déblocage, restauration, refus de rattachement ;
+ * 2. « MVR Viewer Pro » : état de l'abonnement (SPEC-abonnement §5.5), s'abonner
+ *    ou se réabonner, « Gérer ou résilier mon abonnement » (toujours), restaurer,
+ *    rembourser, refus de rattachement, adresse e-mail non vérifiée ;
  * 3. « Services » : ligne « GDTF Share » (Connecté / Non connecté). Non connecté :
  *    toucher la ligne ouvre la connexion (sous-volet) ; connecté : bouton « Se
  *    déconnecter » au bout de la ligne — toucher la ligne ne déconnecte JAMAIS ;
@@ -114,6 +116,13 @@ fun AccountSettingsScreen(
         if (!GdtfShareClient.loggedIn && GdtfCredentialStore.username(ctx) != null) {
             runCatching { GdtfShareClient.ensureLoggedIn(ctx) }
         }
+    }
+    // Ouverture (pas le retour d'un sous-volet, déclaré avant eux) : un message de
+    // restauration passé ne dit plus rien de l'état présent ; l'adresse e-mail a pu
+    // être vérifiée depuis (lien ouvert ailleurs, SPEC-abonnement §5.5).
+    LaunchedEffect(Unit) {
+        ProAccess.accountScreenDidOpen()
+        sync?.refreshEmailVerification()
     }
     // Sous-volet de connexion GDTF Share : son ← et le retour système ramènent ICI.
     if (gdtfLogin) {
@@ -163,7 +172,7 @@ fun AccountSettingsScreen(
                     AccountSettingsSection.ACCOUNT -> sync?.let {
                         AccountSection(it, form, onForgotPassword = { email -> passwordResetEmail = email })
                     }
-                    AccountSettingsSection.PRO -> ProSection()
+                    AccountSettingsSection.PRO -> ProSection(sync)
                     AccountSettingsSection.SERVICES -> Column(
                         Modifier.onGloballyPositioned { servicesTop = it.positionInParent().y.toInt() }
                     ) { ServicesSection(onSignIn = { gdtfLogin = true }) }
@@ -292,11 +301,15 @@ private fun AccountSection(sync: SyncViewModel, form: AccountFormState, onForgot
     )
 }
 
-// MARK: - Version Pro (état, déblocage, restauration) — au même endroit que le
-// compte : c'est là qu'on cherche « ai-je payé ? ».
+// MARK: - Version Pro (état de l'abonnement, gestion, restauration) — au même
+// endroit que le compte : c'est là qu'on cherche « suis-je abonné, jusqu'à quand,
+// comment résilier ? ». Les dates viennent des sources de la licence du compte,
+// jamais de son échéance (marge de renouvellement Google, §3.7).
 
 @Composable
-private fun ProSection() {
+private fun ProSection(sync: SyncViewModel?) {
+    val ctx = LocalContext.current
+    val texts = remember(ctx) { ContextProTexts(ctx) }
     // Bloc à l'écran : un refus de rattachement s'affiche ICI (pas d'alerte en
     // double par-dessus, cf. ProAccess.setAccountLinkRefusal).
     DisposableEffect(Unit) {
@@ -304,21 +317,74 @@ private fun ProSection() {
         onDispose { ProAccess.accountSectionShown(false) }
     }
     SectionHeader(stringResource(R.string.pro_section_title))
-    if (ProAccess.isPro) {
-        Text(stringResource(R.string.pro_active), style = MaterialTheme.typography.bodyMedium)
+    val line = ProAccess.statusLine
+    val status = SubscriptionTexts.statusLine(line, texts)
+    if (status != null) {
+        // Paiement en échec : la ligne passe au rouge (sémantique, pas le jaune).
+        val warning = line is ProStatusLine.Grace || line == ProStatusLine.BillingFailed
+        Text(status, style = MaterialTheme.typography.bodyMedium,
+            color = if (warning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.testTag("account.proStatus"))
     } else {
         Text(stringResource(R.string.pro_pitch), style = MaterialTheme.typography.bodySmall)
+    }
+    if (line.offersSubscription && !ProAccess.isPro) {
         Button(
             onClick = { ProAccess.gate("débloquer l'édition") {} },
-            colors = com.minou.mvrviewer.ui.theme.accentButtonColors()
-        ) { Text(stringResource(R.string.pro_unlock)) }
+            colors = com.minou.mvrviewer.ui.theme.accentButtonColors(),
+            modifier = Modifier.testTag("account.subscribe")
+        ) {
+            Text(stringResource(if (line is ProStatusLine.Expired) R.string.pro_subscribe_again else R.string.pro_subscribe_to_pro))
+        }
     }
-    // Refus DÉFINITIF du rattachement de l'achat au compte, après un achat ou
-    // « Restaurer un achat » seulement (SPEC-purchase §6.4) ; rien sinon.
+    // TOUJOURS visible (L215-1-1) : la gestion de Google Play dit simplement
+    // « aucun abonnement » s'il n'y en a pas.
+    TextButton(onClick = { openExternalUrl(ctx, ProAccess.manageUrl) },
+        modifier = Modifier.testTag("account.manageSubscription")) { Text(stringResource(R.string.pro_manage)) }
+    TextButton(onClick = { ProAccess.restore(ProAccess.RestoreScreen.ACCOUNT) }, enabled = !ProAccess.isBusy,
+        modifier = Modifier.testTag("account.restorePurchase")) { Text(stringResource(R.string.pro_restore)) }
+    // Restauration sans résultat : on dit pourquoi, seulement celle faite ICI.
+    ProAccess.restoreMessageShown(ProAccess.RestoreScreen.ACCOUNT)?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("pro.restoreMessage"))
+    }
+    // Seulement si un abonnement Google Play existe sur l'appareil ; jamais
+    // « renoncer au contrat ici » (§5.3 : la rétractation est celle de la boutique).
+    if (ProAccess.hasDeviceSubscription) {
+        TextButton(onClick = { openExternalUrl(ctx, SubscriptionRules.REFUND_URL) },
+            modifier = Modifier.testTag("account.requestRefund")) { Text(stringResource(R.string.pro_refund)) }
+    }
+    // Refus DÉFINITIF du rattachement, après un abonnement ou « Restaurer mes
+    // achats » seulement (§5.9) ; rien pour un succès (`inactive` compris).
     ProAccess.accountLinkMessage?.let {
         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
     }
-    TextButton(onClick = { ProAccess.restore() }) { Text(stringResource(R.string.pro_restore)) }
+    if (sync != null) EmailVerificationRow(sync)
+}
+
+/**
+ * ABONNÉ dont l'adresse n'est pas vérifiée (SPEC-abonnement §5.5) : il risque de
+ * ne pas recevoir la confirmation et le rappel avant reconduction. Seulement sur
+ * un backend qui fait vérifier les achats.
+ */
+@Composable
+private fun EmailVerificationRow(sync: SyncViewModel) {
+    val auth by sync.auth.collectAsState()
+    val verified by sync.emailVerified.collectAsState()
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var sent by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    if (!auth.isSignedIn || !sync.verifiesPurchases || verified != false || !ProAccess.isSubscriber) return
+    Text(stringResource(R.string.account_email_unverified), style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.testTag("account.emailUnverified"))
+    TextButton(onClick = {
+        sent = false; error = null
+        scope.launch {
+            try { sync.sendEmailVerification(); sent = true } catch (e: Exception) { error = e.syncMessage(ctx) }
+        }
+    }, modifier = Modifier.testTag("account.resendVerification")) { Text(stringResource(R.string.pro_resend_verification)) }
+    if (sent) Text(stringResource(R.string.pro_verification_sent), style = MaterialTheme.typography.bodySmall)
+    error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 }
 
 // MARK: - Services (GDTF Share)

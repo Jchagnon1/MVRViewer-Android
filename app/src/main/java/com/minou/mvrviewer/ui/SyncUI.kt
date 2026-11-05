@@ -104,7 +104,20 @@ internal fun DeleteAccountDialog(sync: SyncViewModel, onDismiss: () -> Unit, onD
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text(stringResource(R.string.sync_delete_account_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                // Abonnement à renouvellement (SPEC-abonnement §5.7) : supprimer le compte
+                // ne le résilie pas — dit AVANT la confirmation, avec de quoi le résilier ;
+                // la suppression immédiate reste possible.
+                if (com.minou.mvrviewer.ui.ProAccess.hasRenewingSubscription) {
+                    Text(stringResource(R.string.account_delete_subscription_warning),
+                        modifier = Modifier.testTag("account.deleteSubscriptionWarning"))
+                    TextButton(onClick = { openExternalUrl(ctx, com.minou.mvrviewer.ui.ProAccess.manageUrl) }) {
+                        Text(stringResource(R.string.pro_manage))
+                    }
+                }
                 Text(stringResource(R.string.sync_delete_account_warning))
                 Text(stringResource(R.string.sync_delete_account_password_hint),
                     style = MaterialTheme.typography.bodySmall,

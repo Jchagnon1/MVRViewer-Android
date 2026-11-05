@@ -382,9 +382,9 @@
     <string name="power_tab_hint">Set power draw by TYPE: your value applies to every fixture of that type and feeds the shared library. The cabling updates immediately.</string>
     <string name="power_to_enter">to be entered</string>
     <string name="power_watts_gdtf_fmt">%1$d W · GDTF</string>
-    <string name="pro_link_invalid_purchase">This purchase could not be verified.</string>
-    <string name="pro_link_owned_by_other_account">This purchase is already linked to another MVR Viewer account. Sign in with that account to get Pro on your other devices.</string>
-    <string name="pro_link_revoked">This purchase was refunded or cancelled and no longer unlocks Pro.</string>
+    <string name="pro_link_invalid_purchase">This subscription could not be verified.</string>
+    <string name="pro_link_owned_by_other_account">This subscription is already linked to another MVR Viewer account. Sign in with that account to get Pro on your other devices.</string>
+    <string name="pro_link_revoked">This subscription was refunded or revoked and no longer unlocks Pro.</string>
     <string name="pro_link_test_purchase_refused">Test purchases are not accepted.</string>
     <string name="raster_jpeg">JPEG image</string>
     <string name="raster_pdf">PDF</string>
@@ -701,13 +701,77 @@
     <string name="account_signed_in">Signed in</string>
     <string name="account_not_signed_in">Not signed in</string>
     <string name="pro_section_title">MVR Viewer Pro</string>
-    <string name="pro_active">Pro version active — editing unlocked</string>
     <string name="pro_pitch">Reading is free; editing (patch, cabling, imports…) requires Pro.</string>
-    <string name="pro_unlock">Unlock Pro</string>
-    <string name="pro_restore">Restore a purchase</string>
-    <!-- Pro purchase screen (ProPaywall.kt), texts of iOS ProPaywallView. -->
+    <string name="pro_restore">Restore Purchases</string>
+    <!-- Annual Pro subscription (SPEC-abonnement §5): Pro screen (ProPaywall.kt), Account &amp; settings,
+         same texts as iOS EXCEPT the sentence below the button (§5.2, specific to Google Play). -->
     <string name="pro_paywall_reason_fmt">To %1$s, you need the Pro version.</string>
-    <string name="pro_paywall_pitch">Reading a show stays completely free — 3D, plan, patch, universes, cabling, PDF export, shared projects. Pro unlocks everything that MODIFIES the project.</string>
+    <string name="pro_kind_annual">Annual subscription</string>
+    <string name="pro_price_per_year_fmt">%1$s per year</string>
+    <string name="pro_subscribe_fmt">Subscribe — %1$s per year</string>
+    <string name="pro_loading_price">Loading price…</string>
+    <string name="pro_free_note">The free version still lets you open and view all your files and projects.</string>
+    <string name="pro_sign_in_to_subscribe">Sign in to subscribe</string>
+    <string name="pro_account_needed">A free account is required to subscribe: it carries Pro to all your devices and the website, and lets us send your confirmation and a reminder before each renewal.</string>
+    <string name="pro_verify_email_to_subscribe">Verify your email address to subscribe: it receives your confirmation and the reminder before each renewal.</string>
+    <string name="pro_resend_verification">Resend verification email</string>
+    <string name="pro_verification_sent">Verification email sent.</string>
+    <!-- EXACT sentence below the button, Google Play (§5.2, decided 05/11: short, WITH waiver, no 24 h
+         notice); “VAT included” only for an EEA, UK or Swiss store. -->
+    <string name="pro_terms_vat_fmt">Auto-renewing annual subscription: %1$s per year, VAT included. Unless cancelled before the end of the current period, it renews for one year at the then-current price; any increase is announced in advance. Cancel anytime in Google Play › Payments &amp; subscriptions › Subscriptions; Pro access remains until the end of the paid year. By subscribing, you request immediate access to MVR Viewer Pro and acknowledge that you lose your 14-day right of withdrawal once it is activated.</string>
+    <string name="pro_terms_fmt">Auto-renewing annual subscription: %1$s per year. Unless cancelled before the end of the current period, it renews for one year at the then-current price; any increase is announced in advance. Cancel anytime in Google Play › Payments &amp; subscriptions › Subscriptions; Pro access remains until the end of the paid year. By subscribing, you request immediate access to MVR Viewer Pro and acknowledge that you lose your 14-day right of withdrawal once it is activated.</string>
+    <string name="pro_terms_of_use">Terms of Use</string>
+    <string name="pro_privacy_policy">Privacy Policy</string>
+    <!-- Publisher identity BEFORE the contract (L221-12, §5.1 row 9a): %1$s name, %2$s address, %3$s link. -->
+    <string name="pro_publisher_fmt">Publisher: %1$s · %2$s · %3$s</string>
+    <string name="pro_publisher_legal_notice">Legal notice</string>
+    <string name="pro_manage">Manage or cancel subscription</string>
+    <string name="pro_refund">Request a refund</string>
+    <string name="pro_pending">Purchase pending approval: Pro will activate once it is confirmed.</string>
+    <string name="pro_expired_fmt">Pro expired on %1$s. Your files and projects remain readable.</string>
+    <string name="pro_already_subscribed_fmt">You already have MVR Viewer Pro until %1$s. Manage it on the device where you subscribed.</string>
+    <string name="pro_restore_nothing">No subscription to restore for this Google account.</string>
+    <string name="pro_restore_expired_fmt">Your subscription expired on %1$s.</string>
+    <!-- Introductory offer (§5.4, generic display: no offer in v1). -->
+    <string name="pro_offer_free_trial_fmt">Free for %1$s, then %2$s per year.</string>
+    <string name="pro_offer_pay_up_front_fmt">%1$s for %2$s, then %3$s per year.</string>
+    <string name="pro_offer_pay_as_you_go_fmt">%1$s per %2$s for %3$s, then %4$s per year.</string>
+    <plurals name="pro_duration_days">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
+    <plurals name="pro_duration_weeks">
+        <item quantity="one">%1$d week</item>
+        <item quantity="other">%1$d weeks</item>
+    </plurals>
+    <plurals name="pro_duration_months">
+        <item quantity="one">%1$d month</item>
+        <item quantity="other">%1$d months</item>
+    </plurals>
+    <plurals name="pro_duration_years">
+        <item quantity="one">%1$d year</item>
+        <item quantity="other">%1$d years</item>
+    </plurals>
+    <string name="pro_period_day">day</string>
+    <string name="pro_period_week">week</string>
+    <string name="pro_period_month">month</string>
+    <string name="pro_period_year">year</string>
+    <!-- Account &amp; settings, “MVR Viewer Pro” section (§5.5): dates from the licence sources. -->
+    <string name="pro_status_renews_fmt">Subscription active — renews on %1$s</string>
+    <string name="pro_status_active_no_renewal_fmt">Subscription active until %1$s — auto-renew is off</string>
+    <string name="pro_status_active">Subscription active</string>
+    <string name="pro_status_grace_fmt">Payment issue: update your payment method before %1$s to keep Pro.</string>
+    <string name="pro_status_billing_failed">Payment failed: Pro is on hold until payment goes through.</string>
+    <string name="pro_status_paused_fmt">Subscription paused: Pro resumes on %1$s.</string>
+    <string name="pro_status_paused">Subscription paused: Pro resumes when the pause ends.</string>
+    <string name="pro_status_other_device_fmt">Pro active until %1$s — subscription managed on another device</string>
+    <string name="pro_status_licence">Pro active</string>
+    <string name="pro_status_licence_until_fmt">Pro active until %1$s</string>
+    <string name="pro_subscribe_again">Subscribe again</string>
+    <string name="pro_subscribe_to_pro">Subscribe to Pro</string>
+    <string name="account_email_unverified">Email address not verified: you may not receive your confirmation and renewal reminder.</string>
+    <!-- Account deletion with a renewing subscription (§5.7), BEFORE the confirmation. -->
+    <string name="account_delete_subscription_warning">Deleting your account does not cancel your MVR Viewer Pro subscription: the store where you subscribed will keep billing it. Cancel it first with “Manage or cancel subscription”. If you delete your account without cancelling, we keep only your email address, until the subscription ends, to send you the messages required by law (renewal reminder, cancellation acknowledgement).</string>
     <string name="pro_feature_patch">Edit the patch: addresses, universes, modes, names</string>
     <string name="pro_feature_cabling">Assign power cabling and DMX lines</string>
     <string name="pro_feature_orient">Flip and orient fixtures</string>
@@ -715,11 +779,6 @@
     <string name="pro_feature_models_fmt">Import 3D objects (%1$s)</string>
     <string name="pro_feature_custom_types">Create custom fixture types</string>
     <string name="pro_feature_share">Share a project and push your changes</string>
-    <string name="pro_unlock_price_fmt">Unlock Pro — %1$s</string>
-    <!-- Waiver of the right of withdrawal, RIGHT BELOW the purchase button (Terms §6.7):
-         SAME sentence on iOS and Android, never reword it on one side only. -->
-    <string name="pro_purchase_withdrawal_waiver">By confirming the purchase, you request immediate access to the Pro version and expressly waive your right of withdrawal.</string>
-    <string name="pro_one_time_purchase">One-time purchase, no subscription. Valid on all your devices with the same Google account.</string>
     <string name="pro_error_play_unavailable">Google Play is unavailable.</string>
     <string name="pro_error_purchase_failed">The purchase did not go through.</string>
     <string name="pro_error_product_unavailable">The product is not available right now. Check your connection and try again.</string>

@@ -17,11 +17,12 @@ import java.net.InetAddress
 import java.net.ServerSocket
 
 /**
- * Partie PURE de l'achat reconnu partout (SPEC-purchase.md §3.3, §1.2, §6.1,
- * §6.3, §6.4) : vecteurs COMMUNS aux trois plateformes (copiés tels quels de la
- * spec, recoupés Node + Python), corps JSON exact, table des issues, décision
- * d'envoi, mémoire `pro.link`, textes FR/EN, et le transport HTTP réel contre
- * un serveur local (JDK `HttpServer`).
+ * Partie PURE de l'abonnement reconnu partout (SPEC-purchase.md §3.3, §1.2, §6.1 ;
+ * SPEC-abonnement.md §3.2, §4.1.1, §5.9) : vecteurs COMMUNS aux trois plateformes
+ * (copiés tels quels de la spec, recoupés Node + Python), corps JSON exact (avec
+ * `lang`), clé de période (`orderId`), table des issues (`inactive` compris),
+ * décision d'envoi, mémoire `pro.link`, textes FR/EN, et le transport HTTP réel
+ * contre un serveur local.
  */
 class PurchaseLinkTest {
 
@@ -52,37 +53,56 @@ class PurchaseLinkTest {
             PurchaseLink.playPurchaseId("opaque-token-1.AO-J1Oz"))
     }
 
-    // MARK: - Preuve (§1.2 forme Android)
+    // MARK: - Preuve (SPEC-abonnement §3.2, forme Android)
 
     @Test fun proofBodyIsExactlyTheAndroidContract() {
-        val p = PurchaseLink.proofFor("opaque-token-1.AO-J1Oz")
+        val p = PurchaseLink.proofFor("opaque-token-1.AO-J1Oz", "GPA.3346-1234-5678-90123", "en")
         assertEquals("play_30c78cf501a1aab050ff1947dbf6a12b1de968594b35a677312952c1f1de84c8", p.purchaseId)
+        assertEquals("GPA.3346-1234-5678-90123", p.periodKey)
         val o = JSONObject(p.json)
-        assertEquals(setOf("platform", "purchaseToken", "productId", "packageName"), keysOf(o))
+        assertEquals(setOf("platform", "purchaseToken", "productId", "packageName", "lang"), keysOf(o))
         assertEquals("android", o.getString("platform"))
         assertEquals("opaque-token-1.AO-J1Oz", o.getString("purchaseToken"))
-        assertEquals("com.minou.mvrviewer.pro", o.getString("productId"))
+        assertEquals("com.minou.mvrviewer.pro.subscription", o.getString("productId"))
         assertEquals("com.minou.mvrviewer", o.getString("packageName"))
+        assertEquals("en", o.getString("lang"))
+        // Toute autre langue → « fr » (le serveur n'en connaît que deux).
+        assertEquals("fr", JSONObject(PurchaseLink.proofFor("t", null, "de").json).getString("lang"))
+        assertEquals("fr", PurchaseLink.language("fr-CA"))
+        assertEquals("en", PurchaseLink.language("en"))
+        assertEquals("en", PurchaseLink.language("de"))
     }
 
-    @Test fun productIdIsTheSameAsProAccess() {
-        assertEquals(com.minou.mvrviewer.ui.ProAccess.PRODUCT_ID, PurchaseLink.PRODUCT_ID)
+    @Test fun subscriptionIdentifiersAreTheSpecOnes() {
+        assertEquals("com.minou.mvrviewer.pro.subscription", PurchaseLink.PRO_SUBSCRIPTION_ID)
+        assertEquals("annual", PurchaseLink.PRO_BASE_PLAN_ID)
+        assertEquals(com.minou.mvrviewer.ui.ProAccess.PRO_SUBSCRIPTION_ID, PurchaseLink.PRO_SUBSCRIPTION_ID)
+        assertEquals(com.minou.mvrviewer.ui.ProAccess.PRO_BASE_PLAN_ID, PurchaseLink.PRO_BASE_PLAN_ID)
+        // L'ancien produit `com.minou.mvrviewer.pro` (achat unique) n'existe plus dans le code.
+        val dir = listOf(File("src/main/java"), File("app/src/main/java")).first { it.isDirectory }
+        val users = dir.walkTopDown().filter { it.isFile && it.extension == "kt" }
+            .filter { Regex("\"com\\.minou\\.mvrviewer\\.pro\"").containsMatchIn(it.readText()) }.map { it.name }.toList()
+        assertEquals(emptyList<String>(), users)
     }
 
-    @Test fun onlyAPurchasedProPurchaseYieldsAProof() {
-        val pro = listOf(PurchaseLink.PRODUCT_ID)
+    @Test fun onlyAPurchasedProSubscriptionYieldsAProof() {
+        val pro = listOf(PurchaseLink.PRO_SUBSCRIPTION_ID)
         assertNull(PurchaseLink.selectProofToken(emptyList()))
         // EN ATTENTE → jamais de preuve.
         assertNull(PurchaseLink.selectProofToken(listOf(PlayPurchaseSnapshot(pro, purchased = false, purchaseToken = "t-pending"))))
-        // Autre produit → pas de preuve.
+        // Autre produit (dont l'ancien achat unique) → pas de preuve.
         assertNull(PurchaseLink.selectProofToken(listOf(PlayPurchaseSnapshot(listOf("other"), true, "t-other"))))
+        assertNull(PurchaseLink.selectProofToken(listOf(PlayPurchaseSnapshot(listOf("com.minou.mvrviewer.pro"), true, "t-old"))))
         // Jeton vide → pas de preuve.
         assertNull(PurchaseLink.selectProofToken(listOf(PlayPurchaseSnapshot(pro, true, ""))))
         assertEquals("t-ok", PurchaseLink.selectProofToken(listOf(
             PlayPurchaseSnapshot(pro, false, "t-pending"),
             PlayPurchaseSnapshot(listOf("other"), true, "t-other"),
-            PlayPurchaseSnapshot(pro, true, "t-ok")
+            PlayPurchaseSnapshot(pro, true, "t-ok", orderId = "GPA.1")
         )))
+        assertEquals("GPA.1", PurchaseLink.selectProof(listOf(PlayPurchaseSnapshot(pro, true, "t-ok", orderId = "GPA.1")))?.orderId)
+        assertTrue(PlayPurchaseSnapshot(pro, false, "t").pending)
+        assertFalse(PlayPurchaseSnapshot(listOf("other"), false, "t").pending)
     }
 
     // MARK: - Issues (§1.2 / §6.1)
@@ -94,6 +114,10 @@ class PurchaseLinkTest {
             """{"ok":true,"status":"granted","pro":true,"store":"play","test":false}"""))
         assertEquals(PurchaseLinkOutcome.Linked, PurchaseLink.outcome(200,
             """{"ok":true,"status":"already","pro":true,"store":"play","test":true}"""))
+        // Abonnement EXPIRÉ rattaché (« Restaurer mes achats ») : pas une erreur.
+        assertEquals(PurchaseLinkOutcome.Linked, PurchaseLink.outcome(200,
+            """{"ok":true,"status":"inactive","pro":false,"store":"play","test":false,""" +
+                """"subscription":{"status":"expired","expiresAt":1799913600000,"autoRenew":false}}"""))
     }
 
     @Test fun definitiveRefusalsCarryTheirCode() {
@@ -133,49 +157,59 @@ class PurchaseLinkTest {
         assertEquals(retry, PurchaseLink.outcome(422, """{"code":"invalid_purchase"}"""))
     }
 
-    // MARK: - Décision d'envoi (§6.1)
+    // MARK: - Décision d'envoi (SPEC-abonnement §4.1.1)
 
-    private fun rec(outcome: String, purchaseId: String = "play_a", uid: String = "u1") =
-        PurchaseLinkRecord(purchaseId, uid, outcome, null, 1L)
+    private fun rec(outcome: String, purchaseId: String = "play_a", uid: String = "u1", period: String? = "GPA.1") =
+        PurchaseLinkRecord(purchaseId, uid, outcome, null, 1L, period)
 
     @Test fun shouldSendTable() {
         val L = PurchaseLinkRecord.LINKED
         val R = PurchaseLinkRecord.REFUSED
         val T = PurchaseLinkRecord.RETRY
         // Pas de preuve / non connecté → jamais.
-        assertFalse(PurchaseLink.shouldSend(null, "u1", false, null))
-        assertFalse(PurchaseLink.shouldSend("play_a", null, false, null))
-        assertFalse(PurchaseLink.shouldSend(null, "u1", true, null))
-        assertFalse(PurchaseLink.shouldSend("play_a", null, true, null))
+        assertFalse(PurchaseLink.shouldSend(null, "GPA.1", "u1", false, null))
+        assertFalse(PurchaseLink.shouldSend("play_a", "GPA.1", null, false, null))
+        assertFalse(PurchaseLink.shouldSend(null, "GPA.1", "u1", true, null))
+        assertFalse(PurchaseLink.shouldSend("play_a", "GPA.1", null, true, null))
         // Rien de mémorisé → oui.
-        assertTrue(PurchaseLink.shouldSend("play_a", "u1", false, null))
-        // Même achat + même compte réglé (linked/refused) → automatique SAUTÉ.
-        assertFalse(PurchaseLink.shouldSend("play_a", "u1", false, rec(L)))
-        assertFalse(PurchaseLink.shouldSend("play_a", "u1", false, rec(R)))
+        assertTrue(PurchaseLink.shouldSend("play_a", "GPA.1", "u1", false, null))
+        // Même abonnement + même PÉRIODE + même compte réglé (linked/refused) → automatique SAUTÉ.
+        assertFalse(PurchaseLink.shouldSend("play_a", "GPA.1", "u1", false, rec(L)))
+        assertFalse(PurchaseLink.shouldSend("play_a", "GPA.1", "u1", false, rec(R)))
         // … mais un geste explicite envoie toujours.
-        assertTrue(PurchaseLink.shouldSend("play_a", "u1", true, rec(L)))
-        assertTrue(PurchaseLink.shouldSend("play_a", "u1", true, rec(R)))
+        assertTrue(PurchaseLink.shouldSend("play_a", "GPA.1", "u1", true, rec(L)))
+        assertTrue(PurchaseLink.shouldSend("play_a", "GPA.1", "u1", true, rec(R)))
         // retry → renvoyé.
-        assertTrue(PurchaseLink.shouldSend("play_a", "u1", false, rec(T)))
-        // Autre compte, autre achat → oui.
-        assertTrue(PurchaseLink.shouldSend("play_a", "u2", false, rec(L)))
-        assertTrue(PurchaseLink.shouldSend("play_b", "u1", false, rec(R)))
+        assertTrue(PurchaseLink.shouldSend("play_a", "GPA.1", "u1", false, rec(T)))
+        // Autre compte, autre abonnement → oui.
+        assertTrue(PurchaseLink.shouldSend("play_a", "GPA.1", "u2", false, rec(L)))
+        assertTrue(PurchaseLink.shouldSend("play_b", "GPA.1", "u1", false, rec(R)))
+        // RENOUVELLEMENT : nouvel orderId → repart une fois.
+        assertTrue(PurchaseLink.shouldSend("play_a", "GPA.1..0", "u1", false, rec(L)))
+        // Entrée ancienne SANS periodKey (achat unique) : ne bloque rien.
+        assertTrue(PurchaseLink.shouldSend("play_a", "GPA.1", "u1", false, rec(L, period = null)))
+        // Preuve sans orderId (jamais pour un achat valide) : jamais tenue pour réglée.
+        assertTrue(PurchaseLink.shouldSend("play_a", null, "u1", false, rec(L, period = null)))
     }
 
     // MARK: - Mémoire `pro.link`
 
     @Test fun recordRoundTripsThroughJson() {
-        val a = PurchaseLinkRecord("play_x", "uid-B", PurchaseLinkRecord.REFUSED, "owned_by_other_account", 1_759_400_000_000L)
+        val a = PurchaseLinkRecord("play_x", "uid-B", PurchaseLinkRecord.REFUSED, "owned_by_other_account",
+            1_759_400_000_000L, "GPA.3346-1234-5678-90123..1")
         assertEquals(a, PurchaseLinkRecord.fromJson(a.toJson()))
         val b = PurchaseLinkRecord("play_y", "abc123", PurchaseLinkRecord.LINKED, null, 42L)
         assertEquals(b, PurchaseLinkRecord.fromJson(b.toJson()))
-        val o = JSONObject(a.toJson())
-        assertEquals(setOf("purchaseId", "uid", "outcome", "code", "at"), keysOf(o))
+        // Forme §4.1.1 : { purchaseId, periodKey, uid, outcome, code, at }.
+        assertEquals(setOf("purchaseId", "periodKey", "uid", "outcome", "code", "at"), keysOf(JSONObject(a.toJson())))
+        // Entrée de l'achat unique (sans periodKey) : relue telle quelle.
+        val old = PurchaseLinkRecord.fromJson("""{"purchaseId":"play_z","uid":"u","outcome":"linked","at":7}""")
+        assertEquals(PurchaseLinkRecord("play_z", "u", "linked", null, 7L, null), old)
     }
 
     @Test fun recordFromOutcome() {
-        assertEquals(PurchaseLinkRecord("p", "u", "linked", null, 5L),
-            PurchaseLinkRecord.of("p", "u", PurchaseLinkOutcome.Linked, 5L))
+        assertEquals(PurchaseLinkRecord("p", "u", "linked", null, 5L, "o"),
+            PurchaseLinkRecord.of("p", "u", PurchaseLinkOutcome.Linked, 5L, "o"))
         assertEquals(PurchaseLinkRecord("p", "u", "refused", "revoked", 5L),
             PurchaseLinkRecord.of("p", "u", PurchaseLinkOutcome.Refused("revoked"), 5L))
         assertEquals(PurchaseLinkRecord("p", "u", "retry", null, 5L),
@@ -190,7 +224,7 @@ class PurchaseLinkTest {
         assertNull(PurchaseLinkRecord.fromJson("""{"purchaseId":"p","uid":"u","outcome":"weird","at":1}"""))
     }
 
-    // MARK: - Textes (§6.4)
+    // MARK: - Textes (SPEC-abonnement §5.9)
 
     @Test fun refusalCodesMapToTheirMessages() {
         assertEquals(R.string.pro_link_owned_by_other_account, PurchaseLink.refusalMessageRes("owned_by_other_account"))
@@ -214,15 +248,15 @@ class PurchaseLinkTest {
 
     @Test fun messagesAreExactlyTheSpecTextsInFrenchAndEnglish() {
         assertEquals(mapOf(
-            "pro_link_owned_by_other_account" to "Cet achat est déjà rattaché à un autre compte MVR Viewer. Connectez-vous avec ce compte pour retrouver la version Pro sur vos autres appareils.",
-            "pro_link_revoked" to "Cet achat a été remboursé ou annulé : il ne donne plus accès à la version Pro.",
-            "pro_link_invalid_purchase" to "Cet achat n'a pas pu être vérifié.",
+            "pro_link_owned_by_other_account" to "Cet abonnement est déjà rattaché à un autre compte MVR Viewer. Connectez-vous avec ce compte pour retrouver la version Pro sur vos autres appareils.",
+            "pro_link_revoked" to "Cet abonnement a été remboursé ou révoqué\u00A0: il ne donne plus accès à la version Pro.",
+            "pro_link_invalid_purchase" to "Cet abonnement n'a pas pu être vérifié.",
             "pro_link_test_purchase_refused" to "Les achats de test ne sont pas acceptés."
         ), strings("values"))
         assertEquals(mapOf(
-            "pro_link_owned_by_other_account" to "This purchase is already linked to another MVR Viewer account. Sign in with that account to get Pro on your other devices.",
-            "pro_link_revoked" to "This purchase was refunded or cancelled and no longer unlocks Pro.",
-            "pro_link_invalid_purchase" to "This purchase could not be verified.",
+            "pro_link_owned_by_other_account" to "This subscription is already linked to another MVR Viewer account. Sign in with that account to get Pro on your other devices.",
+            "pro_link_revoked" to "This subscription was refunded or revoked and no longer unlocks Pro.",
+            "pro_link_invalid_purchase" to "This subscription could not be verified.",
             "pro_link_test_purchase_refused" to "Test purchases are not accepted."
         ), strings("values-en"))
     }

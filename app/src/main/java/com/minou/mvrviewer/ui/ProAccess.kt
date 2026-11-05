@@ -397,6 +397,11 @@ object ProAccess {
     /** Cache mémorisé (tests). */
     internal fun cacheForTests(): ProCacheRecord? = cacheRecord
 
+    /** TESTS : pose le cache mémorisé, comme [init] le relit au lancement. */
+    internal fun seedCacheForTests(record: ProCacheRecord?) {
+        cacheRecord = record
+    }
+
     // MARK: - Garde
 
     /**

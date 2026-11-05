@@ -49,23 +49,26 @@ data class ProGrant(
 
         /**
          * Document Firestore → valeurs simples pour [fromDocument], en profondeur
-         * (sources). [timestampMs] reconnaît un `Timestamp` Firestore et rend ses
-         * millisecondes. Sous une clé de temps ([TIME_KEYS]), une valeur qui N'EST
-         * PAS un Timestamp (nombre, texte, table saisis à la main dans la console :
-         * la `RawValue` que le serveur recopie telle quelle, §3.7) est OPAQUE et
-         * retirée — jamais lue comme des millisecondes. Une `expires` ainsi retirée
-         * laisse une licence sans échéance, comme sur le site (`proGrant.js`) et sur
-         * iOS (`ProGrant.plainDocument`). Hors clés de temps : valeur inchangée.
+         * (sources). [timestampDate] reconnaît un `Timestamp` Firestore et rend sa
+         * [Date] — la SEULE forme de date que [fromDocument] lit. Sous une clé de
+         * temps ([TIME_KEYS]), une valeur qui N'EST PAS un Timestamp (nombre, texte,
+         * table `{ seconds }` saisis à la main dans la console : la `RawValue` que le
+         * serveur recopie telle quelle, §3.7) est OPAQUE et retirée — traitée comme
+         * ABSENTE (règle D8, §4.1.5), jamais lue comme des secondes ni des
+         * millisecondes. Une `expires` ainsi retirée laisse une licence sans
+         * échéance, comme sur le site (`proGrant.js`), sur iOS
+         * (`ProGrant.plainDocument`) et au serveur (`repo.fromFirestore`). Hors clés
+         * de temps : valeur inchangée.
          */
-        fun plainDocument(data: Map<String, Any?>, timestampMs: (Any?) -> Long?): Map<String, Any?> {
+        fun plainDocument(data: Map<String, Any?>, timestampDate: (Any?) -> Date?): Map<String, Any?> {
             val out = LinkedHashMap<String, Any?>()
             for ((key, value) in data) {
-                val ms = timestampMs(value)
+                val date = timestampDate(value)
                 when {
-                    ms != null -> out[key] = ms
+                    date != null -> out[key] = date
                     key in TIME_KEYS -> Unit
                     value is Map<*, *> ->
-                        out[key] = plainDocument(value.entries.associate { (k, v) -> k.toString() to v }, timestampMs)
+                        out[key] = plainDocument(value.entries.associate { (k, v) -> k.toString() to v }, timestampDate)
                     else -> out[key] = value
                 }
             }
@@ -74,10 +77,11 @@ data class ProGrant(
 
         /**
          * Document `entitlements/{uid}` déjà converti en valeurs simples
-         * ([plainDocument] : seuls les `Timestamp` Firestore deviennent des dates,
-         * en millisecondes). Une date peut aussi être un [Date] ou un nombre de
-         * millisecondes (backend local, tests). Une `expires` d'une autre forme est
-         * ignorée : la licence vaut alors sans échéance.
+         * ([plainDocument]). D8 (§4.1.5) : SEULE une [Date] — un `Timestamp`
+         * Firestore converti — est une date ; un nombre (secondes ou
+         * millisecondes), un texte, une table sont traités comme ABSENTS, même
+         * passés ici sans [plainDocument]. Une `expires` absente : la licence vaut
+         * sans échéance (licence admin perpétuelle).
          */
         fun fromDocument(data: Map<String, Any?>, fromServer: Boolean): ProGrant {
             val sources = data["sources"] as? Map<*, *>
@@ -101,12 +105,8 @@ data class ProGrant(
             )
         }
 
-        fun date(raw: Any?): Long? = when (raw) {
-            is Date -> raw.time
-            is Long -> raw
-            is Int -> raw.toLong()
-            is Double -> raw.toLong()
-            else -> null
-        }
+        /** Date (ms) d'une valeur de [plainDocument] : une [Date], rien d'autre (D8) —
+         *  un nombre n'est JAMAIS lu comme des millisecondes. */
+        fun date(raw: Any?): Long? = (raw as? Date)?.time
     }
 }

@@ -1,6 +1,9 @@
 package com.minou.mvrviewer.sync
 
+import com.google.firebase.Timestamp
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,6 +12,7 @@ import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import java.util.Date
 
 /**
@@ -17,8 +21,9 @@ import java.util.Date
  * CONTRAT partagé avec le backend réel : `null` (INCONNU) si déconnecté ou si la
  * lecture échoue — jamais `pro: false` sur une erreur —, `pro: false` sans
  * document, la licence suit le COMPTE ; la lecture d'un document
- * `entitlements/{uid}` daté avec ses sources ; et la vérification de l'adresse
- * e-mail (§4.1.6).
+ * `entitlements/{uid}` daté avec ses sources ; la règle D8 (§4.1.5 : seul un
+ * Timestamp est une date), rejouée sur les vecteurs communs `licence.json › lecture` ;
+ * et la vérification de l'adresse e-mail (§4.1.6).
  */
 class ProGrantTest {
 
@@ -77,14 +82,15 @@ class ProGrantTest {
     // MARK: - Document `entitlements/{uid}` (FirebaseSyncService → valeurs simples)
 
     @Test fun fromDocumentReadsExpiresAndSources() {
+        // Valeurs simples de `plainDocument` : un Timestamp y est devenu une Date.
         val g = ProGrant.fromDocument(mapOf(
             "pro" to true,
-            "expires" to 1_808_661_600_000L,
+            "expires" to Date(1_808_661_600_000L),
             "sources" to mapOf(
                 "appstore" to mapOf("active" to false, "status" to "expired", "expiresAt" to Date(1_790_000_000_000L),
                     "graceUntil" to null, "autoRenew" to false),
-                "play" to mapOf("active" to true, "status" to "grace", "expiresAt" to 1_808_640_000_000L,
-                    "graceUntil" to 1_809_000_000_000L, "autoRenew" to true),
+                "play" to mapOf("active" to true, "status" to "grace", "expiresAt" to Date(1_808_640_000_000L),
+                    "graceUntil" to Date(1_809_000_000_000L), "autoRenew" to true),
                 "admin" to mapOf("active" to false, "origin" to "manual")
             )
         ), fromServer = true)
@@ -101,9 +107,19 @@ class ProGrantTest {
         // Licence admin sans échéance.
         assertTrue(ProGrant.fromDocument(mapOf("pro" to true), true).isActive(now))
         // Échéance passée : plus active.
-        assertFalse(ProGrant.fromDocument(mapOf("pro" to true, "expires" to now - 1), true).isActive(now))
+        assertFalse(ProGrant.fromDocument(mapOf("pro" to true, "expires" to Date(now - 1)), true).isActive(now))
         // `expires` d'une autre forme (RawValue admin recopiée telle quelle) : ignorée.
         assertTrue(ProGrant.fromDocument(mapOf("pro" to true, "expires" to "2027-12-31"), true).isActive(now))
+        // D8, même sans `plainDocument` : un nombre n'est jamais une date (ni ms, ni secondes).
+        for (n in listOf<Any>(now - 1, 1_700_000_000, 1_830_000_000_000.0)) {
+            val g = ProGrant.fromDocument(mapOf("pro" to true, "expires" to n,
+                "sources" to mapOf("play" to mapOf("active" to true, "expiresAt" to n, "graceUntil" to n))), true)
+            assertNull("$n", g.expires)
+            assertNull("$n", g.play?.expiresAt)
+            assertNull("$n", g.play?.graceUntil)
+        }
+        assertNull(ProGrant.date(now))
+        assertEquals(now, ProGrant.date(Date(now)))
         // `pro` absent ou d'un autre type : non Pro.
         assertFalse(ProGrant.fromDocument(mapOf("pro" to "true"), true).pro)
         assertFalse(ProGrant.fromDocument(emptyMap(), true).pro)
@@ -132,12 +148,12 @@ class ProGrantTest {
                 "admin" to mapOf("active" to true, "origin" to "manual", "count" to 3L)
             )
         )
-        val plain = ProGrant.plainDocument(raw) { (it as? FakeTimestamp)?.ms }
+        val plain = ProGrant.plainDocument(raw) { (it as? FakeTimestamp)?.let { t -> Date(t.ms) } }
         assertFalse("nombre sous `expires` : opaque", plain.containsKey("expires"))
         assertEquals(true, plain["pro"])
         val sources = plain["sources"] as Map<*, *>
         val play = sources["play"] as Map<*, *>
-        assertEquals("Timestamp → ms", stamp, play["expiresAt"])
+        assertEquals("Timestamp → Date", Date(stamp), play["expiresAt"])
         assertFalse("texte sous une clé de temps : opaque", play.containsKey("graceUntil"))
         assertEquals("annual", play["basePlanId"])
         val appstore = sources["appstore"] as Map<*, *>
@@ -156,6 +172,69 @@ class ProGrantTest {
         // Entier ou flottant écrit dans Firestore : jamais une échéance.
         for (n in listOf<Any>(1_700_000_000, 1_830_000_000_000L, 1_830_000_000_000.0)) {
             assertNull("$n", ProGrant.fromDocument(ProGrant.plainDocument(mapOf("pro" to true, "expires" to n)) { null }, true).expires)
+        }
+    }
+
+    // MARK: - Vecteurs communs `licence.json › lecture` (D8, §4.1.5)
+
+    /** Vecteurs communs du dépôt web (`tests/fixtures/abonnement/licence.json`, copiés
+     *  dans `src/test/resources/port-vectors/abonnement/`). */
+    private val licenceVectors: JSONObject by lazy {
+        val url = javaClass.classLoader!!.getResource("port-vectors/abonnement/licence.json")!!
+        JSONObject(File(url.toURI()).readText())
+    }
+
+    private fun longOrNull(o: JSONObject, key: String): Long? = if (o.isNull(key)) null else o.getLong(key)
+
+    /** Valeur du vecteur → valeur telle que le SDK Firestore Android la rend :
+     *  `{ "$timestamp": ms }` = un VRAI [Timestamp] ; entiers en Long, décimaux en
+     *  Double ; une table `{ seconds }` reste une table. */
+    private fun firestoreValue(v: Any?): Any? = when (v) {
+        null, JSONObject.NULL -> null
+        is JSONObject ->
+            if (v.has("\$timestamp")) Timestamp(Date(v.getLong("\$timestamp")))
+            else v.keys().asSequence().associateWith { firestoreValue(v.get(it)) }
+        is JSONArray -> (0 until v.length()).map { firestoreValue(v.get(it)) }
+        is Int -> v.toLong()
+        is Long -> v
+        is Number -> v.toDouble()
+        else -> v
+    }
+
+    /** LD1-LD9 contre la lecture RÉELLE de `FirebaseSyncService` ([proGrantFromFirestore],
+     *  vrais Timestamp) : seul un Timestamp est une date ; nombre, chaîne, table
+     *  `{ seconds }` → absent. `revokedAt` n'est pas exposé par [ProGrant.SourceView] :
+     *  ignoré, comme le permet le champ `form`. */
+    @Test fun lesVecteursCommunsLectureLD1aLD9() {
+        assertEquals("mvrviewer.vectors.licence/1", licenceVectors.getString("schema"))
+        val list = licenceVectors.getJSONObject("lecture").getJSONArray("vectors")
+        val vectors = (0 until list.length()).map { list.getJSONObject(it) }
+        assertEquals((1..9).map { "LD$it" }, vectors.map { it.getString("id") })
+        for (v in vectors) {
+            val id = v.getString("id") + " — " + v.getString("note")
+            @Suppress("UNCHECKED_CAST")
+            val document = firestoreValue(v.get("document")) as Map<String, Any?>?
+            val g = proGrantFromFirestore(document, fromServer = true)
+            val expect = v.getJSONObject("expect")
+            assertEquals("$id : pro", expect.getBoolean("pro"), g.pro)
+            assertEquals("$id : expires", longOrNull(expect, "expires"), g.expires)
+            val sources = expect.optJSONObject("sources") ?: continue
+            for (store in sources.keys()) {
+                val view = when (store) {
+                    "appstore" -> g.appstore
+                    "play" -> g.play
+                    else -> throw AssertionError("$id : boutique inconnue $store")
+                }
+                val keys = sources.getJSONObject(store)
+                for (key in keys.keys()) {
+                    val actual = when (key) {
+                        "expiresAt" -> view?.expiresAt
+                        "graceUntil" -> view?.graceUntil
+                        else -> continue
+                    }
+                    assertEquals("$id : sources.$store.$key", longOrNull(keys, key), actual)
+                }
+            }
         }
     }
 

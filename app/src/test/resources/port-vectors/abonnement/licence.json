@@ -1,0 +1,1074 @@
+{
+  "schema": "mvrviewer.vectors.licence/1",
+  "spec": "SPEC-abonnement.md §3.7 (computeEntitlement : entitlements/{uid} DATÉE ; marge Google de 6 h) — ce que lisent les trois clients (§2.4 : licence.pro, licence.expires) ; §4.1.5 : dates lues (D8) et échéance de la licence app ouverte (R415)",
+  "source": "attendus écrits à la main d'après le calcul et la table V1-V25 du §3.7 (2026-11-05) ; rejoués par functions/test/core.test.js. Sections « lecture » (D8) et « echeance » (R415) écrites à la main d'après le §4.1.5 (2026-11-05) : rejouées par les trois clients (tests/pro.test.js pour le site) et par le serveur (functions/test/repo.firestore.test.js : repo.fromFirestore ; functions/test/abonnement.vectors.test.js : formule de référence)",
+  "now": 1800000000000,
+  "form": "existing = document entitlements/{uid} avant (ms ; null = absent) ; summaries = sources store recalculées (clé absente = inchangée) ; expect.expires = ms, ou null quand le champ est SUPPRIMÉ (licence sans échéance ou pas de licence) ; expect.write = faux quand rien n'est écrit",
+  "constants": {
+    "MARGE_RENOUVELLEMENT_GOOGLE_MS": 21600000
+  },
+  "vectors": [
+    {
+      "id": "L1",
+      "note": "V1 : abonnement App Store actif, échéance E1",
+      "existing": null,
+      "summaries": {
+        "appstore": {
+          "active": true,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1808640000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1808640000000,
+        "admin": null
+      }
+    },
+    {
+      "id": "L2",
+      "note": "V4 : période de grâce, fin de grâce G > E1",
+      "existing": null,
+      "summaries": {
+        "appstore": {
+          "active": true,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "grace",
+          "expiresAt": 1808640000000,
+          "graceUntil": 1810022400000,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1810022400000,
+        "admin": null
+      }
+    },
+    {
+      "id": "L3",
+      "note": "V5 : grâce expirée (billing_retry) → pas de Pro, expires supprimé",
+      "existing": {
+        "pro": true,
+        "expires": 1810022400000,
+        "computed": {
+          "pro": true,
+          "expires": 1810022400000
+        },
+        "sources": {
+          "appstore": {
+            "active": true,
+            "purchaseId": "appstore_2000000123",
+            "productId": "com.minou.mvrviewer.pro.annual",
+            "environment": "Production",
+            "test": false,
+            "status": "grace",
+            "expiresAt": 1808640000000,
+            "graceUntil": 1810022400000,
+            "autoRenew": true,
+            "revokedAt": null,
+            "verifiedAt": 1799913600000
+          }
+        }
+      },
+      "summaries": {
+        "appstore": {
+          "active": false,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "billing_retry",
+          "expiresAt": 1808640000000,
+          "graceUntil": 1810022400000,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": false,
+        "expires": null,
+        "admin": null
+      }
+    },
+    {
+      "id": "L4",
+      "note": "V11 : {pro:true} historique + Play actif → licence admin perpétuelle (expires supprimé)",
+      "existing": {
+        "pro": true
+      },
+      "summaries": {
+        "play": {
+          "active": true,
+          "purchaseId": "play_x",
+          "productId": "com.minou.mvrviewer.pro.subscription",
+          "basePlanId": "annual",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1817280000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": null,
+        "admin": "legacy"
+      }
+    },
+    {
+      "id": "L5",
+      "note": "V12 : {pro:true, expires:T} historique, T < E1, + App Store E1 → E1",
+      "existing": {
+        "pro": true,
+        "expires": 1804320000000
+      },
+      "summaries": {
+        "appstore": {
+          "active": true,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1808640000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1808640000000,
+        "admin": "legacy"
+      }
+    },
+    {
+      "id": "L6",
+      "note": "V13 : licence admin T future seule (App Store expiré) → T",
+      "existing": {
+        "pro": true,
+        "expires": 1834560000000,
+        "computed": {
+          "pro": true,
+          "expires": 1834560000000
+        },
+        "sources": {
+          "admin": {
+            "active": true,
+            "expires": 1834560000000,
+            "origin": "legacy",
+            "at": 1799136000000
+          },
+          "appstore": {
+            "active": true,
+            "purchaseId": "appstore_2000000123",
+            "productId": "com.minou.mvrviewer.pro.annual",
+            "environment": "Production",
+            "test": false,
+            "status": "active",
+            "expiresAt": 1808640000000,
+            "graceUntil": null,
+            "autoRenew": true,
+            "revokedAt": null,
+            "verifiedAt": 1799913600000
+          }
+        }
+      },
+      "summaries": {
+        "appstore": {
+          "active": false,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "expired",
+          "expiresAt": 1808640000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1834560000000,
+        "admin": "legacy"
+      }
+    },
+    {
+      "id": "L7",
+      "note": "V14 : App Store E1 + Play E2 renouvellement coupé, Play expiré → E1",
+      "existing": {
+        "pro": true,
+        "expires": 1817280000000,
+        "computed": {
+          "pro": true,
+          "expires": 1817280000000
+        },
+        "sources": {
+          "appstore": {
+            "active": true,
+            "purchaseId": "appstore_2000000123",
+            "productId": "com.minou.mvrviewer.pro.annual",
+            "environment": "Production",
+            "test": false,
+            "status": "active",
+            "expiresAt": 1808640000000,
+            "graceUntil": null,
+            "autoRenew": true,
+            "revokedAt": null,
+            "verifiedAt": 1799913600000
+          },
+          "play": {
+            "active": true,
+            "purchaseId": "play_x",
+            "productId": "com.minou.mvrviewer.pro.subscription",
+            "basePlanId": "annual",
+            "test": false,
+            "status": "active",
+            "expiresAt": 1817280000000,
+            "graceUntil": null,
+            "autoRenew": false,
+            "revokedAt": null,
+            "verifiedAt": 1799913600000
+          }
+        }
+      },
+      "summaries": {
+        "play": {
+          "active": false,
+          "purchaseId": "play_x",
+          "productId": "com.minou.mvrviewer.pro.subscription",
+          "basePlanId": "annual",
+          "test": false,
+          "status": "expired",
+          "expiresAt": 1817280000000,
+          "graceUntil": null,
+          "autoRenew": false,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1808640000000,
+        "admin": null
+      }
+    },
+    {
+      "id": "L8",
+      "note": "V15 : Play ON_HOLD → pas de Pro",
+      "existing": null,
+      "summaries": {
+        "play": {
+          "active": false,
+          "purchaseId": "play_x",
+          "productId": "com.minou.mvrviewer.pro.subscription",
+          "basePlanId": "annual",
+          "test": false,
+          "status": "on_hold",
+          "expiresAt": 1817280000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": false,
+        "pro": false,
+        "expires": null,
+        "admin": null
+      }
+    },
+    {
+      "id": "L9",
+      "note": "V17 : Play CANCELED avant l'échéance (renouvellement coupé) → E sans marge",
+      "existing": null,
+      "summaries": {
+        "play": {
+          "active": true,
+          "purchaseId": "play_x",
+          "productId": "com.minou.mvrviewer.pro.subscription",
+          "basePlanId": "annual",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1817280000000,
+          "graceUntil": null,
+          "autoRenew": false,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1817280000000,
+        "admin": null
+      }
+    },
+    {
+      "id": "L10",
+      "note": "V21 : Play actif à renouvellement automatique → F + 6 h",
+      "existing": null,
+      "summaries": {
+        "play": {
+          "active": true,
+          "purchaseId": "play_x",
+          "productId": "com.minou.mvrviewer.pro.subscription",
+          "basePlanId": "annual",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1817280000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1817301600000,
+        "admin": null
+      }
+    },
+    {
+      "id": "L11",
+      "note": "deux boutiques actives : max(E1, E2 + 6 h)",
+      "existing": null,
+      "summaries": {
+        "appstore": {
+          "active": true,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1808640000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        },
+        "play": {
+          "active": true,
+          "purchaseId": "play_x",
+          "productId": "com.minou.mvrviewer.pro.subscription",
+          "basePlanId": "annual",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1817280000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1817301600000,
+        "admin": null
+      }
+    },
+    {
+      "id": "L12",
+      "note": "V20 : l'admin pose pro:false à la main sur un abonnement actif → toujours Pro jusqu'à E1",
+      "existing": {
+        "pro": false,
+        "expires": 1808640000000,
+        "computed": {
+          "pro": true,
+          "expires": 1808640000000
+        },
+        "sources": {
+          "appstore": {
+            "active": true,
+            "purchaseId": "appstore_2000000123",
+            "productId": "com.minou.mvrviewer.pro.annual",
+            "environment": "Production",
+            "test": false,
+            "status": "active",
+            "expiresAt": 1808640000000,
+            "graceUntil": null,
+            "autoRenew": true,
+            "revokedAt": null,
+            "verifiedAt": 1799913600000
+          }
+        }
+      },
+      "summaries": {
+        "appstore": {
+          "active": true,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "active",
+          "expiresAt": 1808640000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1808640000000,
+        "admin": "manual"
+      }
+    },
+    {
+      "id": "L13",
+      "note": "V19 : aucun document + abonnement expiré présenté → rien d'écrit",
+      "existing": null,
+      "summaries": {
+        "appstore": {
+          "active": false,
+          "purchaseId": "appstore_2000000123",
+          "productId": "com.minou.mvrviewer.pro.annual",
+          "environment": "Production",
+          "test": false,
+          "status": "expired",
+          "expiresAt": 1808640000000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": false,
+        "pro": false,
+        "expires": null,
+        "admin": null
+      }
+    },
+    {
+      "id": "L14",
+      "note": "Play en grâce (Google a prolongé expiryTime) : pas de marge (statut grace)",
+      "existing": null,
+      "summaries": {
+        "play": {
+          "active": true,
+          "purchaseId": "play_x",
+          "productId": "com.minou.mvrviewer.pro.subscription",
+          "basePlanId": "annual",
+          "test": false,
+          "status": "grace",
+          "expiresAt": 1800259200000,
+          "graceUntil": null,
+          "autoRenew": true,
+          "revokedAt": null,
+          "verifiedAt": 1799913600000
+        }
+      },
+      "expect": {
+        "write": true,
+        "pro": true,
+        "expires": 1800259200000,
+        "admin": null
+      }
+    }
+  ],
+  "lecture": {
+    "rule": "D8 (§4.1.5) : dans entitlements/{uid}, sous expires et sous les clés de temps des sources (expiresAt, graceUntil, revokedAt), SEUL un Timestamp Firestore est une date ; toute autre forme (nombre, chaîne, table { seconds }…) est traitée comme ABSENTE (null) — règle du serveur (repo.fromFirestore → RawValue)",
+    "form": "document = entitlements/{uid} tel que Firestore le rend (null = absent) ; { \"$timestamp\": ms } = un VRAI Timestamp Firestore (chaque client le construit avec son SDK : Timestamp.fromMillis, Timestamp(date:), Timestamp(Date(ms))) ; toute autre valeur est telle quelle (une table { seconds } est une table, pas un Timestamp) ; expect = licence lue : pro, expires (ms | null) et, si présent, expect.sources.<boutique>.<clé de temps> (ms | null) — un client qui n'expose pas une clé l'ignore",
+    "vectors": [
+      {
+        "id": "LD1",
+        "note": "expires Timestamp → date (ms)",
+        "document": {
+          "pro": true,
+          "expires": {
+            "$timestamp": 1830000000000
+          }
+        },
+        "expect": {
+          "pro": true,
+          "expires": 1830000000000
+        }
+      },
+      {
+        "id": "LD2",
+        "note": "expires NOMBRE (secondes saisies dans la console) → absent : licence sans échéance, jamais un Pro expiré en 1970",
+        "document": {
+          "pro": true,
+          "expires": 1830000000
+        },
+        "expect": {
+          "pro": true,
+          "expires": null
+        }
+      },
+      {
+        "id": "LD3",
+        "note": "expires NOMBRE (millisecondes) → absent, jamais lu comme des ms",
+        "document": {
+          "pro": true,
+          "expires": 1830000000000
+        },
+        "expect": {
+          "pro": true,
+          "expires": null
+        }
+      },
+      {
+        "id": "LD4",
+        "note": "expires TABLE { seconds } → absent",
+        "document": {
+          "pro": true,
+          "expires": {
+            "seconds": 1830000000
+          }
+        },
+        "expect": {
+          "pro": true,
+          "expires": null
+        }
+      },
+      {
+        "id": "LD5",
+        "note": "expires TABLE { seconds, nanoseconds } (forme d'un Timestamp sérialisé, mais pas un Timestamp) → absent",
+        "document": {
+          "pro": true,
+          "expires": {
+            "seconds": 1830000000,
+            "nanoseconds": 500000000
+          }
+        },
+        "expect": {
+          "pro": true,
+          "expires": null
+        }
+      },
+      {
+        "id": "LD6",
+        "note": "expires CHAÎNE → absent",
+        "document": {
+          "pro": true,
+          "expires": "2027-12-31T23:59:59Z"
+        },
+        "expect": {
+          "pro": true,
+          "expires": null
+        }
+      },
+      {
+        "id": "LD7",
+        "note": "sources : même règle sous expiresAt, graceUntil, revokedAt (Timestamp → ms ; nombre, chaîne, table → absent)",
+        "document": {
+          "pro": true,
+          "expires": {
+            "$timestamp": 1830021600000
+          },
+          "sources": {
+            "appstore": {
+              "active": false,
+              "status": "expired",
+              "expiresAt": 1790000000000,
+              "graceUntil": null,
+              "autoRenew": false,
+              "revokedAt": {
+                "seconds": 1795000000
+              }
+            },
+            "play": {
+              "active": true,
+              "status": "active",
+              "expiresAt": {
+                "$timestamp": 1830000000000
+              },
+              "graceUntil": "2028-01-01",
+              "autoRenew": true,
+              "revokedAt": null,
+              "basePlanId": "annual"
+            }
+          }
+        },
+        "expect": {
+          "pro": true,
+          "expires": 1830021600000,
+          "sources": {
+            "appstore": {
+              "expiresAt": null,
+              "graceUntil": null,
+              "revokedAt": null
+            },
+            "play": {
+              "expiresAt": 1830000000000,
+              "graceUntil": null,
+              "revokedAt": null
+            }
+          }
+        }
+      },
+      {
+        "id": "LD8",
+        "note": "expires null (licence admin perpétuelle) → absent",
+        "document": {
+          "pro": true,
+          "expires": null
+        },
+        "expect": {
+          "pro": true,
+          "expires": null
+        }
+      },
+      {
+        "id": "LD9",
+        "note": "document absent → pas de licence",
+        "document": null,
+        "expect": {
+          "pro": false,
+          "expires": null
+        }
+      }
+    ]
+  },
+  "echeance": {
+    "rule": "R415 (§4.1.5) : une lecture serveur faite AVANT l'échéance de la licence lue ne vaut plus onlineLicence après elle ; minuteur à l'échéance (min(expires − now, 24 h) + 1 ms, réarmé) qui remet onlineLicence à faux puis relit ; lecture en échec → licence inconnue ; lecture en échec ou venue du cache Firestore → onlineLicence faux",
+    "constants": {
+      "PLAFOND_MINUTEUR_MS": 86400000,
+      "MARGE_HORS_LIGNE_MS": 259200000
+    },
+    "form": "input = { now, read: \"serveur\" (lecture serveur réussie) | \"cache\" (réponse du cache Firestore, fromServer faux) | \"échec\" (lecture impossible), readAt = instant (ms) de la dernière lecture SERVEUR réussie (null : inconnu), licence = dernière licence lue { pro, expires } (ms | null), cache = cache Pro de l'appareil (§2.4) } ; expect.licence = entrée licence de proState (null si read = \"échec\") ; expect.onlineLicence = read === \"serveur\" && encoreEnLigne(licence, readAt, now) ; expect.licenceDeadlineDelayMs = délai du minuteur d'échéance de la LICENCE (null : aucun ; le site arme aussi la fin de la marge hors ligne, hors de ce vecteur) ; expect.pro, reason, cache = proState({ now, override: null, store: null, onlineStore: false, licence: expect.licence, onlineLicence: expect.onlineLicence, cache })",
+    "vectors": [
+      {
+        "id": "LE1",
+        "note": "lecture serveur AVANT l'échéance, maintenant APRÈS (minuteur pas encore passé, machine en veille) : plus « en ligne » ; Pro gardé par la part licence du cache (72 h), cache NON effacé",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": 1799992800000,
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1799996400000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "onlineLicence": false,
+          "licenceDeadlineDelayMs": null,
+          "pro": true,
+          "reason": "hors-ligne",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1799996400000,
+              "perpetual": false
+            }
+          }
+        }
+      },
+      {
+        "id": "LE2",
+        "note": "lecture serveur APRÈS l'échéance (le serveur n'a rien prolongé, P6) : vaut ; plus de Pro, part licence effacée",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": 1799998200000,
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1799996400000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "onlineLicence": true,
+          "licenceDeadlineDelayMs": null,
+          "pro": false,
+          "reason": "aucun",
+          "cache": {
+            "store": null,
+            "licence": null
+          }
+        }
+      },
+      {
+        "id": "LE3",
+        "note": "lecture serveur faite À l'échéance même (readAt = expires) : vaut",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": 1799996400000,
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1799996400000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "onlineLicence": true,
+          "licenceDeadlineDelayMs": null,
+          "pro": false,
+          "reason": "aucun",
+          "cache": {
+            "store": null,
+            "licence": null
+          }
+        }
+      },
+      {
+        "id": "LE4",
+        "note": "échéance à venir (5 h) : en ligne ; minuteur à l'échéance + 1 ms",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": 1799996400000,
+          "licence": {
+            "pro": true,
+            "expires": 1800018000000
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1800018000000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": 1800018000000
+          },
+          "onlineLicence": true,
+          "licenceDeadlineDelayMs": 18000001,
+          "pro": true,
+          "reason": "licence",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1800018000000,
+              "perpetual": false
+            }
+          }
+        }
+      },
+      {
+        "id": "LE5",
+        "note": "échéance à plus de 24 h : minuteur PLAFONNÉ à 24 h (+ 1 ms), réarmé à son tour",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": 1799996400000,
+          "licence": {
+            "pro": true,
+            "expires": 1800259200000
+          },
+          "cache": null
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": 1800259200000
+          },
+          "onlineLicence": true,
+          "licenceDeadlineDelayMs": 86400001,
+          "pro": true,
+          "reason": "licence",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1800259200000,
+              "perpetual": false
+            }
+          }
+        }
+      },
+      {
+        "id": "LE6",
+        "note": "lecture en ÉCHEC : licence INCONNUE pour proState (la dernière lue reste seulement affichée), plus « en ligne », pas de minuteur de licence ; part licence du cache gardée (P13)",
+        "input": {
+          "now": 1800000000000,
+          "read": "échec",
+          "readAt": 1799992800000,
+          "licence": {
+            "pro": true,
+            "expires": 1800018000000
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1800018000000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": null,
+          "onlineLicence": false,
+          "licenceDeadlineDelayMs": null,
+          "pro": true,
+          "reason": "hors-ligne",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1800018000000,
+              "perpetual": false
+            }
+          }
+        }
+      },
+      {
+        "id": "LE7",
+        "note": "lecture en ÉCHEC plus de 72 h après l'échéance : plus de Pro, cache NON effacé (seule une lecture serveur l'efface)",
+        "input": {
+          "now": 1800000000000,
+          "read": "échec",
+          "readAt": 1799708400000,
+          "licence": {
+            "pro": true,
+            "expires": 1799712000000
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1799712000000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": null,
+          "onlineLicence": false,
+          "licenceDeadlineDelayMs": null,
+          "pro": false,
+          "reason": "aucun",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1799712000000,
+              "perpetual": false
+            }
+          }
+        }
+      },
+      {
+        "id": "LE8",
+        "note": "lecture venue du CACHE Firestore (fromServer faux) : pas « en ligne » ; une licence non Pro n'efface pas le cache",
+        "input": {
+          "now": 1800000000000,
+          "read": "cache",
+          "readAt": 1799992800000,
+          "licence": {
+            "pro": false,
+            "expires": null
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1808640000000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": {
+            "pro": false,
+            "expires": null
+          },
+          "onlineLicence": false,
+          "licenceDeadlineDelayMs": null,
+          "pro": true,
+          "reason": "hors-ligne",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1808640000000,
+              "perpetual": false
+            }
+          }
+        }
+      },
+      {
+        "id": "LE9",
+        "note": "lecture venue du CACHE Firestore, licence Pro à venir : Pro par la licence, minuteur armé ; pas « en ligne »",
+        "input": {
+          "now": 1800000000000,
+          "read": "cache",
+          "readAt": null,
+          "licence": {
+            "pro": true,
+            "expires": 1800018000000
+          },
+          "cache": null
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": 1800018000000
+          },
+          "onlineLicence": false,
+          "licenceDeadlineDelayMs": 18000001,
+          "pro": true,
+          "reason": "licence",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1800018000000,
+              "perpetual": false
+            }
+          }
+        }
+      },
+      {
+        "id": "LE10",
+        "note": "licence sans échéance (admin) : en ligne, aucun minuteur",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": 1799992800000,
+          "licence": {
+            "pro": true,
+            "expires": null
+          },
+          "cache": null
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": null
+          },
+          "onlineLicence": true,
+          "licenceDeadlineDelayMs": null,
+          "pro": true,
+          "reason": "licence",
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": null,
+              "perpetual": true
+            }
+          }
+        }
+      },
+      {
+        "id": "LE11",
+        "note": "instant de lecture inconnu (readAt null) : la lecture serveur vaut",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": null,
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1799996400000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": {
+            "pro": true,
+            "expires": 1799996400000
+          },
+          "onlineLicence": true,
+          "licenceDeadlineDelayMs": null,
+          "pro": false,
+          "reason": "aucun",
+          "cache": {
+            "store": null,
+            "licence": null
+          }
+        }
+      },
+      {
+        "id": "LE12",
+        "note": "licence NON Pro lue au serveur : la règle ne vise que les licences Pro datées échues — en ligne, part licence effacée",
+        "input": {
+          "now": 1800000000000,
+          "read": "serveur",
+          "readAt": 1799992800000,
+          "licence": {
+            "pro": false,
+            "expires": null
+          },
+          "cache": {
+            "store": null,
+            "licence": {
+              "until": 1800864000000,
+              "perpetual": false
+            }
+          }
+        },
+        "expect": {
+          "licence": {
+            "pro": false,
+            "expires": null
+          },
+          "onlineLicence": true,
+          "licenceDeadlineDelayMs": null,
+          "pro": false,
+          "reason": "aucun",
+          "cache": {
+            "store": null,
+            "licence": null
+          }
+        }
+      }
+    ]
+  }
+}

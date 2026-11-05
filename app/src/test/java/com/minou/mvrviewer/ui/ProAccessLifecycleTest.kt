@@ -1,6 +1,7 @@
 package com.minou.mvrviewer.ui
 
 import com.minou.mvrviewer.sync.ProGrant
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -8,6 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.File
 
 /**
  * ÉCHÉANCE DE LA LICENCE APP OUVERTE (SPEC-abonnement §2.4, §3.7, §4.1.4-4.1.5,
@@ -17,6 +19,8 @@ import org.junit.Test
  * `onlineLicence` et relit la licence. Une lecture en échec rend la licence INCONNUE
  * (jamais `pro: false`) ; une lecture en échec ou venue du cache Firestore fait
  * retomber `onlineLicence`. Horloge et minuteurs factices (JVM, sans Looper).
+ * Rejoue les vecteurs communs `licence.json › echeance` (LE1-LE12), règles pures
+ * puis module, comme le site.
  */
 class ProAccessLifecycleTest {
 
@@ -55,6 +59,8 @@ class ProAccessLifecycleTest {
         ProAccess.forceForTests(null)
         ProAccess.resetForTests()
         timers = FakeTimers()
+        refreshes = 0
+        serverAnswer = null
         ProAccess.timers = timers
         ProAccess.clock = { now }
         ProAccess.grantRefresher = { done ->
@@ -187,6 +193,107 @@ class ProAccessLifecycleTest {
         ProAccess.forceForTests(true)
         ProAccess.applyAccountLicence(ProGrant(true, now + hour, fromServer = true), UID)
         assertTrue(timers.pending.isEmpty())
+    }
+
+    // MARK: - Vecteurs communs `licence.json › echeance` (R415, §4.1.5)
+
+    /** Section « echeance » des vecteurs communs du dépôt web
+     *  (`tests/fixtures/abonnement/licence.json`, copiés dans
+     *  `src/test/resources/port-vectors/abonnement/`), rejouée comme le site et iOS. */
+    private val echeance: JSONObject by lazy {
+        val url = javaClass.classLoader!!.getResource("port-vectors/abonnement/licence.json")!!
+        val all = JSONObject(File(url.toURI()).readText())
+        assertEquals("mvrviewer.vectors.licence/1", all.getString("schema"))
+        all.getJSONObject("echeance")
+    }
+
+    private fun longOrNull(o: JSONObject, key: String): Long? = if (o.isNull(key)) null else o.getLong(key)
+
+    private fun licenceOf(o: JSONObject?): ProState.Licence? =
+        o?.let { ProState.Licence(it.getBoolean("pro"), longOrNull(it, "expires")) }
+
+    private fun cacheOf(o: JSONObject?): ProState.Cache? {
+        if (o == null) return null
+        val store = o.optJSONObject("store")?.let { ProState.StorePart(it.getLong("until")) }
+        val licence = o.optJSONObject("licence")?.let {
+            ProState.LicencePart(longOrNull(it, "until"), it.getBoolean("perpetual"))
+        }
+        return ProState.Cache(store, licence)
+    }
+
+    private fun echeanceVectors(): List<JSONObject> {
+        val list = echeance.getJSONArray("vectors")
+        return (0 until list.length()).map { list.getJSONObject(it) }
+    }
+
+    /** Règles pures composées avec [ProState.evaluate], comme le dit le champ `form`. */
+    @Test fun lesVecteursCommunsEcheanceLE1aLE12ReglesPures() {
+        val constants = echeance.getJSONObject("constants")
+        assertEquals(constants.getLong("PLAFOND_MINUTEUR_MS"), ProState.LICENCE_DEADLINE_CAP_MS)
+        assertEquals(constants.getLong("MARGE_HORS_LIGNE_MS"), ProState.OFFLINE_MARGIN_MS)
+        val vectors = echeanceVectors()
+        assertEquals((1..12).map { "LE$it" }, vectors.map { it.getString("id") })
+        for (v in vectors) {
+            val id = v.getString("id") + " — " + v.getString("note")
+            val input = v.getJSONObject("input")
+            val expect = v.getJSONObject("expect")
+            val t = input.getLong("now")
+            val read = input.getString("read")
+            val entry = if (read == "échec") null else licenceOf(input.optJSONObject("licence"))
+            val online = ProState.licenceReadStillOnline(read == "serveur", entry, longOrNull(input, "readAt"), t)
+            val out = ProState.evaluate(ProState.Input(
+                now = t, override = null, store = null, licence = entry,
+                onlineStore = false, onlineLicence = online, cache = cacheOf(input.optJSONObject("cache"))
+            ))
+            assertEquals("$id : licence", licenceOf(expect.optJSONObject("licence")), entry)
+            assertEquals("$id : onlineLicence", expect.getBoolean("onlineLicence"), online)
+            assertEquals("$id : minuteur", longOrNull(expect, "licenceDeadlineDelayMs"), ProState.licenceDeadlineDelay(entry, t))
+            assertEquals("$id : pro", expect.getBoolean("pro"), out.pro)
+            assertEquals("$id : raison", expect.getString("reason"), out.reason.code)
+            assertEquals("$id : cache", cacheOf(expect.getJSONObject("cache")), out.cache)
+        }
+    }
+
+    /**
+     * Le module [ProAccess] : la lecture serveur a lieu à `readAt` (puis, pour « échec »,
+     * une relecture en échec à `now`) ; la lecture du cache Firestore, à `now`. L'horloge
+     * saute à `now` SANS déclencher de minuteur (appareil en veille). Une évaluation à
+     * `now` (même compte : rien n'est oublié) écrit le cache et réarme le minuteur. LE11
+     * (instant de lecture inconnu) n'a pas de sens ici : ProAccess note toujours
+     * l'instant d'une lecture serveur.
+     */
+    @Test fun lesVecteursCommunsEcheanceLE1aLE12SurProAccess() {
+        val replayed = mutableListOf<String>()
+        for (v in echeanceVectors()) {
+            val input = v.getJSONObject("input")
+            val read = input.getString("read")
+            val readAt = longOrNull(input, "readAt")
+            if (read != "cache" && readAt == null) continue
+            val id = v.getString("id") + " (ProAccess) — " + v.getString("note")
+            val expect = v.getJSONObject("expect")
+            val licence = licenceOf(input.getJSONObject("licence"))!!
+            setUp()
+            ProAccess.seedCacheForTests(cacheOf(input.optJSONObject("cache"))?.let { ProCacheRecord(UID, it) })
+            if (read != "cache") {
+                now = readAt!!
+                ProAccess.applyAccountLicence(ProGrant(licence.pro, licence.expires, fromServer = true), UID)
+            }
+            now = input.getLong("now")
+            when (read) {
+                "cache" -> ProAccess.applyAccountLicence(ProGrant(licence.pro, licence.expires, fromServer = false), UID)
+                "échec" -> ProAccess.applyAccountLicence(null, UID)
+            }
+            assertEquals("$id : pro", expect.getBoolean("pro"), ProAccess.isPro)
+            assertEquals("$id : raison", expect.getString("reason"), ProAccess.proReason.code)
+            ProAccess.bindAccount(UID)
+            assertEquals("$id : cache", cacheOf(expect.getJSONObject("cache")),
+                ProAccess.cacheForTests()?.cache ?: ProState.Cache.EMPTY)
+            assertEquals("$id : minuteur", listOfNotNull(longOrNull(expect, "licenceDeadlineDelayMs")),
+                timers.pending.map { it.delay })
+            assertEquals("$id : aucune relecture (aucun minuteur échu)", 0, refreshes)
+            replayed += v.getString("id")
+        }
+        assertEquals((1..12).filter { it != 11 }.map { "LE$it" }, replayed)
     }
 
     private companion object {

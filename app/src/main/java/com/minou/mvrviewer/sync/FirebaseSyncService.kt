@@ -169,20 +169,12 @@ class FirebaseSyncService(context: Context) : SyncService {
         val uid = auth.currentUser?.uid ?: return null
         return try {
             val snap = db.collection("entitlements").document(uid).get().await()
-            val fromServer = !snap.metadata.isFromCache
-            val data = snap.data ?: return ProGrant(pro = false, fromServer = fromServer)
-            ProGrant.fromDocument(plainValues(data), fromServer)
+            proGrantFromFirestore(snap.data, fromServer = !snap.metadata.isFromCache)
         } catch (e: Exception) {
             if (e is CancellationException && e !is TimeoutCancellationException) throw e
             null
         }
     }
-
-    /** `Timestamp` → millisecondes, en profondeur (sources), pour [ProGrant] ; sous
-     *  une clé de temps, toute autre forme (nombre saisi à la main…) est opaque et
-     *  retirée — jamais lue comme des millisecondes ([ProGrant.plainDocument], §3.7). */
-    private fun plainValues(data: Map<String, Any?>): Map<String, Any?> =
-        ProGrant.plainDocument(data) { (it as? com.google.firebase.Timestamp)?.toDate()?.time }
 
     /**
      * Adresse vérifiée ? `reload()` relit le compte (le lien de vérification a pu
@@ -1061,4 +1053,22 @@ class FirebaseSyncService(context: Context) : SyncService {
         /** Sous-collections connues d'un projet (mêmes noms qu'iOS), purgées quand le projet est supprimé. */
         val PROJECT_SUBCOLLECTIONS = listOf("sections", "audit")
     }
+}
+
+/**
+ * Document `entitlements/{uid}` tel que le SDK Firestore le rend → [ProGrant]
+ * (SPEC-abonnement §3.7, §4.1.4-4.1.5). Document absent (`null`) → `pro: false`.
+ * D8 : sous `expires` et sous `expiresAt`, `graceUntil`, `revokedAt` des sources,
+ * SEUL un [com.google.firebase.Timestamp] est une date ; un nombre (secondes ou
+ * millisecondes), un texte, une table `{ seconds }` sont ABSENTS
+ * ([ProGrant.plainDocument]) — règle du serveur, du site et d'iOS. Hors de la
+ * classe (aucun Firebase initialisé) : rejouée sur les vecteurs communs
+ * `licence.json › lecture` avec de vrais Timestamp.
+ */
+internal fun proGrantFromFirestore(data: Map<String, Any?>?, fromServer: Boolean): ProGrant {
+    if (data == null) return ProGrant(pro = false, fromServer = fromServer)
+    return ProGrant.fromDocument(
+        ProGrant.plainDocument(data) { (it as? com.google.firebase.Timestamp)?.toDate() },
+        fromServer
+    )
 }

@@ -97,16 +97,19 @@ class SharingToolsTest {
 
     @Test fun homonymesDistinguesParLUid() {
         val names = mapOf("3f9a77" to "Alice", "b2c4d6" to "Alice", "c0ffee" to "Bob")
-        assertEquals("Alice · 3F9A", ProjectNames.label("3f9a77", "Alice", names))
-        assertEquals("Alice · B2C4", ProjectNames.label("b2c4d6", "Alice", names))
-        assertEquals("Bob", ProjectNames.label("c0ffee", "Bob", names))
+        val uids = names.keys.toList()
+        assertEquals(
+            mapOf("3f9a77" to "Alice · 3F9A", "b2c4d6" to "Alice · B2C4", "c0ffee" to "Bob"),
+            ProjectNames.labels(names, "Membre sans nom")
+        )
         // Auteur du journal : son nom DANS LE PROJET d'abord, sinon celui de l'entrée.
         val e = AuditEntry("E1", 1.0, "c0ffee", "ancien nom", "patch", "Projecteur 1", "Adresse", "1.1", "1.2")
-        assertEquals("Bob", ProjectNames.authorLabel(e, names))
-        assertEquals("ancien nom", ProjectNames.authorLabel(e.copy(authorUid = "parti"), names))
-        assertEquals("Alice · 3F9A", ProjectNames.authorLabel(e.copy(authorUid = "3f9a77"), names))
-        // Entrée ancienne sans auteur : son nom tel quel.
-        assertEquals("Alice", ProjectNames.authorLabel(e.copy(authorUid = "", authorName = "Alice"), names))
+        fun author(x: AuditEntry) = ProjectNames.authorLabel(x, uids, names, "Membre sans nom")
+        assertEquals("Bob", author(e))
+        assertEquals("ancien nom", author(e.copy(authorUid = "parti")))
+        assertEquals("Alice · 3F9A", author(e.copy(authorUid = "3f9a77")))
+        // Entrée ancienne sans auteur : son nom (sans espaces aux bords), sans suffixe.
+        assertEquals("Alice", author(e.copy(authorUid = "", authorName = "Alice")))
     }
 
     /** Opération fictive d'un lot : (projet, libellé). */

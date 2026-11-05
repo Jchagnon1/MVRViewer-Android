@@ -569,7 +569,9 @@ fun HistoryDialog(
 ) {
     val log by sync.auditLog.collectAsState()
     val project by sync.currentProject.collectAsState()
+    val memberUids = project?.memberUids.orEmpty()
     val memberNames = project?.memberNames.orEmpty()
+    val unnamed = stringResource(R.string.sync_unnamed_member)
     val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
 
     AlertDialog(
@@ -582,9 +584,9 @@ fun HistoryDialog(
             } else {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     items(log) { e ->
-                        // Nom DANS LE PROJET de l'auteur s'il en a un, homonymes distingués
-                        // (SPEC-partage-moderation §5.14, §4).
-                        AuditRow(e, ProjectNames.authorLabel(e, memberNames),
+                        // Nom DANS LE PROJET de l'auteur s'il en a un, découpé, homonymes
+                        // distingués comme dans la liste des membres (§5.14, §4).
+                        AuditRow(e, ProjectNames.authorLabel(e, memberUids, memberNames, unnamed),
                             fmt.format(Date((e.epoch * 1000).toLong())), onUndo)
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }

@@ -98,24 +98,46 @@ object ProjectNames {
     fun projectName(name: String): String = Utf16Text.truncated(name, MAX_PROJECT_NAME)
 
     /**
-     * HOMONYMES (§4) : un nom porté aussi par un AUTRE compte du projet est suivi de
-     * « · » et des 4 premiers caractères de l'uid, en majuscules (« Alice · 3F9A »),
-     * dans la liste des membres comme dans l'historique.
+     * Nom MONTRÉ d'un compte (§4, décision C-tous-12 R1) : le nom tel que lu
+     * (`memberNames`, table locale des retraits, auteur d'une entrée du journal) sans
+     * espaces aux bords ([trimEdges]) ; absent ou vide après découpe (U+200B seul) →
+     * [unnamed] (« Membre sans nom »), jamais un libellé invisible.
      */
-    fun label(uid: String, name: String, among: Map<String, String>): String {
-        if (uid.isEmpty() || among.none { it.key != uid && it.value == name }) return name
-        return "$name · ${uid.take(4).uppercase()}"
+    fun shown(name: String?, unnamed: String): String = name?.let(::trimEdges)?.takeIf { it.isNotEmpty() } ?: unnamed
+
+    /**
+     * LIBELLÉS uid → nom affiché, avec la règle des HOMONYMES (§4, décision C-tous-12 R2) :
+     * LA fonction de la liste des membres, des personnes retirées, de « Retirer… » et de
+     * l'historique ([authorLabel]) — un même compte porte le même libellé partout. Chaque
+     * nom est d'abord montré par [shown] ; un libellé porté par plusieurs uid de [names]
+     * (« Membre sans nom » compris) est suivi de « · » et des 4 premiers caractères de
+     * l'uid, en majuscules (« Alice · 3F9A »). Les homonymes se jugent donc sur les noms
+     * DÉCOUPÉS : « Bob » et « U+200B Bob » sont le même nom. L'ordre de [names] est gardé.
+     */
+    fun labels(names: Map<String, String?>, unnamed: String): Map<String, String> {
+        val base = names.mapValues { (_, n) -> shown(n, unnamed) }
+        val count = base.values.groupingBy { it }.eachCount()
+        return base.mapValues { (uid, n) ->
+            if (uid.isNotEmpty() && (count[n] ?: 0) > 1) "$n · ${uid.take(4).uppercase()}" else n
+        }
     }
 
     /**
      * Auteur affiché d'une entrée du journal (§5.14) : son nom DANS LE PROJET
-     * (`memberNames[authorUid]`) s'il en a un, sinon le nom écrit dans l'entrée
-     * (entrées anciennes, membres partis), avec la règle des homonymes.
+     * (`memberNames[authorUid]`) si cette clé existe, sinon le nom écrit dans l'entrée
+     * (entrées anciennes, membres partis), libellé par [labels] parmi les membres du
+     * projet ([memberUids] → `memberNames`, l'ensemble de la liste des membres) : un
+     * membre nommé a exactement son libellé de la liste ; un auteur parti est distingué
+     * d'un membre homonyme sans changer le libellé de celui-ci. Entrée sans auteur
+     * (ancienne) : son nom montré par [shown], sans suffixe (pas d'uid).
      */
-    fun authorLabel(entry: AuditEntry, memberNames: Map<String, String>): String {
-        val name = if (entry.authorUid.isEmpty()) entry.authorName
-        else memberNames[entry.authorUid] ?: entry.authorName
-        return label(entry.authorUid, name, memberNames)
+    fun authorLabel(entry: AuditEntry, memberUids: List<String>, memberNames: Map<String, String>, unnamed: String): String {
+        val uid = entry.authorUid
+        if (uid.isEmpty()) return shown(entry.authorName, unnamed)
+        val among = LinkedHashMap<String, String?>()
+        memberUids.forEach { among[it] = memberNames[it] }
+        among[uid] = memberNames[uid] ?: entry.authorName
+        return labels(among, unnamed).getValue(uid)
     }
 }
 

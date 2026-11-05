@@ -240,6 +240,8 @@ data class ProjectMemberRow(
  * Membres d'un projet partagé tels que la fenêtre « Partager le projet » et le menu de
  * ligne de « Projets partagés » les montrent (§6.1-6.3) — calcul PUR, même règle qu'iOS
  * (`ProjectMembers`). Le nom vient de `memberNames` (jamais du profil d'un autre compte).
+ * Libellés (découpe, « Membre sans nom », homonymes) : [ProjectNames.labels], la même
+ * fonction que l'historique ([ProjectNames.authorLabel]) — un compte, un libellé partout.
  * [unnamed] = « Membre sans nom » dans la langue de l'interface.
  */
 object ProjectMembers {
@@ -247,7 +249,7 @@ object ProjectMembers {
     fun rows(p: CloudProject, me: String, unnamed: String): List<ProjectMemberRow> {
         val uids = p.memberUids.distinct()
         val names = p.memberNames.orEmpty()
-        val labels = labelled(uids, unnamed) { names[it] }
+        val labels = ProjectNames.labels(uids.associateWith { names[it] }, unnamed)
         return uids.map { ProjectMemberRow(it, labels[it] ?: unnamed, it == me, it == p.ownerUid) }
             .sortedWith(compareBy<ProjectMemberRow> { !it.isOwner }.then(byLabel))
     }
@@ -258,14 +260,14 @@ object ProjectMembers {
      */
     fun removedRows(p: CloudProject, localNames: Map<String, String>, unnamed: String): List<ProjectMemberRow> {
         val uids = p.bannedUids.orEmpty().filter { it !in p.memberUids }.distinct()
-        val labels = labelled(uids, unnamed) { localNames[it] }
+        val labels = ProjectNames.labels(uids.associateWith { localNames[it] }, unnamed)
         return uids.map { ProjectMemberRow(it, labels[it] ?: unnamed, isMe = false, isOwner = false) }.sortedWith(byLabel)
     }
 
     /** Nom affiché d'un membre (homonymes compris) — titre de « Retirer… », héritier, propriétaire du signalement. */
     fun label(uid: String, p: CloudProject, unnamed: String): String =
         rows(p, "", unnamed).firstOrNull { it.uid == uid }?.label
-            ?: p.memberNames?.get(uid)?.let(ProjectNames::trimEdges)?.takeIf { it.isNotEmpty() } ?: unnamed
+            ?: ProjectNames.shown(p.memberNames?.get(uid), unnamed)
 
     /** HÉRITIER de la propriété si le propriétaire [me] quitte (§5.4) : le premier autre membre, donc le plus ancien. */
     fun heir(p: CloudProject, me: String): String? = p.memberUids.firstOrNull { it != me }
@@ -279,18 +281,6 @@ object ProjectMembers {
         Comparator<ProjectMemberRow> { a, b -> collator.compare(a.label, b.label) }.thenBy { it.uid }
     }
 
-    /**
-     * Libellés uid → nom, avec la règle des HOMONYMES (§4) : un nom porté par plusieurs
-     * comptes de la liste (« Membre sans nom » compris) est suivi de « · » et des 4
-     * premiers caractères de l'uid, en majuscules. Un nom sans espaces aux bords
-     * ([ProjectNames.trimEdges], la découpe du nom affiché §4) : réduit à rien (U+200B
-     * seul), c'est un membre sans nom, jamais un libellé invisible.
-     */
-    private fun labelled(uids: List<String>, unnamed: String, name: (String) -> String?): Map<String, String> {
-        val base = uids.associateWith { uid -> name(uid)?.let(ProjectNames::trimEdges)?.takeIf { it.isNotEmpty() } ?: unnamed }
-        val count = base.values.groupingBy { it }.eachCount()
-        return base.mapValues { (uid, n) -> if ((count[n] ?: 0) > 1) "$n · ${uid.take(4).uppercase()}" else n }
-    }
 }
 
 /**

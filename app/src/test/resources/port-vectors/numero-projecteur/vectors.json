@@ -1,0 +1,50 @@
+{
+  "schema": "mvrviewer.vectors.numero-projecteur/1",
+  "doc": "N° de projecteur (<FixtureID>) « sans numéro ». Source : MVRViewerWeb/tests/fixtures/numero-projecteur/ ; copies TELLES QUELLES dans iOS MVRViewerTests/Fixtures.bundle/numero-projecteur/ et Android app/src/test/resources/port-vectors/numero-projecteur/. Règle (SPEC.md § N° de projecteur) : bords blancs retirés ; vide ou marqueur exact « Aucun » / « None » (casse ignorée) = SANS numéro ; sinon la valeur telle quelle. Le fichier .mvr n'est jamais réécrit pour autant.",
+  "placeholders": ["Aucun", "None"],
+  "normalize": [
+    { "raw": "Aucun", "expected": null, "why": "Vectorworks en français : projecteur sans numéro" },
+    { "raw": "None", "expected": null, "why": "Vectorworks en anglais" },
+    { "raw": "aucun", "expected": null, "why": "casse ignorée" },
+    { "raw": "AUCUN", "expected": null, "why": "casse ignorée" },
+    { "raw": "none", "expected": null, "why": "casse ignorée" },
+    { "raw": "NONE", "expected": null, "why": "casse ignorée" },
+    { "raw": "  Aucun\n", "expected": null, "why": "bords blancs retirés AVANT de comparer" },
+    { "raw": "\tNone ", "expected": null, "why": "bords blancs retirés AVANT de comparer" },
+    { "raw": "", "expected": null, "why": "vide = sans numéro (comportement d'avant)" },
+    { "raw": "   ", "expected": null, "why": "blanc = sans numéro (comportement d'avant)" },
+    { "raw": null, "expected": null, "why": "balise <FixtureID> absente" },
+    { "raw": "201", "expected": "201", "why": "vrai numéro" },
+    { "raw": " 201\n", "expected": "201", "why": "vrai numéro, bords retirés" },
+    { "raw": "0", "expected": "0", "why": "0 est un vrai numéro" },
+    { "raw": "101.1", "expected": "101.1", "why": "numéro à point" },
+    { "raw": "A12", "expected": "A12", "why": "numéro alphanumérique" },
+    { "raw": "Aucune", "expected": "Aucune", "why": "seuls les mots EXACTS de Vectorworks sont des marqueurs" },
+    { "raw": "Aucun 1", "expected": "Aucun 1", "why": "seuls les mots EXACTS de Vectorworks sont des marqueurs" },
+    { "raw": "Nonea", "expected": "Nonea", "why": "seuls les mots EXACTS de Vectorworks sont des marqueurs" }
+  ],
+  "duplicates": [
+    { "ids": ["Aucun", "Aucun", "None", "none", "AUCUN"], "expected": [], "why": "les marqueurs ne sont pas des numéros : jamais en double" },
+    { "ids": ["201", "Aucun", "201", "Aucun", "202"], "expected": ["201"], "why": "seul le vrai numéro répété compte" },
+    { "ids": [null, "", "   ", null], "expected": [], "why": "les projecteurs sans numéro ne sont pas en double" },
+    { "ids": [" 5", "5 ", "5"], "expected": ["5"], "why": "bords blancs retirés avant de compter" },
+    { "ids": ["A2", "a2"], "expected": [], "why": "comparaison EXACTE (la casse compte), comme avant" },
+    { "ids": ["10", "9", "100", "10", "9", "100"], "expected": ["9", "10", "100"], "why": "liste triée dans l'ordre NUMÉRIQUE" },
+    { "ids": ["B10", "B9", "B10", "B9"], "expected": ["B9", "B10"], "why": "ordre numérique aussi dans un numéro alphanumérique" },
+    {
+      "ids": ["101", "102", "104", "105", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun", "501", "502", "503", "504", "802", "801", "701", "702", "703", "704", "705", "706", "707", "708", "705", "706", "707", "708", "304", "303", "302", "301", "305", "306", "307", "308", "201", "202", "203", "204", "205", "206", "207", "201", "202", "203", "204", "205", "206", "207", "601", "605", "604", "603", "606", "602", "606", "606", "1001", "1002", "1003", "1004", "1005", "1006", "616", "615", "614", "613", "612", "611", "616", "616", "901", "Aucun", "Aucun", "Aucun", "Aucun", "Aucun"],
+      "expected": ["201", "202", "203", "204", "205", "206", "207", "606", "616", "705", "706", "707", "708"],
+      "why": "les 83 <FixtureID> de « MVR Viewer - Exemple.mvr » (export Vectorworks FR, 16 « Aucun ») : plus de « #Aucun » dans le bandeau"
+    }
+  ],
+  "banner": [
+    { "ids": ["201", "606"], "fr": "N° en double : #201, #606", "en": "Duplicate IDs: #201, #606", "why": "une espace après les deux-points (Android la perdait : « IDs:#201 »)" }
+  ],
+  "miniMvr": {
+    "file": "aucun.mvr",
+    "doc": "GeneralSceneDescription.xml seul, un calque, 8 projecteurs (make_aucun_mvr.py), dans l'ordre du fichier. rawFixtureIds = contenu de <FixtureID> (null = balise absente) ; expectedFixtureIds = N° lu par l'app (null = sans numéro).",
+    "rawFixtureIds": ["Aucun", "None", "201", "201", " 202 ", "", null, "aucun"],
+    "expectedFixtureIds": [null, null, "201", "201", "202", null, null, null],
+    "duplicates": ["201"]
+  }
+}

@@ -131,7 +131,13 @@ class PatchOverrides {
 
     /** Même identité que le masquage et le fil de fer (cf. mvrInstanceKey). */
     fun key(o: MvrSceneObject) = mvrInstanceKey(o)
-    fun effectiveId(o: MvrSceneObject) = edits[key(o)]?.fixtureId ?: o.fixtureId
+    /**
+     * N° EFFECTIF, null = sans numéro. Normalisé ici aussi, pas seulement à la lecture du .mvr :
+     * un patch reçu (cloud) ou restauré, écrit par une version d'avant la règle, porte encore
+     * « Aucun » / « None » — il ne doit ni s'afficher ni compter en double (FixtureNumber).
+     */
+    fun effectiveId(o: MvrSceneObject): String? =
+        com.minou.mvrviewer.mvr.FixtureNumber.normalize(edits[key(o)]?.fixtureId ?: o.fixtureId)
     fun effectiveAddress(o: MvrSceneObject) = edits[key(o)]?.address ?: o.addresses.firstOrNull()
     fun effectiveMode(o: MvrSceneObject) = edits[key(o)]?.modeName ?: o.gdtfMode
     /**

@@ -355,7 +355,7 @@
     <string name="opt_show_labels">Afficher les étiquettes</string>
     <string name="opt_structure">Décor / structure</string>
     <string name="patch_duplicate_id_cd">N° en double</string>
-    <string name="patch_duplicate_ids">N° en double : </string>
+    <string name="patch_duplicate_ids">N° en double : %1$s</string>
     <string name="patch_filter_hint">Filtrer (ID, GDTF, calque, DMX…)</string>
     <string name="patch_title">Patch</string>
     <string name="pdf_balance_fmt">Équilibrage — %1$s</string>

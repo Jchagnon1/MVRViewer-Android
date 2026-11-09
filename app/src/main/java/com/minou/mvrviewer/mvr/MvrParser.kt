@@ -247,7 +247,9 @@ object MvrParser {
                     }
                     "GDTFSpec" -> { collecting = false; gdtfSpec = text.toString().trim().ifEmpty { gdtfSpec } }
                     "GDTFMode" -> { collecting = false; gdtfMode = text.toString().trim().ifEmpty { gdtfMode } }
-                    "FixtureID" -> { collecting = false; fixtureId = text.toString().trim().ifEmpty { fixtureId } }
+                    // « Aucun » / « None » (Vectorworks) = SANS numéro, comme une balise vide
+                    // (FixtureNumber) ; le fichier, lui, n'est jamais réécrit.
+                    "FixtureID" -> { collecting = false; fixtureId = FixtureNumber.normalize(text.toString()) ?: fixtureId }
                     "Address" -> {
                         collecting = false
                         val a = text.toString().trim(); if (a.isNotEmpty()) addresses.add(a)

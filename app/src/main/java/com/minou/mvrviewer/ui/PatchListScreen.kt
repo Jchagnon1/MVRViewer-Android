@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.minou.mvrviewer.mvr.DmxAddress
+import com.minou.mvrviewer.mvr.FixtureNumber
 import com.minou.mvrviewer.mvr.MvrScene
 import com.minou.mvrviewer.mvr.MvrSceneObject
 import com.minou.mvrviewer.sync.PowerSource
@@ -143,10 +144,15 @@ fun PatchListScreen(
         // Deux projecteurs ne peuvent pas porter le même N° : sur un vrai
         // plateau c'est une erreur de patch (le pupitre en piloterait deux, ou
         // aucun). On la signale ici plutôt que de la découvrir en montage.
+        // PORTÉE VOULUE, identique iOS / web : TOUT le projet (`fixtures`, pas
+        // `filtered`) — la liste peut être filtrée, le bandeau signale quand même
+        // le doublon ; les lignes affichées dont le N° y figure passent en rouge.
+        // Projecteurs sans numéro (vide, « Aucun » / « None » de Vectorworks)
+        // jamais comptés : FixtureNumber.
         val dupIds = remember(fixtures, overrides.version) {
-            fixtures.mapNotNull { overrides.effectiveId(it)?.trim()?.ifBlank { null } }
-                .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+            FixtureNumber.duplicates(fixtures.map { overrides.effectiveId(it) })
         }
+        val dupSet = remember(dupIds) { dupIds.toSet() }
         if (dupIds.isNotEmpty()) {
             Surface(color = MaterialTheme.colorScheme.errorContainer) {
                 Row(
@@ -157,7 +163,9 @@ fun PatchListScreen(
                         tint = MaterialTheme.colorScheme.onErrorContainer)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        stringResource(R.string.patch_duplicate_ids) + dupIds.sorted().joinToString(", ") { "#" + it },
+                        // Liste PASSÉE à la ressource (« … : %1$s ») : une espace finale dans
+                        // strings.xml est retirée par aapt (« IDs:#201 »).
+                        stringResource(R.string.patch_duplicate_ids, FixtureNumber.bannerList(dupIds)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
@@ -167,7 +175,7 @@ fun PatchListScreen(
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(filtered) { f ->
-                FixtureRow(f, overrides, power, customResolver, overrides.effectiveId(f)?.trim() in dupIds) { detail = f }
+                FixtureRow(f, overrides, power, customResolver, overrides.effectiveId(f) in dupSet) { detail = f }
             }
         }
     }

@@ -352,7 +352,7 @@
     <string name="opt_show_labels">Show labels</string>
     <string name="opt_structure">Set / structure</string>
     <string name="patch_duplicate_id_cd">Duplicate ID</string>
-    <string name="patch_duplicate_ids">Duplicate IDs: </string>
+    <string name="patch_duplicate_ids">Duplicate IDs: %1$s</string>
     <string name="patch_filter_hint">Filter (ID, GDTF, layer, DMX…)</string>
     <string name="patch_title">Patch</string>
     <string name="pdf_balance_fmt">Balance — %1$s</string>
